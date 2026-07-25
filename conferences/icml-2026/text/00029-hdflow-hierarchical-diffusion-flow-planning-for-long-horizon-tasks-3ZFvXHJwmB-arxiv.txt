@@ -1,0 +1,1638 @@
+\n\n--- page 1 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Nandiraju Gireesh 1 2 * Yuanliang Ju3 * Chaoyi Xu 2 Weiheng Liu 2 Yuxuan Wan1 2 He Wang 1 2
+Abstract
+Recent advances in generative models have shown
+promise in generating behavior plans for long-
+horizon, sparse reward tasks. While these ap-
+proaches have achieved promising results, they
+often lack a principled framework for hierarchi-
+cal decomposition and struggle with the computa-
+tional demands of real-time execution, due to their
+iterative denoising process. In this work, we in-
+troduceHierarchical Diffusion-Flow( HDFlow),
+a novel hierarchical planning framework that op-
+timally leverages the strengths ofdiffusionand
+rectified flowmodels to overcome the limitations
+of single-paradigm generative planners. HDFlow
+employs a high-level diffusion planner to gener-
+ate sequences of strategic subgoals in a learned
+latent space, capitalizing on diffusion’s power-
+ful exploratory capabilities. These subgoals then
+guide a low-level rectified flow planner that gen-
+erates smooth and dense trajectories, exploit-
+ing the speed and efficiency of ordinary differ-
+ential equation (ODE)-based trajectory genera-
+tion. We evaluate HDFlow on four challenging
+furniture assembly tasks in both simulation and
+real-world, where it significantly outperforms
+state-of-the-art methods. Furthermore, we also
+showcase our method’s generalizability on two
+long-horizon benchmarks comprising diverse lo-
+comotion and manipulation tasks. Project web-
+site: https://hdflow-page.github.io/
+1. Introduction
+Robotic manipulation for complex, long-horizon tasks (Kim-
+ble et al., 2020; Suárez-Ruiz & Pham, 2016; Lee et al., 2021;
+Heo et al., 2025; Ankile et al., 2024a;b) remains a significant
+challenge requiring not only understanding multi-stage in-
+structions but also executing precise motions over extended
+1Peking University 2Galbot 3University of Toronto. Correspon-
+dence to: Nandiraju Gireesh <2401112103@stu.pku.edu.cn>.
+Proceedings of the 43 rd International Conference on Machine
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026
+by the author(s).
+periods. Traditional planning methods struggle with long-
+horizon problems because small inaccuracies in dynamics
+prediction or control execution accumulate over time, com-
+pounding into significant deviations that ultimately lead to
+task failure. This has motivated a shift towards hierarchical
+planning (Sacerdoti, 1974; Knoblock, 1990; Singh, 1992;
+Kaelbling & Lozano-Pérez, 2011), which decomposes a
+complex goal into a sequence of simpler, more manage-
+able subgoals. A powerful approach within this paradigm
+is to perform planning in the latent space of a learned
+world model (Ha & Schmidhuber, 2018; Hafner et al., 2019;
+2020). By forecasting future states in a compressed repre-
+sentation, world models allow planners to reason efficiently
+and abstract away from high-dimensional, noisy observa-
+tions (Wang & Ba, 2020; Hafner et al., 2022). This type
+of model-based planning is advantageous over model-free
+methods due to its superior data efficiency and its ability
+to readily adapt to various tasks within the same environ-
+ment (Moerland et al., 2022; Hamrick et al., 2021).
+The advent of generative models, particularly denoising dif-
+fusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020;
+Song et al., 2021), have achieved strong results across vari-
+ous domains (Nichol et al., 2022; Luo & Hu, 2021; Li et al.,
+2022; Gupta et al., 2024; Avdeyev et al., 2023). Building
+upon these successes, they have recently revolutionized plan-
+ning in robotics (Janner et al., 2022; Ajay et al., 2023; Lu
+et al., 2025b). By treating planning as a conditional genera-
+tion problem, these models can produce diverse and high-
+quality trajectories. However, their iterative denoising pro-
+cess is computationally intensive (Dong et al., 2024), mak-
+ing them ill-suited for the fast, low-level control required
+for real-time robotic interaction. Applying diffusion mod-
+els naively at all levels of a hierarchy (Chen et al., 2024; Li
+et al., 2023; Hao et al., 2025) inherits this critical drawback,
+creating a bottleneck at the trajectory generation stage. This
+raises a fundamental question:Is a single generative mod-
+eling paradigm optimal for all levels of a planning hier-
+archy?
+We empirically show that the answer is no. The require-
+ments for high-level strategic planning are fundamentally
+different from those of low-level trajectory generation. High-
+level planning demands exploration to discover viable se-
+quences of subgoals. In contrast, low-level planning de-
+mands speed and deterministic execution to translate a cho-
+1
+arXiv:2605.04525v2  [cs.RO]  19 May 2026\n\n--- page 2 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+sen subgoal into a smooth, dense trajectory.
+In this paper, we introduceHierarchicalDiffusion-Flow
+(HDFlow), a new hierarchical framework for long-horizon
+planning that is built on this core insight. HDFlow leverages
+a hybrid generative architecture that assigns the right tool to
+the right job. For high-level planning, we employ adiffusion
+modelto generate diverse sequences of subgoals within a
+learned latent space of a world model. While standard con-
+ditional diffusion models can generate plans that are consis-
+tent with the goal, they lack an explicit mechanism to assess
+the quality or long-term viability of those plans. In complex,
+sparse-reward settings, many plausible-looking sequences
+of subgoals can lead to irreversible failures. To address this,
+we introduce anenergy-based model(EBM) to provide ex-
+plicit guidance. The EBM is trained to assign low energy to
+successful strategies and high energy to failing ones, effec-
+tively learning a dense reward signal. This energy function
+then steers the diffusion planner away from potential dead
+ends and towards high-quality solutions, which is critical
+for robust, long-horizon performance. Furthermore, to miti-
+gate the failures caused by inaccurate guidance, we enhance
+the standard EBM guidance with a two-stepmanifold-aware
+process (He et al., 2024). For low-level planning, we intro-
+duce arectified flow modelto rapidly generate dense latent
+trajectories to reach each subgoal.
+We evaluate our proposed method on four contact-rich as-
+sembly tasks from the FurnitureBench (Heo et al., 2025)
+benchmark in both simulation and real-world settings. Fur-
+thermore, we evaluate HDFlow on two diverse and challeng-
+ing benchmarks: RLBench (James et al., 2020) and OG-
+Bench (Park et al., 2025), allowing for a more comprehen-
+sive assessment of our method’s robustness and generaliza-
+tion capabilities.
+In summary, our contributions are as follows:
+• We propose HDFlow, a novel, hybrid hierarchical plan-
+ner that combines a diffusion model for high-level ex-
+ploration and a rectified flow model for low-level tra-
+jectory generation.
+• We introduce a two-stage training process featuring a
+contrastive-trained world model for structured repre-
+sentation learning and a manifold-aware EBM for ex-
+plicit guidance of the high-level planner, enabling ro-
+bust planning in sparse-reward environments.
+• We demonstrate superior performance on various long-
+horizon benchmarks in both simulation and real-world
+settings.
+2. Related Works
+Recent advancements in generative models, particularly de-
+noising diffusion probabilistic models (Sohl-Dickstein et al.,
+2015; Ho et al., 2020; Song et al., 2021; Karras et al., 2022),
+have significantly impacted planning in robotics by framing
+it as a conditional generation problem. Early works such
+as Diffuser (Janner et al., 2022) leverage iterative denois-
+ing to generate flexible trajectories conditioned on objec-
+tives like rewards or constraints. Building on this, Decision
+Diffuser (DD)(Ajay et al., 2023) further demonstrated that
+return-conditional diffusion models can outperform tradi-
+tional offline reinforcement learning by enabling condition-
+ing on various factors like constraints and skills. While pow-
+erful, the iterative nature of diffusion models can be com-
+putationally intensive (Dong et al., 2024). To tackle long-
+horizon tasks, hierarchical planning with diffusion models
+has emerged, as seen in (Li et al., 2023; Chen et al., 2024;
+Hao et al., 2025). Simple Hierarchical Diffuser (SHD)(Chen
+et al., 2024) employs a high-level diffusion model for sparse
+subgoal generation and a low-level one for dense trajectory
+refinement, aiming for improved efficiency and generaliza-
+tion. However, their reliance on diffusion models for both
+high-level and low-level planning increases the maintenance
+burden and makes them computationally expensive.
+3. Preliminaries
+3.1. Denoising Diffusion Models
+Denoising diffusion models (Sohl-Dickstein et al., 2015; Ho
+et al., 2020) are generative models that learn a data distribu-
+tionp(x)by reversing a fixed forward noising process.
+Forward Process.The forward process gradually adds
+Gaussian noise to a data samplex0 over L discrete timesteps,
+according to a variance schedule βℓ: q(xℓ|xℓ−1) =
+N(x ℓ; √1−β ℓxℓ−1, βℓI). A key property is that we can
+sample xℓ at any timestep ℓ in closed form: q(xℓ|x0) =
+N(x ℓ; √¯αℓx0,(1−¯α ℓ)I), where αℓ = 1−β ℓ and ¯αℓ =Qℓ
+i=1 αi. As ℓ→L , xL approaches an isotropic Gaussian
+distributionN(0,I).
+Reverse Process.The reverse process is a learned gener-
+ative model that starts from noise xL ∼ N(0,I)and iter-
+atively denoises it to produce a sample. This process is
+modeled by a neural network ϵθ(xℓ, ℓ)trained to predict the
+noise ϵ that was added to the original sample x0 to produce
+xℓ. The training objective is to minimize the mean squared
+error between the true and predicted noise:
+LDDPM =E ℓ,x0,ϵ
+hϵ−ϵ θ(√¯αℓx0 +
+√
+1−¯αℓϵ, ℓ)
+2i
+(1)
+For conditional generation (e.g., on a context c), classifier-
+free guidance (CFG) (Ho & Salimans, 2022) is commonly
+used. The model is trained on both conditional and un-
+conditional inputs, and the noise prediction during infer-
+ence is modified to steer generation towards the context:
+ˆϵθ(xℓ, ℓ, c) =ϵθ(xℓ, ℓ,∅) +w·(ϵ θ(xℓ, ℓ, c)−ϵθ(xℓ, ℓ,∅))
+2\n\n--- page 3 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+where w is the guidance scale and ∅ denotes the uncondi-
+tional case.
+3.2. Rectified Flow
+Rectified Flow (Lipman et al., 2022; Albergo & Vanden-
+Eijnden, 2023; Liu et al., 2023) is a generative modeling
+approach based on ordinary differential equations (ODEs)
+that offers a more efficient alternative to diffusion models.
+It learns a deterministic mapping from a simple prior distri-
+bution to a data distribution.
+Let p0 be a prior distribution (e.g., N(0,I) ) and p1 be the
+data distribution. Rectified Flow constructs straight-line
+paths between pairs of samples (x0,x 1) drawn from these
+distributions. The path is defined by the linear interpolation
+xu = (1−u)x 0 +ux 1 for u∈[0,1] . The corresponding
+velocity vector field is simply x1 −x 0. The model trains a
+neural network vθ(x, u)to approximate this vector field by
+minimizing the flow-matching objective:
+LRF =E u,x0,x1
+h
+∥vθ((1−u)x0 +ux1, u)−(x1 −x0)∥2i
+(2)
+Once trained, generation is performed by starting with a
+sample from the prior, x0 ∼p 0, and solving the initial
+value problem for the learned ODE from u= 0 to u= 1 :
+dxu
+du =v θ(xu, u)
+4. Method
+In this section, we introduce HDFlow, a hierarchical plan-
+ning framework that tackles long-horizon manipulation
+tasks using a two-stage training process (see Fig. 1). First,
+we train a world model with a contrastive objective to learn
+a semantically structured latent space that embeds a notion
+of progress. Second, we train a hierarchical planner on top
+of the frozen, pre-computed latent representations from this
+world model.
+Notation disambiguation.We use t for environment time
+indices, ℓ∈ {1, . . . , L}for diffusion timesteps, and u∈
+[0,1] for the continuous flow time in rectified flow. We also
+denote a clean (noise-free) latent subgoal sequence by zclean
+to avoid confusion with the initial environment statez 0.
+4.1. Stage 1: World Model Learning
+Our framework operates within the latent space of a world
+model, which is trained to model the environment’s dy-
+namics from multi-modal, high-dimensional observations
+(denoted as o). We adopt a Recurrent State Space Model
+(RSSM) architecture (Hafner et al., 2023) with an encoder
+that leverages a pretrained DINOv2 model (Oquab et al.,
+2024). The RSSM learns to encode observations into a la-
+tent space Z, and is trained to accurately reconstruct obser-
+vations and predict future states. For a detailed explanation
+of the architecture and training objective, please see Ap-
+pendix C.
+LWM =E qϕ(z1:T|o1:T)
+" TX
+t=1
+ logpϕ(ˆot|zt, ht)
+−DKL[qϕ(zt|ht, et)||pϕ(ˆzt|ht)]
+# (3)
+The first term is theobservation reconstruction loss, which
+ensures that the world model can accurately reconstruct the
+observed input ot from its latent representation zt and recur-
+rent hidden state ht. The second term is aKL divergence
+regularization term. It minimizes the divergence between
+the posterior latent distribution qϕ(zt|ht, et) (inferred from
+the actual observation embedding et) and the prior latent
+distribution pϕ(ˆzt|ht) (predicted solely from the recurrent
+hidden state ht). This term acts as a bottleneck, forcing the
+model to learn compressed, predictive latent states.
+While LWM encourages predictable dynamics, it does not
+explicitly structure the latent space to reflect a notion of
+progress towards a goal, making long-horizon planning chal-
+lenging. To address this, we introduce a contrastive learn-
+ing objective designed to provide a dense learning signal
+and organize the latent space for more effective downstream
+planning. The goal is to pull representations of intermediate
+latent states from successful trajectories closer to their final
+goal representation, while pushing them away from interme-
+diate latent states from failed trajectories (Shan et al., 2025).
+Let f(·) be a projection head that maps latent states z to a
+new embedding space. For a given intermediate latent state
+zk from a successful trajectory with final goal zG, we form
+a positive pair (f(z k), f(zG)). Negative pairs are formed
+with intermediate latent states from failed trajectories. The
+contrastive loss is then given by the modified InfoNCE
+objective (Oord et al., 2018) as suggested by (Schroff et al.,
+2015; Sohn, 2016):
+Lcontrastive =−E
+"
+log exp(sim(f(z k), f(zG))/τ)PN
+j=1 exp(sim(f(z k), f(zj))/τ)
+#
+(4)
+where sim(·,·) is the cosine similarity andτ is a temperature
+hyperparameter (Wang & Liu, 2021).
+To further encourage the latent space to be informa-
+tive for control, we also include an inverse dynamics
+model (Agrawal et al., 2016; Pathak et al., 2018). This
+model is trained to predict the action that was taken to tran-
+sition between two consecutive latent states. It is trained
+with a mean squared error loss:
+LIDM =E
+h
+∥at −MLP(z t, zt+1)∥2
+i
+(5)
+The full training objective combines the world model loss,
+3\n\n--- page 4 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+World Model LearningHierarchical Planner Training
+Observation
+t
+Encoder
+WorldModel
+LatentSpaceZt, ht
+Recon.ôₜ
+Zt+1Pred.
+High-LevelLow-Level
+Z0 ZG
+……Diffusion Generation
+Output: (Z1, Z2,Z3, … ZK)EBMGuidance
+t=0t=H t= n x Ht=2H t=T
+ZK-1 ZK
+Rectified Flow
+Timestep =H
+𝜈̅! …u=0u=0.1u=0.2u=0.9u=1ODE Solver
+Output: τ = [τ₁, τ₂, τ₃, ..., τH]
+Figure 1. HDFlow pipeline.The framework consists of two main stages:World Model Learning(left), where observations are encoded
+into a structured latent space, andHierarchical Planner Training(right). The latter involves aHigh-Leveldiffusion planner generating
+sparse strategic subgoals (z1, . . . , zK ) with Manifold-aware EBM guidance, and aLow-Levelrectified flow planner synthesizing dense
+trajectoriesτ= [τ 1, . . . , τH ]between subgoals using an ODE solver.
+the inverse dynamics loss, and the contrastive loss:
+LWM-total =λ W MLW M+λIDM LIDM +λcontrastiveLcontrastive
+(6)
+After this stage, the world model’s weights are frozen, and
+its encoder is used to generate a static dataset of structured
+latent representations for the next stage.
+4.2. Stage 2: Hierarchical Planner Training
+With the structured latent space from Stage 4.1 fixed, we
+frame the long-horizon planning problem as a conditional
+generative modeling task. We decompose the problem by
+defining a temporal abstraction (Chen et al., 2024). For
+each full-length trajectory in our latent dataset, we define
+subgoals by subsampling the trajectory at a fixed interval
+of H timesteps. For a trajectory of length T , this yields
+K=⌊T /H⌋ subgoals, which can vary across trajectories.
+This process creates two distinct datasets for our planners:
+• For thehigh-level planner, we create sparse sequences
+of K latent subgoals, z= (z 1, . . . , zK), where each
+subgoal zk corresponds to the latent state at timestep
+k·H.
+• For thelow-level planner, we create a dataset of dense,
+fixed-length trajectory segments. Each segment τk con-
+tains the H latent states and actions between consecu-
+tive subgoalsz k−1 andz k.
+4.2.1. HIGH-LEVELPLANNER: MANIFOLD-AWARE
+EBM-GUIDEDDIFFUSION
+The high-level planner is a conditional diffusion model,
+trained to generate a sequence of K latent subgoals, z=
+(z1, . . . , zK), conditioned on the context c= (z 0, zG),
+where z0 is the current latent state and zG is the goal latent
+state. It is trained by minimizing the standard noise predic-
+tion error from Eq. 1:
+LHL =E ℓ,zclean,ϵ
+hϵ−ϵ θ
+ √¯αℓ zclean +
+√
+1−¯αℓ ϵ, ℓ, c
+2i
+(7)
+While this provides a strong prior for generating plausible
+plans, it does not guarantee that all generated plans will
+be successful, especially in long-horizon scenarios where
+small errors can compound. To address this, we introduce
+an Energy-Based Model (EBM) (Du & Mordatch, 2019;
+Grathwohl et al., 2020) for explicit guidance at inference
+time. The EBM, Eϕ(z|z0, zG), is a separate network trained
+to predict a low energy for high-quality latent subgoal se-
+quences and a high energy for poor ones. It is trained with a
+contrastive loss that pushes down the energy of plans from
+successful trajectories ( zpos) and pushes up the energy of
+plans from failed trajectories (zneg):
+LEBM = log(1 + exp(Eϕ(zpos)−E ϕ(zneg)))(8)
+However, in high-dimensional latent spaces, inexact guid-
+ance can causemanifold deviation(He et al., 2024), a phe-
+nomenon where guided samples drift away from the fea-
+sible latent subgoal manifold Mt. We formalize this is-
+sue through the guidance gap. Definition 4.1 and Propo-
+sition 4.2 show that inaccuracies in energy guidance grow
+with scenarios involving long planning horizons and high-
+dimensional latent spaces, leading sampled trajectories to
+deviate away. Check Appendix A.1 for a detailed proof.
+Manifold-Aware Guidance.High-dimensional latent repre-
+sentations often exhibit intrinsic low-dimensional structure.
+4\n\n--- page 5 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+We extend the result of (Lee & Choi, 2025) to the
+goal-conditioned, EBM-guided planning setting.
+Definition 4.1.Let ∇zt Etrue(zt|c) denote the true
+optimal energy guidance and ∇zt Eϕ(zt|c) be our
+learned EBM guidance. The guidance gap at zt is:
+∆EBM(zt) =∥∇ zt Etrue(zt|c)− ∇zt Eϕ(zt|c)∥2
+(9)
+Proposition 4.2. (Proof in Appendix) The EBM
+guidance gap ∆EBM(zt) has a lower bound scaling
+as c√1−¯αt
+√
+d in high-dimensional latent spaces,
+where c >0 is a constant independent of dimen-
+sionalityd.
+Under our contrastive training, successful latent subgoal
+sequences concentrate on a k-dimensional submanifold
+M0 ⊂R d with k≪d . To mitigate this manifold devia-
+tion, we enhance the standard EBM guidance with a two-
+step manifold-aware process as suggested in (Lee & Choi,
+2025). Rather than applying guidance directly to the noise
+prediction, we perform:
+Step 1: Guided Sampling.
+ztemp
+ℓ−1 ∼ N
+ 
+µθ(zℓ) +w ebm Σℓ g,Σ ℓ
+(10)
+where g=∇ zℓ Eϕ(zℓ|c) is the EBM guidance and µθ,Σ ℓ
+are the mean and covariance of the reverse diffusion transi-
+tion.
+Step 2: Manifold Projection.
+zℓ−1 =P Tzℓ−1 Mℓ−1
+ 
+ztemp
+ℓ−1
+
+(11)
+where PTzℓ−1 Mℓ−1 projects onto the local tangent space of
+the latent manifoldM ℓ−1.
+The manifold projection is computed using local low-rank
+approximation: we first obtain a denoised estimate using
+Tweedie’s formula (Robbins, 1992; Chung et al., 2022;
+2023):
+ˆz0|ℓ−1 = 1√¯αℓ−1
+
+ztemp
+ℓ−1 −
+p
+1−¯αℓ−1 ϵθ(ztemp
+ℓ−1 , ℓ−1, c)
+
+(12)
+We then retrieve k nearest neighbors from successful la-
+tent subgoal sequences using cosine similarity (Feng et al.,
+2024), forward diffuse them to timestep ℓ−1 , and perform
+rank-r PCA to obtain the projection basis U∈R d×r. Let
+µ be the local mean of these neighbors. The mean-centered
+projection is
+P(z) =µ+U U T (z−µ).
+Manifold
+EBM
+Guidance
+Local Manifold
+Approximation
+Tangent
+Space
+Manifold
+Projection
+𝑀𝑙
+𝑀𝑙−1
+𝑀0
+𝑧𝑙
+𝒫𝒯𝑧𝑙−1𝑀𝑙−1(𝑧𝑡𝑒𝑚𝑝
+𝑙−1 )
+𝑧0|𝑙−1
+𝑧𝑡𝑒𝑚𝑝
+𝑙−1
+Figure 2.Manifold-Aware EBM-Guided Diffusion step: Start-
+ing from a noisy latent sample (zℓ), the standard reverse diffusion
+predicts a mean. EBM guidance (red arrow) then shifts this mean,
+leading to a guided sample ( ztemp
+ℓ−1). To prevent manifold devia-
+tion, ztemp
+ℓ−1 is subsequently projected onto the local latent mani-
+fold Mℓ−1 (using local manifold approximation and projection,
+indicated by purple and green arrows), yielding the final projected
+sample (zℓ−1). This two-step process ensures both successful and
+feasible subgoal generation within the hierarchical planning frame-
+work.
+Proposition 4.3.Given a base diffusion planner ϵθ
+trained for classifier-free guidance, a learned en-
+ergy function Eϕ(z|c), and a manifold projection
+operator PM, the manifold-aware guided planner,
+which combines EBM guidance with manifold pro-
+jection, corresponds to sampling from a posterior
+distribution p(z|y= 1, z∈ M, c)that maximizes
+the likelihood of generating a successful and feasi-
+ble goal-conditioned plan.
+4.2.2. LOW-LEVELPLANNER: RECTIFIEDFLOW FOR
+TRAJECTORYGENERATION
+The low-level planner’s role is to generate a dense, short-
+horizon latent trajectory τz to a given subgoal zk. We can
+frame this subproblem through the lens of optimal transport.
+Here, the task is to find the optimal mapping from the distri-
+bution of initial states around zk−1 to the distribution of tar-
+get states around zk. Thecostof transport is minimized by
+trajectories that are as straight as possible in the latent space.
+We use a conditional rectified flow model, vθ(τu, u, ck), for
+its speed. It is trained to generate a trajectory segment τ
+conditioned on the context ck = (zk−1, zk) by minimizing
+the standard flow-matching objective from Eq. 2:
+LLL =E u,τ0,τ1
+hvθ
+ (1−u)τ 0 +uτ1, u, ck
+ −(τ1 −τ 0)2i
+(13)
+Construction of training pairs.For each consecutive latent
+subgoal pair (zk−1, zk), we extract the dense H-step latent
+5\n\n--- page 6 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+one_leg lamp round_table cabinet
+Method Low Med High Low Med High Low Med High Low Med
+BC 0 0 0 0 0 0 0 0 0 0 0
+DP 51 19 3 18 7 1 6 2 0 4 1
+JUICER 68 22 3 27 12 2 23 8 2 11 5
+Diffuser 56 22 4 22 9 1 21 7 1 6 2
+DD 60 22 4 24 11 1 22 8 2 9 3
+HDMI 66 26 11 37 16 11 33 15 9 17 8
+SHD 71 31 15 43 22 16 41 21 12 21 11
+Ours 92 71 39 68 49 34 61 43 27 55 36
+Table 1.Performance on FurnitureBench in simulation.Success rates (%) are reported for different initial randomization levels.
+Top:Imitation Learning methods, where JUICER (Ankile et al., 2024a) generally outperforms pure BC and Diffusion Policy.Bottom:
+Diffusion-based Planners, where our proposed HDFlow provides significant improvements in success rates over other planning methods.
+segment from successful demonstrations. We setτ1 to be the
+observed segment that ends at zk and τ0 to be the segment
+that starts atz k−1 from the same demonstration.
+4.2.3. TRAINING ANDINFERENCE
+The components of the hierarchical planner are trained
+jointly with a composite loss function that combines the ob-
+jectives for the high-level planner, the low-level planner, the
+EBM, and manifold consistency:
+Lplanner=λHLLHL+λLLLLL+λEBMLEBM+λprojLprojection
+(14)
+where the λ terms are hyperparameters and Lprojection en-
+courages the generated latent subgoals to remain close to
+the learned latent manifold:
+Lprojection =E z∼πHL
+h
+∥z− PM(z)∥2
+i
+(15)
+During online deployment in an MPC framework, the high-
+level planner is invoked iteratively. At each replanning step,
+it takes the robot’scurrent latent stateand thegoal stateas
+input to generate a new sequence of subgoals for the remain-
+ing portion of the task. The low-level planner takes the first
+subgoal from this sequence, and generates a dense latent tra-
+jectory. Then consecutive latent pairs (zt, zt+1) along the
+generated latent trajectory are mapped to control actions via
+the inverse dynamics model introduced in Stage 4.1.
+5. Experiments
+To evaluate the efficacy of our proposed framework, we
+design a set of experiments to answer the following key
+questions: (1) Does HDFlow achieve state-of-the-artperfor-
+manceon complex, long-horizon robotic tasks compared
+to existing methods? (2) How does ourhybridarchitecture
+compare against non-hybrid hierarchical planner as well as
+single planner approaches? (3) What are the contributions
+of thecore componentsof HDFlow? (4) Does HDFlow of-
+fer superiorcomputational efficiencyduring inference, a
+critical factor for real-time robotic control?
+5.1. FurnitureBench Experiments
+5.1.1. SIMULATIONEXPERIMENTS
+Tasks and Environment.We evaluate our method on Fur-
+nitureBench (Heo et al., 2025), a challenging benchmark
+for long-horizon, contact-rich robotic assembly. We chose 4
+tasks from the benchmark: one_leg, lamp, round_table,
+and cabinet (see Figure 4 for start and goal positions),
+with the default initial randomization protocol: Low, Med,
+and High. We report the success rate calculated over 100
+episodes for each task. Further details about the tasks and
+dataset collection are provided in Appendix B.1 and detailed
+descriptions of our experimental setup are provided in Ap-
+pendix C
+Baselines.We compare against two categories of methods:
+(i) Imitation Learning (IL) Baselines:These methods
+learn directly from successful demonstrations without ex-
+plicit reward signals.
+• Vanilla Behaviour Cloning (BC)
+• Diffusion Policy (DP) (Chi et al., 2023)
+•JUICER(Ankile et al., 2024a)
+(ii) Diffusion-based Planners:These methods use
+diffusion-based planning from a mixed dataset of successful
+and failure demonstrations.
+•Diffuser(Janner et al., 2022)
+• Decision Diffuser (DD) (Ajay et al., 2023)
+•HDMI(Li et al., 2023)
+• Simple Hierarchical Diffuser (SHD) (Chen et al., 2024)
+We provide more details about each baseline in Appendix D.
+Analysis.The results presented in Table 1 demonstrate
+HDFlow’s superior performance across all four challeng-
+ing furniture assembly tasks and varying levels of initial
+randomization. Our framework consistently achieves the
+6\n\n--- page 7 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+One -leg Assembly in Simulator 
+One -leg Assembly in Real WorldReal Robot Setup
+3 x RealSense 435 Cameras
+Franka Research 3 Robot
+Figure 3.(left) Real-world FurnitureBench setup. (right) A successful rollout of HDFlow planner on the one_leg assembly task initialized
+withMedrandomness in both simulation (top) and real-world (bottom).
+highest success rates, significantly outperforming imitation
+learning, non-hierarchical, and other hierarchical diffusion
+planners. Specifically, HDFlow achieves a success rate of
+55% and 36% on cabinet task beating the baselines by a
+wide margin.
+5.1.2. ABLATIONSTUDIES
+To systematically analyze the contribution of each compo-
+nent within HDFlow, we conduct extensive ablation studies.
+For more ablation experiments, please see Appendix E
+Method SR(%) Time (ms)
+FD 24 197
+HF 24 53
+HD 43 142
+Ours 68 88
+Table 2.Ablation study on the choice of generative models for
+the high-level and low-level planners, and their computational
+efficiencies on lamp task. Success rates (%) and average inference
+time (ms/step) are reported.
+Choice of Generative Model.We compare HDFlow against
+variants that use alternative generative models. Specifically,
+we consider FD (flat diffusion), HF (hierarchical flow), and
+HD (hierarchical diffusion). Table 2 shows that our plan-
+ner significantly outperforms single-paradigm or flat ap-
+proaches. Furthermore, we also assess the computational ef-
+ficiency of these variants by measuring the average inference
+time per planning step and present them in the same table.
+Contribution of Core Components.We investigate the im-
+pact of the contrastive world model, EBM guidance, and
+manifold projection by progressively removing them from
+HDFlow. Table 3 demonstrates that each novel component
+measurably contributes to HDFlow’s overall success, high-
+lighting the importance of our multi-faceted approach to
+long-horizon tasks.
+Method one_leg lamp
+w/o Manifold Projection 84 57
+w/o Manifold-aware EBM 61 33
+w/o Contrastive WM 58 27
+Ours 92 68
+Table 3.Ablation study on the core components of HDFlow. Suc-
+cess rates (%) are reported for the one_leg and lamp tasks under
+Lowrandomization.
+one_leg lamp round_table
+Method Low Med Low Med Low Med
+BC0/10 0/10 0/10 0/10 0/10 0/10
+IQL3/10 1/10 1/10 0/10 0/10 0/10
+Ours 8/10 6/10 5/10 4/10 4/10 3/10
+Table 4.Performance on FurnitureBench in real-world.Success
+rates (number of successes out of 10 episodes) are reported for
+different initial randomization levels.
+5.1.3. REAL-WORLDEXPERIMENTS
+We conduct experiments in the real-world using a Franka Re-
+search 3 robot arm by setting up the benchmark as shown in
+Figure 3. We finetune our world model and hierarchical plan-
+ners using 50 real-world demonstrations for each task, and
+report success rate on 10 evaluation episodes in Table 4. We
+compare our method with (a) Vanilla Behavior Cloning (BC),
+and (b) Implicit Q-Learning (IQL) (Kostrikov et al., 2022).
+HDFlow significantly outperforms both baselines, achieving
+high success rates on all tasks and maintaining robust per-
+formance even under increased initial randomization, which
+validates its effectiveness for real-world robotic tasks.
+5.2. RLBench Experiments
+Tasks and Environment.We further evaluate our method
+on RLBench (James et al., 2020), a challenging, large-scale
+7\n\n--- page 8 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Method Close Jar Drag Stick Insert Peg Meat off Grill Open Drawer Place Cups Place Wine Push Buttons Put in Cupboard
+PerAct55.2 89.6 5.6 70.4 88.0 2.4 44.8 92.8 28.0
+RVT52.0 99.2 11.2 88.0 71.2 4.0 91.0100.049.6
+3D Actor96.0100.065.6 96.889.624.0 93.6 98.485.6
+RVT-2100.099.0 40.099.074.0 38.095.0 100.066.0
+Ours 96.0 100.0 93.3 98.7 82.0 56.7 94.7 100.0 72.0
+Method Put in Drawer Put in Safe Screw Bulb Slide Block Sort Shape Stack Blocks Stack Cups Sweep to Dustpan Turn Tap
+PerAct51.2 84.0 17.6 74.0 16.8 26.4 2.4 52.0 88.0
+RVT88.0 91.2 48.0 81.6 36.0 28.8 26.4 72.0 93.6
+3D Actor96.097.682.497.644.0 68.3 47.2 84.099.2
+RVT-296.0 96.0 88.0 92.0 35.080.069.0100.099.0
+Ours 98.7 96.7 88.7 91.3 73.3 56.0 81.3 100.0 95.3
+Table 5.Performance on RLBench.We report success rates on 18 RLBench tasks with 249 variations. Our method outperforms all
+baselines, achieving a significant performance margin over prior state-of-the-art methods.
+Environment Task Diffuser DD HDMI AD SHD DL DV Ours
+antmaze
+antmaze-medium-v015±522±431±640±542±751±660±4 72±3
+antmaze-large-v08±314±422±528±631±540±451±5 65±1
+antmaze-giant-v02±15±211±415±319±427±535±4 48±3
+humanoidmaze
+humanoidmaze-medium-v05±29±315±421±524±430±338±5 51±4
+humanoidmaze-large-v02±15±29±313±416±322±429±3 42±5
+humanoidmaze-giant-v00±01±13±25±27±311±416±3 25±4
+cube
+cube-single-v05±28±312±418±520±425±332±5 45±4
+cube-double-v02±14±27±311±413±317±423±3 35±5
+cube-triple-v01±12±14±26±38±211±314±4 17±3
+scene scene-v010±316±424±533±437±645±556±3 70±4
+puzzle
+puzzle-3x3-v08±313±420±528±331±539±449±6 62±3
+puzzle-4x4-v00±00±00±02±35±411±319±5 32±4
+puzzle-4x5-v00±00±00±00±05±36±38±4 16±5
+puzzle-4x6-v00±00±00±00±00±00±06±4 14±3
+Table 6.Performance on OGBench.We report the average binary success rate (%) across five test-time goals for each task, averaged
+over8seeds. Standard deviations are indicated by the±symbol.
+benchmark designed to facilitate research in various robot
+learning areas, including imitation learning and multi-task
+learning. We specifically consider the subset of 18 tasks
+used in the PerAct framework (Shridhar et al., 2023). Fur-
+ther details about the tasks and dataset collection are pro-
+vided in Appendix B.2
+Baselines.We compare HDFlow with state-of-the-art meth-
+ods on RLBench benchmark like PerAct (Shridhar et al.,
+2023), RVT (Goyal et al., 2023), 3D Diffuser Actor (Ke
+et al., 2025), andRVT-2(Goyal et al., 2024).
+Analysis.Table 5 demonstrates the strong performance
+and generalization capabilities of HDFlow across the diverse
+and challenging RLBench tasks. Our method consistently
+achieves competitive or superior success rates compared
+to state-of-the-art baselines. Specifically, HDFlow achieves
+100% success rate on Drag Stick and Push Buttons
+(tying with other strong baselines), and significantly out-
+performs others on tasks such as Insert Peg (93.3% vs.
+65.6% by 3D Diffuser Actor) and Sort Shape (73.3% vs.
+44.0% by 3D Diffuser Actor and 35.0% by RVT-2). This
+highlights that HDFlow effectively leverages its hierarchical
+planning framework, structured latent space, and guided gen-
+erative models to handle the complexities of long-horizon
+manipulation, diverse object variations, and intricate sequen-
+tial tasks.
+5.3. OGBench Experiments
+Tasks and Environment.We further evaluate our method
+on OGBench (Park et al., 2025), a benchmark specifically
+designed for offline goal-conditioned reinforcement learn-
+ing (RL) that assesses capabilities such as long-horizon rea-
+soning and handling stochasticity across diverse and chal-
+8\n\n--- page 9 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Subgoals one_leg lamp round_table cabinet
+K Low Med High Low Med High Low Med High Low Med
+10 61 21 2 33 13 2 23 9 0 6 0
+15 78 35 10 52 25 8 40 18 5 25 10
+20 92 71 39 68 49 34 61 43 27 55 36
+25 89 60 30 63 45 25 58 40 20 50 30
+30 85 45 15 60 35 12 50 28 10 35 18
+Table 7.Ablation study on the choice of total subgoals K. Success rates (%) of HDFlow on all tasks with respective randomization levels
+for differentKvalues, highlighting the importance of temporal abstraction for optimal performance.
+lenging tasks. We consider visual versions of locomotion
+tasks, including antmaze and humanoidmaze, and manip-
+ulation tasks, including cube, scene, and puzzle. Further
+details about the tasks and dataset collection are provided in
+Appendix B.3
+Baselines.We compare HDFlow with prior state-of-the-
+art diffusion planners like Diffuser (Janner et al., 2022),
+Decision Diffuser (DD) (Ajay et al., 2023), AdaptDiffuser
+(AD) (Liang et al., 2023), DiffuserLite ( DL) (Dong et al.,
+2024), Diffusion Veteran (DV) (Lu et al., 2025a); and hier-
+archical diffusion planners like HDMI (Li et al., 2023) and
+SHD(Chen et al., 2024).
+Analysis.Table 6 shows that our approach consistently
+achieves superior performance across all environments.
+Specifically, in the challenging antmaze-giant-v0 and
+puzzle-4x4-v0 task, our method obtains a success rate of
+48% and 32%, significantly outperforming the next best
+method, DV , which achieves 35% and 19% respectively.
+We notice that our method keeps performing well even
+as the hardness of the task increases, this can be seen on
+puzzle-4x6-v0 task where most of the baselines fail, our
+approach achieves a success rate of14%. These results high-
+light the effectiveness and robustness of HDFlow in diverse
+and complex long-horizon planning tasks.
+5.4. Performance under different total subgoals
+We investigate the impact of the total number of subgoals
+K on the performance of HDFlow. The total number of sub-
+goals dictates the temporal abstraction of our hierarchical
+planner, influencing both the complexity of high-level sub-
+goals and the length of low-level trajectories. We conduct
+experiments on all tasks with varying randomness, varying
+Kand report the success rates in Table 7.
+The results indicate that an optimal total number of subgoals
+K exists for each task. A very small K (e.g., 10) leads to
+an overly coarse high-level plan, requiring the low-level
+rectified flow model to bridge larger gaps in latent space,
+which can be challenging. Conversely, a very large K (e.g.,
+30) makes the high-level diffusion model generate too many
+subgoals, which can accumulate errors. A value of K= 20
+consistently yields the highest success rates, representing a
+balance where the high-level planner provides meaningful
+strategic guidance, and the low-level planner can efficiently
+and accurately execute the dense trajectories. This ablation
+highlights the importance of carefully tuning the temporal
+abstraction level for optimal performance in hierarchical
+planning.
+6. Conclusion
+In this work, we introduced HDFlow, a novel hierarchical
+planning framework that effectively addresses long-horizon
+robotic tasks by synergistically combining the strengths of
+diffusion and rectified flow models. Our approach leverages
+a contrastively-trained world model to learn a semantically
+structured latent space, a manifold-aware EBM-guided high-
+level diffusion planner for strategic subgoal generation, and
+a fast low-level rectified flow planner for efficient trajectory
+synthesis. We demonstrated state-of-the-art performance on
+challenging FurnitureBench, RLBench and OGBench tasks,
+showcasing the robustness and efficiency of HDFlow in both
+simulation and real-world settings.
+Limitations.Despite its significant performance, HDFlow
+has several limitations that suggest avenues for future re-
+search. Currently, our framework relies on a dataset of
+successful and failed demonstrations for training the world
+model and the EBM. While effective, collecting such data
+can be resource-intensive.
+Impact Statement
+This paper advances the field of Machine Learning through
+a new hierarchical planning method for long-horizon tasks.
+We do not identify any direct negative societal impacts that
+must be specifically highlighted. However, we encourage
+practitioners to apply this work responsibly and evaluate
+real-world safety implications before deployment.
+Acknowledgement
+We would like to thank Yuanchen Ju, Swati Dantu and
+Ananth Rachakonda for valuable discussion and feedback.
+9\n\n--- page 10 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+References
+Agrawal, P., Nair, A. V ., Abbeel, P., Malik, J., and Levine,
+S. Learning to poke by poking: Experiential learning
+of intuitive physics.Advances in neural information
+processing systems, 29, 2016.
+Ajay, A., Du, Y ., Gupta, A., Tenenbaum, J. B., Jaakkola,
+T. S., and Agrawal, P. Is conditional generative modeling
+all you need for decision making? InThe Eleventh
+International Conference on Learning Representations,
+2023.
+Albergo, M. S. and Vanden-Eijnden, E. Building normaliz-
+ing flows with stochastic interpolants. InThe Eleventh
+International Conference on Learning Representations,
+2023. URL https://openreview.net/forum?id=
+li7qeBbCR1t.
+Ankile, L., Simeonov, A., Shenfeld, I., and Agrawal, P.
+Juicer: Data-efficient imitation learning for robotic as-
+sembly. In2024 IEEE/RSJ International Conference on
+Intelligent Robots and Systems (IROS), pp. 5096–5103.
+IEEE, 2024a.
+Ankile, L., Simeonov, A., Shenfeld, I., Torne, M., and
+Agrawal, P. From imitation to refinement–residual rl
+for precise assembly.arXiv preprint arXiv:2407.16677,
+2024b.
+Avdeyev, P., Shi, C., Tan, Y ., Dudnyk, K., and Zhou, J.
+Dirichlet diffusion score model for biological sequence
+generation. InInternational Conference on Machine
+Learning, pp. 1276–1301. PMLR, 2023.
+Chen, C., Deng, F., Kawaguchi, K., Gulcehre, C., and Ahn,
+S. Simple hierarchical planning with diffusion. InThe
+Twelfth International Conference on Learning Represen-
+tations, 2024.
+Chi, C., Xu, Z., Feng, S., Cousineau, E., Du, Y ., Burchfiel,
+B., Tedrake, R., and Song, S. Diffusion policy: Visuomo-
+tor policy learning via action diffusion.The International
+Journal of Robotics Research, pp. 02783649241273668,
+2023.
+Chung, H., Sim, B., Ryu, D., and Ye, J. C. Improving
+diffusion models for inverse problems using manifold
+constraints.Advances in Neural Information Processing
+Systems, 35:25683–25696, 2022.
+Chung, H., Kim, J., Mccann, M. T., Klasky, M. L., and Ye,
+J. C. Diffusion posterior sampling for general noisy in-
+verse problems. InThe Eleventh International Confer-
+ence on Learning Representations, ICLR 2023. The Inter-
+national Conference on Learning Representations, 2023.
+Dong, Z., Hao, J., Yuan, Y ., Ni, F., Wang, Y ., Li, P., and
+Zheng, Y . Diffuserlite: Towards real-time diffusion plan-
+ning.Advances in Neural Information Processing Sys-
+tems, 37:122556–122583, 2024.
+Du, Y . and Mordatch, I. Implicit generation and modeling
+with energy based models.Advances in neural informa-
+tion processing systems, 32, 2019.
+Esser, P., Kulal, S., Blattmann, A., Entezari, R., Müller, J.,
+Saini, H., Levi, Y ., Lorenz, D., Sauer, A., Boesel, F., et al.
+Scaling rectified flow transformers for high-resolution
+image synthesis. InForty-first international conference
+on machine learning, 2024.
+Feng, L., Gu, P., An, B., and Pan, G. Resisting stochas-
+tic risks in diffusion planners with the trajectory aggre-
+gation tree. InForty-first International Conference on
+Machine Learning, 2024. URL https://openreview.
+net/forum?id=NbYAmsFJrc.
+Goyal, A., Xu, J., Guo, Y ., Blukis, V ., Chao, Y .-W., and Fox,
+D. Rvt: Robotic view transformer for 3d object manipula-
+tion. In Tan, J., Toussaint, M., and Darvish, K. (eds.),Pro-
+ceedings of The 7th Conference on Robot Learning, vol-
+ume 229 ofProceedings of Machine Learning Research,
+pp. 694–710. PMLR, 06–09 Nov 2023. URL https:
+//proceedings.mlr.press/v229/goyal23a.html.
+Goyal, A., Blukis, V ., Xu, J., Guo, Y ., Chao, Y .-W.,
+and Fox, D. Rvt-2: Learning precise manipulation
+from few demonstrations.ArXiv, abs/2406.08545,
+2024. URL https://api.semanticscholar.org/
+CorpusID:270440444.
+Grathwohl, W., Wang, K.-C., Jacobsen, J.-H., Duvenaud, D.,
+and Zemel, R. Learning the stein discrepancy for training
+and evaluating energy-based models without sampling.
+InInternational Conference on Machine Learning, pp.
+3732–3747. PMLR, 2020.
+Gupta, A., Yu, L., Sohn, K., Gu, X., Hahn, M., Li, F.-
+F., Essa, I., Jiang, L., and Lezama, J. Photorealistic
+video generation with diffusion models. InEuropean
+Conference on Computer Vision, pp. 393–411. Springer,
+2024.
+Ha, D. and Schmidhuber, J. World models.arXiv preprint
+arXiv:1803.10122, 2(3), 2018.
+Hafner, D., Lillicrap, T., Fischer, I., Villegas, R., Ha, D., Lee,
+H., and Davidson, J. Learning latent dynamics for plan-
+ning from pixels. In Chaudhuri, K. and Salakhutdinov, R.
+(eds.),Proceedings of the 36th International Conference
+on Machine Learning, volume 97 ofProceedings of Ma-
+chine Learning Research, pp. 2555–2565. PMLR, 09–15
+Jun 2019. URL https://proceedings.mlr.press/
+v97/hafner19a.html.
+10\n\n--- page 11 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Hafner, D., Lillicrap, T., Ba, J., and Norouzi, M. Dream
+to control: Learning behaviors by latent imagination. In
+International Conference on Learning Representations,
+2020. URL https://openreview.net/forum?id=
+S1lOTC4tDS.
+Hafner, D., Lee, K.-H., Fischer, I., and Abbeel, P. Deep
+hierarchical planning from pixels. In Oh, A. H., Agarwal,
+A., Belgrave, D., and Cho, K. (eds.),Advances in Neural
+Information Processing Systems, 2022. URL https:
+//openreview.net/forum?id=wZk69kjy9_d.
+Hafner, D., Pasukonis, J., Ba, J., and Lillicrap, T. Mastering
+diverse domains through world models.arXiv preprint
+arXiv:2301.04104, 2023.
+Hamrick, J. B., Friesen, A. L., Behbahani, F., Guez, A.,
+Viola, F., Witherspoon, S., Anthony, T., Buesing, L. H.,
+Veliˇckovi´c, P., and Weber, T. On the role of plan-
+ning in model-based deep reinforcement learning. In
+International Conference on Learning Representations,
+2021. URL https://openreview.net/forum?id=
+IrM64DGB21.
+Hao, C., Xiao, A., Xue, Z., and Soh, H. Chd: Coupled hier-
+archical diffusion for long-horizon tasks.arXiv preprint
+arXiv:2505.07261, 2025.
+He, K., Chen, X., Xie, S., Li, Y ., Dollár, P., and Girshick,
+R. Masked autoencoders are scalable vision learners. In
+Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pp. 16000–16009, 2022.
+He, Y ., Murata, N., Lai, C.-H., Takida, Y ., Uesaka, T., Kim,
+D., Liao, W.-H., Mitsufuji, Y ., Kolter, J. Z., Salakhutdi-
+nov, R., and Ermon, S. Manifold preserving guided diffu-
+sion. InThe Twelfth International Conference on Learn-
+ing Representations, 2024. URL https://openreview.
+net/forum?id=o3BxOLoxm1.
+Heo, M., Lee, Y ., Lee, D., and Lim, J. J. Furniturebench: Re-
+producible real-world benchmark for long-horizon com-
+plex manipulation.The International Journal of Robotics
+Research, 2025.
+Ho, J. and Salimans, T. Classifier-free diffusion guidance.
+arXiv preprint arXiv:2207.12598, 2022.
+Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-
+bilistic models.Advances in neural information process-
+ing systems, 33:6840–6851, 2020.
+James, S., Ma, Z., Arrojo, D. R., and Davison, A. J. Rlbench:
+The robot learning benchmark & learning environment.
+IEEE Robotics and Automation Letters, 5(2):3019–3026,
+2020. doi: 10.1109/LRA.2020.2974707.
+Janner, M., Du, Y ., Tenenbaum, J., and Levine, S. Planning
+with diffusion for flexible behavior synthesis. InInterna-
+tional Conference on Machine Learning, pp. 9902–9915.
+PMLR, 2022.
+Kaelbling, L. P. and Lozano-Pérez, T. Hierarchical task and
+motion planning in the now. In2011 IEEE international
+conference on robotics and automation, pp. 1470–1477.
+IEEE, 2011.
+Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating
+the design space of diffusion-based generative models.
+Advances in neural information processing systems, 35:
+26565–26577, 2022.
+Ke, T.-W., Gkanatsios, N., and Fragkiadaki, K. 3d diffuser
+actor: Policy diffusion with 3d scene representations. In
+Agrawal, P., Kroemer, O., and Burgard, W. (eds.),Pro-
+ceedings of The 8th Conference on Robot Learning, vol-
+ume 270 ofProceedings of Machine Learning Research,
+pp. 1949–1974. PMLR, 06–09 Nov 2025. URL https:
+//proceedings.mlr.press/v270/ke25a.html.
+Kimble, K., Van Wyk, K., Falco, J., Messina, E., Sun, Y .,
+Shibata, M., Uemura, W., and Yokokohji, Y . Benchmark-
+ing protocols for evaluating small parts robotic assembly
+systems.IEEE robotics and automation letters, 5(2):883–
+889, 2020.
+Knoblock, C. A. Learning abstraction hierarchies for prob-
+lem solving. InProceedings of the Eighth National Con-
+ference on Artificial Intelligence - Volume 2, AAAI’90,
+pp. 923–928. AAAI Press, 1990. ISBN 026251057X.
+Kostrikov, I., Nair, A., and Levine, S. Offline reinforcement
+learning with implicit q-learning. InInternational Con-
+ference on Learning Representations, 2022. URL https:
+//openreview.net/forum?id=68n2s9ZJWF8.
+Lee, K. and Choi, J. Local manifold approximation and pro-
+jection for manifold-aware diffusion planning. InForty-
+second International Conference on Machine Learning,
+2025. URL https://openreview.net/forum?id=
+EHG5Iv1mmb.
+Lee, Y ., Hu, E. S., and Lim, J. J. Ikea furniture assembly en-
+vironment for long-horizon complex manipulation tasks.
+In2021 ieee international conference on robotics and au-
+tomation (icra), pp. 6343–6349. IEEE, 2021.
+Li, W., Wang, X., Jin, B., and Zha, H. Hierarchical diffusion
+for offline decision making. InInternational Conference
+on Machine Learning, pp. 20035–20064. PMLR, 2023.
+Li, X. L., Thickstun, J., Gulrajani, I., Liang, P., and
+Hashimoto, T. Diffusion-LM improves controllable text
+generation. In Oh, A. H., Agarwal, A., Belgrave, D., and
+11\n\n--- page 12 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Cho, K. (eds.),Advances in Neural Information Process-
+ing Systems, 2022. URL https://openreview.net/
+forum?id=3s9IrEsjLyk.
+Liang, Z., Mu, Y ., Ding, M., Ni, F., Tomizuka, M., and
+Luo, P. AdaptDiffuser: Diffusion models as adaptive self-
+evolving planners. In Krause, A., Brunskill, E., Cho, K.,
+Engelhardt, B., Sabato, S., and Scarlett, J. (eds.),Proceed-
+ings of the 40th International Conference on Machine
+Learning, volume 202 ofProceedings of Machine Learn-
+ing Research, pp. 20725–20745. PMLR, 23–29 Jul 2023.
+Lipman, Y ., Chen, R. T. Q., Ben-Hamu, H., Nickel, M., and
+Le, M. Flow matching for generative modeling.arXiv
+preprint arXiv:2210.02747, 2022.
+Liu, X., Gong, C., et al. Flow straight and fast: Learning
+to generate and transfer data with rectified flow. InThe
+Eleventh International Conference on Learning Repre-
+sentations, 2023.
+Lu, H., Han, D., Shen, Y ., and Li, D. What makes a good
+diffusion planner for decision making? InThe Thirteenth
+International Conference on Learning Representations,
+2025a. URL https://openreview.net/forum?id=
+7BQkXXM8Fy.
+Lu, H., Han, D., Shen, Y ., and Li, D. What makes a good
+diffusion planner for decision making? InThe Thirteenth
+International Conference on Learning Representations,
+2025b.
+Luo, S. and Hu, W. Diffusion probabilistic models for 3d
+point cloud generation. In2021 IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR),
+pp. 2836–2844, 2021. doi: 10.1109/CVPR46437.2021.
+00286.
+Ma, Y . J., Sodhani, S., Jayaraman, D., Bastani, O., Kumar,
+V ., and Zhang, A. VIP: Towards universal visual reward
+and representation via value-implicit pre-training. In
+The Eleventh International Conference on Learning Rep-
+resentations, 2023. URL https://openreview.net/
+forum?id=YJ7o2wetJ2.
+Moerland, T. M., Broekens, J., Plaat, A., and Jonker, C. M.
+Model-based reinforcement learning: A survey, 2022.
+URLhttps://arxiv.org/abs/2006.16712.
+Nair, S., Rajeswaran, A., Kumar, V ., Finn, C., and Gupta,
+A. R3m: A universal visual representation for robot ma-
+nipulation. In6th Annual Conference on Robot Learn-
+ing, 2022. URL https://openreview.net/forum?
+id=tGbpgz6yOrI.
+Nichol, A. Q., Dhariwal, P., Ramesh, A., Shyam, P.,
+Mishkin, P., Mcgrew, B., Sutskever, I., and Chen, M.
+Glide: Towards photorealistic image generation and edit-
+ing with text-guided diffusion models. InInternational
+Conference on Machine Learning, pp. 16784–16804.
+PMLR, 2022.
+Oord, A. v. d., Li, Y ., and Vinyals, O. Representation learn-
+ing with contrastive predictive coding.arXiv preprint
+arXiv:1807.03748, 2018.
+Oquab, M., Darcet, T., Moutakanni, T., V o, H. V .,
+Szafraniec, M., Khalidov, V ., Fernandez, P., HAZIZA, D.,
+Massa, F., El-Nouby, A., Assran, M., Ballas, N., Galuba,
+W., Howes, R., Huang, P.-Y ., Li, S.-W., Misra, I., Rab-
+bat, M., Sharma, V ., Synnaeve, G., Xu, H., Jegou, H.,
+Mairal, J., Labatut, P., Joulin, A., and Bojanowski, P. DI-
+NOv2: Learning robust visual features without supervi-
+sion.Transactions on Machine Learning Research, 2024.
+ISSN 2835-8856. URL https://openreview.net/
+forum?id=a68SUt6zFt. Featured Certification.
+Park, S., Frans, K., Eysenbach, B., and Levine, S. OGBench:
+Benchmarking offline goal-conditioned RL. InThe Thir-
+teenth International Conference on Learning Representa-
+tions, 2025. URL https://openreview.net/forum?
+id=M992mjgKzI.
+Pathak, D., Mahmoudieh, P., Luo, G., Agrawal, P., Chen,
+D., Shentu, Y ., Shelhamer, E., Malik, J., Efros, A. A., and
+Darrell, T. Zero-shot visual imitation. InProceedings
+of the IEEE conference on computer vision and pattern
+recognition workshops, pp. 2050–2053, 2018.
+Peebles, W. and Xie, S. Scalable diffusion models with trans-
+formers. InProceedings of the IEEE/CVF international
+conference on computer vision, pp. 4195–4205, 2023.
+Ren, A. Z., Lidard, J., Ankile, L. L., Simeonov, A., Agrawal,
+P., Majumdar, A., Burchfiel, B., Dai, H., and Simchowitz,
+M. Diffusion policy policy optimization.arXiv preprint
+arXiv:2409.00588, 2024.
+Robbins, H. E. An empirical bayes approach to statistics.
+InBreakthroughs in Statistics: Foundations and basic
+theory, pp. 388–394. Springer, 1992.
+Sacerdoti, E. D. Planning in a hierarchy of abstraction
+spaces.Artificial intelligence, 5(2):115–135, 1974.
+Schroff, F., Kalenichenko, D., and Philbin, J. Facenet: A
+unified embedding for face recognition and clustering. In
+Proceedings of the IEEE conference on computer vision
+and pattern recognition, pp. 815–823, 2015.
+Shan, Y ., Zhu, Z., Long, T., Qifan, L., Chang, Y ., Zhang,
+W., and Yin, L. Contradiff: Planning towards high re-
+turn states via contrastive learning. InThe Thirteenth
+International Conference on Learning Representations,
+2025. URL https://openreview.net/forum?id=
+XMOaOigOQo.
+12\n\n--- page 13 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Shridhar, M., Manuelli, L., and Fox, D. Perceiver-actor: A
+multi-task transformer for robotic manipulation. In Liu,
+K., Kulic, D., and Ichnowski, J. (eds.),Proceedings of
+The 6th Conference on Robot Learning, volume 205 of
+Proceedings of Machine Learning Research, pp. 785–799.
+PMLR, 14–18 Dec 2023. URL https://proceedings.
+mlr.press/v205/shridhar23a.html.
+Singh, S. P. Reinforcement learning with a hierarchy of ab-
+stract models. InProceedings of the Tenth National Con-
+ference on Artificial Intelligence, AAAI’92, pp. 202–207.
+AAAI Press, 1992. ISBN 0262510634.
+Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., and
+Ganguli, S. Deep unsupervised learning using nonequi-
+librium thermodynamics. InInternational conference on
+machine learning, pp. 2256–2265. pmlr, 2015.
+Sohn, K. Improved deep metric learning with multi-class
+n-pair loss objective.Advances in neural information
+processing systems, 29, 2016.
+Song, Y ., Sohl-Dickstein, J., Kingma, D. P., Kumar, A.,
+Ermon, S., and Poole, B. Score-based generative mod-
+eling through stochastic differential equations. InIn-
+ternational Conference on Learning Representations,
+2021. URL https://openreview.net/forum?id=
+PxTIG12RRHS.
+Suárez-Ruiz, F. and Pham, Q.-C. A framework for fine
+robotic assembly. In2016 IEEE international conference
+on robotics and automation (ICRA), pp. 421–426. IEEE,
+2016.
+Wang, F. and Liu, H. Understanding the behaviour of con-
+trastive loss. InProceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pp. 2495–
+2504, 2021.
+Wang, T. and Ba, J. Exploring model-based planning with
+policy networks. InInternational Conference on Learn-
+ing Representations, 2020. URL https://openreview.
+net/forum?id=H1exf64KwH.
+13\n\n--- page 14 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+A. Theoretical Framework
+This section provides the detailed mathematical proofs for the propositions made in the previous sections.
+A.1. Proof for Proposition on EBM Guidance Gap
+Statement.The EBM guidance gap ∆EBM(zℓ) has a lower bound scaling as c√1−¯αℓ
+√
+d in high-dimensional latent spaces,
+where c >0 is a constant independent of dimensionality d. (this was extended from (Lee & Choi, 2025) to the goal-
+conditioned, EBM-guided planning setting.)
+Proof.We aim to provide a more detailed derivation for the lower bound of the EBM guidance gap in high-dimensional
+latent spaces. The core of this issue stems from the discrepancy between the true optimal energy guidance and our learned
+EBM approximation, particularly in how they weight successful plans.
+1. Forward Process and Conditional Score.The forward diffusion process defines how a clean latent state z0 is noised
+toz ℓ at timestepℓ:
+zℓ = √¯αℓz0 +
+√
+1−¯αℓϵ, ϵ∼ N(0,I)
+From this, the conditional distribution q(z0|zℓ) can be expressed as a Gaussian with mean µ(zℓ, ℓ) = 1√ ¯αℓ
+(zℓ −√1−¯αℓϵ) and variance Σ(ℓ) = (1−¯αℓ)I. The gradient of the log-probability of this conditional distribution with
+respect toz ℓ is crucial for relating scores inz 0 space toz ℓ space:
+∇zℓ logq(z 0|zℓ) =∇ zℓ logN
+
+z0; 1√¯αℓ
+(zℓ −
+√
+1−¯αℓϵ),(1−¯α ℓ)I
+
+This simplifies to:
+∇zℓ logq(z 0|zℓ) =− 1√1−¯αℓ
+ϵ
+2. True Optimal Energy Guidance.The true optimal energy guidance, ∇zℓ Etrue(zℓ|c), aims to steer the diffusion process
+towards regions of low energy (high success probability) in the z0 space. This gradient is given by the expectation of
+the score of q(z0|zℓ) weighted by the exponential of the negative energy function, effectively performing importance
+sampling towards more successfulz 0 configurations:
+∇zℓ Etrue(zℓ|c) = Eq(z0|zℓ)[e−E(z0|c)∇zℓ logq(z 0|zℓ)]
+Eq(z0|zℓ)[e−E(z0|c)]
+Substituting the expression for∇ zℓ logq(z 0|zℓ)and assumingE q(z0|zℓ)[e−E(z0|c)]is a normalizing constant, we get:
+∇zℓ Etrue(zℓ|c) = 1√1−¯αℓ
+Eq(z0|zℓ)[e−E(z0|c)(−ϵ)]
+Eq(z0|zℓ)[e−E(z0|c)] =− 1√1−¯αℓ
+Eq(z0|zℓ)[ϵ|e−E(z0|c)]
+where E[ϵ|e−E(z0|c)] denotes the expectation of ϵ conditioned on z0 being sampled with a probability proportional to
+e−E(z0|c).
+3. Learned EBM Guidance.Our learned EBM guidance, ∇zℓ Eϕ(zℓ|c), typically approximates the gradient of the energy
+function at zℓ. In many practical implementations, this effectively corresponds to a linear weighting of the score of
+q(z0|zℓ)by the energy function itself, rather than its exponential:
+∇zℓ Eϕ(zℓ|c)≈E q(z0|zℓ)[E(z0|c)∇zℓ logq(z 0|zℓ)] =− 1√1−¯αℓ
+Eq(z0|zℓ)[E(z0|c)ϵ]
+This approximation introduces a discrepancy because the relationship between the energy E(z0|c) and the success
+probabilityp(y= 1|z 0, c)is exponential (p(y= 1|z 0, c)∝e −E(z0|c)), not linear.
+4. Analysis of the Guidance Gap.The EBM guidance gap is defined as ∆EBM(zℓ) =∥∇ zℓ Etrue(zℓ|c)− ∇zℓ Eϕ(zℓ|c)∥2.
+Substituting the expressions, we get:
+∆EBM(zℓ) =
+− 1√1−¯αℓ
+
+Eq(z0|zℓ)[ϵ|e−E(z0|c)]−E q(z0|zℓ)[E(z0|c)ϵ]
+
+2
+14\n\n--- page 15 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Let δ(z0) = e−E(z0 |c)
+Eq(z0 |zℓ )[e−E(z0 |c)] −E(z 0|c) represent the difference between the ideal exponential weighting (normalized)
+and the approximate linear weighting. The term in the parenthesis can be viewed as Eq(z0|zℓ)[δ(z0)ϵ]. In high-
+dimensional latent spaces (i.e., when d is large), the noise vector ϵ typically has a magnitude of approximately√
+d (i.e., ∥ϵ∥2 ≈
+√
+d). Furthermore, the components of ϵ are largely independent. Due to the Central Limit
+Theorem and concentration inequalities, even small biases in the weighting function δ(z0) can lead to a significant
+accumulated error when multiplied by a high-dimensional random vector. Specifically, if Eq(z0|zℓ)[δ(z0)]̸= 0 , the
+term ∥Eq(z0|zℓ)[δ(z0)ϵ]∥2 will tend to scale with
+√
+d in expectation, as the contributions from different dimensions
+accumulate.
+Therefore, there exists a constant c >0 (which depends on the magnitude of the mismatch δ(z0) and the properties of the
+noise distribution) such that:
+∆EBM(zℓ)≥ c√1−¯αℓ
+√
+d
+This lower bound shows that the inaccuracies in energy guidance are exacerbated in high-dimensional latent spaces and
+as the diffusion process approaches z0 (i.e., as ℓ→0 , 1−¯αℓ →0 , making the term 1√1−¯αℓ
+large). This leads sampled
+trajectories to deviate significantly from the true data manifold.□
+A.2. Proof for Proposition on Manifold-Aware Guided Planning
+Statement.Given a base diffusion planner ϵθ trained for classifier-free guidance, a learned energy function Eϕ(z|c), and
+a manifold projection operator PM, the manifold-aware guided planner, which combines EBM guidance with manifold
+projection, corresponds to sampling from a posterior distribution p(z|y= 1, z∈ M, c)that maximizes the likelihood of
+generating a successful and feasible goal-conditioned plan.
+Proof.The manifold-aware guidance process can be viewed as implementing constrained Bayesian inference. We seek to
+sample from the posterior:
+p(z|y= 1, z∈ M, c)∝p(y= 1|z, c)p(z|c)1[z∈ M]
+where1[z∈ M]is the indicator function for the feasible manifold.
+The two-step process approximates this constrained posterior:
+1. The guided sampling step samples from p(y= 1|z, c)p(z|c), implementing the unconstrained Bayesian posterior. This
+is achieved by combining classifier-free guidance for the conditional term p(z|c) and EBM guidance for the success
+termp(y= 1|z, c), as detailed in Proof A.3
+2. The projection step enforces the manifold constraint z∈ Mby mapping to the closest point on the approximated
+manifold.
+By the principle of alternating projections and the contraction property of projection operators, this two-step process
+converges to a point that balances optimality (high success probability) with feasibility (remaining on the manifold). The
+approximation error depends on the quality of the local manifold approximation, which improves with the number of
+neighbors k and the intrinsic dimensionality of the subgoal space. This shows that our combined guidance approach is a
+principled implementation of Bayes-optimal sampling, steering the generative process towards plans that are both relevant
+to the goal and likely to succeed, while remaining on the feasible manifold.□
+A.3. Proof for EBM-based Guidance
+Statement.Given a base diffusion planner ϵθ trained for classifier-free guidance and a learned energy function Eϕ(z|c)
+that estimates the probability of success conditioned on context c, the EBM-guided component of the planner corresponds to
+sampling from a posterior distribution that maximizes the likelihood of generating a successful, goal-conditioned plan.
+Proof.The proof proceeds in two steps. First, we derive the theoretically optimal score function for sampling successful,
+goal-conditioned plans using Bayes’ rule. Second, we show how our combined guidance mechanism implements an effective
+approximation of this optimal score.
+15\n\n--- page 16 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+1.Deriving the Optimal Score Function.Our goal is to sample from the posterior distribution p(z|y= 1, c), which is the
+distribution of plans z that are successful (y= 1 ) given the context c= (z 0, zG). Using Bayes’ rule, we can express this
+posterior as:
+p(z|y= 1, c) = p(y= 1|z, c)p(z|c)
+p(y= 1|c) ∝p(y= 1|z, c)p(z|c)
+Taking the logarithm, we get:
+logp(z|y= 1, c) = logp(y= 1|z, c) + logp(z|c) +const.
+The score function is the gradient of the log-probability with respect to the planz. The optimal score for our desired posterior
+is therefore:
+∇z logp(z|y= 1, c) =∇ z logp(y= 1|z, c) +∇ z logp(z|c)
+This equation tells us that the optimal guided score is the sum of two terms:
+•∇ z logp(z|c): The score of the original conditional planner. This term ensures the plan isrelevantto the contextc.
+•∇ z logp(y= 1|z, c): The gradient of the log-probability of success. This term ensures the plan isviableand likely to
+succeed.
+2.Implementing the Score with Combined Guidance.Our framework approximates each of these two terms:
+• EBM Guidance for Success:The Energy-Based Model Eϕ(z|c) is trained to model the success probability. We define
+p(y= 1|z, c)∝exp(−E ϕ(z|c)), where low energy corresponds to high success probability. The gradient of the log-
+probability of success is therefore directly related to the gradient of the energy function:
+∇z logp(y= 1|z, c) =−∇ zEϕ(z|c)
+This is theEBM Guidanceterm in our equation.
+• CFG for Conditional Relevance:The base diffusion model, ϵθ, is trained to predict the noise, which is proportional to
+the score. The term ∇z logp(z|c) is the score of the conditional model. Classifier-Free Guidance (CFG) is a technique
+to strengthen this conditioning at inference time. The CFG-adjusted score is:
+ˆ∇z logp(z|c)≈ ∇z logp(z|∅) +w cf g(∇z logp(z|c)− ∇z logp(z|∅))
+This is theClassifier-Free Guidanceterm in our equation, expressed in terms of the noise predictionsϵ θ.
+By combining these two approximations, our final guided noise prediction implements the theoretically optimal score:
+ˆϵθ(zℓ, ℓ, c) =ϵθ(zℓ, ℓ,∅) +wcf g(ϵθ(zℓ, ℓ, c)−ϵθ(zℓ, ℓ,∅))| {z }
+Approximates∇ z logp(z|c)via CFG
+−w ebm
+√
+1−¯αℓ∇zℓ Eϕ(zℓ|c)| {z }
+Approximates∇ z logp(y=1|z,c)via EBM
+This shows that our combined guidance approach is a principled implementation of Bayes-optimal sampling, steering the
+generative process towards plans that are both relevant to the goal and likely to succeed.□
+16\n\n--- page 17 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+B. Tasks and Dataset
+B.1. FurnitureBench Benchmark
+One Leg Round TableLamp Cabinet
+startgoal
+Figure 4.Overview of tasks from FurnitureBench in simulation.
+FurnitureBench (Heo et al., 2025) is a novel furniture assembly benchmark for testing complex, long-horizon manipulation
+tasks. We choose a subset of 4 tasks from the available 9 tasks in the benchmark. The tasks involve assembling various
+pieces of furniture from individual parts using a simulated Franka Emika Panda robot in a IsaacGym environment. The
+robot receives multi-modal observations, including front and wrist RGBD images and its proprioceptive state. The goal is to
+assemble the furniture correctly, which requires a sequence of precise manipulations over a long time horizon as shown in
+Fig 4. Each task comes with three different levels with respect to the randomness in the initial furniture part configuration,
+making the manipulation task more challenging.
+•Low: Furniture parts are randomly offset from their original positions by[−1.5,1.5]cm in the horizontal plane
+• Med: Furniture parts are randomly offset from their original positions by [−5,5] cm and from their original rotations
+by[−45 ◦,45 ◦]in the horizontal plane.
+•High: Furniture parts are randomly initialized on the workspace.
+Below we describe each task in detail:
+1.One Leg
+• Task: The task is to assemble one leg of a table. First, it has to stabilize the tabletop in one corner of a U-shaped
+wall, then it has to grasp, insert and screw the leg in its goal position.
+•Phases: 5 phases in total.
+•Success Metric: Assemble 2 parts in their goal positions.
+•Max. Episode Length: 700
+2.Lamp
+• Task: The task is to assemble one lamp base, bulb, and lamp hood. First, it has to stabilize the lamp base in one
+corner of a U-shaped wall. Then, it has to grasp, insert and screw the bulb into the lamp base. Finally, it has to
+grasp, and insert the lamp hood into the bulb.
+17\n\n--- page 18 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+•Phases: 7 phases in total.
+•Success Metric: Assemble 3 parts in their goal positions.
+•Max. Episode Length: 1100
+3.Round Table
+• Task: The task is to assemble one round tabletop, leg, and table base. First, it has to stabilize the round tabletop in
+one corner of a U-shaped wall. Then, it has to grasp, insert and screw the leg into the tabletop. Finally, it has to
+grasp, insert and screw the table base into the leg.
+•Phases: 8 phases in total.
+•Success Metric: Assemble 3 parts in their goal positions.
+•Max. Episode Length: 1500
+4.Cabinet
+• Task: The task is to assemble one cabinet body, left door, right door, and cabinet top. First, it has to stabilize the
+cabinet body in one corner of a U-shaped wall, then it has to grasp, insert and slide each door in its goal position.
+Then, it has to flip the cabinet body along with the assembled doors orthogonally. Finally, it has to grasp, insert
+and screw the cabinet top.
+•Phases: 11 phases in total.
+•Success Metric: Assemble 4 parts in their goal positions.
+•Max. Episode Length: 1500
+Simulation.We use a scripted policy provided by the original benchmark to collect 100 successful and 50 failure
+demonstrations for each task and randomness type. Unfortunately, we were unable to collect any successful trajectories with
+high randomness initialization for cabinet task, so we only considered low and med initial randmoness.
+Real-world.Following (Ankile et al., 2024a;b; Ren et al., 2024), we use 3DConnexion SpaceMouse, a 6DoF end-
+effector control device for teleoperated dataset collection. For each task and randomness type, we collect 50 successful
+demonstrations and use them to finetune our pretrained world model and hierarchical planners.
+Observation Space.The observation space for our world model consists of two RGBD images from the front and wrist
+camera and robot proprioceptive states. The front and wrist camera RGB images are first resized from 1280×720 to
+320×240 , and then center cropped to 224×224 . The robot proprioceptive state consists of current end-effector (EE) state
+and gripper width. In particular, 3 dimensional EE position, 4 dimensional EE orientation, 3 dimensional linear velocity, 3
+dimensional rotational velocity, and1dimensional gripper width.
+Action Space.We use an 8D action space, which consists of 3 dimensional delta EE position, 4 dimensional delta EE
+orientation (quaternion), and1dimensional gripper action. The action space is bounded between−1and+1.
+Goal Specification.We initialize the furniture in its final assembled state and capture the front and wrist RGBD images as
+well as the robot’s proprioceptive state. These are then passed through the pre-trained world model’s encoder to produce a
+fixed latent goal vector zG. This vector is then used as the conditioning for the planner in all subsequent experiments for that
+task.
+B.2. RLBench Benchmark
+RLBench (James et al., 2020) is a challenging, large-scale benchmark designed to facilitate research in various robot
+learning areas, including imitation learning and multi-task learning, by providing a diverse set of tasks with realistic visual
+observations and an infinite supply of demonstrations. This makes it an ideal platform to evaluate our hierarchical planning
+framework, which relies on learning from demonstrations and aims to solve long-horizon problems.
+Tasks Overview.We specifically consider the 18 tasks from the RLBench benchmark that were also used in the PerAct
+framework (Shridhar et al., 2023). These tasks encompass a wide variety of 6-DoF manipulation challenges, including
+both prehensile and non-prehensile behaviors, and feature numerous semantic and pose variations. The tasks are: close
+jar, drag stick , insert peg , meat off grill , open drawer , place cups , place wine , push buttons , put in
+cupboard, put in drawer , put in safe , screw bulb , slide block , sort shape , stack blocks , stack cups ,
+18\n\n--- page 19 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Close Jar
+ Drag Stick Insert Peg Meat off Grill Open Drawer Place Cups
+Place Wine Push Buttons Put in Cupboard Put in Drawer Put in Safe Screw Bulb 
+Slide Block Sort Shape Stack Blocks Stack Cups Sweep to Dustpan Turn Tap
+Figure 5.RLBench Manipulation Tasks.We evaluate HDFlow on 18 simulated RLBench tasks, covering 249 variations of object poses,
+goal configurations, and scene appearances. During evaluation, the robot must complete each task under randomized colors, shapes, sizes,
+and semantic arrangements.
+sweep to dustpan , and turn tap . These tasks often involve variations in object colors, sizes, shapes, counts, and
+placements, requiring the agent to generalize across different semantic instantiations and novel object poses.
+Data Generation.Following the methodology of PerAct (Shridhar et al., 2023) and the capabilities of RLBench (James
+et al., 2020), we generate datasets of successful and failure demonstrations for each of the 18 tasks. RLBench provides
+expert policies that use motion planners to generate an infinite supply of demonstrations. For our experiments, we collect
+100 successful demonstrations and 50 failure demonstrations for each task, ensuring a diverse dataset that captures both
+successful strategies and common failure modes. These demonstrations consist of RGB-D observations from multiple
+cameras (front, left shoulder, right shoulder, and wrist) and robot proprioceptive states, along with corresponding 6-DoF
+end-effector actions. The failure demonstrations are generated by introducing perturbations to the expert trajectories or by
+stopping trajectories prematurely. This rich dataset is essential for training the contrastive world model and the EBM-guided
+high-level planner inHDFlow.
+B.3. OGBench Benchmark
+OGBench (Park et al., 2025) is a benchmark specifically designed for offline goal-conditioned reinforcement learning (RL)
+that assesses capabilities such as long-horizon reasoning and handling stochasticity across diverse and challenging tasks.
+This benchmark allows us to thoroughly evaluate our method on a planning benchmark.
+Tasks Overview.We consider visual versions of locomotion tasks, including antmaze and humanoidmaze, and manipula-
+tion tasks, includingcube,scene, andpuzzle.
+• Maze Tasks (antmaze, humanoidmaze):These tasks require the agent to learn both high-level maze navigation and
+low-level locomotion skills, involving high-dimensional control, purely from diverse offline trajectories.
+• Manipulation Tasks ( cube, scene, puzzle):These tasks are designed to test the agent’s object manipulation,
+sequential generalization, and combinatorial generalization abilities.
+19\n\n--- page 20 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+ 
+Figure 6.OGBench Tasks.We evaluateHDFlowon 14 simulated OGBench tasks.
+Data Generation.For each task, we generate both successful and failure episode data using different dataset types provided
+by the original benchmark:
+•Maze Tasks:
+–navigate datasets: These datasets are considered successful and are collected by a noisy expert policy that
+navigates the maze by repeatedly reaching randomly sampled goals.
+–stitch datasets: These datasets are considered failure episodes and consist of short goal-reaching trajectories (at
+most 4 cell units long), designed to challenge the agent’s stitching ability.
+–explore datasets: These datasets are also considered failure episodes, featuring high suboptimality and high
+coverage, suitable for learning from highly suboptimal data.
+•Manipulation Tasks:
+–play datasets: These datasets are considered successful and are collected by open-loop, non-Markovian scripted
+policies with temporally correlated action noise to enhance state coverage.
+–noisy datasets: These datasets are considered failure episodes and are collected by closed-loop, Markovian
+scripted policies. The degree of action noise is sampled at the beginning of each episode, and trajectories are
+collected with the chosen amount of (time-independent) Gaussian action noise, ensuring high coverage while
+having a sufficient number of optimal trajectories. These are also suitable for learning from highly suboptimal data.
+20\n\n--- page 21 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+C. Implementation Details
+World models learn a compressed representation of the environment’s state and a model of its dynamics within this latent
+space. We use a Recurrent State-Space Model (RSSM) (Hafner et al., 2019), which has demonstrated strong performance in
+modeling complex dynamics from high-dimensional observations. We use observations from both front and wrist RGB-D
+cameras. The RSSM consists of the following components:
+• RGB Encoder:A visual encoder leveraging a pretrained DINOv2 model (Oquab et al., 2024) for RGB images,
+mapping them to a lower-dimensional embedding.
+•Depth Encoder:A separate CNN that encodes depth images into an embedding.
+•State Encoder:An MLP that encodes the robot’s proprioceptive state into an embedding.
+• Combined Observation Embedding:The embeddings from the RGB, Depth, and State encoders are concatenated to
+form the high-dimensional observation embeddinge t =Enc ϕ(ot).
+• Dynamics Model:The dynamics are modeled in two parts. A deterministic RNN, ht+1 =f ϕ(ht, zt), updates its
+hidden state to summarize the history. This hidden state is then used to predict a prior distribution over the current
+latent state,ˆzt ∼p ϕ(ˆzt|ht).
+• Representation Model:A posterior distribution over the latent state zt ∼q ϕ(zt|ht, et) is inferred from the combined
+observation embeddinge t and the deterministic hidden stateh t of the RNN.
+•Decoder:A decoderˆo t ∼p ϕ(ˆot|ht, zt)reconstructs the original observation from the latent state.
+The model is trained by maximizing the Evidence Lower Bound (ELBO) on the data log-likelihood, which encourages
+accurate reconstruction and prediction while regularizing the latent space. The objective function is:
+LWM =E qϕ(z1:T |o1:T )
+" TX
+t=1
+(logp ϕ(ˆot|zt, ht)−D KL [qϕ(zt|ht, et)||pϕ(ˆzt|ht)])
+#
+(16)
+This objective trains the model to form a compressed and predictive latent space Z, where planning can be performed
+efficiently.
+Parameter Value
+Visual Encoder DINOv2
+RGB Images 2
+Depth Encoder Yes
+RSSM Stochastic Latent State Size 32
+RSSM Deterministic State Size 1024
+Combined Latent State Size 2048
+Training Epochs 100
+Batch Size 64
+Learning Rate 1e-4
+Loss Weightλ W M 1.0
+Loss Weightλ IDM 0.1
+Loss Weightλ contrastive 0.1
+Table 8.World Model Hyperparameters
+21\n\n--- page 22 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Parameter Value
+Model Architecture Diffusion Transformer (DiT) (Peebles & Xie, 2023)
+Layers 4
+Attention Heads 8
+Hidden Dimension 512
+Training Epochs 10,000
+Batch Size 64
+Learning Rate 1e-4
+Diffusion Timesteps 1000 (linear beta schedule)
+EBM Architecture 4-layer Transformer
+Subgoal Interval (H) Task-dependent
+Projection Stepst∈[T /3,2T /3]
+Nearest Neighbors (k) 10
+Projection Variance Retentionλ= 0.99
+Loss Weightλ HL 1.0
+Loss Weightλ EBM 0.1
+Loss Weightλ proj 0.05
+Inference Steps 100
+Classifier-Free Guidance Scale 2.0
+EBM Guidance Scale 0.1
+Context Conditioningz 0, zG
+Table 9.High-Level Planner Hyperparameters
+Task one_leg lamp round_table cabinet
+Subgoal interval (H) 35 55 75 75
+Table 10.Task-dependent high-level planning subgoal intervals (H)
+Parameter Value
+Model Architecture Rectified Flow Transformer (Esser et al., 2024)
+Layers 4
+Attention Heads 8
+Hidden Dimension 512
+Training Epochs 10,000
+Batch Size 64
+Learning Rate 1e-4
+Loss Weightλ LL 1.0
+ODE Solver Dormand-Prince
+Number of Integration Steps 20
+Context Conditioningz k−1, zk
+Table 11.Low-Level Planner Hyperparameters
+22\n\n--- page 23 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Algorithm 1HDFlowTraining
+Require:DatasetD, World Modelϕ, HL Plannerθ HL, LL Plannerθ LL, EBMϕ EBM
+1://Stage 1: World Model Learning
+2:Initialize RSSMϕ, projection headf(·), inverse dynamics modelIDM.
+3:forepoch from 1 toN W Mdo
+4:forbatch(o 1:T , a1:T )fromDdo
+5:Encode observations:(z 1:T , h1:T ) =RSSM.encode(o 1:T )
+6:Compute Total Loss:L WM-total =λ W MLW M+λ IDM LIDM +λ contrastiveLcontrastive
+7:Update parametersϕ, f(·), IDM.
+8:end for
+9:end for
+10://Stage 2: Hierarchical Planner Training
+11:Initialize HL Diffusion Plannerϵ θHL , LL Rectified Flow Plannerv θLL, EBME ϕEBM .
+12:forepoch from 1 toN P lannerdo
+13:forbatch(z 0, zG,(z k)K
+k=1)from static datasetdo
+14:Compute Planner Loss:L planner =λ HL LHL +λ LLLLL +λ EBM LEBM +λ projLprojection
+15:Update parametersθ HL,θ LL,ϕ EBM .
+16:end for
+17:end for
+Algorithm 2HDFlowInference and Online Deployment
+Require:o curr, oG, Trained World Model, HL Planner, LL Planner,IDM.
+1:Encodeo curr →z curr ando G →z G using encoder.
+2:whiletask not completeddo
+3://High-Level Planning
+4:Generate subgoals(z 1, . . . , zK)using HL Planner conditioned on(z curr, zG).
+5:Setz subgoal =z 1.
+6://Low-Level Planning and Execution
+7:Generate trajectoryτ= (z curr, . . . , zsubgoal)using LL Planner.
+8:fortfrom1toHdo
+9:Predict actiona t =IDM(z t, zt+1)and execute.
+10:Updateo curr andz curr.
+11:end for
+12:end while
+D. Baselines
+In this section, we provide a brief description of each baseline method.
+•DP (Chi et al., 2023): A policy learning method that leverages diffusion models to directly model the distribution of
+actions conditioned on observations, enabling sample-efficient learning from offline data.
+•JUICER (Ankile et al., 2024a): A data-efficient imitation learning framework for robotic assembly that leverages
+expressive policy architectures, dataset expansion, and simulation-based data augmentation to learn multi-part, long-
+horizon assembly directly from RGB images.
+•Diffuser (Janner et al., 2022): A diffusion probabilistic model that plans by iteratively denoising trajectories. It treats
+planning as a conditional generation problem and can produce diverse and high-quality trajectories.
+•DD (Ajay et al., 2023): A conditional diffusion model that views decision-making as a conditional generative mod-
+eling problem, leveraging classifier-free guidance with low-temperature sampling to extract high-likelihood, return-
+maximizing trajectories from offline datasets without relying on dynamic programming.
+23\n\n--- page 24 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+•HDMI (Li et al., 2023): Hierarchical Diffusion for Offline Decision Making (HDMI) proposes a hierarchical trajectory-
+level diffusion probabilistic model to tackle challenges in offline reinforcement learning, especially for long-horizon
+tasks. It employs a cascade framework with a Reward-Conditional Goal Diffuser for discovering subgoals and a Goal-
+Conditional Trajectory Diffuser for generating action sequences.
+•SHD (Chen et al., 2024): A hierarchical diffusion-based planning method that uses a "jumpy" planning strategy at the
+high level for subgoal generation and a low-level diffuser for subgoal achievement, aiming for improved efficiency and
+generalization in long-horizon tasks.
+E. More Ablation Studies
+E.1. Choice of Vision Encoder
+To evaluate the impact of the vision encoder on the performance of our world model and the overallHDFlow framework,
+we conducted an ablation study comparing different visual backbones. We trained the world model with various encoders:
+a simple CNN, R3M (Nair et al., 2022), VIP (Ma et al., 2023), MAE (He et al., 2022), and our chosen DINOv2 (Oquab et al.,
+2024). The results are summarized in the table below.
+Backbone one_leg lamp round_table cabinet
+Low Med High Low Med High Low Med High Low Med
+CNN 55 18 2 28 8 0 20 6 0 3 0
+R3M 68 25 5 39 15 4 29 10 2 7 1
+VIP 75 32 9 45 20 7 36 14 5 10 3
+MAE 83 45 18 57 33 10 48 25 8 15 6
+DINOv2 92 71 39 68 49 34 61 43 27 55 36
+Table 12.Ablation study on the choice of vision encoder for the world model. This table reports HDFlow success rates (%) on all tasks
+with respective randomization levels.
+We found out that DINOv2 leads to significantly more accurate and detailed reconstructions of observations, which translates
+to a richer and more semantically structured latent space. This improved latent representation is crucial for both the high-
+level diffusion planner and the low-level rectified flow planner, enabling them to generate more effective and feasible
+plans. The quantitative results in Table 12 further confirm that DINOv2 consistently yields the highest HDFlow success rates,
+underscoring its importance as a foundational component of our framework.
+E.2. Ablation Studies onL IDM
+To evaluate the specific contribution of the Inverse Dynamics Model (IDM) loss (Eq. 8), we conducted an ablation study
+where we effectively disabled its dedicated training from the world model objective (i.e., setting λIDM = 0). While the
+IDM architecture remains within the framework and is called during inference, without its specific training objective, it
+cannot learn to accurately translate latent state transitions into executable actions. The results for the one_leg and lamp
+tasks underLowrandomization are presented in Table 13.
+Method one_leg lamp
+Ours 92 68
+w/oLIDM 34 14
+w/o RSSM (direct DINOv2 latents)45 27
+Table 13.Ablation study on the contribution of the Inverse Dynamics Model (IDM) loss as well as directly using DINOv2 features.
+As shown in Table 13, removing the LIDM leads to a noticeable drop in performance. This indicates that explicitly training
+the world model to predict actions between latent states indeed enhances the quality of the latent representation for planning.
+Without this objective, the latent space might become less sensitive to fine-grained action dynamics, making it harder for the
+low-level rectified flow planner to generate precise trajectories.
+24\n\n--- page 25 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+E.3. Using DINOv2 features as latent states
+We investigate the potential for directly using DINOv2 (Oquab et al., 2024) features as latent states z without training an
+additional RSSM world model. Our current framework uses a pre-trained DINOv2 model as an RGB encoderwithinan
+RSSM-based world model. The RSSM then learns a compressed, recurrent latent state that captures temporal dynamics and
+reconstructs observations.
+We conducted an experiment where we directly used the output of the DINOv2 encoder as the latent state z, bypassing the
+RSSM. In this setup, the high-level diffusion planner and low-level rectified flow planner would operate directly on these
+raw DINOv2 embeddings. The results are as shown in Table 13. The performance degradation is significant when the RSSM
+is removed, andDINOv2features are used directly as latent states. This can be attributed to several factors:
+1. Lack of Temporal Dynamics: DINOv2, while excellent for static visual representation, does not inherently capture
+temporal dynamics. The RSSM is crucial for learning a recurrent state that summarizes the history of observations and
+predicts future states, which is vital for long-horizon planning.
+2. Unstructured Latent Space:While DINOv2 provides semantically rich visual features, its latent space is not explicitly
+structured for planning in terms of task progress or action relevance. The RSSM, especially with the contrastive and
+IDM objectives, is specifically designed to create a latent space that is optimized for downstream planning.
+3. Dimensionality and Noise:Raw DINOv2 features might be higher dimensional or contain more irrelevant noise for
+planning compared to the compressed and refined latent states learned by the RSSM. The RSSM acts as a bottleneck
+and a learning mechanism to extract the most pertinent information for control.
+In conclusion, while DINOv2 serves as an excellent visual backbone, the RSSM world model plays a critical role in learning
+a temporally consistent, structured, and compact latent space that is essential for effective hierarchical planning in long-
+horizon robotic tasks.
+F. Successful Rollouts
+Initial state Grasp tabletop Place it to corner
+Pick up leg Insert leg Screw leg
+One Leg Low
+Figure 7.A successful rollout ofHDFlowplanner on theone_legassembly task initialized withLowrandomness.
+25\n\n--- page 26 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Initial state Grasp tabletop Place it to corner
+Pick up leg Insert leg Screw leg
+One Leg Med
+Figure 8.A successful rollout ofHDFlowplanner on theone_legassembly task initialized withMedrandomness.
+Initial state Grasp tabletop Place it to corner
+Pick up leg Insert leg Screw leg
+One Leg High
+Figure 9.A successful rollout ofHDFlowplanner on theone_legassembly task initialized withHighrandomness.
+26\n\n--- page 27 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Initial state Grasp tabletop Place it to corner Pick up leg
+Insert leg Screw leg Pick up base Insert and Screw base
+Round Table Low
+Figure 10.A successful rollout ofHDFlowplanner on theround_tableassembly task initialized withLowrandomness.
+Initial state Grasp base Place it to corner Pick up bulb
+Insert bulb Screw bulb Pick up hood Place on the top of base
+Lamp Low
+Figure 11.A successful rollout ofHDFlowplanner on thelampassembly task initialized withLowrandomness.
+27\n\n--- page 28 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Initial state Grasp base Place it to corner Pick up bulb
+Insert bulb Screw bulb Pick up hood Place on the top of base
+Figure 12.A successful rollout ofHDFlowplanner on thelampassembly task initialized withMedrandomness.
+Initial state Grasp cabinet box Place it to corner Pick up and insert door
+Repeat with another door Make box stand up Pick up cabinet top Insert and Screw top
+Cabinet Low
+Figure 13.A successful rollout ofHDFlowplanner on thecabinetassembly task initialized withLowrandomness.
+28\n\n--- page 29 ---\n\nHDFlow: Hierarchical Diffusion-Flow Planning for Long-horizon Tasks
+Initial state Grasp tabletop Place it to corner
+Pick up leg Insert leg Screw leg
+One Leg Low
+Figure 14.A successful rollout ofHDFlowplanner on theone_legassembly task initialized withLowrandomness in the real-world.
+Initial state Grasp base Place it to corner Pick up bulb
+Insert bulb Screw bulb Pick up hood Place on the top of base
+Lamp Low
+Figure 15.A successful rollout ofHDFlowplanner on thelampassembly task initialized withLowrandomness in the real-world.
+Initial state Grasp tabletop Place it to corner Pick up leg
+Insert leg Screw leg Pick up base Insert and Screw base
+Round Table Low
+Figure 16.A successful rollout of HDFlow planner on the round_table assembly task initialized with Low randomness in the real-world.
+29\n

@@ -1,0 +1,1271 @@
+\n\n--- page 1 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+Yuanjian Xu1 2 Jianing Hao 1 Wanbo Zhang 3 Zhong Li 2 * Guang Zhang 1 *
+Abstract
+The annealing phase is a pivotal convergence
+stage in LLM pre-training that ultimately deter-
+mines final model quality. However, effectively
+selecting training data during this phase remains
+a key challenge. Current strategies rely on empiri-
+cal heuristics, such as domain filtering or context
+extension, which lack a principled grounding in
+optimization theory. In this work, we character-
+ize the annealing phase through the lens of the
+loss landscape’s spectral geometry. We argue that
+optimal convergence requires gradient updates
+to satisfy heterogeneous constraints across dif-
+ferent eigen-directions. Building on this insight,
+we formulate data selection as a problem of sat-
+isfying these directional constraints. To this end,
+we proposeDiReCT(Directionally-Restrained
+ConstrainedTraining), a novel framework that
+reformulates sample selection in the annealing
+stage as a constrained optimization problem. By
+imposing explicit directional constraints on per-
+sample gradients based on the spectral proper-
+ties of the Hessian,DiReCTidentifies samples
+that align with the optimal curvature-aware de-
+scent path. Extensive experiments across vari-
+ous model scales demonstrate thatDiReCTcon-
+sistently achieves state-of-the-art performance.
+For future research, code is available at https:
+//github.com/xuyj233/Direct.
+1. Introduction
+While the capabilities of large language models (LLMs) are
+fundamentally determined by their training data (Xu et al.,
+2023; Luo et al., 2025a), effectively harnessing this data re-
+Work done during Yuanjian Xu’s internship at Microsoft Re-
+search Asia. 1The Hong Kong University of Science and Technol-
+ogy (Guangzhou), Guangzhou, China 2Microsoft Research Asia,
+Beijing, China 3Fudan University, Shanghai, China. Correspon-
+dence to: Zhong Li <zhongli@microsoft.com>, Guang Zhang
+<guangzhang@hkust-gz.edu.cn>.
+Proceedings of the 43 rd International Conference on Machine
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026
+by the author(s).
+quires sophisticated training strategies. Modern pre-training
+pipelines therefore commonly adopt a two-stage approach
+(Hu et al., 2024; Black et al., 2022; Grattafiori et al., 2024):
+a stable phase for acquiring foundational knowledge from
+massive datasets, followed by an annealing phase for final
+convergence and optimization. Crucially, this annealing
+phase relies on two key levers: learning rate decay and
+targeted data selection. However, while the former is well-
+studied, strategies for the latter remain largely empirical.
+This reliance on heuristics, absent a principled grounding
+in optimization theory, leads to sub-optimal data schedul-
+ing and inefficient resource allocation at this most critical
+juncture of training.
+In the absence of a principled foundation, data selection in
+the annealing phase consequently revolves around two em-
+pirical heuristics. One focuses on capability refinement
+through the up-sampling of reasoning-heavy data (e.g.,
+mathematics, code) (Grattafiori et al., 2024). The other
+prioritizes context extension by integrating long-sequence
+samples (Yang et al., 2025). In essence, both strategies in-
+duce targeted shifts in the data distribution. Although they
+yield gains, these heuristics remain disconnected from the
+underlying optimization dynamics, leading to suboptimal
+scheduling. A more principled approach would require a
+selection framework explicitly guided by the model’s in-
+stantaneous optimization geometry. To design such a data
+selection strategy, we must first characterize how the an-
+nealing phase differs from stable training. Following the
+valley metaphor used in prior studies to characterize opti-
+mization (Wen et al., 2025), as shown in Figure 1, towards
+the end of stable training (Figure 1(a)), the optimization en-
+ters a regime where gradients oscillate within steep regions
+of the loss landscape with minimal effective descent, caus-
+ing convergence to stagnate. Breaking this plateau therefore
+requires the annealing phase (Figure 1(b)) to enforce a dual
+objective: providing a strong vertical descent signal while
+constraining horizontal oscillations within a sharp subspace.
+Driven by this geometric intuition, we introduceDiReCT,
+a framework that formalizes data selection through the lens
+of spectral geometry. Our analysis begins by characterizing
+the annealing-phase loss landscape via the Hessian matrix
+computed on a validation set. This reveals a fundamental
+tension between high-curvature (“sharp”) directions, where
+optimization is prone to instability from gradient noise, and
+1
+arXiv:2605.31175v1  [cs.CL]  29 May 2026\n\n--- page 2 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+low-curvature (“flat”) directions, which govern stable gen-
+eralization.DiReCTresolves this tension by evaluating
+each training sample based on its gradient’s projection onto
+these spectral components, actively selecting those that am-
+plify the descent signal in flat valleys while suppressing
+noise in sharp directions. To render this principle scalable,
+we employ efficient randomized projections to approximate
+high-dimensional gradients, dramatically reducing compu-
+tational overhead. Moreover, the selection criterion permits
+the entire data schedule to be precomputed with just a sin-
+gle forward pass over the dataset before training begins.
+Consequently,DiReCTseamlessly aligns sample selection
+with the underlying optimization dynamics, ensuring both
+efficient computation and stable convergence. Our contribu-
+tions are summarized as follows:
+• We proposeDiReCT, to the best of our knowledge,
+the first systematic framework designed to guide data
+selection during the annealing phase of LLMs.
+• DiReCTmoves beyond empirical heuristics by lever-
+aging the spectral properties of the Hessian matrix
+to guide the annealing phase. By identifying and ad-
+dressing the tension between sharp directions and low-
+curvature valleys,DiReCToffers a robust mechanism
+to suppress optimization noise while maintaining a
+strong descent signal.
+• We demonstrate the effectiveness ofDiReCTthrough
+extensive experiments across diverse model archi-
+tectures and scales. The results show that our ap-
+proach consistently outperforms state-of-the-art em-
+pirical baselines in final model capabilities.
+2. Related Work
+We organize this section by reviewing data selection strate-
+gies across the two major stages of LLM pre-training: stable
+training and the annealing phase.
+Data strategies in stable training.The initial phase of
+pre-training focuses primarily on the acquisition of funda-
+mental linguistic structures. Although existing literature
+rarely distinguishes the stable training stage explicitly, most
+current data strategies are inherently designed for this pe-
+riod, focusing on balancing domain weights and prioritizing
+samples to ensure steady convergence. Current research has
+transitioned from manual heuristics to optimization-driven
+domain weighting. For instance, DoReMi (Xie et al., 2023)
+utilizes distributionally robust optimization to minimize ex-
+cess loss, while REGMIX (Liu et al., 2025) and MixMin
+(Thudi et al., 2025) treat mixture identification as regres-
+sion or convex optimization problems. Furthermore, recent
+works introduce adaptive scheduling to handle evolving
+data importance during this phase. Chameleon (Xie et al.,
+2025) employs leverage scores for flexible reweighting, and
+Velocitune (Luo et al., 2025b) monitors the model’s learn-
+ing velocity to adjust sample weights in real-time. These
+strategies, often grounded in scaling law analyzes (Shukor
+et al., 2025), facilitate efficient convergence by ensuring
+the model maintains a steady learning signal throughout the
+massive-scale stable training process.
+Data Strategies in annealing phase.The annealing phase
+transitions from stable training to convergence, shifting the
+objective from language acquisition to capability consolida-
+tion. As shown in Table 1, recent models upsample specific
+datasets during this stage to enhance performance. For in-
+stance, DeepSeek-V3, Qwen-3, and YuLan-Mini mix math,
+code, and science data to improve reasoning (DeepSeek-AI
+et al., 2025; Yang et al., 2025; Hu et al., 2024). Similarly,
+GLM-4, Kimi-1.5, and Llama-3 integrate long-context data
+to extend sequence processing (Zeng et al., 2024; Team
+et al., 2025; Grattafiori et al., 2024). However, these strate-
+gies remain empirical and lack a principled understanding
+of the selection mechanisms during this phase.
+Table 1.A comparison of data prioritization strategies during the
+annealing phase across leading LLMs. Checkmarks (✓) indicate
+categories where specific upsampling or curriculum shifts have
+been reported.
+Model Math Code Science Long
+Llama-2-L✓
+Llama-3✓ ✓
+DeepSeek-V3✓ ✓ ✓ ✓
+Qwen-3✓ ✓ ✓
+Qwen-2.5-1M✓
+Ministral-3✓
+YuLan-Mini✓ ✓ ✓ ✓
+GLM-4✓
+Kimi-1.5✓ ✓ ✓
+3. Preliminary Study
+To establish a principled understanding of the annealing
+stage, we characterize it not merely as a learning rate decay ,
+but as a critical transition in the model’s spectral navigation
+of the loss landscape (Goyal et al., 2017; Wen et al., 2025).
+We build upon the empirical observation that neural loss
+landscapes exhibit a skewed eigenspectrum, with a minority
+of high-curvature directions and a vast, flat subspace. In
+this geometric view, the stable training phase can be seen
+as the model operating in a high-entropy regime where sig-
+nificant learning rates induce a large noise scale (Wu et al.,
+2020; Keskar et al., 2017). This noise, while providing a
+beneficial self-stabilization effect that repels the model from
+sharp minima, geometrically manifests as dominant updates
+along the high-curvature (stiff) subspace S⊥. These trans-
+verse components largely cancel out over iterations, yielding
+only a weak net signal for descending the valley floor (the
+2\n\n--- page 3 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+(a) Stable Training (b) Annealing Phase
+Weak vertical discent signal
+Strong vertical discent signal
+Sharp subspace
+Constraint (   ,      )
+Low-curvature subspace
+Figure 1.A geometric comparison of optimization dynamics across training phases. In the stable training stage (a), high learning rates and
+uncurated data lead to high-variance oscillations across the steep walls of the loss landscape, resulting in a weak descent signal. During
+the annealing phase (b), our proposed mechanism suppresses transverse noise while maximizing the longitudinal signal, allowing the
+model to descend efficiently along the low-curvature valley toward the optimum.
+low-curvature subspace S∥), consistent with observed slow
+descent prior to annealing.
+The annealing phase, therefore, represents a targeted refine-
+ment process where the dynamics shift from exploration to
+exploitation of the low-curvature subspace. For this tran-
+sition to be effective, the optimization must satisfy two
+distinct geometric conditions: mitigating noise-amplified
+perturbations in S⊥ to stabilize, while preserving a coherent
+descent signal in S∥ to accelerate along the flat valley floor.
+Our framework hypothesizes that the empirical success of
+certain training schedules stems from their implicit ability
+to satisfy these spectral constraints. In the following section,
+we formalize this property and actively control it through
+the design of a selection algorithm.
+4. Methodology
+We first establish the problem formulation in Section 4.1,
+defining the sample selection task. In Section 4.2, we in-
+troduce the construction of our optimization problem. We
+then derive the Successive Convex Approximation (SCA)
+solver in Section 4.3 to address the non-convex alignment
+constraints. Finally, Section 4.4 provides the implementa-
+tion details, including the sketching-based approximation
+for high-dimensional Hessian analysis.
+4.1. Problem Formulation
+Let Dtrain ={x i}N
+i=1 be the training dataset of text se-
+quences, and let ℓpre(x;θ) denote the self-supervised pre-
+training loss for a model with parameters θ∈R d. Stan-
+dard training minimizes the empirical risk LERM(θ) =
+1
+N
+PN
+i=1 ℓpre(xi;θ) . We study post-hoc sample reweighting
+or selection during the late-phase training regime, where the
+model is near a local optimum. Let w= (w 1, . . . , wN )∈
+W be a vector of sample weights; the feasible setW encodes
+the chosen strategy: for reweighting, W ⊆RN
+≥0 with a nor-
+malization constraint, and for selection, W ⊆ {0,1}N with
+a cardinality constraint P
+i wi =K . Both modify the train-
+ing objective toL pre(θ;w) = 1P
+i wi
+PN
+i=1 wi ℓpre(xi;θ).
+We assume access to a held-out validation set Dval =
+{xval
+j }M
+j=1 from the same pretraining distribution, used to
+guide weight optimization via the validation loss Lval(θ) =
+1
+M
+PM
+j=1 ℓpre(xval
+j ;θ) . To evaluate downstream perfor-
+mance after pretraining, we use a supervised posttraining
+dataset Dpost ={(x post
+k , ypost
+k )}L
+k=1, e.g., an supervised fine-
+tuning (SFT) benchmark, with lossℓ post(x, y;θ).
+Let θbase denote the model obtained by standard ERM train-
+ing. Starting from θbase, we perform a few additional train-
+ing steps using the weighted loss Lpre(θ;w) to obtain ad-
+justed parameters θadj(w). Our goal is to maximize the
+post-training performance gain:
+max
+w∈W
+[Lpost(θbase)− Lpost(θadj(w))],(1)
+whereL post(θ) = 1
+L
+PL
+k=1 ℓpost(xpost
+k , ypost
+k ;θ).
+4.2. Annealing Data Selection as an Optimization
+We begin by defining the model’s parameter stateθs ∈R d
+at the end of stable training. To characterize the loss land-
+scape geometry aroundθs, we introduce a validation setDval
+representing the target data distribution and calculate the
+corresponding Hessian matrix as shown in Definition 4.1:
+Definition 4.1(Validation Hessian Matrix).The valida-
+tion Hessian matrix atθ s is defined as:
+Hval ≜∇ 2
+θ Ex∼Dval
+
+ℓ(x;θ)
+
+θ=θs
+.
+Let Hval =VΛV ⊤ be its spectral decomposition, where
+Λ = diag(λ 1, . . . , λd) with λ1 ≥ · · · ≥λd ≥0 , and
+V= [v 1, . . . , vd]is the orthonormal eigenbasis.
+3\n\n--- page 4 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+The eigenspectrum of Hval captures the anisotropic cur-
+vature of the loss landscape. To formalize the distinction
+between high- and low-curvature directions, we partition the
+parameter space into two complementary subspaces using
+a curvature threshold ϵ >0. The stiff modes subspace con-
+sists of directions with eigenvalues greater than ϵ, while the
+flat valleys subspace consists of directions with eigenvalues
+less than or equal to ϵ. Formally, we introduce the following
+spectral partitioning:
+Definition 4.2(Spectral Subspace Partitioning).Given
+a curvature threshold ϵ >0, we partition the parameter
+directions into two disjoint subspaces:
+I⊥ ={j|λ j > ϵ},andS ⊥ = span{vj :j∈ I⊥},
+I∥ ={j|λ j ≤ϵ},andS ∥ = span{vj :j∈ I∥}.
+Here S⊥ denotes the stiff modes subspace (directions of
+high curvature) and S∥ the flat valleys subspace (direc-
+tions of low curvature).
+Based on the above partitioning, we connect the global
+geometry with sample-level gradient dynamics. For each
+training sample xi ∈D train, we project its gradient at θs
+onto each eigenvectorv j.
+Definition 4.3(Sample-wise Spectral Projections).For a
+training sample xi, we define its gradient projection onto
+vj atθ s as:g i,j ≜⟨∇ℓ pre(xi;θ s), vj⟩.
+We now formulate sample selection as an optimization prob-
+lem that explicitly encodes the anisotropic curvature of the
+loss landscape. Our objective is to select samples that col-
+lectively produce a large gradient component in the flat sub-
+space S∥ (to drive progress along low-curvature directions)
+while limiting the gradient energy in the stiff subspace S⊥
+(to avoid instability). Formally, we propose the following
+optimization problem:
+max
+w∈W
+
+NX
+i=1
+wigi,I∥
+
+2
+2
+s.t.
+X
+j∈I⊥
+λj
+NX
+i=1
+wig2
+i,j ≤τ ⊥,
+(2)
+where gi,I∥ = (gi,j)j∈I∥ is the projection of ∇ℓpre(xi;θ s)
+onto the flat subspace and τ⊥ >0 is a threshold controlling
+the allowed gradient energy in stiff directions. For data
+selection, we have W={w∈ {0,1} N | PN
+i=1 wi =K} ,
+whereKis the number of samples to select.
+4.3. Optimization Solver
+The optimization problem in Equation (2) presents com-
+putational challenges due to its combinatorial nature for
+Algorithm 1The Overall Pipeline ofDiReCT
+Require: Pre-trained model θs, training set Dtrain, valida-
+tion setD val, selection countKor reweighting flag
+Ensure:Fine-tuned modelθ adj
+1: Generate random matrix R∈R k×d with Rij ∼
+N(0,1/k)
+2:foreachx∈D val do
+3:Computez x ←R∇ θℓ(x;θ s)∈R k
+4:end for
+5:Form ˜H← 1
+M
+P
+x∈Dval zxz⊤
+x
+6:Compute ˜H= ˜V ˜Λ ˜V ⊤ (eigendecomposition)
+7:foreachx i ∈D train do
+8:Computez i ←R∇ℓ pre(xi;θ s)
+9:Setg i,j ←
+√
+k·z ⊤
+i ˜vj forj= 1, . . . , k
+10:end for
+11:Partition{1, . . . , k}intoI⊥ andI ∥ using thresholdϵ
+12:Solve Eq. (2) via Algorithm 2 to obtain weightsw
+13: Fine-tune θs with weighted loss Lpre(θ;w) for a few
+steps→θ adj
+14:returnθ adj
+selection (wi ∈ {0,1}) and non-convex structure. For data
+selection, Equation (2) reduces to a cardinality-constrained
+binary quadratic program, which is NP-hard and intractable
+for typical pretraining dataset sizes (N∼10 5 −10 6). For
+data reweighting (wi ≥0 ), the maximization of a convex
+quadratic function over a convex set remains non-convex.
+We therefore adopt a two-stage approach: first solve a contin-
+uous relaxation, then recover discrete solutions for selection
+through rounding. We begin by relaxing the binary con-
+straint to wi ∈[0,1] . Then we employ a Successive Convex
+Approximation (SCA) solver. The key idea is to iteratively
+construct and solve convex approximations of the original
+problem. At iteration t with current solution w(t), we use
+the fact that for anyw, w(t):
+∥Gw∥2
+2 ≥2(Gw (t))⊤(Gw)− ∥Gw(t)∥2
+2,
+where G is the |I∥| ×Nmatrix with columns gi,I∥. This
+inequality follows from the convexity of ∥Gw∥2
+2 in w. The
+right-hand side provides a linear minorizer that touches
+the original objective at w(t). We thus solve the convex
+approximation:
+max
+w∈[0,1]N
+2(Gw(t))⊤(Gw)
+s.t.
+X
+j∈I⊥
+λj
+NX
+i=1
+wig2
+i,j ≤τ ⊥,
+NX
+i=1
+wi =K.
+(3)
+Equation (3) is a linear program with a convex quadratic
+constraint. We solve it efficiently using projected gradient
+4\n\n--- page 5 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+descent with Dykstra’s projection algorithm for intersecting
+convex sets, which handles the combination of box con-
+straints (wi ∈[0,1] ), equality constraint (P
+i wi =K ), and
+quadratic constraint. The complete algorithm proceeds as
+follows. We initialize w(0) = (K/N, . . . , K/N)and iter-
+ate until convergence (defined as ∥w(t+1) −w (t)∥2 < δ).
+For data selection, we apply deterministic rounding: sort
+w∗
+i in descending order and select the top K samples. Op-
+tionally, we can use randomized rounding with probability
+proportional to w∗
+i , which provides approximation guaran-
+tees while maintaining the cardinality constraint exactly.
+4.4. Implementation Details of DiReCT
+Hessian Approximation via Randomized Sketching.Di-
+rect eigendecomposition of the full Hessian Hval ∈R d×d
+is computationally prohibitive for large language models
+(d∼10 9). We instead approximate its dominant spectral
+structure using randomized sketching. Let k≪d be a
+target subspace dimension. We construct a random projec-
+tion matrix R∈R k×d with i.i.d. N(0,1/k) entries, set
+zj :=R∇ θℓ(xval
+j ;θ s)∈R k, and compute the sketched
+curvature matrix
+˜H≜ 1
+M
+MX
+j=1
+zjz⊤
+j ∈R k×k.
+Its eigendecomposition ˜H= ˜V ˜Λ ˜V ⊤ yields approximate
+eigenvalues λj ≈ ˜λj and eigenvectors vj ≈
+√
+kR⊤˜vj.
+These define the spectral partitioning I⊥ and I∥ accord-
+ing to Definition 4.2. Gradient projections are computed
+efficiently as gi,j ≈
+√
+k⟨R∇ℓpre(xi;θ s),˜vj⟩, reducing stor-
+age fromO(N d)toO(N k).
+The Overall Pipeline.Algorithm 1 outlines the complete
+DiReCTprocedure. Given a pre-trained model θs, we
+first approximate the Hessian eigenspace using random-
+ized sketching: validation gradients are projected onto a
+low-dimensional subspace to form a sketched covariance
+matrix ˜H, whose eigen-decomposition yields approximate
+curvature directions ˜vj and eigenvalues ˜λj. We then project
+each training-sample gradient onto these directions to ob-
+tain coefficients gi,j. Using a curvature threshold ϵ, the
+directions are partitioned into stiff ( I⊥) and flat ( I∥) sub-
+spaces. With these projections, the optimization problem
+(Eq. (2)) is solved via SCA to obtain sample weights w∗.
+Finally, starting from θs, a few fine-tuning steps are per-
+formed using the weighted loss, yielding the adjusted model
+θadj. The pipeline returns both the optimized weights and
+the fine-tuned model.
+4.5. Theoretical Analysis
+For the theoretical analysis we work with the regularized
+validation Hessian Hρ(θ)≜H val(θ) +ρI for some small
+ρ >0 that ensures positive definiteness, and measure flat-
+ness around the late-phase parameterθs via the inverse-trace
+functional S(θ) = Tr
+ 
+Hρ(θ)−1
+= Pd
+i=1 1/λi(θ), which
+is large precisely when θ sits in a flat valley of the loss land-
+scape. Under mild spectral and Lipschitz regularity (formal
+assumptions in Appendix C), the surrogate S exhibits a
+structural preference for flat eigendirections: moving along
+an eigenvector vk associated with a small eigenvalue λk
+provably increases S and contracts the corresponding curva-
+ture, as formalized below (proof in Appendix C).
+Theorem 4.4(Flat-direction preference).Under the spec-
+tral regularity assumptions of Appendix C,
+∂vk S(θ)≥ c0
+2λk(θ)2 >0.(4)
+Consequently, for any sufficiently small η >0 , S(θ+
+ηvk)> S(θ)andλ k(θ+ηv k)< λk(θ).
+Intuitively, flatness is exactly what a generalization bound
+charges for: PAC-Bayes guarantees penalize a model by the
+local curvature of the loss, so flatter basins mean smaller
+train–test gaps. Theorem 4.4 shows that a step along a flat
+direction flattens the landscape further, and Theorem C.5
+(Appendix C) turns this gain into an explicit generalization
+guarantee with a shrinking curvature penalty. This is pre-
+cisely what our objective (2) induces by concentrating mass
+on gradients in the flat subspace S∥, so the dataDiReCT
+selects drives training toward flatter solutions that satisfy
+the generalization guarantee of Theorem C.5.
+5. Experiments
+In this section, we provide a comprehensive evaluation of
+our proposed approach. We begin by detailing the exper-
+imental setup in Section 5.1, covering the datasets, base-
+lines, and technical configurations used in our study. We
+then report the main results in Section 5.2 to highlight the
+performance gains over existing methods. Finally, we pro-
+vide practical guidance on hyperparameter selection in Sec-
+tion 5.3 and decipher the sample selection logic learned by
+DiReCTin Section 5.4 to interpret what kinds of data drive
+the observed improvements.
+Table 2.Model architectures used in our experiments.
+GPT-2-Medium Llama-1.1B
+Parameters 355M 1.1B
+Layers 36 22
+Attention Heads 24 32
+Embedding Dim. 768 2048
+Hidden Dim. 3072 2048
+Max Seq. Length 512 2048
+5\n\n--- page 6 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+Table 3.Composition of pre-training corpora by byte percentage.
+For The Pile, due to space limitations we report the top-6 sources
+and aggregate the remaining 16 specialized domains into a single
+“Others” entry.
+SlimPajama (for GPT-2-Medium) The Pile (for Llama-1.1B)
+Data Source Ratio (%) Data Source Ratio (%)
+Common Crawl 54.10 Pile-CC 18.21
+C4 28.70 PubMed Central 14.48
+GitHub 4.20 Books3 † 12.14
+Books 3.70 OpenWebText2 † 10.07
+ArXiv 3.40 ArXiv 9.01
+Wikipedia 3.10 GitHub 7.63
+StackExchange 2.80 Others (16 sources) 28.46
+5.1. Experimental Setup
+Models and Pretraining Data.To obtain the stable late-
+phase checkpoints θs essential for our curvature analysis,
+we pretrain multiple models across various scales and ar-
+chitectures (Xu et al., 2026). This selection is designed to
+investigate performance across distinct distributional char-
+acteristics. For the GPT series, we pretrain GPT-2-Medium
+on the SlimPajama dataset (Soboleva et al., 2023), a dedupli-
+cated and quality-filtered corpus derived from RedPajama.
+To verify the scalability of our method and to evaluate its
+adaptability to different model architectures, we also pre-
+train a Llama-1.1B model on The Pile (Gao et al., 2021),
+benefiting from its vast multi-domain exposure, particularly
+in specialized scientific and code sectors. This dual-model
+setup provides a distributionally diverse proxy for evalu-
+ating specialized reasoning tasks. The model architecture
+and dataset compositions are summarized in Table 2 and
+Table 3.
+Annealing Datasets.To evaluate our proposed selection
+method during annealing, we construct a representative train-
+ing mixture Dann by subsampling from three specialized
+corpora: MathPile (Wang et al., 2024) for mathematical
+reasoning, StarCoderData (Li et al., 2023) for code, and the
+Dolma 3 Longmino Mix (Soldaini et al., 2024) for long-
+context text. We preserve the relative proportions of the
+source corpora so that Dann remains a distributionally faith-
+ful proxy for specialized reasoning tasks while staying com-
+putationally tractable for the required second-order spectral
+analysis. Detailed statistics of the resulting mixture are
+provided in Appendix A.1.
+Benchmarks.We evaluate our method on a suite of bench-
+marks spanning two key reasoning domains. For common-
+sense reasoning, we employ HellaSwag (Zellers et al., 2019),
+PiQA (Bisk et al., 2020), OpenBookQA (Mihaylov et al.,
+2018), COPA (Sarlin et al., 2020), ARC-Easy (Clark et al.,
+2018), and SciQ (Welbl et al., 2017) and WinoGrande (Sak-
+aguchi et al., 2021). For mathematical and complex rea-
+soning, we use GSM8K (Cobbe et al., 2021), HumanEval
+(Chen et al., 2021). All evaluations are reported with stan-
+dard accuracy for most tasks and pass@1 for HumanEval.
+Baselines.To rigorously evaluate the efficacy ofDiReCT,
+we compare it against a suite of representative data selec-
+tion baselines: Uniform Sampling, Perplexity-based selec-
+tion (Hu et al., 2024), Loss-based selection, GradNorm
+(IS) (Katharopoulos & Fleuret, 2018), and InfoBatch (Qin
+et al., 2024). To ensure a fair comparison, we enforce a
+strict data budget across all methods by fixing the selection
+ratio at 80% of the original meta-dataset. This controlled
+experimental design ensures that the performance variations
+observed in Table 4 are attributable solely to the quality of
+the selection logic rather than the volume of training data.
+5.2. Main Results
+The experimental results in Table 4 yield three consistent
+findings across both model scales. First,DiReCTattains
+the highest aggregated score at both scales, gaining roughly
+two points over Uniform Sampling. This confirms that
+the improvements generalize across model capacity rather
+than relying on scale-specific tuning. Second, on the math
+and code reasoning benchmarks (GSM8K and HumanEval),
+DiReCTdelivers clear gains that grow with model capac-
+ity, consistent with the intuition that larger models possess
+the latent reasoning ability that targeted data selection can
+unlock. Third,DiReCT’s effect on the commonsense rea-
+soning benchmarks is heterogeneous: it lifts accuracy by
+several points on OBQA, SciQ, and ARC-E, while staying
+within roughly one point of Uniform Sampling on Hella.,
+PiQA, COPA, and Wino. This pattern indicates that uniform
+sampling already suffices for surface-level linguistic pat-
+terns, whereas targeted gradient alignment is most valuable
+for navigating the geometric bottlenecks of deeper structural
+logic. The comparison with the strongest magnitude-centric
+baseline, InfoBatch, is particularly informative. InfoBatch
+matches or exceedsDiReCTon several individual common-
+sense benchmarks, yetDiReCTovertakes it on the aggre-
+gated metric at both scales. This indicates that maximiz-
+ing “information density” is secondary to ensuring “update
+alignment.” By projecting gradients onto the flat subspace
+of the validation Hessian,DiReCTbiases the optimizer
+toward directions that generalize broadly, rather than to-
+ward sample difficulty in isolation. The small bidirectional
+fluctuations observed on commonsense tasks reflect a princi-
+pled trade-off: imposing the stiff-mode constraint τ⊥ trades
+a fraction of the gradient energy on high-curvature direc-
+tions in exchange for stable descent along the low-curvature
+valley floor, preserving foundational knowledge while ag-
+gressively specializing in the reasoning domains required
+for downstream applications.
+6\n\n--- page 7 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+Table 4.Performance comparison ofDiReCTagainst various data selection baselines across two model scales (GPT-2-Medium 355M and
+Llama-1.1B) in the annealing stage. Subscripts denote the change relative to the Uniform Sampling baselineat the same scale(positive in
+red, negative ingreen). All numbers are averaged over 5 random seeds.DiReCTattains the highest aggregated score at both scales, with
+the most pronounced gains on the math and code reasoning benchmarks (GSM8K, HumanEval) and on OBQA, SciQ, and ARC-E.
+Method Commonsense Reasoning Math & Code Reasoning Aggregated
+Hella. PiQA OBQA COPA Wino. SciQ ARC-E GSM8K HumanE Avg.
+GPT-2-Medium (355M)
+Uniform Sampling 26.2 55.8 11.3 57.6 49.4 43.1 27.2 0.2 1.2 30.2
+Perplexity-based 25.3 54.5 12.4 59.1 51.0 44.6 29.8 0.4 1.8 31.0
+Loss-based 24.8 55.2 11.9 58.2 50.3 43.7 28.4 0.3 1.2 30.4
+GradNorm (IS) 27.2 53.4 13.2 58.7 50.9 45.2 30.6 0.5 1.8 31.3
+InfoBatch 27.5 56.8 12.7 59.4 51.5 46.0 31.7 0.7 3.0 32.1
+DiReCT(Ours) 25.8−0.4 56.2+0.4 13.5+2.2 58.2+0.6 48.8−0.6 48.5+5.4 34.0+6.8 1.5+1.3 3.8+2.6 32.3+2.1
+Llama-1.1B
+Uniform Sampling 29.0 58.2 27.1 66.2 50.8 61.2 41.3 1.1 6.2 37.9
+Perplexity-based 29.4 57.4 28.2 65.0 49.5 63.1 42.4 1.5 7.6 38.2
+Loss-based 28.7 59.6 26.4 68.1 52.0 60.5 41.0 2.0 6.8 38.3
+GradNorm (IS) 30.4 58.7 28.9 64.6 50.9 62.8 44.3 1.4 8.3 38.9
+InfoBatch 31.2 60.5 28.4 69.3 52.4 65.6 43.7 2.5 7.1 40.1
+DiReCT(Ours) 30.7+1.7 57.5−0.7 28.8+1.7 65.1−1.1 51.2+0.4 66.5+5.3 47.0+5.7 4.5+3.4 11.2+5.0 40.3+2.4
+5.3. Practical Guidance for Hyperparameter Decision
+A primary challenge in deployingDiReCTinvolves select-
+ing the curvature threshold ϵ, which defines the boundary
+between structural preservation and task adaptation. Rather
+than exhaustive grid searching, we propose a heuristic-based
+decision process grounded in the model’s Hessian spectral
+dynamics. Importantly, we observe that the gradient en-
+ergy budget τ⊥ is intrinsically coupled with the number
+of selected components k and the required sample size for
+Hessian estimation. By modulating τ⊥, practitioners can
+identify the optimal K that captures the dominant structural
+constraints while maintaining computational tractability.
+The selection of ϵ is driven by the intrinsic dimensionality
+of the Hessian spectrum Hval. As illustrated in Figure 2(a),
+the eigenvalue distribution for GPT-2-Medium exhibits a
+characteristic power-law decay, suggesting that model sensi-
+tivity is concentrated within a remarkably low-dimensional
+manifold. To systematically decouple the parameter space,
+we employ a spectral elbow detection heuristic quantified
+by the cumulative energyE(k) = ( Pk
+i=1 λi)/(PD
+j=1 λj).
+Empirical results in Figure 2(c) demonstrate that the first
+k= 34 eigenvalues account for 94.5% of the total spectral
+energy. This “elbow” point serves as a geometric phase
+transition: the subspace S⊥ aligns with high-energy eigen-
+vectors (λi ≥ϵ ) that constitute the steep, high-curvature
+walls of the loss landscape. These directions represent the
+rigid structural foundations of the pre-trained model, where
+any significant weight update would lead to catastrophic for-
+getting. Conversely, the remaining spectral energy resides
+in the flat subspace S∥ (λi < ϵ), corresponding to the valley
+floor. The diffused nature of these low-energy eigenvec-
+tors in Figure 2(b) confirms that S∥ provides the necessary
+plasticity for adaptive fine-tuning. By tuning τ⊥ to reach
+this elbow, we ensure that the optimization trajectory is or-
+thogonal to the stiffest constraints, thereby stabilizing the
+learning process without sacrificing the model’s capacity
+for new task acquisition.
+5.4. Deciphering the Selection Logic
+To understand the sample selection tendencies ofDiReCT,
+we examine its behavior on two types of extreme samples:
+those with very high pre-training loss and those with very
+short sequence length. Figure 3(a) shows that selected sam-
+ples exhibit markedly higher loss than those not selected,
+with the distribution centered significantly higher. This
+aligns with theDiReCTobjective of maximizing projec-
+tions onto the flat subspace S∥. During the late-phase train-
+ing regime, low-loss samples typically provide weak gradi-
+ent signals, indicating that the model has already converged
+in those parameter directions. In contrast, high-loss sam-
+ples represent unlearned patterns that supply the gradient
+energy needed to drive optimization along the low-curvature
+“flat valleys.” The strong correlation (Pearson r= +0.811 )
+confirms that the algorithm effectively identifies samples
+with higher optimization potential. Even when the absolute
+lengths in the candidate pool are modest,DiReCTcon-
+sistently prefers the longer ones. Figure 3(b) shows that
+7\n\n--- page 8 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+0 10 20 30 40 50 500 1000 2000
+Eigenvalue Index
+0
+200
+400
+600
+800
+1000
+1200Eigenvalue
+(a) Eigenvalue Spectrum
+Eigenvalues
+Separation point (k=34)
+Large eigenvalues region
+Small eigenvalues region
+0.08
+ 0.06
+ 0.04
+ 0.02
+ 0.00 0.02 0.04 0.06
+PC1
+0.08
+0.06
+0.04
+0.02
+0.00
+0.02
+0.04
+0.06
+PC2
+(b) Eigenvectors Visualization
+Small eigenvalues (k=1966)
+Large eigenvalues (k=34)
+0 10 20 30 40 50 500 1000 2000
+Eigenvalue Index
+0
+20
+40
+60
+80
+100Cumulative Energy (%)
+(c) Spectral Elbow Detection for 
+Selected (k < 34)
+Not selected (k  34)
+k = 34
+ = 158.88
+Energy: 94.5%
+Hessian Eigenvalue and Eigenvector Analysis
+Figure 2.Hessian Eigenvalue and Eigenvector Analysis for GPT-2-Medium.(a) The eigenvalue spectrum exhibits a sharp power-law
+decay, where the green region denotes the stiff subspace and the orange region represents the flat subspace. (b) PCA projection of
+eigenvectors, illustrating the directional concentration of high-energy components versus the diffusion of low-energy ones. (c) Spectral
+elbow detection based on cumulative energy, identifying k= 34 as the optimal separation point (ϵ= 158.88 ) covering 94.5% of the total
+spectral energy.
+Figure 3.Sample selection under two extreme regimes.We probeDiReCT’s selection behavior on the constructed annealing dataset
+under two extremes: (a) the high-loss extreme, showing the pre-training loss distribution of selected versus unselected samples; and (b)
+the short-length extreme, showing the sequence length distribution.DiReCTprioritizes high-loss, long-sequence samples that align with
+the flat curvature of the loss landscape.
+selected samples concentrate near 125 tokens, while shorter
+sequences are largely excluded. From a dynamical per-
+spective, longer sequences often contain complex semantic
+dependencies and higher information density, yielding gra-
+dient vectors with richer components in the spectral decom-
+position that align with the flat directions of the validation
+HessianH val.
+6. Conclusion
+We introduceDiReCT, a geometrically principled frame-
+work for annealing-phase data selection that replaces
+content-based heuristics with optimization-guided spectral
+analysis of the validation Hessian. The core idea is to up-
+weight samples aligned with the low-curvature valley floor
+and suppress high-curvature noise, which mitigates the con-
+vergence stagnation typical of late-stage pre-training while
+remaining scalable to foundation-model sizes. We further
+give a PAC-Bayesian analysis showing that the induced flat-
+direction update contracts the curvature trace, yielding a
+generalization bound governed by this contracted trace. Em-
+pirically,DiReCTdelivers consistent gains over standard
+baselines across diverse architectures.
+Limitations
+DiReCThas two main limitations. First, the validation
+Hessian and gradient projections are computed only at a sin-
+gle onset-of-annealing checkpoint θs; tracking the evolving
+landscape would sharpen the spectral partitioning but at sub-
+stantial extra compute. Second, while randomized sketching
+reduces projection storage from O(N d)to O(N k), gather-
+ing gradients across the full Dtrain still requires a forward
+pass, which is nontrivial at trillion-token scale. We leave dy-
+namic re-partitioning and parameter-subset backpropagation
+for gradient collection as future work.
+8\n\n--- page 9 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+Impact Statement
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal
+consequences of our work, none which we feel must be
+specifically highlighted here.
+References
+Bisk, Y ., Zellers, R., Gao, J., Choi, Y ., et al. PiQA: Reason-
+ing About Physical Commonsense in Natural Language.
+InProceedings of the AAAI Conference on Artificial In-
+telligence, pp. 7432–7439, 2020.
+Black, S., Biderman, S., Hallahan, E., Anthony, Q., Gao,
+L., Golding, L., He, H., Leahy, C., McDonell, K., Phang,
+J., et al. GPT-NeoX-20B: An Open-Source Autoregres-
+sive Language Model.arXiv preprint arXiv:2204.06745,
+2022.
+Chen, M., Tworek, J., et al. Evaluating large language
+models trained on code.arXiv preprint arXiv:2107.03374,
+2021.
+Clark, P., Cowhey, I., Etzioni, O., Khot, T., Sabharwal, A.,
+Schoenick, C., and Tafjord, O. Think You Have Solved
+Question Answering? Try ARC, the AI2 Reasoning Chal-
+lenge.arXiv preprint arXiv:1803.05457, 2018.
+Cobbe, K., Kosaraju, V ., Bavarian, M., Chen, M., Jun, H.,
+Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+R., Hesse, C., and Schulman, J. Training verifiers to solve
+math word problems.arXiv preprint arXiv:2110.14168,
+2021.
+DeepSeek-AI, Liu, A., Feng, B., Xue, B., Wang, B., Wu,
+B., Lu, C., Zhao, C., et al. Deepseek-v3 technical report.
+arXiv preprint arXiv:2412.19437, 2025.
+Dziugaite, G. K. and Roy, D. M. Computing nonvacuous
+generalization bounds for deep (stochastic) neural net-
+works with many more parameters than training data. In
+Proceedings of the Thirty-Third Conference on Uncer-
+tainty in Artificial Intelligence (UAI), 2017.
+Gao, L., Biderman, S., Black, S., Golding, L., Hoppe, T.,
+Foster, C., Phang, J., He, H., Thite, A., Nabeshima, N.,
+Presser, S., and Leahy, C. The pile: An 800gb dataset
+of diverse text for language modeling.arXiv preprint
+arXiv:2101.00027, 2021.
+Goyal, P., Doll ´ar, P., Girshick, R., Noordhuis, P.,
+Wesolowski, L., Kyrola, A., Tulloch, A., Jia, Y ., and
+He, K. Accurate, large minibatch sgd: Training imagenet
+in 1 hour.arXiv preprint arXiv:1706.02677, 2017.
+Grattafiori, A., Dubey, A., Jauhri, A., Pandey, A., et al. The
+llama 3 herd of models.arXiv preprint arXiv:2407.21783,
+2024.
+Hu, Y ., Song, H., Deng, J., Wang, J., Chen, J., Zhou, K., Zhu,
+Y ., Jiang, J., Dong, Z., Zhao, W. X., and Wen, J. Yulan-
+mini: An open data-efficient language model.arXiv
+preprint arXiv:2412.17743, 2024.
+Katharopoulos, A. and Fleuret, F. Not all samples are cre-
+ated equal: Deep learning with importance sampling. In
+International conference on machine learning, pp. 2525–
+2534. PMLR, 2018.
+Kato, T.Perturbation Theory for Linear Operators. Classics
+in Mathematics. Springer, Berlin, Heidelberg, 2nd edition,
+1995.
+Keskar, N. S., Mudigere, D., Nocedal, J., Smelyanskiy,
+M., and Tang, P. T. P. On large-batch training for deep
+learning: Generalization gap and sharp minima. InProc.
+ICLR, 2017.
+Li, R., Allal, L. B., Zi, Y ., Muennighoff, N., Kocetkov, D.,
+Mou, C., Marone, M., Akiki, C., Li, J., Chim, J., et al.
+Starcoder: may the source be with you!arXiv preprint
+arXiv:2305.06161, 2023.
+Liu, Q., Zheng, X., Muennighoff, N., Zeng, G., et al. Reg-
+mix: Data mixture as regression for language model pre-
+training. InProc. ICLR, 2025.
+Luo, J., Wu, B., Luo, X., Xiao, Z., Jin, Y ., Tu, R.-C., Yin,
+N., Wang, Y ., Yuan, J., Ju, W., et al. A survey on effi-
+cient large language model training: From data-centric
+perspectives. InProc. ACL, pp. 30904–30920, 2025a.
+Luo, Z., Zhang, X., Liu, X., Li, H., Gong, Y ., Chen, Q., and
+Cheng, P. Velocitune: A velocity-based dynamic domain
+reweighting method for continual pre-training. InProc.
+ACL, 2025b.
+McAllester, D. A. PAC-Bayesian model averaging. In
+Proceedings of the Twelfth Annual Conference on Com-
+putational Learning Theory (COLT), pp. 164–170, 1999.
+Mihaylov, T., Clark, P., Khot, T., and Sabharwal, A. Can
+a Suit of Armor Conduct Electricity? A New Dataset
+for Open Book Question Answering.arXiv preprint
+arXiv:1809.02789, 2018.
+Neyshabur, B., Bhojanapalli, S., McAllester, D., and Srebro,
+N. Exploring generalization in deep learning. InProc.
+NeurIPS, 2017.
+Qin, Z., Wang, K., Zheng, Z., Gu, J., Peng, X., Xu, Z., Zhou,
+D., Shang, L., Sun, B., Xie, X., and You, Y . InfoBatch:
+Lossless Training Speed Up by Unbiased Dynamic Data
+Pruning. InProc. ICLR. OpenReview.net, 2024.
+Sakaguchi, K., Bras, R. L., Bhagavatula, C., and Choi, Y .
+WinoGrande: An Adversarial Winograd Schema Chal-
+lenge at Scale.Communications of the ACM, 64(9):99–
+106, 2021.
+9\n\n--- page 10 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+Sarlin, P.-E., DeTone, D., Malisiewicz, T., and Rabinovich,
+A. SuperGlue: Learning Feature Matching with Graph
+Neural Networks. InProceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pp.
+4938–4947, 2020.
+Shukor, M., B´ethune, L., Busbridge, D., Grangier, D., Fini,
+E., El-Nouby, A., and Ablin, P. Scaling laws for optimal
+data mixtures. InProc. NeurIPS, 2025.
+Soboleva, D., Al-Khateeb, F., Myers, R., Steeves, J. R.,
+Hestness, J., and Dey, N. SlimPajama: A 627B Token
+Cleaned and Deduplicated Version of RedPajama, 2023.
+Dataset available at: https://huggingface.co/
+datasets/cerebras/SlimPajama-627B.
+Soldaini, L., Kinney, R., Bhagia, A., Schwenk, D., Atkinson,
+D., Authur, R., Bogin, B., Chandu, K., Dumas, J., Elazar,
+Y ., et al. Dolma: An open corpus of three trillion tokens
+for language model pretraining research. InProc. ACL,
+pp. 15725–15788, 2024.
+Stewart, G. W. and Sun, J.-g.Matrix Perturbation Theory.
+Academic Press, San Diego, CA, 1990.
+Team, K., Du, A., Gao, B., Xing, B., et al. Kimi k1.5:
+Scaling reinforcement learning with llms.arXiv preprint
+arXiv:2501.12599, 2025.
+Thudi, A., Rovers, E., Ruan, Y ., Thrush, T., and Maddi-
+son, C. J. Mixmin: Finding data mixtures via convex
+minimization. InProc. ICML, 2025.
+Wang, Z., Li, X., Xia, R., and Liu, P. Mathpile: A billion-
+token-scale pretraining corpus for math. InAdvances in
+Neural Information Processing Systems, volume 37, pp.
+25426–25468, 2024.
+Welbl, J., Liu, N. F., and Gardner, M. Crowdsourcing
+Multiple Choice Science Questions.arXiv preprint
+arXiv:1707.06209, 2017.
+Wen, K., Li, Z., Wang, J. S., Hall, D. L. W., Liang, P., and
+Ma, T. Understanding Warmup-Stable-Decay Learning
+Rates: A River Valley Loss Landscape View. InProc.
+ICLR, 2025.
+Wu, J., Hu, W., Xiong, H., Huan, J., Braverman, V ., and
+Zhu, Z. On the noisy gradient descent that generalizes
+as SGD. InProc. ICML, volume 119, pp. 10367–10376.
+PMLR, 2020.
+Xie, S. M., Pham, H., Dong, X., Du, N., Liu, H., Lu, Y .,
+Liang, P., Le, Q. V ., Ma, T., and Yu, A. W. Doremi:
+optimizing data mixtures speeds up language model pre-
+training. InProc. NeurIPS, 2023.
+Xie, W., Tonin, F., and Cevher, V . Chameleon: A flexible
+data-mixing framework for language model pretraining
+and finetuning. InProc. ICML, 2025.
+Xu, Y ., An, Q., Zhang, J., Li, P., and Nie, Z. Hard sample
+aware prompt-tuning. InProceedings of the 61st Annual
+Meeting of the Association for Computational Linguistics
+(Volume 1: Long Papers), pp. 12356–12369, 2023.
+Xu, Y ., Sun, T., Xu, C., Zhao, X., Hao, J., Chen, R., Liu, Y .,
+Xu, R., Chen, S., and Zhang, G. Rethinking Data Mixing
+from the Perspective of Large Language Models. InProc.
+ACL, 2026.
+Yang, A., Li, A., Yang, B., Zhang, B., et al. Qwen3 technical
+report.arXiv preprint arXiv:2505.09388, 2025.
+Zellers, R., Holtzman, A., Bisk, Y ., Farhadi, A., and Choi, Y .
+HellaSwag: Can a Machine Really Finish Your Sentence?
+arXiv preprint arXiv:1905.07830, 2019.
+Zeng, A., Xu, B., Wang, B., et al. Chatglm: A family of
+large language models from GLM-130B to GLM-4 all
+tools.arXiv preprint arXiv:2406.12793, 2024.
+10\n\n--- page 11 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+A. Experiment Settings
+A.1. Annealing Datasets
+We constructed a dataset for the annealing-phase experiments, comprising a 2.1-GB corpus of approximately 1.8M samples.
+To cultivate a multifaceted skill set, we curated data from three authoritative sources spanning distinct domains: math
+(1.27M samples from MathPile), code (0.23M samples from StarCoderData), and long-context text (0.30M samples from the
+Dolma 3 Longmino Mix). The dataset was partitioned into 1.62M training samples and 0.18M validation samples, following
+a 90/10 split. Figure 4 presents a detailed breakdown of the sample distribution and storage footprint across these domains.
+Figure 4.Overview of the annealing-phase dataset. (a) Sample distribution across sources: MathPile, StarCoderData, and the Dolma 3
+Longmino Mix. (b) Train/validation split (90%/10%). (c) On-disk file sizes for train, validation, and total corpus.
+A.2. Implementation Details
+Baselines.All baselines retain the top 80% of the training set Dtrain ranked by a method-specific score, except Uniform
+Sampling, which draws a random 80% subset. The scoring metrics are Perplexity ( expℓ pre), Loss (ℓpre evaluated at the
+stable checkpoint θs), and GradNorm (∥∇θℓpre∥2); higher-scored samples are kept. InfoBatch additionally rescales the kept
+gradients by1.25to compensate for the pruned20%.
+Hyperparameters.The annealing phase uses E= 5 epochs and batch size B= 4 . The learning rate is fixed at
+η= 10 −5 with weight decay 0.01. The optimizer employs a cosine learning rate scheduler with warmup ratio ρ= 0.1 , and
+gradient clipping at a maximum norm of 1.0. For the DiReCT procedure, the sample weight vector w is constrained by a
+gradient energy threshold τ⊥ = 0.1 in the stiff subspace S⊥, under the nonnegativity constraint wi ≥0 . The SCA solver
+(Algorithm 2) is run with maximum iteration countT max = 20and convergence toleranceδ= 10 −4.
+B. Successive Convex Approximation Solver
+Our goal is to learn a continuous selection vector w∈[0,1] N such that the selected samples produce a strong aggregate
+gradient in the flat subspace while remaining within a budget in the stiff subspace. Because the flat-subspace objective is
+quadratic in w, we adopt a Successive Convex Approximation (SCA) strategy: at each iteration we replace the quadratic
+objective with a linear surrogate around the current solution, solve the resulting linear program (LP), and updatew.
+Original problem.Let G= [g 1,I∥ , . . . ,gN,I∥ ]∈R |I∥|×N collect the per-sample gradients projected onto the flat
+subspace, and letp(w) =Gwdenote the resulting aggregate gradient. The continuous relaxation of Equation (2) reads
+max
+w∈[0,1]N
+∥Gw∥2
+2 s.t.
+X
+j∈I⊥
+λj
+NX
+i=1
+wig2
+i,j ≤τ ⊥,1 ⊤w=K.
+The feasible set is convex (box, equality, and linear budget), but the objectivef(w) =∥Gw∥ 2
+2 =w ⊤G⊤Gw is quadratic in
+w, making direct maximization non-trivial.
+11\n\n--- page 12 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+SCA surrogate.At iteration t with current solution w(t) and aggregate gradient p(t) =Gw (t), the gradient ∇f(w (t)) =
+2G⊤Gw(t) yields the first-order minorizer f(w)≥f(w (t)) + 2(Gw(t))⊤G(w−w (t)). Discarding terms independent of w
+and defining the per-sample marginal contribution and stiff-budget cost
+c(t)
+i := 2p (t)⊤
+gi,I∥ , a i :=
+X
+j∈I⊥
+λjg2
+i,j,
+the surrogate collapses into a linear program inw:
+w(t+1) = arg max
+w∈[0,1]N
+c(t)⊤
+ws.t.a ⊤w≤τ ⊥,1 ⊤w=K.
+Intuitively, each SCA iteration is a re-scoring step: samples whose gradients are well-aligned with the current aggregate
+direction (largec (t)
+i ) are favored, while those consuming excessive stiff-budget (largea i) are suppressed.
+Solving the LP via projected gradient ascent.We solve the LP with projected gradient ascent: each inner step
+takes ˜w(s+1) =w (s) +η c(t) and is followed by an Euclidean projection w(s+1) = Π C( ˜w(s+1)) onto the feasible set
+C={w: 0≤w i ≤1,1 ⊤w=K, a ⊤w≤τ ⊥}. Since C is the intersection of three simple convex sets, we compute ΠC
+via Dykstra’s alternating projection. The outer SCA loop terminates once ∥w(t+1) −w (t)∥2 < δ, returning the optimized
+weightsw ∗.
+Algorithm 2SCA Solver
+Require: Gradient matrix G∈R |I∥|×N , per-sample squared projections {g2
+i,j}i,j for j∈ I⊥, eigenvalues {λj}j∈I⊥,
+threshold τ⊥, selection count K, initial weights w(0) ∈[0,1] N (default: w(0)
+i =K/N ), tolerance δ >0 (default: 10−4),
+max iterationsT max
+Ensure:Optimized continuous weightsw ∗ ∈[0,1] N
+1:t←0
+2:repeat
+3:Compute current aggregate gradient:p (t) ←Gw (t)
+4:Form linear objective:c i ←2p (t)⊤gi,I∥ fori= 1, . . . , N
+5:Solve convex subproblem:
+6:w (t+1) ←argmax w∈[0,1]N
+PN
+i=1 ciwi
+7:s.t. P
+j∈I⊥
+λj
+PN
+i=1 wig2
+i,j ≤τ ⊥, PN
+i=1 wi =K
+// Subproblem solved via PGD with Dykstra’s projection
+8:t←t+ 1
+9:until∥w (t) −w (t−1)∥2 < δort≥T max
+10:w ∗ ←w (t)
+11:returnw ∗
+C. Theoretical Analysis
+We establish a rigorous connection between the flatness-seeking behavior of the inverse-trace surrogate and a PAC-Bayesian
+generalization bound. The analysis proceeds in two steps. First, we show that under mild spectral regularity conditions, the
+gradient of the surrogate has a non-negligible component along the eigenvector of a sufficiently small Hessian eigenvalue.
+Second, we demonstrate that a parameter update along this direction contracts the dominant flatness term in the PAC-Bayes
+bound, yielding a self-contained generalization guarantee for the adjusted model whose leading factor is the contracted
+curvature trace.
+C.1. Setup and Assumptions
+Let LS (θ) be the empirical loss and LD(θ) the population loss. For a fixed regularization constant ρ >0 that ensures
+positive definiteness, define the regularized Hessian Hρ(θ) =∇ 2
+θLS (θ) +ρI . Note that Hρ shares the same eigenbasis as
+Hval up to the empirical/validation sampling error and the ρI shift, so a flat (resp. stiff) direction of Hρ corresponds to a flat
+12\n\n--- page 13 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+(resp. stiff) direction ofH val used by the algorithm. The central object of study is the inverse-trace surrogate
+S(θ) = Tr
+ 
+Hρ(θ)−1
+=
+dX
+i=1
+1
+λi(θ) ,(5)
+where λ1(θ)≥ · · · ≥λd(θ)>0 are the eigenvalues of Hρ(θ) (in the same descending order as in Definition 4.1) and
+{vi(θ)}d
+i=1 the corresponding orthonormal eigenvectors. We omit the argument θ when no confusion arises. For a unit
+vectoru, the directional derivative is∂ uf(θ) =⟨∇ θf(θ), u⟩.
+Assumption C.1(Local spectral regularity).There exists a neighborhood Nθ of θ such that Hρ is twice continuously
+differentiable and all eigenvalues are simple on Nθ. By analytic perturbation theory for simple eigenvalues (Kato, 1995;
+Stewart & Sun, 1990), each λi and vi is then differentiable on Nθ, and for any unit vector u we have λi(θ+tu) =
+λi(θ) +t ∂uλi(θ) +O(t 2)ast→0.
+Assumption C.2(Directional sensitivity of eigenvalues).There exist constants c0, c1 >0 such that, for the eigenvector
+vk corresponding to a sufficiently small eigenvalueλ k, the following holds:
+∂vk λk(θ)
+ ≥c 0,(6)∂vk λi(θ)
+ ≤c 1 for alli̸=k.(7)
+The sign ofv k is chosen such that∂ vk λk(θ)≤ −c0 <0.
+Condition (6) quantifies the intuition that moving along a flat direction significantly alters the associated curvature; the
+negative sign indicates that this direction initially leads to flatter regions. Condition (7) is a mild regularity requirement
+limiting the influence ofv k on other eigenvalues.
+Assumption C.3(Spectral gap control).WithM:= P
+i̸=k λ−2
+i <∞, assume
+λk(θ)2 ≤ c0
+2c1M .(8)
+This inequality ensures that the contribution of the small eigenvalue dominates the gradient of S, making the bias toward vk
+provably positive.
+For the generalization analysis, we start from the standard PAC-Bayesian flatness bound (McAllester, 1999; Dziugaite &
+Roy, 2017; Neyshabur et al., 2017) and specialize it to the curvature trace used throughout this paper. Assume the loss is
+bounded in[0,1]. With probability at least1−δover the training sample, for allϑ∈ N θ, we have
+LD(ϑ)≤L S (ϑ) + Φ(ϑ) +O
+ log(n/δ)
+n
+
+,(9)
+where the flatness complexity term is
+Φ(ϑ) :=
+r
+Tr(Hρ(ϑ))∥ϑ∥2 + ln(2n/δ)
+2n .(10)
+We obtain this curvature-trace form from the generic sharpness–KL bound as follows. Under a Gaussian perturbation
+ν∼ N(0, σ2I), the expected sharpness equals σ2
+2 Tr(Hρ(ϑ)) to second order (using ∇LS (θ) = 0) and the KL term equals
+∥ϑ∥2/(2σ2). The standard bound leaves these as two separate terms; our refinement is to tie the perturbation scale to the
+local curvature, choosing the curvature-matched variance σ2 = 1/(2 Tr(Hρ(ϑ))). This collapses both terms into the single
+complexity factor Tr(Hρ(ϑ))∥ϑ∥2 inside the root, making the bound depend on the curvature trace that our update directly
+contracts.
+To control higher-order effects when taking a small step along vk, we impose a mild regularity condition on the loss Hessian.
+Assumption C.4(Locally Lipschitz Hessian).On the neighborhood Nθ, the Hessian ∇2LS is Lipschitz continuous:
+there exists a constant LH >0 such that ∥∇2LS (ϑ)− ∇2LS (ϑ′)∥op ≤L H ∥ϑ−ϑ ′∥ for all ϑ, ϑ′ ∈ Nθ. Moreover,
+assume∇L S (θ) = 0.
+13\n\n--- page 14 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+This standard condition implies that the operator norm of the Hessian is locally bounded, and it controls the changes in
+eigenvalues and parameter norm under small perturbations; all higher-order terms are of order O(∥θ′ −θ∥ 2). Moreover,
+by Assumption C.1, the trace T(ϑ) := Tr(H ρ(ϑ)) is twice continuously differentiable on Nθ, so we may set LT :=
+supϑ∈Nθ,∥u∥=1 |∂2
+uT(ϑ)|<∞; thisL T controls the second-order Taylor remainder ofTalong any unit direction.
+C.2. Gradient Bias Toward the Flat Direction
+The following result, stated as Theorem 4.4 in the main text, formalizes the preference of the surrogate S for the flat
+eigendirectionv k.
+Proof of Theorem 4.4.Differentiating (5) along vk gives ∂vk S(θ) =−∂ vk λk/λ2
+k − P
+i̸=k ∂vk λi/λ2
+i . By Assumption C.2,
+−∂vk λk ≥c 0, so the first term is at least c0/λ2
+k; the remaining terms are bounded using (7) as
+P
+i̸=k ∂vk λi/λ2
+i
+ ≤
+c1
+P
+i̸=k λ−2
+i =c 1M. Hence ∂vk S(θ)≥c 0/λ2
+k −c 1M, and applying the gap condition (8), c1M≤c 0/(2λ2
+k), we obtain
+(4). The monotonicity claims follow from first-order Taylor expansions, since the positive linear term dominates for small η.
+C.3. A PAC-Bayesian Generalization Bound
+Theorem C.5(PAC-Bayes generalization bound).Under the regularity assumptions of this appendix, there exist a
+threshold η0 = Θ(λk) and a constant ∆ = Ω(η)>0 such that, for every η≤η 0, the update θ′ =θ+ηv k contracts the
+curvature trace,Tr(H ρ(θ′))≤Tr(H ρ(θ))−∆, and, with probability at least1−δ,
+LD(θ′)≤L S (θ) +
+r
+(T−∆)∥θ ′∥2 + ln(2n/δ)
+2n + eO
+ 
+λ2
+k
+
+,(11)
+where T:= Tr(H ρ(θ)), the norm satisfies ∥θ′∥2 ≤ ∥θ∥2 +O(λ k), and eO absorbs the standard O(log(n/δ)/n)
+PAC-Bayes residual.
+Proof of Theorem C.5.WriteT:= Tr(H ρ(θ)),T ′ := Tr(Hρ(θ′)),q:=∥θ∥ 2,q ′ :=∥θ ′∥2, andΣ ⊥ := P
+i̸=k ∂vk λi(θ).1
+By Taylor expansion with remainder|R T | ≤LT
+2 η2 (Asm. C.4), Asm. C.2 (∂vk λk ≤ −c0), and|Σ ⊥| ≤c0/2,
+T ′ −T=η ∂ vk λk +ηΣ ⊥ +R T ≤ −c0 η+ c0
+2 η+ LT
+2 η2 =−∆,(12)
+with∆ = c0
+2 η− LT
+2 η2 = Ω(η)>0forη≤η 0.
+Taylor at θ with ∇LS (θ) = 0 (Asm. C.4) and BL := sup Nθ ∥∇2LS ∥op <∞ gives LS (θ′)≤L S (θ) + BL
+2 η2 =
+LS (θ) +O(λ 2
+k), where the last step usesη≤η 0 = Θ(λk).
+Since∥v k∥= 1, the Cauchy–Schwarz inequality|⟨θ, vk⟩| ≤ ∥θ∥andη≤η0 = Θ(λk)yield
+q′ =∥θ+ηv k∥2 =q+ 2η⟨θ, v k⟩+η 2 ≤q+ 2η∥θ∥+η 2 =q+O(λ k).(13)
+The linear-in-ηterm is retained inside the flatness factor.
+SinceΦis increasing in its trace argument, plugging (12) and the norm bound (13) intoΦgives
+Φ(θ′)2 = T ′q′ + ln(2n/δ)
+2n ≤ (T−∆)q ′ + ln(2n/δ)
+2n , q ′ ≤q+O(λ k).
+Substituting the empirical-loss bound and this flatness term into the PAC-Bayes bound (9), with eO(λ2
+k) absorbing both the
+O(λ2
+k) empirical-loss residual and the O(log(n/δ)/n) PAC-Bayes term, yields(11). Because ∆ = Ω(η)>0 , the leading
+flatness factor is the strictly contracted traceT−∆< T.□
+1The base point θ is fixed, so ∥θ∥, λk, BL, LT , and c0 are all fixed finite quantities. Every O(·) below denotes a non-asymptotic
+bound with an explicit constant that may depend on these base-point quantities; it is taken with respect to the step size η≤η 0 = Θ(λk).
+For instance,η∥θ∥ ≤η0∥θ∥= (c∥θ∥)λ k =O(λ k)sinceη 0 =cλ k.
+14\n\n--- page 15 ---\n\nTowards Efficient LLMs Annealing with Principled Sample Selection
+D. Notations
+Notation Description Type
+Datasets
+Dtrain Training dataset of text sequences Set
+NNumber of training samples Scalar
+xi i-th training sample (text sequence) Data point
+Dval Validation dataset Set
+MNumber of validation samples Scalar
+xvalj j-th validation sample Data point
+Dpost Supervised posttraining dataset Set
+LNumber of posttraining samples Scalar
+(xpost
+k , ypost
+k )k-th posttraining sample and label Data point + label
+Models and Parameters
+θModel parameters Vector inR d
+dParameter dimension Scalar
+θbase Model from standard ERM training Vector inR d
+θs Model parameters at end of stable training Vector inR d
+θadj(w)Adjusted parameters after weighted training Vector inR d
+θadj Final adjusted model afterDiReCTprocedure Vector inR d
+Loss Functions
+ℓpre(x;θ)Self-supervised pretraining loss Scalar function
+ℓpost(x, y;θ)Posttraining loss function Scalar function
+LERM(θ)Empirical risk: 1
+N
+PN
+i=1ℓpre(xi;θ)Scalar function
+Lpre(θ;w)Weighted training objective: 1P
+i wi
+PN
+i=1wiℓpre(xi;θ)Scalar function
+Lval(θ)Validation loss: 1
+M
+PM
+j=1ℓpre(xvalj ;θ)Scalar function
+Lpost(θ)Posttraining loss: 1
+L
+PL
+k=1ℓpost(xpost
+k , ypost
+k ;θ)Scalar function
+Optimization Variables and Constraints
+wSample weight vector:w= (w 1, . . . , wN)Vector inW
+WFeasible set for weights (reweighting or selection) Set
+KNumber of samples to select (cardinality constraint) Scalar
+τ⊥ Threshold for gradient energy in stiff directions Scalar
+tIteration index in SCA algorithm Scalar
+w(t) Weight vector at iterationtVector inR N
+Hessian Analysis and Spectral Decomposition
+Hval Validation Hessian matrix:∇2θEx∼Dval[ℓ(x;θ)]|θ=θs Matrix inRd×d
+λj j-th eigenvalue ofHval(λ1 ≥ · · · ≥λd ≥0) Scalar
+vj j-th eigenvector ofHval Vector inRd
+VOrthonormal eigenbasis:V= [v 1, . . . , vd]Matrix inR d×d
+ΛDiagonal eigenvalue matrix:Λ = diag(λ 1, . . . , λd)Diagonal matrix
+ϵCurvature threshold for spectral partitioning Scalar
+I⊥ Indices of high-curvature directions:{j|λj > ϵ}Index set
+I∥ Indices of low-curvature directions:{j|λj ≤ϵ}Index set
+S⊥ Stiff modes subspace (high curvature) Subspace
+S∥ Flat valleys subspace (low curvature) Subspace
+gi,j Sample gradient projection:gi,j =⟨∇ℓpre(xi;θs), vj⟩Scalar
+gi,I∥ Gradient projection onto flat subspace:(gi,j)j∈I∥ Vector inR|I∥|
+GMatrix of flat subspace gradients (|I ∥| ×N) Matrix
+Sketching and Approximation
+kSketching subspace dimension (k≪d) Scalar
+RRandom projection matrix:R∈R k×dwithRij ∼ N(0,1/k)Matrix inR k×d
+˜H Sketched curvature matrix:1
+M
+PM
+j=1(R∇θℓ(xvalj ;θs))(R∇θℓ(xvalj ;θs))⊤ Matrix inRk×k
+˜VEigenvectors of ˜HMatrix inR k×k
+˜ΛEigenvalues of ˜HDiagonal matrix
+˜vj j-th eigenvector of˜HVector inR k
+zx Sketched gradient for validation sample:zx =R∇θℓ(x;θs)Vector inR k
+zi Sketched gradient for training sample:zi =R∇ℓpre(xi;θs)Vector inR k
+15\n

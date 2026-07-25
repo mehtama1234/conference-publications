@@ -1,0 +1,2220 @@
+\n\n--- page 1 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy
+Optimization
+Yuchen Zhu* 1 Wei Guo * 1 Jaemoo Choi 1 Petr Molodyk 1 Bo Yuan1 Molei Tao †1 Yongxin Chen†1
+Abstract
+Diffusion large language models (dLLMs) are
+promising alternatives to autoregressive large lan-
+guage models (AR-LLMs), as they potentially
+allow higher inference throughput. Reinforce-
+ment learning (RL) is crucial to enabling dLLMs
+to achieve performance comparable to that of
+AR-LLMs on important tasks, such as reasoning.
+However, RL algorithms well-suited to dLLMs’
+unique characteristics have yet to be developed.
+This paper proposesDistribution Matching Pol-
+icy Optimization (DMPO), a principled and the-
+oretically grounded RL fine-tuning method specif-
+ically designed to enhance the reasoning capabili-
+ties of dLLMs by matching the dLLM policy dis-
+tribution to the optimal, reward-tilted one through
+cross-entropy optimization. We identify a key im-
+plementation challenge with small training batch
+sizes and propose several effective solutions based
+on a novel weight baseline subtraction technique.
+DMPO exhibits superior performance on multiple
+reasoning benchmarks without supervised fine-
+tuning, achieving up to a 39.63 percentage-point
+improvement in accuracy over prior non-DMPO
+RL baselines and 67.97 percentage points over
+the base model, underscoring the effectiveness of
+the distribution-matching framework. Our code is
+available at https://github.com/yuche
+n-zhu-zyc/DMPO.
+1. Introduction
+Autoregressive large language models (AR-LLMs) have
+demonstrated remarkable capabilities in addressing sophis-
+ticated reasoning tasks, such as solving challenging math
+*Equal contribution †Equal advising 1Georgia In-
+stitute of Technology. Correspondence to: Yuchen
+Zhu <yzhu738@gatech.edu>, Yongxin Chen
+<yongchen@gatech.edu>.
+Proceedings of the 43 rd International Conference on Machine
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026
+by the author(s).
+questions and completing coding tasks (Jaech et al., 2024;
+Anthropic, 2025; Guo et al., 2025a; Novikov et al., 2025;
+Kimi Team et al., 2025). While these models form their
+amazing capabilities from pretraining on massive text cor-
+pora, the main powerhouse behind the success is scaling
+the post-training phase with reinforcement learning (RL)
+techniques, such as Proximal Policy Optimization (PPO,
+Schulman et al. (2017)) and Group Relative Policy Opti-
+mization (GRPO, Shao et al. (2024)), which enhance model
+abilities through exploration of reward functions and go
+beyond static datasets. While possessing extraordinary com-
+petence, AR-LLMs are known to be expensive for inference
+due to their sequential, fixed left-to-right generation order,
+which currently prohibits large-scale deployment.
+To address such issues, diffusion large language models
+(dLLMs) have been investigated as an alternative to the
+AR models. Unlike AR-LLMs, dLLMs iteratively refine
+a sequence from masked inputs, enabling any-order gen-
+eration, and have shown promising performance on text
+modeling tasks. dLLMs such as LLaDA (Nie et al., 2025b)
+and Dream (Ye et al., 2025), have demonstrated competitive
+performances on many tasks compared to similar-size AR
+baselines. Recently, commercial models such as Mercury
+(Inception Labs et al., 2025) and Gemini Diffusion (Deep-
+Mind) have demonstrated the ability to achieve significantly
+higher inference throughput without sacrificing generation
+quality, suggesting dLLMs as a promising direction for lan-
+guage modeling. However, one question that remains largely
+unanswered is how to transfer the success of RL on LLMs
+to dLLMs, thereby further scaling up their capability.
+Designing RL algorithms for dLLMs faces two major chal-
+lenges. Due to the bidirectional nature of dLLMs, estimating
+the log probability of generated sequences is more expen-
+sive than for AR models, making it less favorable to naively
+adapt LLM post-training algorithms like GRPO to dLLMs,
+which heavily rely on this estimate. The GRPO-style algo-
+rithms also do not leverage dLLM’s unique characteristic
+of having aforwardnoising process, as they are backward-
+only algorithms when using generated rollouts. Moreover,
+existing RL frameworks for enhancing LLM reasoning ca-
+pabilities overly focus on reward maximization (Guo et al.,
+2025a; Liu et al., 2025b; Zheng et al., 2025a). By targeting
+1
+arXiv:2510.08233v3  [cs.LG]  12 Jul 2026\n\n--- page 2 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+70
+72
+74
+76
+78
+80
+82
+84
+86
+88
+Accuracy (%)
+73.39
+80.97
+79.76
+82.41 82.71
+84.0
+81.7381.40
+GSM8K
+30
+32
+34
+36
+38
+40
+42
+44
+36.60
+33.80
+35.00
+38.2
+36.6
+40.0
+32.80
+36.60
+MATH500
+10
+20
+30
+40
+50
+60
+70
+80
+28.52
+16.4114.45
+80.86 79.3
+67.19
+42.58
+26.56
+Countdown
+0
+5
+10
+15
+20
+25
+30
+16.41
+13.04
+6.10
+24.56 24.51
+25.73
+24.17
+11.04
+Sudoku
+Dream-Instruct (7B)
+LLaDA-Instruct (8B)
+LLaDA-1.5 (8B)
+d1-LLaDA
+cGRPO-LLaDA
+DMPO-LLaDA (Ours)
+DMPO-LLaDA-SFT (Ours)
+DMPO-LLaDA-1.5 (Ours)
+Figure 1.Performance on reasoning benchmarks evaluated with generation length 256. DMPO consistently achieves the best performance
+across dLLMs, outperforming prior RL baselines.
+only the reward mode, these approaches do not fully lever-
+age dLLMs’ potential to generate diverse responses, given
+the task’s random-order nature (Gong et al., 2026).
+To jointly address these challenges, we proposeDistribu-
+tion Matching Policy Optimization (DMPO), a principled
+and efficient RL fine-tuning method specifically designed
+for dLLMs. DMPO is designed on a novel framework
+grounded in stochastic optimal control (SOC), which shifts
+away from the conventional reward-maximization paradigm
+and targets the goal of matching the entire reward-tilted pol-
+icy distribution. This enables the model to explore diverse,
+high-quality reasoning paths and responses during train-
+ing, addressing concerns about over-focusing on absolute
+reward values and modes. In addition, DMPO training lever-
+ages importance sampling and a novel weighted denoising
+cross-entropy (WDCE) loss, which has the key advantage
+of operating in anoff-policymanner, enabling the use of
+replay buffers to improve sample efficiency. More impor-
+tantly, WDCE is aforward-onlyobjective that relies solely
+on the obtained clean samples and the inexpensive, forward-
+noising process unique to dLLMs. DMPO largely decouples
+from rollout trajectories, potentially enabling it to achieve
+greater speed-ups than other dLLM RL algorithms when
+employed with fast inference techniques.
+Contributions (I)We propose a novel RL learning frame-
+work for dLLMs that targets distribution matching rather
+than reward maximization (Sec. 3.1).(II)We propose Dis-
+tribution Matching Policy Optimization (DMPO), a prin-
+cipled, theoretically-grounded fine-tuning strategy for en-
+hancing dLLM’s reasoning capabilities, supported by im-
+portance sampling and weighted denoising cross-entropy
+(Sec. 3.2).(III)We identify a special challenge that oc-
+curred for WDCE due to the use of a limited training batch
+size, and propose two novel techniques to address it: weight
+baseline subtraction (Sec. 3.3) and weighted direct discrimi-
+native optimization (Sec. 3.4).(IV)DMPO exhibits superior
+performances on multiple reasoning benchmarks without su-
+pervised fine-tuning (SFT), with an accuracy improvement
+up to 39.63 percentage points over prior non-DMPO RL
+baselines and 67.97 percentage points over the base model,
+being top-performing across bi-directional dLLMs (Sec. 4).
+2. Preliminaries
+2.1. Masked Diffusion Models for Language Modeling
+Themasked (discrete) diffusion models (MDM)(Lou
+et al., 2024; Ou et al., 2025; Sahoo et al., 2024; Shi et al.,
+2024; Zheng et al., 2025f) is a novel method for learning
+high-dimensional categorical distributions with application
+to text (Nie et al., 2025b), images (Chang et al., 2022; Bai
+et al., 2025), DNAs (Hayes et al., 2025), etc. Essentially,
+it learns the one-dimensional conditional distributions of
+the data given any subset of observed dimensions. Suppose
+the data are finite-length sequences with vocabulary V=
+{1,2, ..., V}. Include the mask token M into the V and let
+V={1,2, ..., V,M} . The MDM takes a partially masked
+sequence x= (x 1, ..., xD)∈ V
+D
+as an input, and outputs
+πθ(x)∈R D×V , whose (d, u)-th entry πθ(x)d,u is set to
+1xd=u if xd ̸=M , and if xd =M , is trained to approximate
+the conditional probability
+PrX∼p data (Xd =u|X UM =x UM),
+where xUM = (x d :x d ̸=M) . By definition, we assume
+each row ofπ θ(x)is a valid probability vector. The proba-
+bility of an unmasked sequencex∈ VD under the MDM πθ
+is defined throughrandom-order autoregressive (ROAR)
+generation: choosing a uniformly random order of the D
+positions, and autoregressively sampling each position con-
+ditional on the previously sampled ones. Formally, let σ be
+a uniformly random permutation of{1, ..., D}, then
+pθ(x) =E
+σ
+pθ(x;σ), pθ(x;σ) =
+DY
+d=1
+πθ(xσd |xσ<d ).(1)
+Here, πθ(xσd |xσ<d ) means input x with all positions ex-
+cept σ<d ={σ 1, ..., σd−1} masked into the MDM and take
+the output at position(σ d, xσd ).
+The standard way to train an MDM given i.i.d. samples from
+pdata is to minimize thedenoising cross-entropy (DCE)
+loss Epdata(x) Lθ(x), which involves the following defini-
+tion of the (negative)evidence lower bound (ELBO)L θ:
+2\n\n--- page 3 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+−logp θ(x) =−logE σ pθ(x;σ)≤ −Eσ logp θ(x;σ)
+=E
+m∼Unif{1,...,|x|}
+h |x|
+m Eµm(ex|x)
+X
+d:exd=M
+−logπ θ(ex)d,xd
+i
+=:L θ(x),(2)
+where the transition distribution µm(·|x) means to sample a
+uniformly random subset of {1, ...,|x|}of size m and mask
+the corresponding entries in x, and |x| is the length of x.
+The proof of the last equation can be found in Uria et al.
+(2016); Ou et al. (2025).
+When applying to text data, the MDM is also referred to as
+thediffusion large language model (dLLM)(Nie et al.,
+2025b; Ye et al., 2025; Inception Labs et al., 2025; Song
+et al., 2025). For the purpose of reasoning, we typically
+write x= (q,o) , where q is theprompt(or query, which
+is always assumed to contain no mask state) and o is the
+response(or output). We use πθ(o|q)∈R |o|×V to denote
+the policy model output of the dLLM given a prompt q and
+a partially masked response o. The conditional sequence
+probability of a clean model o given a prompt q, denoted as
+pθ(o|q), is similarly defined through (1), where we now use
+notations pθ(o|q;σ) and πθ(oσd |q,o σ<d ) to emphasize the
+dependence on the prompt q. The negative ELBO will be
+written asL θ(o|q).
+2.2. Reinforcement Learning for Enhancing Reasoning
+We first present theGroup Relative Policy Optimization
+(GRPO, Shao et al. (2024)) method for LLMs, which is the
+basis of most of the existing RL methods for dLLMs. Given
+a pretrained LLM with policy πref that samples from the
+distribution pref (o|q) = Q|o|
+d=1 πref (od|q,o <d), a reward
+function r: (q,o)7→R , a set of prompts D, and a regu-
+larization parameter α≥0 , each step of the GRPO aims
+to solve the following problem: sample prompt q∼ Dand
+rolloutso (1:G) i.i.d.
+∼p θold (o|q), then, maximize
+E
+n 1
+G
+GX
+i=1
+1
+|o(i)|
+|o(i)|X
+d=1
+h
+min
+
+ρ(i)
+d Ai,clip(ρ (i)
+d )1±ϵAi
+
+−αKL(p θ(o(i)|q)∥pref (o(i)|q))
+io
+,(3)
+where the advantages 1 are Ai =r(q,o (i))−
+mean(r(q,o (1:G))), the per-token probability ratios are
+ρ(i)
+d =
+πθ(o(i)
+d |q,o(i)
+<d)
+πθold (o(i)
+d |q,o(i)
+<d), and the KL regularization term
+is estimated similarly by the per-token probability ratios be-
+tween πθ and πref. The clipping threshold ϵ prevents overly
+large policy updates.
+1As suggested by Liu et al. (2025b), we list here the version
+without normalization by standard deviation.
+While (3) works well for LLMs, it is not directly applicable
+to dLLMs due to mismatch between thedLLM policy (model
+output) πθ(o|q) and thesequence likelihood pθ(o|q): un-
+like in LLMs where these two quantities are easily con-
+nected through the chain rule, it is generally non-trivial to
+compute the per-token probability given the dLLM model
+output, and only ELBO (2) is available as a surrogate. To
+tackle this issue, diffu-GRPO (Zhao et al., 2025a) proposed
+to fully mask all response positions and partially masks the
+prompt q, and feed this sequence into the model to obtain
+the approximate probability pθ(od|q). Next, the sequence
+probability pθ(o|q) is approximated by mean-field decom-
+position:p θ(o|q)≈ Q|o|
+d=1 pθ(od|q). Such approximations
+do not capture correlations among different positions in the
+response, leading to imprecision. A similar technique is
+employed in coupled-GRPO (cGRPO) for code generation
+tasks in Gong et al. (2026).
+3. Distribution Matching Policy Optimization
+3.1. Reward Maximization→Distribution Matching
+−5 0 5
+x
+0.0
+0.1
+0.2
+0.3
+Density
+p∗
+RE: argminG KL(·||p∗)
+CE: argminG KL(p∗||·)
+Figure 2.Illustration of
+relative entropy (mode-
+seeking) and cross-entropy
+(mass-covering) for fitting
+a target p∗ (G is the set of
+Gaussian distributions).
+To incentivize the reason-
+ing capabilities of large
+language models, reward-
+maximizing reinforcement
+learning finetuning algo-
+rithms, such as TRPO
+(Schulman et al., 2015),
+PPO (Schulman et al.,
+2017), and GRPO (Shao
+et al., 2024), are often em-
+ployed, with an additional
+entropy regularization term
+that penalizes the deviation of the model from the pretrained
+one. This process amounts to solving the following
+optimization problem,
+max
+θ
+E
+q∼D
+
+E
+pθ(o|q)
+r(q,o)−αKL(p θ(·|q)∥pref (·|q))
+
+.(4)
+However, existing techniques over-focus on finding and
+optimizing thereward modeand adopt many heuristic tech-
+niques to accelerate the mode searching process, neglecting
+the exploration of the entire distribution landscape, and often
+result in model mode collapse or reward hacking, causing
+the model to produce undesirable responses (Weng, 2024).
+A simple fix to this issue and to encourage diverse model
+responses is to enforce the optimality of the target policy
+distribution during the training. It can be shown that the
+optimal sequence distribution that solves the problem (4) is
+the followingreward-tilted distribution:
+p∗(o|q) = 1
+Z(q) pref (o|q)er(q,o)/α ,(5)
+where Z(q) = P
+o pref (o|q)er(q,o)/α. That is to say, we
+3\n\n--- page 4 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+want to use the optimal sequential distribution p∗(o|q) as
+thesupervision signalthroughout the learning process, so
+that we can learn a dLLM policy πθ which produces a
+sequence distribution pθ matching p∗. We can thus obtain a
+policy that not only explores the dominant reward mode but
+is also guaranteed to sample other high-reward trajectories
+with a likelihood proportional to their reward values. This
+motivates us to consider the following task:
+Policy Distribution Matching Learning:Given a pre-
+trained dLLM policy πref (o|q) that samples from a dis-
+tribution pref (o|q), a reward function r: (q,o)7→R , a
+set of prompts D, and temperature α >0, learn a dLLM
+policy πθ(o|q) to produce the desired optimal distribu-
+tionp ∗(o|q)(5) by optimizing the following objective:
+min
+πθ
+Eq∼D F(p θ(·|q), p∗(·|q)).(6)
+Here, F is a class of functionals such that
+argminp F(p, p∗) =p ∗. Note that the original entropy-
+regularized entropy optimization problem is equivalent
+to choosing F to be the reverse KL between p and p∗,
+i.e., F(p θ, p∗) = KL(p θ∥p∗) =E pθ [log pθ
+p∗
+]. While this
+objective, in theory, can also yield the same optimal
+distribution with the desired property, reverse KL is widely
+known to bemode-seeking, i.e., it tends to match the
+dominant mode in p∗ while potentially neglecting other
+modes, which may lead to reward hacking.
+To address this issue, we consider a series of new objectives
+F with more desirable convergence guarantees that steadily
+lead to optimization towards the desired sequence distribu-
+tion, and proposeDistribution Matching Policy Optimiza-
+tion (DMPO)(Alg. 1), which targets matching the entire
+reward-tilted policy distribution. In Sec. 3.2, we introduce
+weighted denoising cross-entropy (WDCE), ascalable
+implementation of the forward KL using importance sam-
+pling. In Secs. 3.3 and 3.4, we discuss an important failure
+case of forward KL withsmall training batch size, and pro-
+pose a series of novel techniques such asweight baseline
+subtraction(Sec. 3.3) andweighted direct discriminative
+optimization(Sec. 3.4) to address it.
+3.2. Weighted Denoising Cross-entropy
+Unlike the reverse KL objective considered by many exist-
+ing works, which are known to be prone to mode seeking
+and collapse, one alternative choice is to use the forward
+KL divergence (orcross-entropy, CE) for the functional,
+i.e., F(p θ, p∗) = KL(p∗∥pθ), which tends to cover all the
+modes of the optimal distribution and can retain the response
+diversity. The CE loss is widely used in another domain,
+stochastic optimal control (SOC) (Domingo-Enrich et al.,
+2024; 2025), which is closely connected to our work. This
+amounts to solving the following task,
+min
+θ
+Eq∼D Ep∗(o|q)
+h
+log p∗(o|q)
+pθ(o|q)
+i
+.(7)
+However, objective (7) is not directly amenable to practical
+implementation, as we do not have access to real samples
+from the p∗, nor can we exactly compute logp ∗ due to the
+presence of the unknown partition functionZ(q). To bypass
+this issue, we draw inspiration from the recent work masked
+diffusion neural sampler (MDNS, Zhu et al. (2025e)), which
+proposed a training framework for learning a neural sam-
+pler based on MDM with stochastic optimal control and
+cross-entropy minimization. While targeting a different
+task, the core of MDNS resides in solving the same dis-
+tribution matching problem with cross-entropy loss, and it
+proposed a practically implementable and scalable variant
+of (7) namedweighted denoising cross-entropy (WDCE)
+loss. The central idea is to introduce a reference policy
+and leverageimportance samplingto treat i.i.d. samples as
+importance-weighted samples from p∗. Taking advantage
+of this approach, we now derive WDCE for dLLM policy
+learning.
+First, given the relationship between the policy output and
+sequence distribution of the masked dLLM (1), it is clear
+that we can match the correct target sequence distribution
+p∗(o|q) as long as we train pθ(o|q;σ) to match theorder-
+specificones, i.e.,p ∗(o|q;σ), given by
+p∗(o|q;σ) = 1
+Z(q) pref (o|q;σ)e r(q,o)/α .(8)
+Leveraging this fact, given any prompt q, we can express
+the cross-entropy loss as follows:
+KL(p∗(·|q)∥pθ(·|q)) =E p∗(o|q)[−logp θ(o|q)] + const
+=E σ Ep∗(o|q;σ) [−logp θ(o|q)] + const
+=E
+σ
+E
+pv(o|q;σ)
+p∗(o|q;σ)
+pv(o|q;σ) [−logp θ(o|q)] + const,(9)
+where pv is the sequence probability under a reference pol-
+icy model v that does not involve gradient computation, and
+in practice, one often chooses v← ¯θ:= stopgrad(θ) to be
+a copy of the policy model detached from the computation
+graph, and periodically synchronizes with the current model
+policy pθ, which is also commonly referred to as pθold in the
+literature. The importance weight w(o|q;σ) := p∗(o|q;σ)
+pv(o|q;σ)
+captures the mismatch between pv and p∗ and ensures the
+mathematical correctness of the objective, and logp θ(o|q)
+is an intractable sequence log probability under the current
+dLLM policy. We discuss the computation of these two
+components in parallel below.
+Importance weight w(o|q;σ) We simplify it with the
+pretrained model and the reward:
+4\n\n--- page 5 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+w(o|q;σ) = 1
+Z(q)
+pref (o|q;σ)
+pv(o|q;σ) e
+r(q,o)
+α
+∝exp
+ r(q,o)
+α + log pref (o|q;σ)
+pv(o|q;σ)
+
+=: eℓ(o|q;σ) .(10)
+Recall that the order-specific probability of a sequence is
+computed via (1). To ensure that the sample distribution
+after importance sampling is valid and normalized, we keep
+track of thelog weights ℓ(o|q;σ) , and take softmax among
+those corresponding to the same prompt q to compute the
+real weight w(o|q;σ) . This is equivalent to estimating
+the unknown partition function Z(q) using an empirical
+estimator of the following expectation:
+Z(q) =E σ Epv(o|q;σ)
+h pref (o|q;σ)
+pv(o|q;σ) er(q,o)/α
+i
+.
+The need to estimate partition functions is common in RL al-
+gorithms for LLM, such as in GflowNet (Bengio et al., 2021;
+Kimi Team et al., 2025). In contrast to these approaches that
+learn such functions independently, our estimation approach
+is training-free and more efficient.
+Sequence log probability logp v(o|q) Unlike the case of
+LLM, the exact sequence log probability is intractable in
+dLLM due to the presence of expectation over the random
+order σ. However, similar to the training of dLLM, we can
+leverage the negative ELBO (2) as a surrogate. Combined
+with the importance weight w(o|q;σ) , we introduce the
+weighted denoising cross-entropy (WDCE)loss for dLLM
+policy distribution matching:
+min
+θ
+E
+q∼D
+E
+σ
+E
+pv(o|q;σ)
+n
+w(o|q;σ)E
+m∼Unif{1,...,|o|}
+h
+|o|
+m E
+µm(eo|o)
+X
+d:eod=M
+−logπ θ(eo|q)d,od
+io
+.(11)
+Notably, this loss highly resembles the DCE loss used in
+pre-training and the supervised fine-tuning (SFT) phase of
+dLLM. One major difference is that instead of using i.i.d.
+samples from p∗, we useimportance samplingto weight
+samples from pv and obtain a valid training objective with
+theoretical guarantees. WDCE differs significantly from
+other popular RL training techniques, such as PPO/GRPO,
+in the following two key aspects:
+WDCE is anoff-policylossThe WDCE loss remains
+valid as the model parameter θ gets updated, since both
+the sampling policy pv and the important sampling target
+policy p∗ are independent of the current model policy pθ.
+This allows us to save generated rollouts in a replay buffer
+and reuse them across multiple training updates, without
+worrying excessively about numerical instability, thereby
+improving sample efficiency. On the other hand, for on-
+policy methods, to use a replay buffer, one would need
+to estimate importance weights with respect to the current
+model policy pθ(o|q), i.e., pθ(o|q)
+pv(o|q) . Different from the case
+of LLM where such estimation can be done in one model
+forward pass, an accurate estimation in dLLMper train-
+ing updateis expensive, rendering the on-policy method
+less efficient. Moreover, for large models, where rollout
+generation and sequence likelihood estimation are typically
+handled by different implementations (such as vLLM and
+FSDP), this could lead to more nuanced, hard-to-detect bi-
+ases that secretly undermine the algorithm’s performance
+(Yao et al., 2025). With WDCE, we are largely free of such
+concerns.
+WDCE is aforwardlossUnlike GRPO-style algorithms
+that typically require tracking the entire rollout trajecto-
+ries, WDCE leverages the forward (noising) process dur-
+ing training, which is a characteristicuniquetodiffusion
+LLMs. Once we obtain the final samples and their associ-
+ated weights, we can discard the trajectories and perform
+training using the cheap forward process by randomly mask-
+ing the data. This implies that the training speed with
+WDCE largely depends on the model’s inference speed.
+With the advances of dLLM efficient inference techniques
+such as fast decoding algorithms and KV-cache techniques
+(Ma et al., 2025; Hu et al., 2025; Wu et al., 2026; Liu et al.,
+2025c), WDCE could also enjoy a great boost in efficiency.
+This method also effectively leverages dLLM’s potential
+to surpass LLMs in inference throughput, distinguishing
+it from other RL baselines that merely adapt LLM algo-
+rithms to dLLM. We defer a more detailed discussion of
+such properties to Sec. B.2.
+Stochastic optimal control (SOC) perspectiveWhile we
+developed WDCE through the lens of distribution matching
+(6), it can also be derived from a path-measure SOC view-
+point, following Wang et al. (2025a); Zhu et al. (2025e); we
+sketch the argument here and defer details to Sec. B.1. The
+random-order autoregressive sampling of πθ can be viewed
+as a continuous-time Markov chain (CTMC) on V
+D
+with
+rate matrix Qθ
+t (x,x d←n) =γ(t)π θ(x)d,n1xd=M, inducing
+apath measure Pθ whose terminal distribution coincides
+with pθ. To produce p∗ at the terminal time, we define the
+target path measure
+P∗(ξ) := 1
+Z Pref (ξ) er(ξ1)/α,
+which preserves the pretrained transition dynamics while
+tilting its terminal distribution to exactly p∗ in (5). A stan-
+dard CTMC Radon–Nikod ´ym calculation (see Thm. B.1)
+shows that diagonal and integral contributions cancel, leav-
+ing the closed-form path-level log-weight log dP∗
+dPθ (ξ) =
+W θ(ξ)−logZ , where W θ(ξ) is the trajectory log-weight
+defined in (22) and depends only on the terminal reward
+r(ξ1) and on along-trajectory policy ratios πref
+πθ
+at the jump
+5\n\n--- page 6 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Response o
+Probability
+pθold(o|q)
+pθnew(o|q)
+Bad
+Good
+(a)Large batch size.
+Response o
+Probability
+pθold(o|q)
+pθnew(o|q)
+Bad
+Good (b)Small batch size.
+Response o
+Probability
+pθold(o|q)
+pθnew(o|q)
+Bad
+Good (c)Small batch size with baseline.
+Figure 3.Demonstration of the effect of weight baseline. The orange and blue curves represent the probability pθ(o|q) before and after
+update, and the magenta arrows represent the weights.(a)When the batch size is large, the distribution mode coverage is good. Though
+bad responses have positive weights, the correct ones have larger weights to push the distribution updates in the right direction.(b)When
+the batch size is small, some modes (e.g., the good one in the middle) may not be sampled. Withoutweight baseline subtraction, the
+dominant positive weights of the bad responses lead to wrong update directions.(c)Withweight baseline subtraction, the bad responses
+will appropriately be penalized, leading to the desired update direction.
+times. Minimizing KL(P∗∥Pθ) by importance sampling
+from a stop-gradient copyP v gives
+KL(P∗∥Pθ) =E
+Pv(ξ)
+1
+Z eW v(ξ) Lθ(ξ1) + const,
+which coincidesexactlywith the WDCE loss (11). Crucially,
+Lθ is theexactnegative log-density of Pθ on the path space,
+so the ELBOapproximationused at the sequence level in
+(9) corresponds topreciseKL matching at the path level,
+justifying the validity of such surrogate.
+3.3. Effective Training with Negative Gradient Insertion
+While theoretically, minimizing the WDCE loss (11) prov-
+ably leads to convergence of the model sequence distribution
+to p∗(o|q), this could face practical issues due to the often
+limited number of rollouts generated per prompt. Ideally, we
+would want to increase the likelihood of “good” responses
+while decreasing the likelihood of “bad” responses. How-
+ever, with WDCE, any response o will be associated with
+apositiveweight w(o|q;σ) due to the softmax operation,
+which may lead to ineffective learning in the low-batch-size
+scenario.
+We note that this issue does not arise when the batch size is
+sufficiently large for the following reason. When having a
+large batch of diverse responses that make up a good cover-
+age of the sample space, despite having all positive weights,
+since the model cannot increase likelihood on all responses
+(as the probabilities sum up to 1), the “bad” responses will
+be automatically and implicitly penalized due to not having
+larger weights than the “good” responses.
+When the batch size is small, the scenario is different as
+is illustrated in Fig. 3. In such a case, the model will tend
+topromote both “good” and “bad” responsesdue to the
+positive weights, and potentially penalize the likelihood of
+other unseen responses to maintain a valid probability distri-
+bution. This could be detrimental to achieving distribution
+matching, as these unseen responses may have high reward
+values and correspond to an undiscovered distribution mode.
+To address this issue, we inject negative gradient (Ren &
+Sutherland, 2025; Deng et al., 2025) by designing aweight
+baselineand subtract it from the obtained weights to facili-
+tate an effective reinforcement on the good samples, i.e.,
+wreal(o|q;σ) =w(o|q;σ)−w base(o|q;σ).(12)
+This approach resembles that adopted by PPO/GRPO. How-
+ever, unlike these methods, we rate responses based on the
+log weights ℓ(o|q;σ) , where larger values indicate better
+alignment with the target optimal distribution. As a con-
+sequence, we promote responses that are more likely to
+be sampled from p∗ and penalize those that are less likely.
+Based on this perspective, we consider the following three
+methods for choosingw base(o|q;σ).
+Group weight baselineWhen the dLLM policy is close to
+optimal, the original log weight ℓ(o|q;σ) should behave ap-
+proximately like constants for a group of different responses
+{o(n)}1≤n≤N , leading to nearly uniform weight value for
+{w(o(n)|q;σ (n))}1≤n≤N after group softmax. We can thus
+choose the baseline as 1 to encourage convergence to this
+optimal situation:
+wbase(o(n)|q;σ (n)) = 1.(13)
+Individual weight baselineWe can also consider the in-
+dividual weight value of each response. For samples with
+smaller log weights, a stronger penalization is more desir-
+able. A natural, adaptive way to design penalization strength
+is to use softmax over the log weights withnegative reward:
+defineℓ −(o|q;σ) :=− r(q,o)
+α + log pref (o|q;σ)
+pv(o|q;σ) , and
+wbase(o(n)|q;σ (n)) = Nexp(ℓ −(o(n)|q;σ (n)))P
+k exp(ℓ−(o(k)|q;σ (k))) .(14)
+Note that this wbase(o|q;σ) now corresponds to abad tar-
+get distributiongiven by p∗−(o|q)∝ o pref (o|q)e−r(q,o)/α,
+6\n\n--- page 7 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+which is tilted by the negative reward. The minus sign in
+the loss before wbase(o|q;σ) means we want to drive the
+dLLM policy away from this bad distribution.
+Model weight baselineFinally, we can determine
+whether to promote or penalize specific responses by com-
+paring w(o|q;σ) with the importance weight under the
+current model policy pθ(o|q), which pushes the model
+further towards the optimal p∗(o|q). Note that this does
+not incur additional computation overhead as we can es-
+timate logp ¯θ(o|q) using negative ELBO (2), which is al-
+ready computed in the WDCE loss. Define ℓθ(o|q;σ) :=
+log p ¯θ(o|q;σ)
+pv(o|q;σ) , and let
+wbase(o(n)|q;σ (n)) = Nexp(ℓ θ(o(n)|q;σ (n)))P
+k exp(ℓθ(o(k)|q;σ (k))) .(15)
+We remark that the group weight and model weight baselines
+(13) and (15) can also be interpreted as anapproximate
+variance reduction. See Sec. B.3 for discussion.
+3.4. Weighted Direct Discriminative Optimization
+To explore the full potential of the distribution matching
+framework in (6), we also investigate other choices for the
+potential F beyond the cross-entropy. One particularly in-
+teresting objective is the followingdirect discriminative
+optimization (DDO)loss:
+F(p θ(·|q), p∗(·|q)) =−E p∗(o|q) logσ
+
+log pθ(o|q)
+pv(o|q)
+
+−E pv(o|q) logσ
+
+−log pθ(o|q)
+pv(o|q)
+
+,(16)
+where σ(t) = 1/(1 + e−t). The global minimizer of (16) is
+also p∗(·|q), thus being a valid functional for distribution
+matching. For a more detailed justification, see Sec. B.4.
+This is inspired by Zheng et al. (2025e), which proposed a
+GAN-like (Goodfellow et al., 2020) loss for SFT of vision
+models. One interesting trait of this objective is its natural
+incorporation of negative gradients for bad samples due to
+the GAN nature, as is shown in the analysis therein:
+∇θF(p θ(·|q), p∗(·|q)) =
+X
+o
+σ
+
+−log pθ(o|q)
+pv(o|q)
+
+·(p θ(o|q)−p ∗(o|q)) ∇θ logp θ(o|q).
+From the expression, as the first term is always non-negative,
+and the boxed term applies a penalty for bad response o,
+thus providing a gradient direction for increasing pθ(o|q).
+Leveraging this property, we adapt it for RL finetuning
+of dLLM and introduceweighted direct discriminative
+optimization (WDDO)loss, again dealing with p∗ through
+importance sampling:
+F(p θ(·|q), p∗(·|q)) =−E
+σ
+E
+pv(o|q;σ)
+h
+w(o|q;σ)
+logσ
+
+log pθ(o|q)
+pv(o|q)
+
++ logσ
+
+−log pθ(o|q)
+pv(o|q)
+i
+,
+wherew(o|q;σ)is the importance weight defined in (10).
+4. Experiments
+Model and baselinesWe apply DMPO to LLaDA-8B-
+Instruct (Nie et al., 2025b), a SOTA fully-bidirectional
+dLLM not post-trained with RL techniques. To clearly
+demonstrate the potential of DMPO, we follow an R1-Zero-
+like training recipe (Guo et al., 2025a; Liu et al., 2025b)
+and apply DMPO directly to the LLaDA and Dream models
+without first performing SFT on curated datasets. We refer
+to the model obtained from this pipeline asDMPO-LLaDA
+andDMPO-Dream. We benchmark our method against a
+series of dLLM base models of comparable size, such as
+Dream-Instruct (7B, Ye et al. (2025)), LLaDA-Instruct (8B,
+Nie et al. (2025b)), and LLaDA-1.5 (8B, Zhu et al. (2025a)).
+We compare with d1 (Zhao et al., 2025a), a dLLM RL fine-
+tuning approach that combines both SFT and diffu-GRPO
+(an adapted version of GRPO), as well as cGRPO (Gong
+et al., 2026), wd1 (Tang et al., 2025c), and GDPO (Rojas
+et al., 2025a).
+Experimental setupsWe explore four reasoning bench-
+marks: GSM8k, MATH500, Sudoku, and Countdown. For
+all pretrained dLLMs, we evaluate the latest available check-
+point. For d1 and cGRPO, we reproduce their results exactly
+following the provided guidelines. To ensure a fair com-
+parison, we train DMPO-LLaDA and DMPO-Dream on the
+same datasets as d1 for each task with rollouts generated
+using a fixed sequence length of 256. Evaluations are con-
+ducted with zero-shot prompting using generation lengths
+128, 256, and 512 for LLaDA-series models, and 256 and
+512for Dream.
+DMPO incentivizes superior reasoning capabilitiesWe
+report in Tabs. 1 and 2 the performance of DMPO to-
+gether with that of base dLLMs and models obtained by
+existing RL post-training strategies. DMPO consistently
+outperforms both the base models and the models tuned
+with d1/cGRPO/wd1/GDPO. On LLaDA, it achieves ex-
+cellent gains over LLaDA-Instruct, with an accuracy im-
+provement of an average of+2.40% on GSM8K, +3.00%
+on MATH500, +59.38% on Countdown, and +42.27%
+on Sudoku. Compared with the strongest non-DMPO RL
+baseline at each setting, DMPO-LLaDA achieves especially
+large gains on planning tasks, including +13.67% and
++16.40% on Countdown, and +39.63% and +31.57%
+on Sudoku at generation lengths 256 and 512, respectively.
+On Dream-Instruct (7B), DMPO-Dream also outperforms
+7\n\n--- page 8 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Table 1.Model performances on reasoning benchmarks for LLaDA-Instruct (8B). Best and second best results are highlighted. DMPO
+consistently outperforms other baselines across different generation length.
+Task GSM8K MATH500 Countdown Sudoku
+Sequence Length128 256 512 128 256 512 128 256 512 128 256 512
+Dream-Instruct (7B)56.63 73.39 76.65 31.00 36.60 36.40 22.66 28.52 27.34 14.45 16.41 11.77
+LLaDA-Instruct (8B)71.87 79.76 83.62 28.20 35.00 38.80 23.44 14.45 14.84 12.94 6.10 7.37
+LLaDA-1.5 (8B)73.09 80.97 84.38 26.80 33.80 40.00 26.17 16.41 23.83 15.19 13.04 8.98
+d1-LLaDA75.28 81.40 84.38 30.00 36.60 40.80 34.38 26.56 30.47 21.97 11.04 8.69
+cGRPO-LLaDA67.40 81.73 84.23 21.40 32.80 38.40 30.08 42.58 37.11 24.17 24.17 21.97
+wd1-LLaDA –80.80 82.31–37.60 39.80–49.22 47.17–22.04 24.65
+GDPO-LLaDA –81.20 82.26–38.00 38.20–67.19 66.41–24.17 25.10
+DMPO-LLaDA (Ours)74.83 82.41 85.2230.00 38.20 42.80 67.19 80.86 82.81 32.76 63.80 56.67
+DMPO-LLaDA-SFT (Ours)80.06 84.0084.09 31.80 40.00 41.20 54.69 67.19 77.34 25.20 25.73 23.78
+DMPO-LLaDA-1.5 (Ours)77.56 82.71 84.61 30.20 36.60 41.00 59.77 79.30 83.20 25.34 24.51 23.34
+Table 2.Model performances on reasoning benchmarks for Dream-Instruct (7B). Best and second best results are highlighted. DMPO
+consistently outperforms other baselines across different generation length.
+Task GSM8K MATH500 Countdown Sudoku
+Sequence Length256 512 256 512 256 512 256 512
+Dream-Instruct (7B)73.39 76.65 36.60 36.40 28.52 27.34 16.41 11.77
+d1-Dream† 80.52 82.41 41.20 45.60 29.46 36.83 21.78 23.34
+DMPO-Dream (Ours)84.03 84.76 47.40 47.20 54.43 56.51 41.04 45.55
+d1-Dream across all tasks, with average gains of +2.93%
+on GSM8K, +3.90% on MATH500, +22.32% on Count-
+down, and +20.73% on Sudoku. This underscores the
+overall effectiveness of DMPO for enhancing model reason-
+ing capabilities across different dLLM backbones.
+Weight baseline subtraction is crucial for small batch
+size trainingWe test different choices for negative gra-
+dient insertion in Secs. 3.3 and 3.4 when training on the
+Sudoku dataset with a small batch size, and the results are
+visualized in Fig. 4. As shown by the curves, without weight
+baseline subtraction, the model does not improve as train-
+ing progresses. All the proposed weight baselines in (13)
+to (15) effectively increase the reward value during train-
+ing. WDDO achieves the fastest reward increase during the
+initial1ksteps but suffers from instability afterwards.
+DMPO benefits from other means of post-training tech-
+niquesTo showcase the robustness and general efficacy
+of DMPO, we apply it to LLaDA-SFT and LLaDA-1.5.
+LLaDA-SFT is obtained by performing SFT of LLaDA-
+Instruct (8B) on s1k (Muennighoff et al., 2025), a dataset
+of 1k examples of high-quality reasoning questions with
+distilled reasoning traces from Gemini Thinking;. LLaDA-
+1.5 is obtained by performing DPO on 350K preference
+pairs covering a wide range of topics such as writing and
+reasoning. We then apply DMPO to these base models to
+obtain DMPO-LLaDA-SFT and DMPO-LLaDA-1.5, with
+performance reported in Tab. 1. DMPO continues to de-
+liver performance gains for post-trained models, with con-
+sistent and significant accuracy improvements over base
+models, especially at generation lengths of 128 and 256 for
+the math reasoning datasets, with +4.78% and +2.60%
+on GSM8K, +1.80% and +3.40% on MATH500 com-
+pared with d1. This underscores that DMPO is a powerful
+method that integrates smoothly with existing solutions.
+DMPO enables efficient and fast trainingDue to its
+off-policyandforwardnature, DMPO achieves considerable
+training acceleration compared with GRPO-type methods.
+In Fig. 5, we compare head-to-head the training dynamics of
+diffu-GRPO, DMPO with ROAR sampler, and DMPO with
+Fast-dLLM (an approximate KV-cache mechanism enabled,
+confidence-based heuristic sampler for dLLMs, from Wu
+et al. (2026)) on Countdown under the same amount of train-
+ing compute. Due to its off-policy nature, DMPO enables
+heavy reuse of each sampled buffer of rollouts and achieves
+sample efficiency 2∼3× higher than that of diffu-GRPO.
+8\n\n--- page 9 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+0 200 400 600 800 1000 1200
+Steps
+0.0
+0.1
+0.2
+Reward
+Sudoku
+WDCE (Group Weight Baseline)
+WDCE (Invidiual Weight Baseline)
+WDCE (Model Weight Baseline)
+WDDO
+WDCE (No Weight Baseline)
+Figure 4.Effects of negative gradient in-
+sertion on Sudoku.
+0 1000 2000 3000 4000 5000
+Steps
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+Reward
+diﬀu-GRPO
+DMPO-ROAR-F=8
+DMPO-Fast-dLLM-F=8
+DMPO-Fast-dLLM-F=16
+DMPO-Fast-dLLM-F=24
+0 1 2 3 4 5
+Training Compute (PF-days)
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+Reward
+diﬀu-GRPO
+DMPO-ROAR-F=8
+DMPO-Fast-dLLM-F=8
+DMPO-Fast-dLLM-F=16
+DMPO-Fast-dLLM-F=24
+Figure 5.Comparison of training dynamics on Countdown.Fis the frequency of
+sampling the buffer.
+Regarding training-compute efficiency, as a forward-loss-
+based algorithm, DMPO offers flexibility in the choice of
+rollout sampler. With fast-dLLM, DMPO gains an accel-
+eration of up to 8× per rollout sampling, and achieves the
+same level of reward as d1 with only 31% of the training
+budget (1.8 PF-days 2 v.s. 5.78 PF-days). This empirical
+evidence emphasizes that DMPO is not only an effective
+algorithm but also highly sample- and compute-efficient.
+DMPO exhibits stable training despite highly stale data
+As is evident from Figs. 5 and 6, DMPO enjoys a largely
+stable dynamics despite using up to 24× stale data (which
+means 24 parameter updates on the same batch of rollouts),
+without suffering from high variance of importance sam-
+pling. While this seems to contradict the general belief that
+on-policy learning beats off-policy learning for LLM RL,
+we argue that this isnotthe case, because the off-policy in
+DMPO is inherently different from that used in diffu-GRPO
+or GRPO. Note that the latter considers the importance
+weight of the form πθ
+πold
+, whichinevitably divergesas the
+number of parameter updates on θ increases. However,
+DMPO uses importance weight of the form p∗
+pold
+, which is
+independent of the current policy model πθ and remains
+stable over a long horizon of training, enabling the use of
+a low buffer sampling frequency and highly stale rollouts
+without sacrificing performances. Moreover, DMPO adopts
+sequence-level importance sampling, in contrast to the
+token-levelimportance sampling used in diffu-GRPO or
+cGRPO, thereby providing an additional layer of stability.
+This advantage is also discussed in depth in Group Sequence
+Policy Optimization (GSPO, Zheng et al. (2025a)), which
+similarly considerssequence-levelimportance sampling.
+Additional results and discussion can be found in Sec. C.3.
+5. Conclusion
+We propose Distribution Matching Policy Optimization
+(DMPO), a novel RL fine-tuning framework for dLLMs
+21PF-day= 8.64×10 19 floating point operations.
+that leverages their unique characteristics via importance
+sampling and a WDCE loss, enabling off-policy training
+and forward-only computation that naturally exploits dLLM
+inference capabilities. The main limitation of this work is
+that we focus on two pretrained dLLMs and four elementary
+reasoning benchmarks, and DMPO’s performance on other
+pretrained dLLMs and tasks in different domains remains
+unknown. Our work opens several directions for future
+research, such as investigating the distribution-matching
+framework for other generative models and studying the
+design of more effective weight-baseline techniques.
+Acknowledgements
+The authors are grateful for partial supports by NSF Grants
+ECCS-1942523, DMS-2206576, 2450378 (WG & YC),
+AFOSR Grant FA9550-25-1-0169 (WG & YC), Geor-
+gia Tech ARC-ACO Fellowship (WG), NSF Grant DMS-
+2513699 (YZ & MT), DOE Grants NA0004261 (MT),
+SC0026274 (YZ & MT), Richard Duke Fellowship (YZ
+& MT), and Simons Institute for the Theory of Computing
+at UC Berkeley (MT). This research was supported in part
+through research cyberinfrastructure resources and services
+provided by the Partnership for an Advanced Computing
+Environment (PACE) at the Georgia Institute of Technology,
+Atlanta, Georgia, USA. RRID:SCR 027619.
+Impact Statement
+This paper presents work whose goal is to advance the field
+of Machine Learning. There are many potential societal
+consequences of our work, none which we feel must be
+specifically highlighted here.
+References
+Anthropic. Introducing claude 4, May 2025. URL http
+s://www.anthropic.com/news/claude-4 .
+Accessed: 2025-09-01.
+Arel. Arel’s sudoku generator. https://www.ocf.be
+9\n\n--- page 10 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+rkeley.edu/˜arel/sudoku/main.html, 2025.
+Accessed: 2025-07-01.
+Arriola, M., Sahoo, S. S., Gokaslan, A., Yang, Z., Qi, Z.,
+Han, J., Chiu, J. T., and Kuleshov, V . Block diffusion:
+Interpolating between autoregressive and diffusion lan-
+guage models. InThe Thirteenth International Confer-
+ence on Learning Representations, 2025. URL https:
+//openreview.net/forum?id=tyEyYT267x.
+Austin, J., Johnson, D. D., Ho, J., Tarlow, D., and van den
+Berg, R. Structured denoising diffusion models in dis-
+crete state-spaces. In Beygelzimer, A., Dauphin, Y .,
+Liang, P., and Vaughan, J. W. (eds.),Advances in Neural
+Information Processing Systems, 2021. URL https:
+//openreview.net/forum?id=h7-XixPCAL.
+Bai, J., Ye, T., Chow, W., Song, E., Chen, Q.-G., Li, X.,
+Dong, Z., Zhu, L., and YAN, S. Meissonic: Revital-
+izing masked generative transformers for efficient high-
+resolution text-to-image synthesis. InThe Thirteenth
+International Conference on Learning Representations,
+2025. URL https://openreview.net/forum
+?id=GJsuYHhAga.
+Ben-Hamu, H., Gat, I., Severo, D., Nolte, N., and Karrer, B.
+Accelerated sampling from masked diffusion models via
+entropy bounded unmasking. InThe Thirty-ninth Annual
+Conference on Neural Information Processing Systems,
+2025. URL https://openreview.net/forum
+?id=WBcBhT1NKO.
+Bengio, E., Jain, M., Korablyov, M., Precup, D., and Ben-
+gio, Y . Flow network based generative models for non-
+iterative diverse candidate generation. In Ranzato, M.,
+Beygelzimer, A., Dauphin, Y ., Liang, P., and Vaughan,
+J. W. (eds.),Advances in Neural Information Process-
+ing Systems, volume 34, pp. 27381–27394. Curran As-
+sociates, Inc., 2021. URL https://proceedings.
+neurips.cc/paper_files/paper/2021/fi
+le/e614f646836aaed9f89ce58e837e2310-P
+aper.pdf.
+Besnier, V ., Chen, M., Hurych, D., Valle, E., and Cord,
+M. Halton scheduler for masked generative image trans-
+former. InThe Thirteenth International Conference
+on Learning Representations, 2025. URL https:
+//openreview.net/forum?id=RDVrlWAb7K.
+Campbell, A., Benton, J., De Bortoli, V ., Rainforth, T.,
+Deligiannidis, G., and Doucet, A. A continuous time
+framework for discrete denoising models. In Koyejo,
+S., Mohamed, S., Agarwal, A., Belgrave, D., Cho, K.,
+and Oh, A. (eds.),Advances in Neural Information Pro-
+cessing Systems, volume 35, pp. 28266–28279. Curran
+Associates, Inc., 2022. URL https://proceeding
+s.neurips.cc/paper_files/paper/2022/
+file/b5b528767aa35f5b1a60fe0aaeca056
+3-Paper-Conference.pdf.
+Campbell, A., Yim, J., Barzilay, R., Rainforth, T., and
+Jaakkola, T. Generative flows on discrete state-spaces:
+Enabling multimodal flows with applications to protein
+co-design. InForty-first International Conference on Ma-
+chine Learning, 2024. URL https://openreview
+.net/forum?id=kQwSbv0BR4.
+Chang, H., Zhang, H., Jiang, L., Liu, C., and Freeman,
+W. T. MaskGIT: Masked generative image transformer.
+In2022 IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pp. 11315–11325, 2022.
+doi: 10.1109/CVPR52688.2022.01103.
+Chao, C.-H., Sun, W.-F., Liang, H., Lee, C.-Y ., and Krish-
+nan, R. Beyond masked and unmasked: Discrete diffusion
+models via partial masking. InThe Thirty-ninth Annual
+Conference on Neural Information Processing Systems,
+2025. URL https://openreview.net/forum
+?id=nqpbbvEZwF.
+Chen, H., Ren, Y ., Min, M. R., Ying, L., and Izzo, Z.
+Solving inverse problems via diffusion-based priors: An
+approximation-free ensemble sampling approach.arXiv
+preprint arXiv:2506.03979, 2025a.
+Chen, T., Zhang, Y ., Tang, S., and Chatterjee, P. Multi-
+objective-guided discrete flow matching for control-
+lable biological sequence design.arXiv preprint
+arXiv:2505.07086, 2025b.
+Chu, X., Huang, H., Zhang, X., Wei, F., and Wang, Y . GPG:
+A simple and strong reinforcement learning baseline for
+model reasoning.arXiv preprint arXiv:2504.02546, 2025.
+Cobbe, K., Kosaraju, V ., Bavarian, M., Chen, M., Jun, H.,
+Kaiser, L., Plappert, M., Tworek, J., Hilton, J., Nakano,
+R., et al. Training verifiers to solve math word problems.
+arXiv preprint arXiv:2110.14168, 2021.
+Dao, T. FlashAttention-2: Faster attention with better paral-
+lelism and work partitioning. InThe Twelfth International
+Conference on Learning Representations, 2024. URL
+https://openreview.net/forum?id=mZn2
+Xyh9Ec.
+DeepMind. Gemini diffusion. https://deepmind.g
+oogle/models/gemini-diffusion/. Accessed:
+2025-09-24.
+Deng, W., Ren, Y ., Li, M., Sutherland, D. J., Li, X., and
+Thrampoulidis, C. On the effect of negative gradient in
+group relative deep reinforcement optimization. InThe
+Thirty-ninth Annual Conference on Neural Information
+Processing Systems, 2025. URL https://openrevi
+ew.net/forum?id=2K9QsDaqkM.
+10\n\n--- page 11 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Deschenaux, J. and Gulcehre, C. Beyond autoregression:
+Fast LLMs via self-distillation through time. InThe
+Thirteenth International Conference on Learning Repre-
+sentations, 2025. URL https://openreview.net
+/forum?id=uZ5K4HeNwd.
+Domingo-Enrich, C., Han, J., Amos, B., Bruna, J., and
+Chen, R. T. Q. Stochastic optimal control matching. In
+Globerson, A., Mackey, L., Belgrave, D., Fan, A., Paquet,
+U., Tomczak, J., and Zhang, C. (eds.),Advances in Neural
+Information Processing Systems, volume 37, pp. 112459–
+112504. Curran Associates, Inc., 2024. URL https:
+//proceedings.neurips.cc/paper_files
+/paper/2024/file/cc32ec39a5073f61d38
+c338d963df30d-Paper-Conference.pdf.
+Domingo-Enrich, C., Drozdzal, M., Karrer, B., and Chen, R.
+T. Q. Adjoint matching: Fine-tuning flow and diffusion
+generative models with memoryless stochastic optimal
+control. InThe Thirteenth International Conference on
+Learning Representations, 2025. URL https://open
+review.net/forum?id=xQBRrtQM8u.
+Esser, P., Kulal, S., Blattmann, A., Entezari, R., M ¨uller,
+J., Saini, H., Levi, Y ., Lorenz, D., Sauer, A., Boesel, F.,
+Podell, D., Dockhorn, T., English, Z., and Rombach, R.
+Scaling rectified flow transformers for high-resolution
+image synthesis. In Salakhutdinov, R., Kolter, Z., Heller,
+K., Weller, A., Oliver, N., Scarlett, J., and Berkenkamp, F.
+(eds.),Proceedings of the 41st International Conference
+on Machine Learning, volume 235 ofProceedings of
+Machine Learning Research, pp. 12606–12633. PMLR,
+21–27 Jul 2024. URL https://proceedings.ml
+r.press/v235/esser24a.html.
+Gong, S., Zhang, R., Zheng, H., Gu, J., Jaitly, N., Kong, L.,
+and Zhang, Y . DiffuCoder: Understanding and improving
+masked diffusion models for code generation. InThe
+Fourteenth International Conference on Learning Repre-
+sentations, 2026. URL https://openreview.net
+/forum?id=58NA3unZj5.
+Goodfellow, I., Pouget-Abadie, J., Mirza, M., Xu, B.,
+Warde-Farley, D., Ozair, S., Courville, A., and Bengio, Y .
+Generative adversarial networks.Communications of the
+ACM, 63(11):139–144, 2020.
+Guo, D., Yang, D., Zhang, H., Song, J., Zhang, R., Xu, R.,
+Zhu, Q., Ma, S., Wang, P., Bi, X., et al. Deepseek-R1:
+Incentivizing reasoning capability in LLMs via reinforce-
+ment learning.arXiv preprint arXiv:2501.12948, 2025a.
+Guo, W., Choi, J., Zhu, Y ., Tao, M., and Chen, Y .
+Proximal diffusion neural sampler.arXiv preprint
+arXiv:2510.03824, 2025b.
+Hayes, T., Rao, R., Akin, H., Sofroniew, N. J., Oktay, D.,
+Lin, Z., Verkuil, R., Tran, V . Q., Deaton, J., Wiggert, M.,
+et al. Simulating 500 million years of evolution with
+a language model.Science, pp. 850–858, 2025. doi:
+10.1126/science.ads0018.
+Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart,
+S., Tang, E., Song, D., and Steinhardt, J. Measuring
+mathematical problem solving with the MATH dataset.
+In Vanschoren, J. and Yeung, S. (eds.),Proceedings
+of the Neural Information Processing Systems Track
+on Datasets and Benchmarks, volume 1, 2021. URL
+https://datasets-benchmarks-proceedin
+gs.neurips.cc/paper_files/paper/2021
+/file/be83ab3ecd0db773eb2dc1b0a17836
+a1-Paper-round2.pdf.
+Hong, F., Yu, G., Ye, Y ., Huang, H., Zheng, H., Zhang, Y .,
+Wang, Y ., and Yao, J. Wide-in, narrow-out: Revokable de-
+coding for efficient and effective DLLMs.arXiv preprint
+arXiv:2507.18578, 2025.
+Hu, E. J., yelong shen, Wallis, P., Allen-Zhu, Z., Li, Y .,
+Wang, S., Wang, L., and Chen, W. LoRA: Low-rank
+adaptation of large language models. InInternational
+Conference on Learning Representations, 2022. URL
+https://openreview.net/forum?id=nZeV
+KeeFYf9.
+Hu, Z., Meng, J., Akhauri, Y ., Abdelfattah, M. S., Seo,
+J.-s., Zhang, Z., and Gupta, U. Accelerating diffusion
+language model inference via efficient KV caching and
+guided diffusion.arXiv preprint arXiv:2505.21467, 2025.
+Inception Labs, Khanna, S., Kharbanda, S., Li, S., Varma,
+H., Wang, E., Birnbaum, S., Luo, Z., Miraoui, Y ., Pal-
+recha, A., et al. Mercury: Ultra-fast language models
+based on diffusion.arXiv preprint arXiv:2506.17298,
+2025.
+Jaech, A., Kalai, A., Lerer, A., Richardson, A., El-Kishky,
+A., Low, A., Helyar, A., Madry, A., Beutel, A., Car-
+ney, A., et al. OpenAI o1 system card.arXiv preprint
+arXiv:2412.16720, 2024.
+Karimi Monsefi, A., Bhendawade, N., Ciosici, M. R., Cul-
+ver, D., Zhang, Y ., and Belousova, I. FS-DFM: Fast and
+accurate long text generation with few-step diffusion lan-
+guage models.arXiv preprint arXiv:2509.20624, 2025.
+Kim, J., Shah, K., Kontonis, V ., Kakade, S. M., and Chen,
+S. Train for the worst, plan for the best: Understanding
+token ordering in masked diffusions. InForty-second
+International Conference on Machine Learning, 2025.
+URL https://openreview.net/forum?id=
+DjJmre5IkP.
+11\n\n--- page 12 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Kimi Team, Du, A., Gao, B., Xing, B., Jiang, C., Chen,
+C., Li, C., Xiao, C., Du, C., Liao, C., et al. Kimi k1.
+5: Scaling reinforcement learning with LLMs.arXiv
+preprint arXiv:2501.12599, 2025.
+Li, X., Zhao, Y ., Wang, C., Scalia, G., Eraslan, G., Nair, S.,
+Biancalani, T., Ji, S., Regev, A., Levine, S., and Uehara,
+M. Derivative-free guidance in continuous and discrete
+diffusion models with soft value-based decoding. InThe
+Thirty-ninth Annual Conference on Neural Information
+Processing Systems, 2025. URL https://openrevi
+ew.net/forum?id=6QbbaEGkO7.
+Lightman, H., Kosaraju, V ., Burda, Y ., Edwards, H., Baker,
+B., Lee, T., Leike, J., Schulman, J., Sutskever, I., and
+Cobbe, K. Let’s verify step by step. InThe Twelfth
+International Conference on Learning Representations,
+2023.
+Liu, J., Liu, G., Liang, J., Li, Y ., Liu, J., Wang, X., Wan,
+P., ZHANG, D., and Ouyang, W. Flow-GRPO: Training
+flow matching models via online RL. InThe Thirty-ninth
+Annual Conference on Neural Information Processing
+Systems, 2025a. URL https://openreview.net
+/forum?id=oCBKGw5HNf.
+Liu, Z., Chen, C., Li, W., Qi, P., Pang, T., Du, C., Lee,
+W. S., and Lin, M. Understanding R1-Zero-like training:
+A critical perspective.arXiv preprint arXiv:2503.20783,
+2025b.
+Liu, Z., Yang, Y ., Zhang, Y ., Chen, J., Zou, C., Wei, Q.,
+Wang, S., and Zhang, L. dLLM-Cache: Accelerating
+diffusion large language models with adaptive caching.
+arXiv preprint arXiv:2506.06295, 2025c.
+Loshchilov, I. and Hutter, F. Decoupled weight decay reg-
+ularization. InInternational Conference on Learning
+Representations, 2019. URL https://openreview
+.net/forum?id=Bkg6RiCqY7.
+Lou, A., Meng, C., and Ermon, S. Discrete diffusion mod-
+eling by estimating the ratios of the data distribution.
+In Salakhutdinov, R., Kolter, Z., Heller, K., Weller, A.,
+Oliver, N., Scarlett, J., and Berkenkamp, F. (eds.),Pro-
+ceedings of the 41st International Conference on Machine
+Learning, volume 235 ofProceedings of Machine Learn-
+ing Research, pp. 32819–32848. PMLR, 21–27 Jul 2024.
+URL https://proceedings.mlr.press/v2
+35/lou24a.html.
+Ma, X., Yu, R., Fang, G., and Wang, X. dKV-Cache: The
+cache for diffusion language models. InThe Thirty-ninth
+Annual Conference on Neural Information Processing
+Systems, 2025. URL https://openreview.net
+/forum?id=Gppo2JImHs.
+Muennighoff, N., Yang, Z., Shi, W., Li, X. L., Fei-Fei, L.,
+Hajishirzi, H., Zettlemoyer, L., Liang, P., Cand `es, E.,
+and Hashimoto, T. s1: Simple test-time scaling.arXiv
+preprint arXiv:2501.19393, 2025.
+Nie, S., Zhu, F., Du, C., Pang, T., Liu, Q., Zeng, G., Lin, M.,
+and Li, C. Scaling up masked diffusion models on text.
+2025a. URL https://openreview.net/forum
+?id=WNvvwK0tut.
+Nie, S., Zhu, F., You, Z., Zhang, X., Ou, J., Hu, J., Zhou, J.,
+Lin, Y ., Wen, J.-R., and Li, C. Large language diffusion
+models. InThe Thirty-ninth Annual Conference on Neural
+Information Processing Systems, 2025b. URL https:
+//openreview.net/forum?id=KnqiC0znVF.
+Nisonoff, H., Xiong, J., Allenspach, S., and Listgarten, J.
+Unlocking guidance for discrete state-space diffusion and
+flow models. InThe Thirteenth International Conference
+on Learning Representations, 2025. URL https://op
+enreview.net/forum?id=XsgHl54yO7.
+Novikov, A., V˜u, N., Eisenberger, M., Dupont, E., Huang,
+P.-S., Wagner, A. Z., Shirobokov, S., Kozlovskii, B., Ruiz,
+F. J., Mehrabian, A., et al. AlphaEvolv: A coding agent
+for scientific and algorithmic discovery.arXiv preprint
+arXiv:2506.13131, 2025.
+Ou, J., Nie, S., Xue, K., Zhu, F., Sun, J., Li, Z., and Li,
+C. Your absorbing discrete diffusion secretly models the
+conditional distributions of clean data. InThe Thirteenth
+International Conference on Learning Representations,
+2025. URL https://openreview.net/forum
+?id=sMyXP8Tanm.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C.,
+Mishkin, P., Zhang, C., Agarwal, S., Slama, K., Ray, A.,
+Schulman, J., Hilton, J., Kelton, F., Miller, L., Simens,
+M., Askell, A., Welinder, P., Christiano, P. F., Leike, J.,
+and Lowe, R. Training language models to follow instruc-
+tions with human feedback. In Koyejo, S., Mohamed, S.,
+Agarwal, A., Belgrave, D., Cho, K., and Oh, A. (eds.),
+Advances in Neural Information Processing Systems, vol-
+ume 35, pp. 27730–27744. Curran Associates, Inc., 2022.
+URL https://proceedings.neurips.cc/p
+aper_files/paper/2022/file/b1efde53b
+e364a73914f58805a001731-Paper-Confere
+nce.pdf.
+Pan, J., Zhang, J., Wang, X., Yuan, L., Peng, H., and Suhr, A.
+Tinyzero. https://github.com/Jiayi-Pan/TinyZero, 2025.
+Accessed: 2025-01-24.
+Rector-Brooks, J., Hasan, M., Peng, Z., Liu, C.-H., Mittal,
+S., Dziri, N., Bronstein, M. M., Chatterjee, P., Tong, A.,
+and Bose, J. Steering masked discrete diffusion mod-
+els via discrete denoising posterior prediction. InThe
+12\n\n--- page 13 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Thirteenth International Conference on Learning Repre-
+sentations, 2025. URL https://openreview.net
+/forum?id=Ombm8S40zN.
+Ren, Y . and Sutherland, D. J. Learning dynamics of LLM
+finetuning. InThe Thirteenth International Conference
+on Learning Representations, 2025. URL https://op
+enreview.net/forum?id=tPNHOoZFl9.
+Ren, Y ., Chen, H., Rotskoff, G. M., and Ying, L. How
+discrete and continuous diffusion meet: Comprehensive
+analysis of discrete diffusion models via a stochastic inte-
+gral framework. InThe Thirteenth International Confer-
+ence on Learning Representations, 2025a. URL https:
+//openreview.net/forum?id=6awxwQEI82.
+Ren, Y ., Chen, H., Zhu, Y ., Guo, W., Chen, Y ., Rotskoff,
+G. M., Tao, M., and Ying, L. Fast solvers for discrete
+diffusion models: Theory and applications of high-order
+algorithms. InThe Thirty-ninth Annual Conference on
+Neural Information Processing Systems, 2025b. URL
+https://openreview.net/forum?id=Oukl
+L6Q3sO.
+Ren, Y ., Gao, W., Ying, L., Rotskoff, G. M., and Han,
+J. DriftLite: Lightweight drift control for inference-
+time scaling of diffusion models.arXiv preprint
+arXiv:2509.21655, 2025c.
+Rojas, K., Lin, J., Rasul, K., Schneider, A., Nevmyvaka, Y .,
+Tao, M., and Deng, W. Improving reasoning for diffusion
+language models via group diffusion policy optimization.
+arXiv preprint arXiv:2510.08554, 2025a.
+Rojas, K., Zhu, Y ., Zhu, S., Ye, F. X.-F., and Tao, M. Diffuse
+everything: Multimodal diffusion models on arbitrary
+state spaces. InForty-second International Conference
+on Machine Learning, 2025b. URL https://open
+review.net/forum?id=AjbiIcRt6q.
+Rojas, K., He, Y ., Lai, C.-H., Takida, Y ., Mitsufuji, Y ., and
+Tao, M. Improving classifier-free guidance in masked
+diffusion: Low-dim theoretical insights with high-dim
+impact. InThe Fourteenth International Conference on
+Learning Representations, 2026. URL https://open
+review.net/forum?id=mMK9pvQJxf.
+Sahoo, S. S., Arriola, M., Gokaslan, A., Marroquin, E. M.,
+Rush, A. M., Schiff, Y ., Chiu, J. T., and Kuleshov, V .
+Simple and effective masked diffusion language mod-
+els. InThe Thirty-eighth Annual Conference on Neural
+Information Processing Systems, 2024. URL https:
+//openreview.net/forum?id=L4uaAR4ArM.
+Sahoo, S. S., Yang, Z., Akhauri, Y ., Liu, J., Singh, D.,
+Cheng, Z., Liu, Z., Xing, E., Thickstun, J., and Vah-
+dat, A. Esoteric language models.arXiv preprint
+arXiv:2506.01928, 2025.
+Schulman, J., Levine, S., Abbeel, P., Jordan, M., and Moritz,
+P. Trust region policy optimization. In Bach, F. and Blei,
+D. (eds.),Proceedings of the 32nd International Confer-
+ence on Machine Learning, volume 37 ofProceedings
+of Machine Learning Research, pp. 1889–1897, Lille,
+France, 07–09 Jul 2015. PMLR. URL https://proc
+eedings.mlr.press/v37/schulman15.html.
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and
+Klimov, O. Proximal policy optimization algorithms.
+arXiv preprint arXiv:1707.06347, 2017.
+Shao, Z., Wang, P., Zhu, Q., Xu, R., Song, J., Bi, X., Zhang,
+H., Zhang, M., Li, Y ., Wu, Y ., et al. DeepSeekMath: Push-
+ing the limits of mathematical reasoning in open language
+models.arXiv preprint arXiv:2402.03300, 2024.
+Shi, J., Han, K., Wang, Z., Doucet, A., and Titsias, M.
+Simplified and generalized masked diffusion for discrete
+data. InThe Thirty-eighth Annual Conference on Neural
+Information Processing Systems, 2024. URL https:
+//openreview.net/forum?id=xcqSOfHt4g.
+Shi, Q., Bai, J., Zhao, Z., Chai, W., Yu, K., Wu, J., Song,
+S., Tong, Y ., Li, X., Li, X., et al. Muddit: Liberating
+generation beyond text-to-image with a unified discrete
+diffusion model.arXiv preprint arXiv:2505.23606, 2025.
+Song, Y ., Zhang, Z., Luo, C., Gao, P., Xia, F., Luo, H.,
+Li, Z., Yang, Y ., Yu, H., Qu, X., et al. Seed diffusion:
+A large-scale diffusion language model with high-speed
+inference.arXiv preprint arXiv:2508.02193, 2025.
+Tang, S., Zhang, Y ., and Chatterjee, P. PepTune: De novo
+generation of therapeutic peptides with multi-objective-
+guided discrete diffusion. InForty-second International
+Conference on Machine Learning, 2025a. URL https:
+//openreview.net/forum?id=FQoy1Y1Hd8.
+Tang, S., Zhu, Y ., Tao, M., and Chatterjee, P. TR2-D2: Tree
+search guided trajectory-aware fine-tuning for discrete
+diffusion.arXiv preprint arXiv:2509.25171, 2025b.
+Tang, X., Dolga, R., Yoon, S., and Bogunovic, I. wd1:
+Weighted policy optimization for reasoning in diffusion
+language models.arXiv preprint arXiv:2507.08838,
+2025c.
+Uria, B., C ˆot´e, M.-A., Gregor, K., Murray, I., and
+Larochelle, H. Neural autoregressive distribution esti-
+mation.Journal of Machine Learning Research, 17(205):
+1–37, 2016. URL http://jmlr.org/papers/v1
+7/16-272.html.
+von Werra, L., Belkada, Y ., Tunstall, L., Beeching, E.,
+Thrush, T., Lambert, N., Huang, S., Rasul, K., and Gal-
+lou´edec, Q. TRL: Transformer reinforcement learning.
+https://github.com/huggingface/trl ,
+2020.
+13\n\n--- page 14 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Wang, C., Uehara, M., He, Y ., Wang, A., Lal, A., Jaakkola,
+T., Levine, S., Regev, A., Hanchen, and Biancalani, T.
+Fine-tuning discrete diffusion models via reward opti-
+mization with applications to DNA and protein design.
+InThe Thirteenth International Conference on Learning
+Representations, 2025a. URL https://openrevi
+ew.net/forum?id=G328D1xt4W.
+Wang, Y ., Yang, L., Li, B., Tian, Y ., Shen, K., and Wang,
+M. Revolutionizing reinforcement learning framework
+for diffusion large language models.arXiv preprint
+arXiv:2509.06949, 2025b.
+Weng, L. Reward hacking in reinforcement learning.lilian-
+weng.github.io, Nov 2024. URL https://lilian
+weng.github.io/posts/2024-11-28-rewar
+d-hacking/.
+Wu, C., Zhang, H., Xue, S., Liu, Z., Diao, S., Zhu, L.,
+Luo, P., Han, S., and Xie, E. Fast-dLLM: Training-free
+acceleration of diffusion LLM by enabling KV cache
+and parallel decoding. InThe Fourteenth International
+Conference on Learning Representations, 2026. URL
+https://openreview.net/forum?id=3Z3I
+s6hnOT.
+Xue, Z., Wu, J., Gao, Y ., Kong, F., Zhu, L., Chen, M., Liu,
+Z., Liu, W., Guo, Q., Huang, W., et al. DanceGRPO:
+Unleashing GRPO on visual generation.arXiv preprint
+arXiv:2505.07818, 2025.
+Yang, L., Tian, Y ., Li, B., Zhang, X., Shen, K., Tong, Y ., and
+Wang, M. MMaDA: Multimodal large diffusion language
+models. InThe Thirty-ninth Annual Conference on Neural
+Information Processing Systems, 2025. URL https:
+//openreview.net/forum?id=wczmXLuLGd.
+Yao, F., Liu, L., Zhang, D., Dong, C., Shang, J., and Gao,
+J. Your efficient RL framework secretly brings you off-
+policy RL training, August 2025. URL https://fe
+ngyao.notion.site/off-policy-rl.
+Ye, J., Xie, Z., Zheng, L., Gao, J., Wu, Z., Jiang, X., Li,
+Z., and Kong, L. Dream 7B: Diffusion large language
+models.arXiv preprint arXiv:2508.15487, 2025.
+Yu, Q., Zhang, Z., Zhu, R., Yuan, Y ., Zuo, X., YuYue, Dai,
+W., Fan, T., Liu, G., Liu, J., Liu, L., Liu, X., Lin, H., Lin,
+Z., Ma, B., Sheng, G., Tong, Y ., Zhang, C., Zhang, M.,
+Zhang, R., Zhang, W., Zhu, H., Zhu, J., Chen, J., Chen,
+J., Wang, C., Yu, H., Song, Y ., Wei, X., Zhou, H., Liu,
+J., Ma, W.-Y ., Zhang, Y .-Q., Yan, L., Wu, Y ., and Wang,
+M. DAPO: An open-source LLM reinforcement learning
+system at scale. InThe Thirty-ninth Annual Conference
+on Neural Information Processing Systems, 2025. URL
+https://openreview.net/forum?id=2a36
+EMSSTp.
+Zekri, O. and Boull ´e, N. Fine-tuning discrete diffusion
+models with policy gradient methods. InThe Thirty-ninth
+Annual Conference on Neural Information Processing
+Systems, 2025. URL https://openreview.net
+/forum?id=rXFzVRZsbt.
+Zhang, R., Zhai, S., Gu, J., Zhang, Y ., Zheng, H., Chen, T.,
+Bautista, M. ´A., Susskind, J. M., and Jaitly, N. Flexible
+language modeling in continuous space with transformer-
+based autoregressive flows. InThe Thirty-ninth Annual
+Conference on Neural Information Processing Systems,
+2025a. URL https://openreview.net/forum
+?id=MR7Fn23hSE.
+Zhang, R., Zhai, S., Zhang, Y ., Thornton, J., Ou, Z.,
+Susskind, J. M., and Jaitly, N. Target concrete score
+matching: A holistic framework for discrete diffusion.
+InForty-second International Conference on Machine
+Learning, 2025b. URL https://openreview.net
+/forum?id=ZMrdvSm7xi.
+Zhao, S., Gupta, D., Zheng, Q., and Grover, A. d1: Scaling
+reasoning in diffusion large language models via rein-
+forcement learning. InThe Thirty-ninth Annual Confer-
+ence on Neural Information Processing Systems, 2025a.
+URL https://openreview.net/forum?id=
+7ZVRlBFuEv.
+Zhao, Y ., Liu, Y ., Liu, J., Chen, J., Wu, X., Hao, Y ., Lv, T.,
+Huang, S., Cui, L., Ye, Q., et al. Geometric-mean policy
+optimization.arXiv preprint arXiv:2507.20673, 2025b.
+Zheng, C., Liu, S., Li, M., Chen, X.-H., Yu, B., Gao, C.,
+Dang, K., Liu, Y ., Men, R., Yang, A., Zhou, J., and Lin,
+J. Group sequence policy optimization.arXiv preprint
+arXiv:2507.18071, 2025a.
+Zheng, H., Gong, S., Zhang, R., Chen, T., Gu, J., Zhou, M.,
+Jaitly, N., and Zhang, Y . Continuously augmented dis-
+crete diffusion model for categorical generative modeling.
+arXiv preprint arXiv:2510.01329, 2025b.
+Zheng, H., Liu, X., Kong, C. X., Jiang, N., Hu, Z., Luo,
+W., Deng, W., and Lin, G. Ultra-fast language generation
+via discrete diffusion divergence instruct.arXiv preprint
+arXiv:2509.25035, 2025c.
+Zheng, K., Chen, H., Ye, H., Wang, H., Zhang, Q., Jiang,
+K., Su, H., Ermon, S., Zhu, J., and Liu, M.-Y . Diffu-
+sionNFT: Online diffusion reinforcement with forward
+process.arXiv preprint arXiv:2509.16117, 2025d.
+Zheng, K., Chen, Y ., Chen, H., He, G., Liu, M.-Y ., Zhu, J.,
+and Zhang, Q. Direct discriminative optimization: Your
+likelihood-based visual generative model is secretly a
+GAN discriminator. InForty-second International Con-
+ference on Machine Learning, 2025e. URL https:
+//openreview.net/forum?id=OJ6WE7F8tK.
+14\n\n--- page 15 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Zheng, K., Chen, Y ., Mao, H., Liu, M.-Y ., Zhu, J., and
+Zhang, Q. Masked diffusion models are secretly time-
+agnostic masked models and exploit inaccurate categor-
+ical sampling. InThe Thirteenth International Confer-
+ence on Learning Representations, 2025f. URL https:
+//openreview.net/forum?id=CTC7CmirNr.
+Zhou, C., Yang, C., Hu, Y ., Wang, C., Zhang, C., Zhang,
+M., Mackey, L., Jaakkola, T., Bates, S., and Zhang, D.
+Coevolutionary continuous discrete diffusion: Make your
+diffusion language model a latent reasoner.arXiv preprint
+arXiv:2510.03206, 2025.
+Zhu, F., Wang, R., Nie, S., Zhang, X., Wu, C., Hu,
+J., Zhou, J., Chen, J., Lin, Y ., Wen, J.-R., et al.
+LLaDA 1.5: Variance-reduced preference optimization
+for large language diffusion models.arXiv preprint
+arXiv:2505.19223, 2025a.
+Zhu, S., Zhu, Y ., Tao, M., and Qiu, P. Diffusion generative
+modeling for spatially resolved gene expression inference
+from histology images. InThe Thirteenth International
+Conference on Learning Representations, 2025b. URL
+https://openreview.net/forum?id=FtjL
+UHyZAO.
+Zhu, X., Cheng, D., Zhang, D., Li, H., Zhang, K., Jiang,
+C., Sun, Y ., Hua, E., Zuo, Y ., Lv, X., et al. FlowRL:
+Matching reward distributions for LLM reasoning.arXiv
+preprint arXiv:2509.15207, 2025c.
+Zhu, Y ., Chen, T., Kong, L., Theodorou, E., and Tao, M.
+Trivialized momentum facilitates diffusion generative
+modeling on Lie groups. InThe Thirteenth International
+Conference on Learning Representations, 2025d. URL
+https://openreview.net/forum?id=DTat
+jJTDl1.
+Zhu, Y ., Guo, W., Choi, J., Liu, G.-H., Chen, Y ., and Tao, M.
+MDNS: Masked diffusion neural sampler via stochastic
+optimal control. InThe Thirty-ninth Annual Conference
+on Neural Information Processing Systems, 2025e. URL
+https://openreview.net/forum?id=xIH9
+5kXNR2.
+Zhu, Y ., Wang, X., Lathuili `ere, S., and Kalogeiton, V .
+Di[M]O: Distilling masked diffusion models into one-
+step generator. InProceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision (ICCV), pp. 18606–
+18618, October 2025f.
+Zhu, Y ., Wang, X., Lathuili`ere, S., and Kalogeiton, V . Soft-
+Di[M]O: Improving one-step discrete image generation
+with soft embeddings.arXiv preprint arXiv:2509.22925,
+2025g.
+15\n\n--- page 16 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Algorithm 1Distribution Matching Policy Optimization
+Require: Training dataset D, number of prompts per batch B, number of rollouts per prompt N, frequency for sampling
+bufferF, model policyπ θ.
+1:forstep= 0,1,2, ...do
+2:ifstepmodF= 0then
+3:{Prepare the buffer using the current policy, denotedπ v.}
+4:SampleBprompts{q (i)}1≤i≤B from the datasetD.
+5:for1≤i≤B(in parallel, with gradient computation disabled)do
+6:SampleNorders and generateNrollouts{o (i,n)}1≤n≤N conditional on promptq (i).
+7:Evaluate reward and compute weightsw(o (i,n)|q(i);σ (i,n))according to (10).
+8: Compute the weight baseline according to (13), (14), or (15), and obtain the real weightswreal(o(i,n)|q(i);σ (i,n))
+according to (12).
+9:end for
+10:end if
+11:For eacho (i,n), sample a mask assignment and obtain eo(i,n).
+12:Feed all pairs of(q (i), eo(i,n))intoπ θ and compute the WDCE loss (11), then updateθ.
+13:end for
+outputπ θ
+A. Related Work
+Here, we focus on the literature for discrete diffusion models, as well as the methods for fine-tuning MDMs, dLLMs, and
+LLMs. We also briefly review several GRPO-style algorithms for domains outside of LLMs.
+Discrete diffusion modelsDiffusion models have been top-performing approaches for generating various data modalities
+(Zhu et al., 2025d; Esser et al., 2024; Zhu et al., 2025b; Rojas et al., 2025b; Zheng et al., 2025e; Chen et al., 2025a; Ren
+et al., 2025c). Discrete diffusion models (Austin et al., 2021; Campbell et al., 2022; Lou et al., 2024; Zhang et al., 2025b), a
+natural extension of diffusion models to finite state spaces, have emerged as powerful approaches for generating categorical,
+sequence data, with applications to text (Nie et al., 2025a;b; Ye et al., 2025), images (Chang et al., 2022; Bai et al., 2025;
+Shi et al., 2025), and biological sequences (Tang et al., 2025a; Chen et al., 2025b). One of the most effective variants of
+discrete diffusion models is masked diffusion models (MDM) (Sahoo et al., 2024; Ou et al., 2025; Shi et al., 2024) and its
+variants (Arriola et al., 2025; Sahoo et al., 2025; Chao et al., 2025). Recently, continuous latents have also been introduced
+into the modeling of discrete data (Zhang et al., 2025a; Zhou et al., 2025; Zheng et al., 2025b), resulting in improved and
+more appealing performance.
+One particularly important line of development for discrete diffusion models centers on their inference techniques, with
+the aim of improving generation quality (Nisonoff et al., 2025; Rojas et al., 2026; Kim et al., 2025; Besnier et al., 2025)
+and accelerating sampling speed (Ren et al., 2025b; Ben-Hamu et al., 2025; Wu et al., 2026; Hong et al., 2025). Besides
+these training-free approaches, learning-based approaches, such as few-step distillation, have also achieved decent success
+for discrete diffusion models (Deschenaux & Gulcehre, 2025; Karimi Monsefi et al., 2025; Zheng et al., 2025c; Zhu et al.,
+2025f;g). DMPO is closely tied to the literature on fast inference, as it can benefit from it by enjoying a similar training
+speed acceleration due to its forward nature.
+Fine-tuning general discrete diffusion modelsEarlier works on fine-tuning discrete diffusion models primarily focus on
+applications in biological and chemical domains, e.g., SVDD (Li et al., 2025), DDPP (Rector-Brooks et al., 2025), DRAKES
+(Wang et al., 2025a), SEPO (Zekri & Boull´e, 2025), and TR2-D2 (Tang et al., 2025b). Although these methods work well
+for their respective tasks, they are not directly applicable to dLLMs due to the unique challenges posed by the language
+domain, such as large model size, high dimensionality, and the need to maintain linguistic coherence and diversity.
+Fine-tuning diffusion LLMsRecently, numerous works have proposed RL algorithms for fine-tuning dLLMs, with most
+existing works being adaptations of the GRPO algorithm (Shao et al., 2024) for AR LLMs. For example, Zhao et al. (2025a)
+proposed Diffu-GRPO that estimates the per-token response log probabilities via masking all except the required response
+positions, and partially masking the prompt to get the model output, while their sequence log probability is estimated
+16\n\n--- page 17 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+by mean-field approximation. Gong et al. (2026) introduced Coupled GRPO that modified the Diffu-GRPO method by
+not partially masking the prompt, and using complementary pairs of masks to mask the same response that fully uses the
+model output, which we also adopt in our experiments. Yang et al. (2025) proposed UniGRPO, which involves a structured
+noise strategy and a modified log-likelihood approximation (both per-token and sequence). Concurrent with our work,
+TraceRL (Wang et al., 2025b) improves dLLM RL training by minimizing a training-inference gap. wd1 (Tang et al., 2025c)
+introduces additional regularization to the old policy, alongside the regularization applied to the reference model policy,
+which resembles the case discussed in Sec. B.2. We highlight that all these methods are GRPO-style algorithms that require
+estimating per-token response log probabilities, which are typically intractable and challenging for dLLMs. In contrast, our
+method offers the advantage of being a forward one, with greater efficiency and accuracy.
+Fine-tuning LLMsFor fine-tuning LLMs, pre-LLM era works such as Trust Region Policy Optimization (TRPO,
+Schulman et al. (2015)) and Proximal Policy Optimization (PPO, Schulman et al. (2017)) have been widely used for RLHF
+(Ouyang et al., 2022). Since the huge success of GRPO (Shao et al., 2024) on DeepSeek-R1 (Guo et al., 2025a), there have
+been many follow-up works that improve GRPO in various ways, for instance: GRPO Done Right (Dr-GRPO, Liu et al.
+(2025b)), Decoupled clip and Dynamic sAmpling Policy Optimization (DAPO, Yu et al. (2025)), Group Policy Gradient
+(GPG, Chu et al. (2025)), Group Sequence Policy Optimization (GSPO, Zheng et al. (2025a)), Geometric-Mean Policy
+Optimization (GMPO, Zhao et al. (2025b)), etc.
+Apart from the aforementioned policy gradient-based methods, GFlowNet (Bengio et al., 2021) has also been applied to
+finetuning LLMs, with successful applications seen in Kimi 1.5 (Kimi Team et al., 2025) and FlowRL (Zhu et al., 2025c).
+Notably, concurrent with our work, FlowRL shares the same high-level goal as our DMPO, targeting also policy distribution
+matching rather than merely reward maximization for AR-LLMs. However, distinct from DMPO, FlowRL derives its
+objectives from reverse KL and utilizes GFlowNet objectives. In contrast, our approach considers forward KL, which is
+known to be mass-covering, and implements it using importance sampling and weighted denoising cross-entropy.
+GRPO-style algorithms for fine-tuning diffusion and flow-based modelsGRPO-type algorithms have also been adapted
+to diffusion and flow-based models, such as flow-GRPO (Liu et al., 2025a) and DanceGRPO (Xue et al., 2025). Aside from
+that, there are also SOC-based fine-tuning algorithms for diffusion models, such as adjoint matching (Domingo-Enrich
+et al., 2025), with which our work shares similarity at a high level. Concurrent with our work, DiffusionNFT (Zheng et al.,
+2025d) has been proposed to finetune continuous diffusion models for text-to-image generation tasks. While formulated in
+drastically different ways, DiffusionNFT shares a similarity with our DMPO in that it is also an algorithm that primarily
+depends on model forward passes rather than backward trajectories.
+B. Theory of Distribution Matching Policy Optimization
+B.1. Distribution Matching Policy Optimization from the Stochastic Optimal Control Perspective
+This section aims at providing an alternative derivation of DMPO from the perspective of stochastic optimal control (SOC),
+which is inspired by DRAKES (Wang et al., 2025a) and MDNS (Zhu et al., 2025e). We will first introduce the necessary
+background on continuous-time Markov chains (CTMCs), then show how MDM sampling can be viewed as a CTMC.
+Finally, we derive the DMPO framework from the SOC perspective.
+Introduction to Continuous-time Markov ChainsTo derive the SOC framework for fine-tuning, we view the sampling
+of an MDM as a time-indexed stochastic process, and the proper mathematical tool is thecontinuous-time Markov chain
+(CTMC). A CTMC X= (X t)t∈[0,1] is a stochastic process taking value in a discrete state space X . Its law is characterized
+by therate matrixQ= (Q t)t∈[0,1], defined as
+Qt(x, y) = lim
+∆t→0
+Pr(Xt+∆t =y|X t =x)−1 x=y
+∆t ,∀x, y∈ X.(17)
+By definition, the off-diagonal entries ofQ t are non-negative, and each row sums to zero.
+Thepathof X, i.e., t7→X t(ω), is piecewise constant with discontinuous jumps, and one typically assumes that the path is
+right continuous with left limits. Thepath measurea CTMC X is a probability measure on the space of paths defined as
+PX (A) := Pr(X∈A) , which is the distribution of X. The following lemma shows how to compute theRadon-Nikod ´ym
+(RN) derivativebetween two path measures driven by CTMCs with different rate matrices and initial distributions:
+17\n\n--- page 18 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Lemma B.1.Given two CTMCs with rate matrices Q1, Q2 and initial distributions µ1, µ2 on X , let P1,P 2 be the associated
+path measures. Then, for any pathξ= (ξ t)t∈[0,1],
+log dP1
+dP2 (ξ) = log dµ1
+dµ2
+(ξ0) +
+X
+t:ξt−̸=ξt
+log Q1
+t (ξt−, ξt)
+Q2
+t (ξt−, ξt) +
+Z 1
+0
+(Q1
+t (ξt, ξt)−Q 2
+t (ξt, ξt))dt.(18)
+For the proof, see Campbell et al. (2024, App. C.1), Ren et al. (2025a, Thm. 3.3), or Zhu et al. (2025e, Lem. 1). An intuitive
+interpretation of (18) is to view the RN derivative as the limit of density ratios between finite-dimensional joint distributions,
+and approximate the transition probability by (17).
+Masked Diffusion Models as Continuous-Time Markov ChainsWe will now delve into the CTMC formulation of
+sampling from an MDM. To avoid notational clutter, we use superscript to denote the position index, and subscript to denote
+the time index (e.g., ξt = (ξ1
+t , ..., ξD
+t )). We present the theory only in the case ofunconditional generationwith sequence
+length D for simplicity of notations, but it can be easily easily generalized to the case of conditional generation of o given a
+promptq.
+As shown in (Ou et al., 2025), by introducing a noise schedule γ(t) = 1
+t , 3 the random order autoregressive sampling of an
+MDMπ θ can be viewed as a CTMC with the rate matrixQ θ = (Qθ
+t )t∈[0,1] such that forx̸=y∈ V
+D
+,
+Qθ
+t (x,y) =γ(t)π θ(x)d,n,ifx d =Mandy=x d←n,
+and 0 if otherwise, where xd←n means the sequence obtained by replacing the d-th position of x by n. The diagonal terms
+ofQ θ
+t can be computed as
+Qθ
+t (x,x) =−
+X
+y̸=x
+Qθ
+t (x,y) =−
+X
+d:xd=M
+X
+n
+Qθ
+t (x,x d←n)
+=−
+X
+d:xd=M
+X
+n
+γ(t)πθ(x)d,n =−γ(t)· |{d:x d =M}|.(19)
+Therefore, if Pθ, Pθ′
+are the path measures of the sampling processes of two MDMs parameterized by θ and θ′, respectively,
+then by (18), assuming that the jump fromξ t− toξ t is at thed(t)-th position, we have
+log dPθ′
+dPθ (ξ) =
+X
+t:ξt−̸=ξt
+log
+πθ′(ξt− )d(t),ξd(t)
+t
+πθ(ξt− )d(t),ξd(t)
+t
+,∀ξ= (ξ t)t∈[0,1],(20)
+as the first term in (18) is always zero (both initial distributions are the point mass on the fully masked sequence), and the
+diagonal terms in the third term cancel out due to (19).
+Moreover, as proved in Ou et al. (2025), the training of an MDM πθ given i.i.d. samples from the target distribution
+pdata can be interpreted as minimizing the KL divergence between the target path measure P∗ and the parameterized path
+measure Pθ, where P∗ is defined as the path measure of the CTMC with rate matrix Q∗
+t (x,x d←n) =γ(t) Pr X∼p data (X d =
+n|X UM =x UM)1xd=M, i.e., with the ground-truth conditional distribution. Moreover, one can derive
+KL(P∗∥Pθ) =E pdata(x) Em∼Unif{1,...,D}
+"
+D
+m Eµm(ex|x)
+X
+d:exd=M
+−logπ θ(ex)d,xd
+#
++ const,
+where const does not depend on θ, and µm(·|x) means to sample a uniformly random subset of {1, ..., D}of size m and
+mask the corresponding positions inx. Note that this is exactly the denoising cross-entropy lossEpdata(x) Lθ(x) as presented
+in (2). In other words, minimizing the KL divergence between sequence-level probabilitiesp ∗(ξ1) and pθ(ξ1)≈e −Lθ(ξ1)
+in (11) can be interpreted aspreciselyminimizing the KL divergence between path-level probabilitiesP ∗(ξ)andP θ(ξ).
+3The choice of noise schedule is essentially not important for MDM. In fact, γ can be any positive function with
+R 1
+0 γ(t)dt=∞ .
+Here, we follow the convention in most of the literature on MDM and choose this specific γ such that the conditional distribution of
+ξt ∈ V
+D
+givenξ 1 ∈ VD is obtained by independently masking each position inξ 1 with probability1−t.
+18\n\n--- page 19 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Fine-tuning MDMs as a Stochastic Optimal Control Problem on Path MeasuresThe task of fine-tuning a pretrained
+MDM can be viewed as a stochastic optimal control (SOC) problem on the space of path measures: given a pretrained
+MDM πref which generates a distribution pref, we define its inducedreference path measureas Pref, with rate matrix
+Qref
+t (x,x d←n) =γ(t)π ref (x)d,n1xd=M, and has terminal distribution Pref
+1 =p ref. We aim at finding a target rate matrix
+Q∗ such that the associated target path measure P∗ has a terminal distribution p∗ defined in the following way of tilting by
+reward:
+p∗(x) = 1
+Z pref (x)er(x)/α,x∈ VD,whereZ=
+X
+x
+pref (x)er(x)/α.
+This can be achieved by defining the target path measureP ∗ as
+P∗(ξ) =P ref (ξ[0,1)|ξ1)p∗(ξ1) =P ref (ξ) p∗(ξ1)
+pref (ξ1) = 1
+Z Pref (ξ)er(ξ1)/α,∀ξ= (ξ t)t∈[0,1].(21)
+We use a network πθ to parameterize the new rate matrix, initialized at πref. Given a current path measure Pθ induced by
+a CTMC with rate matrix Qθ
+t (x,x d←n) =γ(t)π θ(x)d,n1xd=M, we can first derive the RN derivative between the path
+measures by (20):
+log dP∗
+dPθ (ξ) = log dP∗
+dPref (ξ) + log dP0
+dPθ (ξ)
+= r(ξ1)
+α −logZ+
+X
+t:ξt−̸=ξt
+log Q0
+t
+Qθ
+t
+(ξt−,ξ t) +
+Z 1
+0
+X
+y̸=ξt
+(Qθ
+t −Q 0
+t )(ξt, y)dt
+= r(ξ1)
+α +
+X
+t:ξt−̸=ξt
+log
+πref (ξt−)d(t),ξd(t)
+t
+πθ(ξt−)d(t),ξd(t)
+t
+−logZ=:W θ(ξ)−logZ,(22)
+where we assume that the jump from ξt− to ξt is at the d(t)-th position. The idea of the weighted denoising cross-entropy
+(WDCE) loss is essentially to treat i.i.d. samples from the current policy Pθ as weighted samples from P∗, and minimizing
+the following loss:
+KL(P∗∥Pθ) + const =E p∗(x) Lθ(x) =E P∗(ξ) Lθ(ξ1)
+=E Pv(ξ)
+dP∗
+dPv (ξ)Lθ(ξ1) =E Pv(ξ)
+1
+Z eW v(ξ)Lθ(ξ1),
+where Pv is the path measure induced by a CTMC with rate matrix Qv where the network is parameterized by v (e.g., the
+old parameters θold), whose parameters do not involve gradient calculation. For instance, we can set v=θ old. Note that
+Z=E Pv(ξ) eW v(ξ), which, if estimated via samples, is equivalent to doing softmax normalization on the logits W v(ξ) in
+the batch. Comparing with the WDCE loss (11) presented in Sec. 3.2, we conclude that they are essentially the same.
+B.2. Generalizing WDCE to Zero Temperature with Proximal Descent
+Recall that our target distribution is (5), which is under a temperature α >0. We propose to generalize the WDCE loss (11)
+to incorporate the limiting caseα→0from the viewpoint ofproximal descent(Guo et al., 2025b).
+The reward maximization problem (4) provides a variational characterization of the target distributionp∗(o|q). Suppose now
+we have a dLLM policy πθold (o|q) that outputs a distribution pθold (o|q). We define the next target distribution ptar(o|q) as
+ptar(o|q) = argmax
+pθ(o|q)
+
+Epθ(o|q)[r(q,o)]−αKL(p θ(·|q)∥pref (·|q))− 1
+η′ KL(pθ(·|q)∥pθold (·|q))
+
+,(23)
+whereη ′ >0is the step size. Letη= η′
+1+η′α ∈
+ 
+0, 1
+α
+
+. It is easy to see that the solution is given by
+ptar(o|q)∝ o pθold (o|q)1−ηαpref (o|q)ηαeηr(q,o) ,(24)
+∝o pθold (o|q)1−ηαp∗(o|q)ηα.
+19\n\n--- page 20 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+In fact, the term inside the brackets in (23) is − 1
+η KL(pθ(·|q)∥ptar(·|q)) + const. This means the next target distribution is
+a geometric interpolation between the current model distribution pθold and the optimal distribution p∗, with η >0 being a
+step size parameter. (24) is well-defined even when α= 0 , although in this case, the target distribution concentrates on the
+set of maximizers of r(q,o) (e.g., all correct question-response pairs) without regularization from the base model pref (o|q).
+For α= 0 , ptar(o|q)∝ o pθold (o|q)eηr(q,o) . We can similarly solve the distribution matching problem via the WDCE loss:
+KL(ptar(·|q)∥pθ(·|q)) =E ptar(o|q)[−logp θ(o|q)] + const
+=E pv(o|q)
+ptar(o|q)
+pv(o|q)| {z }
+=:w(o|q)
+[−logp θ(o|q)] + const
+≤E pv(o|q) w(o|q)Lθ(o|q) + const,
+where the importance weight w(o|q)∝ o exp
+
+ηr(q,o) + log
+pθold (o|q)
+pθv (o|q)
+
+. For v←θ old, the weight simplifies to the
+softmax ofηr(q,o)over all responses for the same promptq. The weight baseline subtraction tricks also apply here.
+We remark that when picking α= 0 , through the proximal gradient descent formulation, DMPO becomes completely
+forward-only, as it eliminates the need for estimating the sequence log probability ratio of the form log pref(o|q)
+pv(o|q) , making it
+the best option to incorporate fast dLLM inference techniques for RL training speed-up. However, in this case, we can no
+longer guarantee the diversity in the target optimal distribution, and thus, we save this direction for future investigation.
+B.3. Insights for Weight Baselines: Approximate Variance Reduction
+We first recall a classical equality in statistics regarding thescore function: if pθ(x) is a probability density or proba-
+bility mass function parameterized by a continuous parameter θ, then under certain weak regularity conditions, we have
+Epθ(x) ∇θ logp θ(x) = 0.
+Therefore,
+0 =E pθ(o|q) ∇θ logp θ(o|q) =∇ θ Ep ¯θ(o|q) logp θ(o|q)
+=∇ θ Eσ Ep ¯θ(o|q;σ) logp θ(o|q)
+=∇ θ Eσ Epv(o|q;σ)
+p¯θ(o|q;σ)
+pv(o|q;σ) logp θ(o|q).
+Combined with (9), we can see that subtracting p ¯θ(o|q;σ)
+pv(o|q;σ) from the weight does not change the gradient of the CE loss, i.e.,
+∇θ KL(p∗(·|q)∥pθ(·|q)) =∇ θ Eσ Epv(o|q;σ)
+ p∗(o|q;σ)
+pv(o|q;σ) −λ p¯θ(o|q;σ)
+pv(o|q;σ)
+
+[−logp θ(o|q)],∀λ∈R.
+Theoretically, there is an optimal choice of λ that minimizes the variance. The natural choice of λ= 1 means implicitly
+matching the probability pθ(o|q;σ) to fit p∗(o|q;σ) , which corresponds to our model weight baseline (15). When the
+frequency for sampling buffer F is small, we can assume pθ(o|q;σ) does not deviate too much from pv(o|q;σ) , thus this
+ratio should be close to 1, which corresponds to our group weight baseline (13). Finally, as we actually use the negative
+ELBOL θ(o|q)instead of−logp θ(o|q)in computing the loss, the variance reduction only holdsapproximately.
+B.4. Proofs for the Weighted Direct Discriminative Optimization Objective
+For notational simplicity, we ignore the conditional dependence onq. Write
+F(p θ) =−E p∗ log pθ
+pθ +p v
+−E pv log pv
+pθ +p v
+.
+For any fixedo, consider the function
+pθ(o)7→ −p∗(o) log pθ(o)
+pθ(o) +p v(o) −p v(o) log pv(o)
+pθ(o) +p v(o) .
+The derivative with respect to pθ(o) is − p∗(o)
+pθ(o) + p∗(o)+pv(o)
+pθ(o)+pv(o) , which is >0 if pθ(o)> p∗(o) and <0 if pθ(o)< p∗(o).
+Therefore, this function is minimized atp θ(o)←p ∗(o), which completes the proof.
+20\n\n--- page 21 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+C. Details of Experiments and Further Results
+C.1. Introduction of Datasets and Rewards used
+To ensure a fair comparison, we use the same datasets and training rewards as d1 (Zhao et al., 2025a). For a self-contained
+presentation, we list the datasets and the rewards below.
+GSM8K.GSM8k (Cobbe et al., 2021) is a mathematical reasoning dataset featuring multi-step grade school math
+problems. We conduct fine-tuning on the train split and evaluate on the test split.4
+The reward is decomposed as follows:
+1. XML Structure Reward: +0.125 for each correctly placed opening and closing tag (<reasoning>, </reasoning>,
+<answer>,</answer>) and−0.001for each extra token after the closing tag</answer>.
+2. Soft Format Reward:+0.5 for responses matching the pattern<reasoning>...</reasoning><answer>...</answer>.
+3.Strict Format Reward:+0.5for matching the specified format precisely with correct line breaks.
+4.Integer Answer Reward:+0.5if the retrieved answer parses as an integer.
+5.Correctness Reward:+2if the returned answer equals the ground truth exactly.
+MATH500.MATH500 (Lightman et al., 2023) is a mathematical reasoning dataset, as well as a curated collection of 500
+high-school-level problems sampled from the MATH (Hendrycks et al., 2021) dataset. We conduct fine-tuning on the train
+split and evaluate on the test split.5
+The reward comprises
+1. Format Reward: 1 when answer tags are present and \boxed appears inside them; 0.75 when the tags are present
+but \boxed is absent; 0.50 when the tags are missing but \boxed is present; 0.25 when neither the tags nor
+\boxedappear.
+2.Correctness Reward:+2when the correct answer is enclosed in\boxed{}.
+Countdown.Countdown (Pan et al., 2025) is a planning task that requires solving a combinatorial arithmetic challenge,
+which is to form a target number using basic arithmetic operations with a provided set of 3 numbers, where each number can
+only be used once. We train on the training split of the dataset from the TinyZero project (Pan et al., 2025), restricting to
+instances that use only three numbers, and evaluate on 256 synthetically generated countdown questions with three numbers.
+The reward checks if an arithmetic expression constructed from given numbers reaches a target value. More specifically, it is
+1 when the equation equals the target and uses exactly the available numbers, 0.1 when the equation uses the right numbers
+but does not reach the target, and0if otherwise.
+Sudoku.Sudoku is a planning task that requires solving 4×4 Sudoku puzzles, which demand constraint satisfaction and
+logical elimination to correctly fill the grid. We use the training dataset from https://github.com/Black-Phoen
+ix/4x4-Sudoku-Dataset, in particular, the subset containing one million unique puzzles, which was synthetically
+generated using code from Arel (2025). For evaluation purposes, we randomly generate 256 Sudoku puzzles using this
+generator. The reward equals the fraction of originally blank cells that the model fills correctly.
+C.2. Training Hyperparameters and Evaluation
+We choose the training hyperparameters following Zhao et al. (2025a) for a fair comparison. We also use the Transformer
+Reinforcement Learning library (TRL, von Werra et al. (2020) to implement DMPO. During training, we also employed the
+same Low-Rank Adaptation (LoRA, Hu et al. (2022)) with a rank of r= 128 and scaling factor α= 64 . For all tasks, the
+training was conducted on8NVIDIA H100 or H200 GPUs with the hyperparameters described below.
+4https://huggingface.co/datasets/openai/gsm8k
+5https://huggingface.co/datasets/ankner/math-500
+21\n\n--- page 22 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+We use a maximum generation length256tokens, a batch size of8per GPU, and gradient accumulation steps of2, and16
+generated rollouts per prompt. We optimized the model using the AdamW optimizer (Loshchilov & Hutter, 2019) with
+parameters β1 = 0.9, β2 = 0.99, weight decay of 0.1, learning rate of 3×10 −6, and gradient clipping at 0.2. For each clean
+sequence, we sampled 4 partially masked tokens to compute the WDCE/WDDO loss. For rollouts generation during training,
+we use a semi-autoregressive random order sampler (with temperature 0) and fast-dLLM (with temperature 0.2) with a block
+size of 32 to generate diverse responses, which is the recommended practice for using LLaDA series models as is described
+in Nie et al. (2025b). We train 4,000 steps (number of gradient updates) for GSM8K and MATH500, Countdown, and
+Sudoku, respectively.
+In Tab. 1, DMPO-LLaDA uses the group weight baseline (13) on GSM8K, MATH500, and Sudoku, and the individual
+weight baseline (14) on Countdown. DMPO-LLaDA-SFT and DMPO-LLaDA-1.5 adopt the individual weight baseline (14)
+in all cases.
+For the reproduction of the d1 results, we follow the guidelines listed in Zhao et al. (2025a) and first perform SFT on s1k
+(Muennighoff et al., 2025) before applying diffu-GRPO. We use the recommended hyperparameter setups and train for up to
+13,000iterations on each dataset before evaluating the results.
+For computational efficiency, we use Flash Attention 2 (Dao, 2024) and 4-bit quantization. All experiments on DMPO share
+these hyperparameters. The main result reported in Tab. 1 used the group weight baseline defined in (13). The ablation study
+in Fig. 4 also follows the same set of hyperparameters above, except for using different choices of weight baselines.
+For the evaluation of LLaDA-series checkpoints, we consider three different generation lengths: 128, 256, and 512. We
+correspondingly use 128, 256, and 512 steps for generation. For the LLaDA series of models, such as LLaDA-Instruct,
+LLaDA-1.5, d1-LLaDA, and our own DMPO-LLaDA, we employ the semi-autoregressive sampler with a block size of32, a
+greedy decoding scheme with a temperature of 0, and the top-k remasking scheme to achieve the best inference results. For
+the Dream model, we report generation lengths 256 and 512, and employ the recommended practice with temperature 0.95
+and the top-kremasking scheme.
+C.3. Further Experimental Results
+0 1000 2000 3000
+Steps
+0
+1
+2Reward
+GSM8K
+DMPO-LLaDA
+d1-LLaDA
+0 1000 2000 3000
+Steps
+1.00
+1.25
+1.50
+1.75
+MATH500
+0 1000 2000 3000
+Steps
+0.2
+0.4
+0.6
+Countdown
+0 1000 2000 3000
+Steps
+0.1
+0.2
+Sudoku
+Figure 6.Reward dynamics during training. DMPO consistently produces higher rewards than d1.
+DMPO consistently achieves higher rewardsIn Fig. 6, we present the reward dynamics of DMPO across training steps
+and compare with that of d1. DMPO consistently achieves higher reward values after an initial warm-up phase and ultimately
+discovers responses with higher rewards than d1, possibly because it continuously explores the reward distribution landscape
+throughout training. In the first 1,000 steps, DMPO often produces lower reward values than d1, potentially due to the lack
+of an SFT phase before RL scaling. Moreover, we observe that the performance of DMPO does not saturate after 4,000
+gradient steps, suggesting its greater potential than GRPO-type algorithms.
+Ablation studies on the hyperparameter dependenceWe provide an ablation study on two of the main hyperparameters
+in Alg. 1, namely the number of rollouts N and the frequency for sampling buffer F , in Figs. 7 and 8, respectively. For
+each run shown in Fig. 7, we train for 6 hours using 8 NVIDIA H200 GPUs. For each run shown in Fig. 8, we train for 8
+hours with 8 NVIDIA H200 GPUs. We only vary the resampling buffer frequency F and the number of rollouts sampled per
+promptN, while fixing other hyperparameters, such as the total effective batch size, to maintain a fair comparison.
+For the number of rollouts per question N, we observe that a larger number of N does not necessarily lead to longer training
+22\n\n--- page 23 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+time, even with the same number of steps, due to the parallelism of the generation process, since we kept the total batch size
+fixed while varying the hyperparameter N. The algorithm is robust across various values of N ranging from 4 to 32 thanks
+to the mechanism for inserting negative gradients.
+For the buffer sampling frequency F , we observe that it significantly affects training speed. The figure clearly demonstrates
+the advantage of DMPO due to itsoff-policynature, whereas a purely on-policy realization of WDCE loss (with F= 1 ) is
+not only extremely slow but also does not show a significant boost in per-step reward gains. The figure also underscores the
+unique benefit of WDCE being aforwardloss: given the generated rollouts and their weights, one can train using the simple
+forward process via random masking. Our algorithm is robust to choices of F up to 24, whereas an even larger F may cause
+slight instability later in training when the reward is high.
+0 500 1000 1500 2000 2500 3000
+Steps
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+Reward
+N=4
+N=8
+N=16
+N=32
+0 1 2 3 4 5 6
+Training time (hours)
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+Reward
+N=4
+N=8
+N=16
+N=32
+Figure 7.Ablation study of the number of rollouts per prompt N on Countdown dataset under the same training time and compute. The
+performance is robust to this hyperparameter.
+0 1000 2000 3000 4000 5000 6000
+Steps
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+Reward
+F=1
+F=2
+F=4
+F=8
+F=12
+F=16
+F=24
+0 1 2 3 4 5 6 7 8
+Training time (hours)
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+Reward
+F=1
+F=2
+F=4
+F=8
+F=12
+F=16
+F=24
+Figure 8.Ablation study of the resampling frequency F on Countdown dataset. A larger F is generally more time-efficient though may
+cause instability when the reward is high.
+Visualizing rollout entropy of DMPOIn Fig. 9, we compare the reward and entropy of the generated rollouts during
+training for both the relative-entropy-based (diffu-GRPO) RL algorithm and the cross-entropy-based (DMPO) RL algorithm.
+Here, in both experiments, we fix N= 16 and F= 8 and evaluate the entropy of generated samples every 10 generations.
+The evaluation of entropy is as follows: we use random-order autoregressive generation with block length 32, and at the d-th
+step of unmasking (where d ranges from 1 to D=|o| ), we compute the entropy of the predicted logits at the d-th position,
+and take average of all theD entropy values as the final value of sequential entropy. From the figure, the trend of consistently
+higher sample entropy for WDCE loss than for diffu-GRPO agrees with our expectation that cross-entropy-based methods
+are less prone to mode-seeking and maintain a higher level of diversity throughout training.
+23\n\n--- page 24 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+0 500 1000 1500 2000 2500 3000
+Steps
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+Reward
+Diﬀu-GRPO
+DMPO (ours)
+0 500 1000 1500 2000 2500 3000
+Steps
+0.6
+0.7
+0.8
+0.9
+1.0
+1.1
+Entropy
+Diﬀu-GRPO
+DMPO (ours)
+Figure 9.Reward (left) and entropy (right) of generated rollouts during training for both diffu-GRPO (Zhao et al., 2025a) and DMPO.
+C.4. Example Outputs of the Model after Fine-tuning
+We present two example outputs of the DMPO-LLaDA model in the following.
+24\n\n--- page 25 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Model:DMPO-LLaDA
+Dataset:MATH500
+Generation Sequence Length:512
+Question:The product of3t 2 + 5t+aand4t 2 +bt−2is12t 4 + 26t3 −8t 2 −16t+ 6. What isa+b?
+To find the values ofa and b such that the product of 3t2 + 5t+a and 4t2 +bt−2 equals 12t4 + 26t3 −8t 2 −16t+ 6,
+we need to expand the left-hand side and compare coefficients with the right-hand side.
+First, expand the product:
+(3t2 + 5t+a)(4t 2 +bt−2)
+Using the distributive property (FOIL method for binomials):
+3t2 ·4t 2 + 3t2 ·bt+ 3t 2 ·(−2) + 5t·4t 2 + 5t·bt+ 5t·(−2) +a·4t 2 +a·bt+a·(−2)
+Simplify each term:
+12t4 + 3bt3 −6t 2 + 20t3 + 5bt2 −10t+ 4at 2 +abt−2a
+Combine like terms:
+12t4 + (3b+ 20)t 3 + (−6 + 5b+ 4a)t2 + (−10 +ab)t−2a
+We need this to equal:
+12t4 + 26t3 −8t 2 −16t+ 6
+By comparing coefficients, we get the following system of equations:
+3b+ 20 = 26 =⇒3b= 6 =⇒b= 2
+−6 + 5(2) + 4a=−8 =⇒4 + 4a=−8 =⇒4a=−12 =⇒a=−3
+Thus,a=−3andb= 2.
+a+b=−3 + 2 =−1
+</reasoning><answer>−1 </answer>
+25\n\n--- page 26 ---\n\nEnhancing Reasoning for Diffusion LLMs via Distribution Matching Policy Optimization
+Model:DMPO-LLaDA
+Dataset:GSM8K
+Generation Sequence Length:512
+Question:Katarina has 5 less cookies than Max has. Max has 12 more cookies than the Cookie Monster, and
+Summer has 23 more cookies than Max. If Katarina has 68 cookies, how many cookies do they have in total?
+To determine the total number of cookies Katarina, Max, and Summer have, we need to find out how many cookies
+each person has and then sum them up.
+1. We know that Katarina has 68 cookies.
+2. Katarina has 5 less cookies than Max.
+3. Max has 12 more cookies than the Cookie Monster.
+4. Summer has 23 more cookies than Max.
+Let’s denote the number of cookies each person has as follows:
+-Kfor Katarina’s cookies
+-Mfor Max’s cookies
+-Cfor the Cookie Monster’s cookies
+-Sfor Summer’s cookies
+From the problem, we have:
+-K= 68
+-K=M−5
+-M=C+ 12
+-S=M+ 23
+First, we substitute the known value ofKinto the equations:
+-68 =M−5
+-M=C+ 12
+-S=M+ 23
+First, solve forM:
+68 =M−5
+M= 68 + 5
+M= 73
+Next, solve forC:
+73 =C+ 12
+C= 73−12
+C= 61
+Finally, solve forS:
+73 =S−23
+S= 73 + 23
+S= 96
+Now, we have the number of cookies each person has:
+- Katarina: 68 cookies
+- Max: 73 cookies
+- The Cookie Monster: 61 cookies
+- Summer: 96 cookies
+To find the total number of cookies, we sum these amounts:
+68 + 73 + 61 + 96 = 298
+Thus, the total number of cookies is298 .
+</reasoning><answer>298 </answer>
+26\n

@@ -1,0 +1,1645 @@
+\n\n--- page 1 ---\n\nIterative Refinement Neural Operators are Learned
+Fixed-Point Solvers: A Principled Approach to Spectral
+Bias Mitigation
+Xiaotian Liu1, Shuyuan Shang 2, Xiaopeng Wang1, Pu Ren 3, and Yaoqing
+Yang1
+1Dartmouth College
+2CUHK Shenzhen
+3Lawrence Berkeley National Lab
+Abstract
+Neural operators serve as fast, data-driven surrogates for scientific modeling but
+typically rely on a monolithic, single-pass inference procedure that struggles to re-
+solve high-frequency details, a limitation known as spectral bias. We introduce the
+Iterative Refinement Neural Operator (IRNO), which augments pre-trained opera-
+tors with a learned refinement module iteratively applied via fixed-point iteration.
+IRNO decomposes the prediction into a coarse initialization followed by successive
+residual corrections, paralleling classical numerical solvers. Under local assumptions,
+we establish contraction of the induced operator, ensuring convergence to a unique
+fixed point. To explicitly target high-frequency errors, we propose a progressive spec-
+tral loss that adaptively increases penalty on high-frequency components over refine-
+ment steps during training. Across physical systems, IRNO consistently lowers er-
+ror, with up to 56.05% improvement on turbulent flow. On Active Matter, spectral
+analysis reveals that, relative to base operator, the normalized error ratios decrease
+to 27.72–36.10% in low-, 5.07–6.68% in mid-, and 1.48–2.04% in high-frequencies,
+remaining stable beyond the trained iteration count. Code is available athttps:
+//github.com/xiaotianliu-dartmouth/Iterative_Refinement_Neural_Operator
+1 Introduction
+Neural operators have emerged as an effective approach for learning mappings between func-
+tion spaces, enabling fast surrogate models for parametric Partial Differential Equations
+(PDEs) and complex physical systems. Architectures such as the Fourier Neural Operator
+(FNO) Li et al. [2021] and DeepONet Lu et al. [2021] achieve high accuracy across a range
+of scientific tasks while maintaining tractable inference computation costs. In this work, we
+introduce theIterative Refinement Neural Operator (IRNO), a learned refinement
+1
+arXiv:2605.24041v2  [cs.LG]  26 May 2026\n\n--- page 2 ---\n\n(a) Ground Truth
+(b) Base Operator (FNO)
+Iteration 2
+ Iteration 4
+ Iteration 6
+T raining Cutoff:K= 6
+Iteration 8
+ Iteration 10
+ Iteration 12
+(c) Iterative Refinement Process (k= 1→12)
+Figure 1:Iterative Refinement on ERA5 16×Super-Resolution.The base opera-
+tor (FNO) captures large-scale atmospheric structure but under-resolves fine-scale details.
+Successive refinement steps (k= 1→12) from IRNO progressively reduce high-frequency
+error while preserving global coherence. Horizontal dashed line indicates the training cutoff
+atK= 6; iterations beyond this point demonstrate stable extrapolation and continue to re-
+cover fine-scale details. All panels share a common color scale. Shown field: kinetic energy.
+operator that augments a pre-trained neural operator with iterative application of a shared-
+weight update as a test-time inference loop. Instead of producing a single solution estimate,
+IRNO defines a dynamical process in function space that progressively corrects residual error.
+IRNO enables consistent error reduction across refinement steps, remains stable when evalu-
+ated for iteration counts beyond those used during training, and improves spectral precision
+without retraining the base model.
+Neural operator architectures are typically trained to approximate the solution opera-
+tor through a single forward evaluation. Improvements in accuracy are therefore primarily
+achieved throughtraining-time scaling, including increased model capacity, higher-resolution
+data, or larger training sets. Unlike monolithic operators, IRNO decouples accuracy im-
+provement from retraining throughtest-time iteration. Furthermore, the function-space for-
+mulation allows IRNO trained with one base operator to refine predictions from different
+operators.
+From the perspective of numerical analysis, this refinement process defines a learned
+fixed-point iteration in function space. IRNO applies a sequence of residual corrections that
+progressively reduce the remaining error, aligning the method with classical residual-based
+solvers [Almgren et al., 2013] while preserving the expressiveness and efficiency of modern
+neural operators.
+We provide a theoretical analysis showing that IRNO converges as a contraction mapping
+in function space in Section 3. The analysis models each refinement update as a locally affine
+map in a neighborhood of the solution manifold. We establish conditions for monotonic
+convergence toward a unique fixed point and show presence of a residual floor when bias
+is present. These results provide a formal interpretation of the convergence and saturation
+behavior when extrapolated beyond training iterations.
+2\n\n--- page 3 ---\n\nAcross systems and tasks, IRNO yields consistent error reduction across refinement steps,
+strong improvements in mid-to-high frequency errors, stable extrapolation to iteration counts
+up to twice those used during training, transferability across base operators, and Pareto-
+dominant accuracy–compute trade-offs relative to capacity-matched monolithic baselines.
+Figure 1 illustrates the refinement process on ERA5 [Hersbach et al., 2020, Ren et al., 2025],
+where successive iterations recover fine-scale structure while preserving large-scale coherence.
+Our contributions are summarized as follows:
+1.Iterative Refinement Operator.We introduce a modular, architecture-agnostic
+iterative refinement operator that enhances predictions of pre-trained neural operators,
+enabling multi-step error reduction at inference time.
+2.Contraction-Based Analysis.We model refinement as a fixed-point iteration in
+function space and derive conditions for monotonic convergence, stable extrapolation
+over iteration, and a bias-controlled residual error floor, which we empirically validate
+by correlating the fixed-point bias with the observed error plateau in Figure 3.
+3.Consistent Error Reduction, Spectral Bias Mitigation, and Cross-Operator
+Transfer.We conduct a systematic empirical study on efficacy of IRNO across mul-
+tiple physical systems in Section 4. IRNO achieves consistent error reductions across
+benchmarks (Section 4.2), demonstrates effective spectral bias mitigation (Section 4.3),
+exhibits cross-operator transferability between distinct neural operator architectures
+(Section 4.5), and extends effectively to unstructured mesh settings (Section 4.6). Cost–
+performance analysis (Section 4.8) shows that IRNO traces a Pareto-dominant frontier
+relative to capacity-matched baselines.
+Detailed discussions of related work are available in Appendix B.
+2 Methodology
+In this section, we formalize IRNO as an inference-time fixed-point scheme in which a pre-
+trained base operator provides an initial estimate that is iteratively refined by residual cor-
+rection. LetXandHbe Banach spaces representing the input (e.g., initial conditions) and
+solution function spaces, respectively. Our goal is to learn the solution operatorG:X → H
+from a finite datasetD={(x i, yi)}N
+i=1, wherey i =G(x i).
+2.1 Iterative Refinement Neural Operator (IRNO)
+2.1.1 Inference-time Refinement Scheme
+The inference process is a two-stage dynamical system:
+1.Initialization:A pre-trained base operatorT base :X → H(e.g., FNO) produces an
+initial coarse ansatzh 0 =T base(x). This captures the dominant low-frequency structure
+but may lack local fidelity.
+3\n\n--- page 4 ---\n\n2.Iterative Correction:A learned refinement operator Φ θ :X × H → Hestimates the
+local residual. The solution state is updated via the fixed-point iteration:
+hk+1 =h k +α·Φ θ(x, hk), k= 0, . . . , K−1,
+whereα∈(0,1] is a step size of choice, controlling the trade-off between convergence
+speed and stability.
+This formulation enables Φ θ to refine predictions from different base operatorsT base (Sec-
+tion 4.5) and allows us to establish IRNO as a contraction mapping in function space (Sec-
+tion 3). The comparison between the workflows of a single-pass and the iterative scheme is
+shown in Figure 2.
+Architectural Choice.The refinement operator Φ θ is designed to represent a stable up-
+date rule that maps the current iterateh k to a corrective residual, rather than directly
+approximating the solution operator itself. Architectural considerations are therefore guided
+by numerical properties of the induced inference dynamics: (i)smoothnessto ensure stable
+iteration, (ii)multi-scale expressivenessto capture spectral corrections, and (iii)computa-
+tional efficiencythrough weight sharing across iterations.
+These requirements can be satisfied by various multi-scale encoder-decoder architectures
+with skip connections. In our experiments (Section 4), we instantiate Φ θ as a lightweight U-
+Net Ronneberger et al. [2015], though the framework is architecture-agnostic and compatible
+with any operator backbone that meets these design criteria.
+2.2 Training the Refinement Operator
+We train Φθ using a composite objective that enforces trajectory control, frequency recovery,
+and convergence stability.
+2.2.1 Multi-step Supervision (Trajectory Control)
+To ensure the iterative process creates a stable dynamical trajectory toward the solution, we
+impose supervision on the output of every refinement step. We minimize theL 2 error norm
+averaged over the trajectory:
+Lspatial = 1
+K
+KX
+k=1
+∥hk −y∥ 2.
+This deep supervision prevents the network from learning unstable intermediate updates
+that might drift off the solution manifold before being corrected. Appendix E demonstrates
+that without trajectory control, the learned operator fails to satisfy the strong monotonicity
+condition underlying the contraction theory (Section 3).
+4\n\n--- page 5 ---\n\nFigure 2:Overview of the Iterative Refinement Neural Operator (IRNO).(a)
+Standard neural operators approximate the solution in a monolithic, single forward evalua-
+tion, often losing fine-scale details. (b) IRNO reformulates inference as a dynamic process.
+A Base Operator provides a coarse initialization, which is then iteratively corrected by a
+shared-weight refinement operator Φθ. At each stepk, the network concatenates the original
+inputxwith the current estimateh k to predict a residual update, progressively resolving
+fine-scale local physics.
+2.2.2 Progressive Spectral Loss (Frequency Recovery)
+StandardL 2 loss in the physical space often fails to capture high-frequency details. We
+apply a progressive spectral loss that dynamically pivots from coarse to fine scales as itera-
+tions proceed. Early refinement steps focus on correcting coarse structure, while later steps
+progressively recover local features, implementing multi-resolution numerical refinement.
+Let ˆhk =F(h k) be the Fourier transform of the estimate. The spectral loss at stepkis
+defined as
+L(k)
+spectral = 1
+HW
+1
+¯ρk
+X
+ω
+ρ(ω, λk)·
+|ˆhk(ω)| − |ˆy(ω)|
+
+2
+,
+where the weighting functionρpenalizes high frequencies exponentially asρ(ω, λ k) = 1 +
+(|ω|/|ω| nyq)λk ,and ¯ρk is the averaged weights. The exponentλ k increases linearly fromλ start
+toλ end across iterations. The total spectral loss is the average over the trajectory,
+Lspectral = 1
+K
+X
+k
+L(k)
+spectral.
+5\n\n--- page 6 ---\n\n2.2.3 Fixed-point Regularization (Convergence Stability)
+Finally, we explicitly enforce the stability condition of a fixed-point solver. If the input is
+the exact solutiony, the residual correction should be zero. We add a regularization term
+Lfp =∥Φ θ(x, y)∥2.
+This ensures thatyis a fixed point of the learned dynamics, preventing the model from
+pushing the state away from the true solution once converged. The fixed-point regularization
+Lfp directly minimizes the bias term in Theorem 3.1, thereby reducing the error floor from
+Corollary 3.3.
+Total Objective.The full loss function is a weighted sum:
+Ltotal =L spatial +β spectralLspectral +β fpLfp,
+whereβ spectral andβ fp are hyperparameters balancing spectral corrections, convergence sta-
+bility, and spatial fidelity.
+Importantly, Φθ learns the iteration-invariantupdate dynamicsrather than the solution
+mapping itself and can be applied fork > Ksteps at inference time.
+3 Theoretical Analysis
+We analyze the convergence behavior of the proposed iterative refinement operator Φ(x,·).
+Lete k =y−h k denote the residual error at iterationk. The analysis characterizes how∥e k∥
+evolves under mild regularity assumptions on the learned refinement operator Φ(x,·) and
+the pre-trained base operatorT base.
+3.1 Theoretical Setup
+Formally, we assume the following properties hold in a local neighborhood of the true solution
+y:
+1.Local affine approximation:In a neighborhoodB δ(y) ={h i ∈ H:∥ei∥< δ}of the
+true solution, we assume the refinement operator Φ(x,·) admits an affine linearization
+of the form
+Φ(x, h) =b(x) +A(x, h)e+R(x, h),
+wheree=y−h,A(x, h) :H → His a bounded linear operator,b(x) is the bias term,
+and the remainderR(x, h) satisfies∥R(x, h)∥ ≤L
+2 ∥e∥2, for someL >0.
+For notational simplicity, we suppress thexdependence and writeb(x) asb. By
+evaluating the affine approximation Φ(x, h) ath=y, we have the bias termb= Φ(x, y).
+Ideally, a perfectly learned refinement operator would satisfy∥b∥= 0.
+This decomposition is analogous to a first-order Taylor expansion of Φ(x,·) around the
+true solutiony, withA(x, h) being a linear operator acting on residualeandR(x, h)
+capturing higher-order remainder terms.
+6\n\n--- page 7 ---\n\n2.Lipschitz continuity of the operator-valued map and strong monotonicity:
+The mappingh7→A(x, h) should vary smoothly in a neighborhood of the fixed point.
+Assume there existsµ >0 such that for allh∈B δ(y),
+∥A(x, h)−A(x, y)∥op ≤µ∥e∥
+whereA(x, y)≡A(x).
+Furthermore, we assume the linearization at the solution,A(x, y), is locally bounded
+and strongly monotone, i.e., there exist constants 0< m≤M <∞such that
+⟨A(x, y)e, e⟩ ≥m∥e∥2,∥A(x, y)∥ op ≤M.
+Under this condition, choosing 0< α < 2m
+M 2 guarantees∥I−αA(x, y)∥ op =q <1, since
+for any unit vectore,
+∥(I−αA)e∥ 2 ≤1−2αm+α 2M 2 <1.
+The Lipschitz continuity assumption onh7→A(x, h) is standard in convergence analy-
+sis Werner and Hofmann [2019], Rastogi et al. [2020], Kovachki et al. [2023], while the
+strong monotonicity condition is empirically validated in Appendix E and ensures the
+spectral radius conditionq <1 is achievable by explicit choices ofα.
+3.Initialization quality and invariant-ball:The base operatorT base provides a suffi-
+ciently accurate initial ansatz such that
+∥e0∥<min
+
+δ, 1−q
+2c
+
+, c=α
+ L
+2 +µ
+
+,
+whereδis the radius in Assumption 1. We further assume there existsrsuch that
+∥e0∥ ≤r <min
+
+δ, 1−q
+2c
+	
+and
+α∥b∥ ≤r(1−q−cr),
+which is a small-bias condition ensuring the iterates remain inBr(y)⊂B δ(y). This bias
+magnitude is directly minimized by the fixed-point regularizationL fp in Section 2.2.3.
+A sufficient condition and derivation are given in Appendix F.
+Intuitively, Assumption 1 reflects the fact that Φ is trained by deep supervision to ap-
+proximate the residuale=y−h, and its local linearization is encouraged to produce residual-
+correcting updates near the solution manifold. Assumption 2 captures architectural smooth-
+ness induced by convolutional layers in Φ, which empirically limit abrupt changes in the
+refinement dynamics. The strong monotonicity condition further ensures that a valid step
+sizeαexists, and is empirically validated in Appendix E. Finally, Assumption 3 formalizes
+the role ofT base as providing a reasonable initialization within the basin of attraction, and
+requires the learned bias∥b∥to remain small enough to keep iterates from escaping the
+local neighborhood, a condition directly enforced by the fixed-point regularizationL fp in
+Section 2.2.3.
+7\n\n--- page 8 ---\n\n(a) Active Matter (FNO)
+ (b) TR-2D (TFNO)
+Figure 3:Empirical validation of bias–error floor relationship.Scatter plots of mini-
+mum error mink ∥ek∥as a function of bias magnitude∥b∥=∥Φ θ(x, y)∥overk= 24 refinement
+steps.(a)Active Matter: Pearsonr= 0.933 (p≪10 −10).(b)TR-2D: Pearsonr= 0.949
+(p≪10 −10). Both systems exhibit a strong linear dependence between the asymptotic error
+floor and the bias, consistent with Corollary 3.3.
+3.2 Main Results
+Theorem 3.1(Quadratic–Linear Convergence).Under the above assumptions, the iteration
+satisfies
+∥ek+1∥ ≤q∥ek∥+c∥e k∥2 +α∥b∥.
+Whenb= 0, the scheme is locally contractive:
+∥ek+1∥ ≤(q+c∥ek∥)∥ek∥,withq+c∥e k∥<1.
+Thus, the errors decrease monotonically andh k →y.
+Proof of Theorem 3.1 is available in Appendix C. The result in Theorem 3.1 characterizes
+IRNO as a learned iterative solver whose convergence behavior is governed by the contraction
+factorq, smoothness of its update dynamics, and the bias, providing a theoretical basis for the
+monotonic error decay and stable extrapolation observed empirically in Section 4. Detailed
+interpretations of the error recursion in Theorem 3.1 are provided in Appendix C.
+Corollary 3.2(Geometric Convergence and Iteration Complexity).In the linear-dominant
+regime withb= 0, the error decays geometrically:
+∥ek∥≲q k∥e0∥.
+To achieve∥e k∥ ≤ε, it suffices to perform
+k=O
+ log(∥e0∥/ε)
+log(1/q)
+
+iterations of refinement.
+8\n\n--- page 9 ---\n\nCorollary 3.2 assumesb= 0, allowing arbitrarily small error with sufficient iterations. In
+practice, however, Φ θ may exhibit non-zero biasb̸= 0, introducing a limiting error floor.
+The following corollary quantifies the upper bound on the bias-induced error floor.
+Corollary 3.3(Convergence with Bias).Ifb= Φ(x, y)̸= 0and∥b∥is sufficiently small,
+then there exists a unique fixed pointh ∗ satisfyingh ∗ =h ∗ +αΦ(x, h∗), and the iteration
+converges linearly toh ∗ for any initialization within a neighborhood ofy. The limiting error
+satisfies
+∥e∗∥ ≤α∥b∥
+1−q +O(∥b∥ 2).
+Proofs of Corollaries 3.2 and 3.3 are available in Appendix D. Under mild assumptions,
+the refinement mapT(h) =h+αΦ(x, h) is locally contractive. The contraction factorq
+governs the convergence speed and is directly affected by the choice of step sizeα(Sec-
+tion 4.7.3). In presence of non-zero bias, convergence remains guaranteed with a limiting
+error floor proportional to∥b∥.
+Empirical validation in Figure 3 supports the conclusions of Corollary 3.3 across two phys-
+ical systems (Section 4.1). For both Active Matter and TR-2D, the minimum attainable error
+over the refinement trajectory exhibits a strong linear dependence on the bias magnitude,
+with Pearson correlations exceeding 0.93 in both cases (p≪10 −10). Least-squares fits in-
+dicate that variation in the asymptotic error floor is largely explained by the magnitude
+of the fixed-point residualb, motivating fixed-point regularization to directly reduce∥b∥
+(Section 2.2.3).
+4 Experiments
+We evaluate IRNO from the perspective of a learned iterative solver rather than a single-pass
+predictor. Experiments are designed to assess six core areas: (i) global convergence behavior
+across distinct physical systems and extrapolation beyond the training iteration cutoff, (ii)
+spectral dynamics of refinement and preferential reduction of mid-to-high frequency spectral
+error, (iii) transferability across base operators and operator architectures, (iv) the role of
+progressive spectral supervision and step sizeαthrough targeted ablations, (v) the cost–
+performance trade-off relative to capacity scaling, and (vi) generalization to graph-based
+operators on irregular meshes.
+4.1 Experimental Setup
+Physical Systems.We evaluate IRNO on four scientific benchmarks: (i) Turbulent Ra-
+diative Layer (TR-2D) and (ii) Active Matter from the Well Ohana et al. [2024], Morel
+et al. [2025], Wu et al. [2025], Holzschuh et al. [2025], (iii) ERA5 global weather 16×super-
+resolution from SuperBench [Ren et al., 2025, Chen et al., 2024, Hassan et al., 2023], and
+(iv) CE-Gauss [Mousavi et al., 2025], an irregular unstructured-mesh benchmark. These
+datasets are widely adopted for assessing operator stability, multi-scale error dynamics, and
+high-resolution reconstruction. Detailed dataset description can be found in Appendix G.1.
+9\n\n--- page 10 ---\n\nTable 1:Iterative error reduction across physical systems.Comparison of single-pass base operator
+performance and IRNO after refinement, with FNO evaluated atK= 6 and TFNO/WDSR atK= 4.
+Metrics reported are VRMSE for TR-2D and Active Matter, and ACC and RFNE for ERA5 with standard
+errors<0.001 for all entries.↑/↓indicate better direction.
+Dataset Metric Base Model Initial IRNO (Ours)Improvement(%)
+TR-2D VRMSE↓FNO 0.23940.130945.32%
+TFNO 0.23710.104256.05%
+Active Matter VRMSE↓FNO 0.10170.050150.73%
+TFNO 0.19810.038780.46%
+ERA5 ACC↑FNO 0.75230.891918.56%
+WDSR 0.90910.91040.143%
+RFNE↓FNO 0.32470.214034.09%
+WDSR 0.21190.19537.83%
+Table 2:ERA516×super-resolution against spectral baselines.Comparison of IRNO against state-
+of-the-art spectral methods on ERA5, with IRNO evaluated using WDSR as the base operator. Metrics
+reported are ACC and RFNE.↑/↓indicate better direction.
+Method ACC↑RFNE↓
+ResUNet-HFS [Khodakarami et al., 2026] 0.8915 0.2253
+HiNOTE [Luo et al., 2024] 0.9055 0.2222
+IRNO (WDSR, Ours)0.9104 0.1953
+We report variance-scaled RMSE (VRMSE) for TR-2D and Active Matter, and anomaly
+correlation coefficient (ACC) and relative Frobenius norm error (RFNE) for ERA5. Defini-
+tions of the metrics are detailed in Appendix G.5.1.
+Base Operators and Baselines.For TR-2D and Active Matter, we use the FNO [Li
+et al., 2021] and the Tucker-Factorized FNO (TFNO) [Kossaifi et al., 2025] as base operators.
+For ERA5, we evaluate both FNO and the Wide-Activated Deep Super-Resolution network
+(WDSR) Fan et al. [2018].
+We compare IRNO against three baselines.(i) Standard Base Operator:single-
+pass inference using the pre-trained backbone without refinement.(ii) Capacity-Matched
+Residual Model:single-shot residual correction networks with parameter count and FLOPs
+exceed those of IRNO executed forKrefinement steps. This baseline controls for improve-
+ments due to increased model capacity rather than iterative refinement.(iii) State-of-the-
+Art Models for Spectral Bias Mitigation:Hierarchical Neural Operator Transformer
+(HiNOTE) [Luo et al., 2024] and High Frequency Scaling (HFS) [Khodakarami et al., 2026],
+compared on ERA5 in Table 2.
+Training and Inference.The refinement operator is trained with a horizon ofK= 4,6
+steps using composite objective defined in Section 2.2. The base operatorT base is pre-trained
+and frozen. Models trained withK= 4 are evaluated fork∈[0,8], and models trained with
+K= 6 are evaluated fork∈[0,12]. Detailed experiments setup is available in Appendix G.
+10\n\n--- page 11 ---\n\n(a) TR-2D(VRMSE↓)
+ (b) ACTIVE(VRMSE↓)
+ (c) ERA5(RFNE↓)
+ (d) ERA5(ACC↑)
+Figure 4:Convergence behavior across physical systems.VRMSE for TR-2D and
+Active Matter, and RFNE and ACC for ERA5, plotted as a function of refinement step
+k. Vertical dashed lines indicate the training cutoff (FNO atK= 6 and TFNO/WDSR at
+K= 4). Error metrics decrease or reach a stable plateau fork > K, while ACC increases
+and stabilizes.
+4.2 Global Convergence Behavior Across Physical Regimes
+We evaluate whether IRNO performs stable and monotonic error reduction across distinct
+physical systems, consistent with the contractive dynamics predicted by Theorem 3.1.
+Quantitative Performance.Table 1 reports aggregate performance metrics for TR-2D,
+Active Matter, and ERA5. Across all benchmarks and base architectures, IRNO consistently
+improves upon base operator inference, achieving 45–56% reductions on TR-2D, 51–80% on
+Active Matter in VRMSE and 34% in RFNE while increasing 19% ACC on ERA5.
+Comparison with State-of-the-Art Models for Spectral Bias Mitigation.Ta-
+ble 2 compares IRNO against recent spectral methods on ERA5 16×super-resolution. IRNO
+(WDSR) achieves the best ACC (0.910) and RFNE (0.195), outperforming both High-
+Frequency Scaling (HFS) [Khodakarami et al., 2026] and the hierarchical attention operator
+HiNOTE [Luo et al., 2024]. Furthermore, IRNO is complementary to these architectural
+spectral methods. On Active Matter, combining IRNO with HFS further reduces VRMSE
+from 0.0631 to 0.0486, suggesting the iterative refinement mechanism compounds gains from
+frequency-aware architectures. Table 17 and Figure 19 in the appendix provide a detailed
+step-by-step breakdown, showing VRMSE decreasing from 0.0631 (HFS base) to 0.0486 at
+k= 6 and remaining stable atk= 8 (0.0487), with IRNO achieving lower spectral error
+energy across the full radial frequency range.
+Error Trajectories vs. Iteration.Figure 4 shows that error decreases monotoni-
+cally during early iterations and reaches a stable plateau. IRNO remains stable beyond the
+training horizon over the evaluated extrapolation range (2×), while longer-horizon behavior
+(8×) depends on the step size; smaller or scheduled step sizes ensure stability. The effect
+of step sizeαon long-horizon stability, evaluated up tok= 48, is analyzed in Appendix H
+(Figure 18).
+4.3 Spectral Dynamics of Iterative Refinement
+To characterize the spectral dynamics of IRNO, we analyze how error evolves in the frequency
+domain across refinement steps at both the dataset and instance levels.
+11\n\n--- page 12 ---\n\n(a) Dataset-level median normalized spectral er-
+ror ratios ˜E(k)(ω).
+(b) Instance-level spectral MSE trajectories.
+Figure 5:Spectral Error Evolution under iterative refinement (Active Matter,
+FNO).(a)Median normalized spectral error ratios ˜E(k)(ω) across the test set, with shaded
+interquartile ranges (25–75%). IRNO exhibits consistent attenuation of mid-to-high fre-
+quency error with increasing refinement steps, with stable behavior near the Nyquist limit
+ω= 128, indicated by a vertical dashed line.(b)Spectral Mean Squared Error (MSE) for
+a representative test instance fork∈[0,12] refinement steps. Each curve shows the radial-
+spectral error of the base operator and successive IRNO refinements, illustrating monotonic
+reduction of spectral error and stable behavior beyond the training cutoff. Across both
+panels, mid-to-high frequency error decreases with refinement, with the largest relative re-
+ductions observed near the Nyquist limitω= 128 (vertical dashed line).
+4.3.1 Dataset- and Instance-Level Spectral Error Distribution
+For each refinement stepkand radial frequencyω, we compute the normalized spectral error
+ratio
+˜E(k)(ω) = E(k)(ω)
+E(0)(ω) +ε ,
+whereE (0)(ω) denotes the spectral error of the base operator andε= 10 −10 is a small
+constant for numerical stability. We report the median and interquartile range (25–75%)
+across the test set.
+Figure 5(a) shows that refinement reduces error primarily in mid-to-high frequency regimes
+where base operators exhibit strongest spectral bias. We further quantify this observation in
+Section 4.4. Figure 5(b) confirms monotonic spectral error reduction per-sample with largest
+improvements nearω= 128 (Nyquist limit).
+4.4 Frequency-Band Convergence
+To summarize frequency-dependent convergence, we partition the spectrum into low-, mid-,
+and high-frequency bands using resolution-invariant percentile cutoffs (bottom 33%, middle
+33%, and top 33%, respectively). For each bandBand refinement stepk, we compute the
+normalized error ratio aggregated over frequencies in the band and across the test set.
+Let ΩB denote the set of frequencies in bandB,i∈ D test index test samples, andE (k)
+i (ω)
+12\n\n--- page 13 ---\n\n0 5 10
+Refinement Step k
+10 2
+10 1
+100
+Normalized Error
+Ratio Rk
+(a)Low-frequency band
+0 5 10
+Refinement Step k
+10 2
+10 1
+100
+ (b)Mid-frequency band
+0 5 10
+Refinement Step k
+10 2
+10 1
+100
+Normalized Error
+Ratio Rk
+ (c)High-frequency band
+Orientation T ensor (Dim 1)
+Orientation T ensor (Dim 2)
+Orientation T ensor (Dim 3)
+Orientation T ensor (Dim 4)
+Strain-Rate T ensor (Dim 1)
+Strain-Rate T ensor (Dim 2)
+Strain-Rate T ensor (Dim 3)
+Strain-Rate T ensor (Dim 4)
+Training Cutoff (K = 6)
+Figure 6:Frequency-band error ratios across refinement steps (Active Matter,
+FNO).Normalized error ratiosR (B)
+k for each tensor field, computed separately over (a) low-,
+(b) mid-, and (c) high-frequency bands as a function of refinement stepk. The vertical dashed
+line marks the training cutoff atK= 6. Lower values indicate stronger error reduction
+relative to the base operator.
+denote the spectral error of sampleiat frequencyωand refinement stepk. We define
+R(B)
+k = mediani∈Dtest
+ P
+ω∈ΩB
+E(k)
+i (ω)
+P
+ω∈ΩB
+E(0)
+i (ω) +ε
+!
+.
+Figure 6 reportsR (B)
+k across refinement steps for orientation and strain-rate tensor fields.
+Table 3 summarizes averaged values at the initial, cutoff, and final iterations. Across ten-
+sor fields, IRNO achieves 98–99% error reduction in high-frequency bands, 93–96% in mid-
+frequency bands, and 62–73% in low-frequency bands at the final refinement step.
+Table 3:Frequency-band error ratios across refinement steps (Active Matter,
+FNO).Normalized error ratiosR (B)
+k for low-, mid-, and high-frequency bands, reported for
+orientation and strain tensor fields at the initial step (k= 1), training cutoff (k= 6), and
+final step (k= 12). Lower values indicate stronger error reduction.
+Refinement Step (k)
+Frequency Tensor Initial(k= 1)Cutoff(k= 6)Final(k= 12)
+Low Orient. 0.8145 0.3503 0.2772
+Strain 0.8423 0.4738 0.3610
+Mid Orient. 0.7204 0.1722 0.0507
+Strain 0.7120 0.1703 0.0668
+High Orient. 0.6856 0.1157 0.0204
+Strain 0.6789 0.1054 0.0148
+4.5 Transferability Across Base Operators
+The function-space formulation of IRNO in Section 2.1 suggests that refinement dynamics de-
+pend primarily on the local residual geometry rather than the specific architecture producing
+13\n\n--- page 14 ---\n\nTable 4:Transferability across base operators.IRNO trained on one base operator
+successfully transfers to refine predictions from different base operators. Subscripts indicate
+the operator IRNO was trained with (e.g., IRNO TFNO was trained with TFNO as the base).
+Standard errors are<0.001 for all entries.
+Dataset Metric Base + IRNOtrain Initial IRNO Improvement(%)
+TR-2D VRMSE↓FNO + IRNO TFNO 0.23960.099458.53%
+TFNO + IRNOFNO 0.23660.134543.15%
+Active Matter VRMSE↓FNO + IRNOTFNO 0.10040.044555.66%
+TFNO + IRNOFNO 0.19550.112742.36%
+ERA5 ACC↑FNO + IRNO WDSR 0.75230.80226.22%
+WDSR + IRNOFNO 0.90910.92191.39%
+RFNE↓FNO + IRNOWDSR 0.32470.282313.06%
+WDSR + IRNOFNO 0.21190.19358.68%
+the initialization. Under Theorem 3.1, convergence is guaranteed whenever the initialization
+lies within the basin of attraction (Assumption 3), and the operator is well-conditioned.
+As shown in Table 4, IRNO trained on one base operator successfully transfers without
+retraining to refine predictions from different operators, achieving consistent error reduction
+across operators and tasks. Notably, IRNO trained on low-performing base operators often
+outperforms same-operator configurations when transferred to high-performing base oper-
+ators. For example, IRNO TFNO improves FNO’s initial prediction VRMSE by 58.53% on
+TR-2D, 13.21 percentage points higher than IRNO FNO’s improvement. This suggests that
+less accurate operators generate larger, more diverse residual structures during training, forc-
+ing IRNO to learn more robust error-correction strategies that generalize effectively to the
+smaller, more structured residuals of higher-performing operators.
+4.6 Generalization to Graph-Based Operators and Irregular Meshes
+To evaluate whether IRNO extends beyond structured-grid operators, we apply it to RIGNO [Mousavi
+et al., 2025], a graph-based neural operator that operates on irregular unstructured meshes.
+We use the CE-Gauss benchmark, an irregular unstructured mesh dataset with 16,384 nodes
+and 4 physical variables, and evaluate autoregressive rollout over 7 timesteps withK= 4
+refinement steps andα= 0.3. Dataset details are provided in Appendix G.1.
+Table 5:Autoregressive rollout on irregular meshes.IRNO (K= 4) with RIGNO as the base
+operator on the CE-Gauss unstructured mesh benchmark, evaluated over a 7-step autoregressive rollout.
+Metric reported is relativeL 2 error (%) against ground truth. Lower is better.
+Modelt= 1t= 2t= 3t= 4t= 5t= 6t= 7
+Base (RIGNO) 3.351 5.017 7.808 10.923 12.732 14.433 16.617
+IRNO 2.931 4.359 6.605 8.990 10.371 11.450 13.080
+Improvement 12.5% 13.1% 15.4% 17.7% 18.5% 20.7% 21.3%
+As shown in Table 5, IRNO reducesL 2 error at every timestep, with improvements
+14\n\n--- page 15 ---\n\nTable 6:Ablation of progressive spectral loss (Active Matter, TFNO).Comparison
+of a progressive schedule (λ k : 1→2) against fixed spectral weights, with TFNO (4 steps)
+as base operator. We report VRMSE and frequency-band normalized error ratios for low-,
+mid-, and high-frequency bands. Lower values indicate stronger error reduction.
+Method VRMSE Low-Freq Mid-Freq High-Freq
+Fixedλ= 1.00 0.0509 0.0953 0.1067 0.6023
+Fixedλ= 1.25 0.0695 0.1599 0.2101 0.8794
+Fixedλ= 1.75 0.0586 0.1124 0.1320 0.6949
+Fixedλ= 2.00 0.0666 0.2063 0.1578 0.7677
+Progressive (Ours) 0.0387 0.0551 0.0788 0.2393
+compounding from 12.5% att= 1 to 21.3% att= 7. This suggests that early refinement
+suppresses error accumulation in autoregressive rollout. Implementation details are provided
+in Appendix G.
+4.7 Ablation Study
+4.7.1 Progressive vs. Fixed Spectral Supervision
+We ablate the proposed progressive spectral loss to evaluate the role of frequency curricu-
+lum in stable multiscale refinement. Table 6 compares models trained with a linearly in-
+creasing spectral exponentλ k : 1.0→2.0 against fixed-weight baselines with constant
+λ∈ {1.0,1.25,1.75,2.0}.
+The progressive spectral loss schedule achieves VRMSE of 0.039 versus 0.051-0.070 for
+fixedλ(23.5-44.3% reduction), with particularly strong high-frequency improvements (nor-
+malized error 0.24 vs 0.60-0.88).
+4.7.2 Robustness Across Refinement Architectures and Normalization
+IRNO’s iterative mechanism is robust across refinement backbone choices, with ResNet, Con-
+vNext, and FNO backbones all achieving>71% VRMSE reduction on Active Matter (TFNO
+base,K= 4); see Appendix H (Table 18). Normalization choice does not qualitatively af-
+fect IRNO’s behavior. BatchNorm, LayerNorm, and GroupNorm all yield consistent error
+reduction on TR-2D (TFNO base); see Appendix H (Table 19).
+4.7.3 Varying Step Sizeα
+Figure 7 shows how step sizeαaffects convergence on TR-2D with TFNO-based IRNO
+trained atk= 4. Small value (α= 0.1) converges slowly but stably, while moderate values
+(α= 0.2) achieve optimal convergence speed and stable extrapolation beyond the training
+horizon. Moderately large step size (0.3≤α≤0.5) initially decreases error but diverges for
+k >6, and large value (α= 0.6) diverges within training horizon with VRMSE increasing
+from 0.12 to 0.24. This instability occurs whenαmoves outside the local contraction regime
+15\n\n--- page 16 ---\n\nFigure 7:Ablation: Step sizeαsensitivity (TR-2D, TFNO).Convergence behavior
+forα∈ {0.1,0.2,0.3,0.4,0.5,0.6}, trained withK= 4 steps (dashed line). Small step sizes
+converge slowly; moderate step sizes (α∈[0.2,0.4]) achieve optimal balance;α= 0.6 diverges
+rapidly beyond the training horizon, violating the contraction conditionq=∥I−αA(x)∥ op <
+1 from Theorem 3.1.
+depicted in the theory section 3. We useα∈ {0.2,0.25}for our experiments, balancing
+convergence speed and stability.
+4.8 Cost–Performance Pareto Frontier
+Finally, we evaluate whether iterative refinement provides a more efficient cost-performance
+trade-off than increasing model capacity. Figure 8 compares IRNO against a capacity-
+matched monolithic residual model in terms of ACC and RFNE versus FLOPs and memory
+consumption.
+Across all metrics, IRNO traces a Pareto-dominant frontier. At 1100 GFLOPs, IRNO
+attains ACC = 0.84, while a 15×U-Net achieves ACC = 0.79 at comparable computational
+cost. Similarly, IRNO reduces RFNE to 0.28 at 1000 GFLOPs, whereas monolithic baselines
+remain above 0.295 in the same cost range. These results indicate that performance gains
+are driven by the refinement mechanism itself rather than by increased model capacity.
+We additionally compare against F-Adapter [Zhang et al., 2026], a parameter-efficient
+spectral fine-tuning method. F-Adapter achieves a 2.31% VRMSE reduction at low compu-
+tational overhead, with gains concentrated in mid- and high-frequency bands; IRNO trades
+additional training cost for substantially larger gains (50.73%), representing complementary
+design regimes. A full spectral comparison is provided in Appendix H (Table 20, Figure 20).
+5 Conclusion
+We propose IRNO, a learned iterative refinement operator that progressively reduces pre-
+diction error across physical systems. We provide a contraction-based theoretical analysis
+that interprets refinement as a fixed-point iteration in function space, establishing condi-
+tions under which monotonic convergence and stability beyond the training horizon are
+expected. Experimental results validate that IRNO achieves consistent spectral error reduc-
+16\n\n--- page 17 ---\n\n(a) ACC vs. FLOPs
+ (b) ACC vs. Memory
+ (c) RFNE vs. FLOPs
+ (d) RFNE vs. Memory
+Figure 8:Cost–performance trade-offs under iterative refinement (ERA5, FNO).
+ACC and RFNE plotted against computational cost (FLOPs) and memory usage during
+inference. Each marker corresponds to a refinement step of the iterative U-Net, with step
+indices annotated. Baselines (FNO, SRCNN, and 15×U-Net) are shown for reference. IRNO
+achieves improved ACC or lower error at comparable or lower computational cost. See
+Appendix H for detailed comparisons and wall-clock times.
+tion, stable extrapolation to iteration counts beyond those seen in training, and improved
+cost–performance trade-offs relative to capacity-matched baselines.
+Acknowledgment
+We thank our colleagues and funding agencies. This work is supported by the DARPA
+AIQ program, the U.S. Department of Energy under Award Number DE-SC0025584, the
+Allocation Year 2026 DOE Mission Science award, and Dartmouth College.
+Impact Statement
+This work advances the accuracy and stability of neural operators for scientific and engineer-
+ing applications, supporting better modeling of complex systems such as climate dynamics,
+fluid flows, and multi-physics processes. More accurate surrogate models can accelerate scien-
+tific discovery, reduce computational costs in simulation-intensive domains, and improve the
+reliability of high-resolution predictions in areas such as weather forecasting and turbulence
+modeling.
+Despite these potential benefits, several limitations are relevant for deployment in high-
+stakes settings. Like most deep learning methods, IRNO lacks built-in uncertainty quan-
+tification, as its predictions do not come with calibrated confidence intervals, which limits
+their use in safety-critical decisions that require assessing prediction reliability. Addition-
+ally, the iterative refinement process introduces an additional computational overhead at
+inference time, and divergence is possible for large step sizes or out-of-distribution inputs.
+Extending IRNO with uncertainty quantification, for example, through ensemble or proba-
+bilistic methods, is a natural direction for future work that would broaden its applicability
+to decision-support contexts.
+17\n\n--- page 18 ---\n\nReferences
+Ann S. Almgren, John B. Bell, Mike J. Lijewski, Zarija Luki´ c, and Ethan Van Andel. Nyx:
+A massively parallel AMR code for computational cosmology.The Astrophysical Journal,
+765(1):39, February 2013. ISSN 1538-4357. doi: 10.1088/0004-637x/765/1/39. URL
+http://dx.doi.org/10.1088/0004-637X/765/1/39.
+Shaojie Bai, J. Zico Kolter, and Vladlen Koltun. Deep equilibrium models. InAdvances in
+Neural Information Processing Systems (NeurIPS), 2019.
+Ricky T. Q. Chen, Yulia Rubanova, Jesse Bettencourt, and David Duvenaud. Neural ordinary
+differential equations.Advances in Neural Information Processing Systems, 2018.
+Wuyang Chen, Jialin Song, Pu Ren, Shashank Subramanian, Dmitriy Morozov, and
+Michael W Mahoney. Data-efficient operator learning via unsupervised pretraining and in-
+context learning. In A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. Tomczak,
+and C. Zhang, editors,Advances in Neural Information Processing Systems, volume 37,
+pages 6213–6245. Curran Associates, Inc., 2024. doi: 10.52202/079017-0201.
+Yuchen Fan, Jiahui Yu, and Thomas S Huang. Wide-activated deep residual networks based
+restoration for bpg-compressed images. InProceedings of the IEEE Conference on Com-
+puter Vision and Pattern Recognition Workshops, pages 2621–2624, 2018.
+Drummond B Fielding, Eve C Ostriker, Greg L Bryan, and Adam S Jermyn. Multiphase
+gas and the fractal nature of radiative turbulent mixing layers.The Astrophysical Journal
+Letters, 894(2):L24, 2020.
+Eldad Haber and Lars Ruthotto. Stable architectures for deep neural networks.Inverse
+Problems, 34(1):014004, dec 2017. doi: 10.1088/1361-6420/aa9a90. URLhttps://doi.
+org/10.1088/1361-6420/aa9a90.
+Sheikh Md Shakeel Hassan, Arthur Feeney, Akash Dhruv, Jihoon Kim, Youngjoon Suh,
+Jaiyoung Ryu, Yoonjin Won, and Aparna Chandramowlishwaran. Bubbleml: A multi-
+phase multiphysics dataset and benchmarks for machine learning. In A. Oh, T. Naumann,
+A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors,Advances in Neural Informa-
+tion Processing Systems, volume 36, pages 418–449. Curran Associates, Inc., 2023.
+Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep Residual Learning for Image
+Recognition. InProceedings of 2016 IEEE Conference on Computer Vision and Pattern
+Recognition, CVPR ’16, pages 770–778. IEEE, June 2016. doi: 10.1109/CVPR.2016.90.
+URLhttp://ieeexplore.ieee.org/document/7780459.
+Hans Hersbach, Bill Bell, Paul Berrisford, Shoji Hirahara, Andr´ as Hor´ anyi, Joaqu ´ ın Mu˜ noz-
+Sabater, Julien Nicolas, Carole Peubey, Raluca Radu, Dinand Schepers, et al. The era5
+global reanalysis.Quarterly journal of the royal meteorological society, 146(730):1999–2049,
+2020.
+18\n\n--- page 19 ---\n\nBenjamin Holzschuh, Qiang Liu, Georg Kohl, and Nils Thuerey. PDE-transformer: Efficient
+and versatile transformers for physics simulations. InForty-second International Confer-
+ence on Machine Learning, 2025. URLhttps://openreview.net/forum?id=3BaJMRaPSx.
+Siavash Khodakarami, Vivek Oommen, Aniruddha Bora, and George Em Karniadakis. Miti-
+gating spectral bias in neural operators via high-frequency scaling for physical systems.
+Neural Networks, 193:108027, 2026. ISSN 0893-6080. doi: https://doi.org/10.1016/
+j.neunet.2025.108027. URLhttps://www.sciencedirect.com/science/article/pii/
+S0893608025009074.
+Jean Kossaifi, Nikola Kovachki, Zongyi Li, David Pitt, Miguel Liu-Schiaffini, Valentin Du-
+ruisseaux, Robert Joseph George, Boris Bonev, Kamyar Azizzadenesheli, Julius Berner,
+and Anima Anandkumar. A library for learning neural operators.arXiv preprint
+arXiv:2412.10354, 2025.
+Nikola B. Kovachki, Zongyi Li, Burigede Liu, Kamyar Azizzadenesheli, Kaushik Bhat-
+tacharya, Andrew M. Stuart, and Anima Anandkumar. Neural operator: Learning maps
+between function spaces.Journal of Machine Learning Research, 24(89):1–97, 2023. URL
+https://www.jmlr.org/papers/v24/21-1524.html.
+Zongyi Li, Nikola Kovachki, Kamyar Azizzadenesheli, Burigede Liu, Kaushik Bhattacharya,
+Andrew Stuart, and Anima Anandkumar. Fourier neural operator for parametric
+partial differential equations. InInternational Conference on Learning Representa-
+tions (ICLR), 2021. URLhttps://openreview.net/forum?id=c8P9NQVtmnO. See also
+arXiv:2010.08895 (2020).
+Xinliang Liu, Bo Xu, Shuhao Cao, and Lei Zhang. Mitigating spectral bias for the multiscale
+operator learning.Journal of Computational Physics, 506:112944, 2024. ISSN 0021-9991.
+doi: https://doi.org/10.1016/j.jcp.2024.112944. URLhttps://www.sciencedirect.com/
+science/article/pii/S0021999124001931.
+Lu Lu, Pengzhan Jin, Guofei Pang, Zongren Zhang, and George Em Karniadakis. Learning
+nonlinear operators via deeponet based on the universal approximation theorem of opera-
+tors.Nature Machine Intelligence, 3(3):218–229, 2021. doi: 10.1038/s42256-021-00302-5.
+Xihaier Luo, Xiaoning Qian, and Byung-Jun Yoon. Hierarchical neural operator transformer
+with learnable frequency-aware loss prior for arbitrary-scale super-resolution. InForty-first
+International Conference on Machine Learning, 2024. URLhttps://openreview.net/
+forum?id=LhAuVPWq6q.
+Rudy Morel, Jiequn Han, and Edouard Oyallon. DISCO: learning to DISCover an evolution
+operator for multi-physics-agnostic prediction. InForty-second International Conference
+on Machine Learning, 2025. URLhttps://openreview.net/forum?id=6EZ3MDDf6p.
+Sepehr Mousavi, Shizheng Wen, Levi Lingsch, Maximilian Herde, Bogdan Raoni´ c, and Sid-
+dhartha Mishra. Rigno: A graph-based framework for robust and accurate operator learn-
+ing for pdes on arbitrary domains. InAdvances in Neural Information Processing Systems,
+volume 38, 2025.
+19\n\n--- page 20 ---\n\nRuben Ohana, Michael McCabe, Lucas Meyer, Rudy Morel, Fruzsina Agocs, Miguel Beneitez,
+Marsha Berger, Blakesly Burkhart, Stuart Dalziel, Drummond Fielding, et al. The well:
+a large-scale collection of diverse physics simulations for machine learning.Advances in
+Neural Information Processing Systems, 37:44989–45037, 2024.
+Vivek Oommen, Aniruddha Bora, Zhen Zhang, and George Em Karniadakis. Integrating
+neural operators with diffusion models improves spectral representation in turbulence mod-
+elling.Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sci-
+ences, 481(2309):20240819, 03 2025. ISSN 1364-5021. doi: 10.1098/rspa.2024.0819. URL
+https://doi.org/10.1098/rspa.2024.0819.
+Shaoxiang Qin, Fuyuan Lyu, Wenhui Peng, Dingyang Geng, Ju Wang, Xing Tang, Sylvie
+Leroyer, Naiping Gao, Xue Liu, and Liangzhu Leon Wang. Toward a better understanding
+of fourier neural operators from a spectral perspective, 2024. URLhttps://arxiv.org/
+abs/2404.07200.
+Nasim Rahaman, Aristide Baratin, Devansh Arpit, Felix Draxler, Min Lin, Fred A. Ham-
+precht, Yoshua Bengio, and Aaron Courville. On the spectral bias of neural networks.
+InInternational Conference on Machine Learning (ICML), volume 97 ofProceedings of
+Machine Learning Research, pages 5301–5310, 2019. URLhttps://proceedings.mlr.
+press/v97/rahaman19a.html.
+Abhishake Rastogi, Gilles Blanchard, and Peter Math´ e. Convergence analysis of Tikhonov
+regularization for non-linear statistical inverse problems.Electronic Journal of Statistics,
+14(2):2798 – 2841, 2020. doi: 10.1214/20-EJS1735. URLhttps://doi.org/10.1214/
+20-EJS1735.
+Pu Ren, N. Benjamin Erichson, Junyi Guo, Shashank Subramanian, Omer San, Zarija Lukic,
+and Michael W. Mahoney. Superbench: A super-resolution benchmark dataset for scien-
+tific machine learning.Journal of Data-centric Machine Learning Research, 2025. URL
+https://openreview.net/forum?id=OJ6zUcWldW. Dataset Certification, Reproducibility
+Certification.
+Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-net: Convolutional networks for
+biomedical image segmentation. In Nassir Navab, Joachim Hornegger, William M. Wells,
+and Alejandro F. Frangi, editors,Medical Image Computing and Computer-Assisted Inter-
+vention – MICCAI 2015, pages 234–241, Cham, 2015. Springer International Publishing.
+ISBN 978-3-319-24574-4.
+Wenshuo Wang and Fan Zhang. Breaking scale anchoring: Frequency representation learning
+for accurate high-resolution inference from low-resolution training, 2025. URLhttps:
+//arxiv.org/abs/2512.05132.
+Frank Werner and Bernd Hofmann. Convergence analysis of (statistical) inverse problems
+under conditional stability estimates.Inverse Problems, 36(1):015004, dec 2019. doi:
+10.1088/1361-6420/ab4cd7. URLhttps://doi.org/10.1088/1361-6420/ab4cd7.
+20\n\n--- page 21 ---\n\nR. Wienands and W. Joppich.Practical Fourier Analysis for Multigrid Methods. Numerical
+Insights. Taylor & Francis, 2005. ISBN 9781584884927. URLhttps://books.google.
+com/books?id=IOSux5GxacsC.
+Zhikai Wu, Shiyang Zhang, Sizhuang He, Sifan Wang, Min Zhu, Anran Jiao, Lu Lu, and
+David van Dijk. COAST: Intelligent time-adaptive neural operators. In2nd AI for Math
+Workshop @ ICML 2025, 2025. URLhttps://openreview.net/forum?id=cz99ALd3yv.
+Hangwei Zhang, KangChun, Yan Wang, and Difan Zou. F-adapter: Frequency-adaptive
+parameter-efficient fine-tuning in scientific machine learning. InThe Thirty-ninth Annual
+Conference on Neural Information Processing Systems, 2026. URLhttps://openreview.
+net/forum?id=6QJZDAIhfk.
+21\n\n--- page 22 ---\n\nA Limitations and Future Work
+The proposed Iterative Refinement Neural Operator (IRNO) demonstrates stable conver-
+gence, reduced spectral error, and improved cost–performance trade-offs across multiple
+physical systems. Several open questions remain that point toward productive directions for
+future research.
+Beyond Local Neighborhoods.The present analysis establishes convergence under
+smoothness and spectral radius assumptions in a neighborhood of the true solution, depend-
+ing on the quality of the initialization from the base operator. Extending these results to
+broader regions of the solution space remains an open problem. Tools from monotone op-
+erator theory, non-expansive mappings, or Lyapunov stability analysis may provide a path
+toward characterizing global behavior and basin structure for learned refinement dynamics.
+Adaptive Control of Refinement Dynamics.IRNO uses a fixed step size chosen
+empirically to satisfy a contraction condition derived from the local Jacobian. This choice
+offers a balance between stability and convergence speed, though it does not incorporate
+information from the refinement trajectory itself. A natural criterion for adaptive stopping
+is when∥Φ θ(x, hk)∥falls below a threshold tied to the bias level, which avoids over-refinement
+once the error floor has been reached. Future work may explore adaptive step-size policies or
+learned controllers that respond to local error geometry or spectral content, thereby drawing
+connections to classical line-search and trust-region methods.
+Extensions to Stochastic and Inverse Settings.This work focuses on deterministic
+forward prediction tasks. Extending iterative refinement to stochastic operators, uncertainty-
+aware prediction, or inverse problems, such as data assimilation or parameter identification,
+represents a promising direction. In these settings, refinement dynamics could be coupled
+with probabilistic inference mechanisms, potentially bridging learned solvers with Bayesian
+filtering or variational frameworks.
+Cross-Resolution and Distribution Generalization.Current evaluation uses matched
+train and test resolutions, and all benchmarks draw from the same data distribution. Whether
+the learned update rule transfers to finer grids than those seen during training, or remains
+accurate under distributional shift (e.g., out-of-distribution forcing terms or boundary condi-
+tions), is an open question. Studying resolution generalization and distributional robustness
+is a key direction for establishing the broader applicability of IRNO in scientific workflows.
+B Related Work
+B.1 Spectral Bias and Multi-Scale Operator Learning
+A fundamental challenge in training neural operators for SciML is the phenomenon of spec-
+tral bias, where neural networks prioritize learning low-frequency components of the target
+function while struggling to capture high-frequency details Rahaman et al. [2019]. Early
+efforts to address this limitation in the context of operator learning focused on architectural
+innovations that explicitly route information across scales. For instance, the Hierarchical
+Attention Neural Operator (HANO) Liu et al. [2024] was proposed to enable nested feature
+computation that better captures multiscale solution spaces, by employing a scale-adaptive
+22\n\n--- page 23 ---\n\ninteraction range and self-attention mechanisms over a hierarchy of levels. More recent
+approaches have sought to mitigate spectral bias through frequency-specific boosting and
+scaling mechanisms. SpecBoost was introduced as an ensemble framework designed to en-
+hance high-frequency capture in FNOs Qin et al. [2024]. Their spectral analysis revealed
+that FNOs exhibit a distinct parameterization bias that favors dominant low frequencies.
+To overcome this, SpecBoost trains a secondary residual operator specifically tasked with
+learning the high-frequency residuals left by the primary model. Similarly, High-Frequency
+Scaling (HFS) modulates the latent space of convolutional-based neural operators to am-
+plify high-frequency modes Khodakarami et al. [2026]. Unlike Fourier-based interventions,
+HFS operates directly in the latent representation, avoiding the computational overhead of
+the FFT while successfully recovering fine-scale features in complex multiphase flow and
+turbulence problems.
+The integration of generative models has emerged as a powerful strategy for recovering
+high-frequency spectral content, particularly in turbulent and multiscale systems. Condition-
+ing diffusion models on the output of neural operators enables the generation of fine-scale
+fluctuations that are typically smoothed out by deterministic operator predictions, leading to
+improved alignment with the true energy spectrum Oommen et al. [2025]. From a resolution-
+generalization perspective, scale anchoring has been identified as a fundamental limitation
+in which models trained on low-resolution data fail to extrapolate to higher Nyquist frequen-
+cies, and Frequency Representation Learning has been proposed as a means to align spectral
+features across resolutions and reduce this dependencyWang and Zhang [2025]. Our work
+complements these approaches but differs fundamentally in its inference mechanism. While
+these methods improve spectral coverage through enhanced architectures or training objec-
+tives, they retain asingle-passinference structure where all frequency components must be
+resolved simultaneously. In contrast, IRNO reframes operator inference as aniterative refine-
+ment process, progressively correcting residual errors across scales through learned fixed-point
+iterations. This enables systematic error reduction at inference time without increasing the
+base model’s capacity or retraining.
+A concurrent line of work, F-Adapter [Zhang et al., 2026] (NeurIPS 2025), addresses
+spectral bias through parameter-efficient adaptation of Fourier layers using low-rank de-
+compositions. Its theoretical grounding concerns the approximation capacity of LoRA-style
+adapters in the Fourier domain. IRNO’s theoretical grounding is distinct, concerning the
+dynamics of fixed-point iteration and establishing contraction conditions for monotonic con-
+vergence. Empirically, F-Adapter targets minimal-parameter adaptation (2.31% VRMSE
+reduction on Active Matter) while IRNO trades additional training cost for substantially
+larger gains (50.73%), representing complementary design regimes rather than competing
+approaches. See Appendix H for a direct quantitative comparison.
+B.2 Numerical Principles as Inductive Bias
+Deep learning architectures often exhibit structural similarity with classical numerical meth-
+ods. Residual networks, for example, are mathematically equivalent to the forward Euler
+discretization of continuous-time dynamical systems He et al. [2016]. Similarly, encoder-
+decoder structures with skip connections, such as U-Nets, mirror the restriction and pro-
+longation operations in multigrid methods, enabling efficient error reduction across scales
+23\n\n--- page 24 ---\n\nHaber and Ruthotto [2017], Wienands and Joppich [2005]. Neural operators such as FNO
+Li et al. [2021] and DeepONet Lu et al. [2021] parameterize mappings in spectral or basis-
+function spaces, consistent with classical spectral/pseudo-spectral methods. In most cases,
+these models are trained asdirect solversthat approximate the solution operator through a
+single forward evaluation.
+A closer conceptual link to our framework arises in implicit layers, Deep Equilibrium Mod-
+els (DEQs)Bai et al. [2019], and Neural Ordinary Differential Equations (Neural ODEs)Chen
+et al. [2018], which explicitly cast network inference as the solution of a fixed-point or
+continuous-time dynamical system. These approaches define thenetwork itselfas an equi-
+librium or flow, with iterative solvers embedded into training and inference. IRNO differs by
+preserving a standard, explicit base operator and introducing a learnedrefinement dynamics
+applied at inference time. Opposed to learning an implicit representation, IRNO learns a
+residual update rule that iteratively corrects the output of a pre-trained operator, retaining
+architectural modularity while inheriting the convergence and stability properties of classical
+fixed-point iterations.
+C Proof of Theorem 3.1 (Quadratic–Linear Convergence)
+We sketch the main steps establishing the error recursion and local contractivity.
+Lete k =y−h k. From the iteration
+hk+1 =h k +αΦ(x, hk),
+and the local affine decomposition in Assumption 1,
+Φ(x, hk) =A(x, hk)ek +b+R(x, h k),
+we obtain
+ek+1 =e k −αA(x, hk)ek −αb−αR(x, h k).
+DecomposingA(x, hk) =A(x) +
+ 
+A(x, hk)−A(x)
+
+yields
+ek+1 = (I−αA(x))e k −α
+ 
+A(x, hk)−A(x)
+
+ek −αb−αR(x, h k).
+Taking norms and applying the Jacobian stability and remainder bounds from Assump-
+tions 1 and 2, we obtain
+∥ek+1∥ ≤ ∥I−αA(x)∥op∥ek∥+αµ∥e k∥2 +α L
+2 ∥ek∥2 +α∥b∥.
+Definingq=∥I−αA(x)∥ op andc=α
+  L
+2 +µ
+
+gives the claimed bound
+∥ek+1∥ ≤q∥ek∥+c∥e k∥2 +α∥b∥.
+Whenb= 0 and∥e 0∥< 1−q
+2c , we have
+q+c∥e k∥<1,
+24\n\n--- page 25 ---\n\nwhich implies local contractivity. By induction, the error decreases monotonically and the
+iteration converges toy. The resulting behavior is linear for small errors, with a quadratic
+correction term governing the transient regime.
+□
+The error recursion in Theorem 3.1 decomposes the refinement dynamics into three contri-
+butions with clear numerical interpretations. The linear termq∥e k∥governs the convergence
+rate and is determined by the choice of step sizeαand the spectral properties of the local
+Jacobian throughq=∥I−αA(x)∥ op. The quadratic termc∥e k∥2 captures higher-order de-
+viations from the local linearization and dominates in the transient regime, explaining the
+accelerated error reduction observed in early refinement steps. Finally, the bias termα∥b∥
+sets a limiting error floor in the presence of model mismatch, leading to convergence toward
+a neighborhood of the true solution as formalized in Corollary 3.3.
+D Proofs of Corollaries
+Corollary 3.2 Geometric Convergence and Iteration Complexity
+From Theorem 3.1 withb= 0, the error satisfies
+∥ek+1∥ ≤q∥ek∥+c∥e k∥2.
+As∥e k∥ →0, the quadratic term becomes negligible. For anyε >0, there existsk 0 such
+that for allk≥k 0,
+c∥ek∥< ε,
+and hence
+∥ek+1∥ ≤(q+ε)∥ek∥.
+Iterating this inequality yields
+∥ek∥ ≤C(q+ε) k∥e0∥,
+for some constantC >0. Sinceεis arbitrary, this implies the asymptotic geometric rate
+∥ek∥≲q k∥e0∥.
+To achieve∥e k∥ ≤ε′, it suffices to chooseksuch that
+qk∥e0∥ ≤ε′,
+which gives
+k=O
+ log(∥e0∥/ε′)
+log(1/q)
+
+.
+□
+25\n\n--- page 26 ---\n\nCorollary 3.3 Convergence with Bias
+Part 1: Existence and Uniqueness of Fixed Point, and Convergence.
+Define the operatorT:B δ(y)→ Hby
+T(h) =h+αΦ(x, h).
+We now verify explicitly thatTmaps a ball aroundyinto itself and is a contraction, so the
+Banach Fixed Point Theorem applies. The derivation also reveals how the admissible radius
+depends onqand the biasb.
+Let a positiver < δbe chosen later and considerh∈ Br(y). Using Assumption 1 gives
+∥T(h)−y∥=∥h−y+α[b+A(x, h)(y−h) +R(x, h)]∥
+=∥(I−αA(x, h))(h−y) +αb+αR(x, h)∥.
+Applying Assumptions 2 and triangular inequality, we have
+∥T(h)−y∥=∥(I−αA(x, h))(h−y) +αb+αR(x, h)∥
+≤ ∥I−αA(x, h)∥op ∥h−y∥+α∥b∥+α∥R(x, h)∥
+≤
+ 
+∥I−αA(x)∥ op +α∥A(x, h)−A(x)∥ op
+
+∥h−y∥+α∥b∥+α∥R(x, h)∥
+≤
+ 
+q+αµr
+
+r+α∥b∥+α L
+2 r2
+=qr+α
+
+µ+ L
+2
+
+r2 +α∥b∥.
+Thus,Tmaps Br(y) into itself providedrsatisfies
+r≥qr+α
+ 
+µ+ L
+2
+
+r2 +α∥b∥.
+This quadratic inequality inradmits a positive solution wheneverq <1 and∥b∥is sufficiently
+small to make the discriminant positive. In particular,
+r−, r+ =
+1−q±
+q
+(1−q) 2 −4α 2 
+µ+ L
+2
+
+∥b∥
+2α
+ 
+µ+ L
+2
+ ,
+and operatorTis self-mapping ifr∈[r −, r+]∪(0, δ).
+For small enough∥b∥, letε:=
+4α2
+
+µ+ L
+2
+
+∥b∥
+(1−q)2 . Then
+r− = (1−q)−(1−q) √1−ε
+2α
+ 
+µ+ L
+2
+ = (1−q)
+ 
+1−1 + 1
+2 ε+O(ε 2)
+
+2α
+ 
+µ+ L
+2
+ = α∥b∥
+1−q +O(∥b∥ 2),
+by taking the first-order Taylor expansion of √1−ε.
+Forh 1, h2 ∈ ¯Br(y), we bound the contraction factor ofTusing the Fr´ echet differentiability
+of Φ and Assumption 1-2.
+26\n\n--- page 27 ---\n\nBy the fundamental theorem of calculus for Fr´ echet derivatives,
+Φ(x, h1)−Φ(x, h2) =
+Z 1
+0
+DhΦ
+ 
+x, h2 +t(h 1 −h 2)
+
+(h1 −h 2)dt.
+Under Assumption 1, the derivativeD hΦ(x, h) exists and satisfies
+DhΦ(x, h) =−A(x, h) +E(x, h),
+where the remainder termE(x, h) arises from the quadratic remainderRand fulfills∥E(x, h)∥op ≤
+C∥y−h∥for someC >0 (sinceRis quadratic in∥e∥).
+Hence,
+∥T(h 1)−T(h 2)∥=
+(h1 −h 2) +α
+Z 1
+0
+DhΦ
+ 
+x, h2 +t(h 1 −h 2)
+
+(h1 −h 2)dt
+
+=
+
+Z 1
+0
+h
+I+αD hΦ
+ 
+x, h2 +t(h 1 −h 2)
+i
+(h1 −h 2)dt
+
+≤
+Z 1
+0
+I+αD hΦ
+ 
+x, h2 +t(h 1 −h 2)
+
+op
+dt· ∥h1 −h 2∥.
+Now, for anyξ∈ ¯Br(y),
+I+αD hΦ(x, ξ)
+
+op =
+I−αA(x, ξ) +αE(x, ξ)
+
+op
+≤ ∥I−αA(x, ξ)∥op +α∥E(x, ξ)∥op.
+Using Assumption 2 and the bound onE,
+∥I−αA(x, ξ)∥ op ≤ ∥I−αA(x, y)∥op +α∥A(x, ξ)−A(x, y)∥op
+≤q+αµ∥y−ξ∥,
+and∥E(x, ξ)∥op ≤C∥y−ξ∥. Since∥y−ξ∥ ≤r, we obtain
+I+αD hΦ(x, ξ)
+
+op ≤q+α(µ+C)r.
+Choosingrsufficiently small so that
+ρ:=q+α(µ+C)r <1,
+we have for allh 1, h2 ∈ ¯Br(y)
+∥T(h 1)−T(h 2)∥ ≤ρ∥h1 −h 2∥,
+which establishes thatTis a contraction on ¯Br(y).
+Conclusion.Therefore,Tis a contraction mapping Br(y) into itself. By theBanach Fixed
+Point Theorem,Tadmits a unique fixed pointh ∗ in Br(y), and the iterationh k+1 =T(h k)
+converges linearly toh ∗ for any initialh 0 ∈B δ(y).
+27\n\n--- page 28 ---\n\nPart 2: Limiting Error Bound.
+At the fixed pointh ∗, one can trivially conclude that
+0 =αΦ(x, h∗) =α(A(x, h∗)e∗ +b+R(x, h ∗)).
+Rearranging gives
+αA(x, h∗)e∗ =−αb−αR(x, h ∗).
+Taking norms on both sides and by Assumption 1,
+∥αA(x, h∗)e∗∥ ≤α∥b∥+ αL
+2 ∥e∗∥2.
+Since
+∥I−αA(x, h∗)∥op ≤ ∥I−αA(x)∥op +α∥A(x, h∗)−A(x)∥ op ≤q+αµ∥e ∗∥,
+ifq+αµ∥e ∗∥<1, by the Neumann series, we haveαA(x, h ∗) invertible and with
+σmin (αA(x, h∗))≥1− ∥I−αA(x, h ∗)∥op ≥1−q−αµ∥e ∗∥.
+Plugging back, we obtain
+∥e∗∥ ≤α∥b∥+ αL
+2 ∥e∗∥2
+σmin (αA(x, h∗)) ≤ a∥b∥+ αL
+2 ∥e∗∥2
+1−q−αµ∥e ∗∥ .
+This is the same quadratic inequality we solved in proving self-mapping, and with first-order
+Taylor expansion, we have
+∥e∗∥ ≤α∥b∥
+1−q +O(∥b∥ 2).
+□
+E Empirical Validation of Strong Monotonicity
+Assumption 2 requires the linearization at the solution,A(x, y), to be bounded and strongly
+monotone. Concretely, we assume there exist constants 0< m≤M <∞such that
+⟨A(x, y)e, e⟩ ≥m∥e∥2,∥A(x, y)∥ op ≤M,
+for alle∈ H. A natural question is whether this local assumption is reasonable for a trained
+refinement network. Since strong monotonicity is not automatic for a learned neural network,
+we examine it empirically in a controlled 1-D synthetic setting and on the full U-Net models
+used in our main experiments.
+28\n\n--- page 29 ---\n\n1-D synthetic experiment.We consider the periodic problem
+(I−εL)y= tanh(x),
+withn= 128 andε= 0.3, whereLis the discrete Laplacian with periodic boundary condi-
+tions and the solution is computed exactly by matrix inversion. We train a two-hidden-layer
+MLP refinement operator Φ θ with no architectural constraint enforcing monotonicity of the
+Jacobian. We compare two variants:Full IRNOandNo deep supervision.
+For each test pair (x, y), we compute the exact Jacobian at the solution,
+A(x, y) =−DhΦθ(x, y),
+using automatic differentiation, and measure
+m=λ min
+ A+A ⊤
+2
+
+, M=∥A∥ op =σ max(A).
+Since⟨Ae, e⟩=
+D
+A+A⊤
+2 e, e
+E
+for alle, the quantitymis the tightest strong-monotonicity
+constant.
+Table 7 summarizes the results. Full IRNO yields uniformly positivemand tightly
+concentrated operator norms across all test samples. In contrast, removing deep supervision
+leads to predominantly negativemvalues and substantially larger, more variable operator
+norms, indicating that the bounded-and-strongly-monotone regime generally does not hold
+in that setting.
+Table 7: Empirical monotonicity and boundedness of the learned Jacobian at the true solu-
+tion in the 1-D synthetic experiment.
+Variantm(mean±std)M(mean±std)m >0
+Full IRNO 0.661±0.060 1.285±0.025 100%
+No deep supervision−0.893±0.989 3.087±2.571 3.9%
+Figure 9 visualizes the distributions ofmandM. The contrast between the two train-
+ing procedures suggests that the proposed training objective, especially deep supervision,
+strongly promotes a locally monotone and well-conditioned refinement map near the solu-
+tion.
+Table 8: Estimated strong monotonicity of the learned U-Net refinement operator on the
+main experimental benchmarks.
+Datasetm(mean±std)m >0
+TR-2D U-Net (power iter.) 13.71±2.41 100%
+Active Matter U-Net (power iter.) 3.01±3.12 99.5%
+29\n\n--- page 30 ---\n\nFigure 9: Distribution of the estimated strong-monotonicity constantm=λ min((A+A ⊤)/2)
+(left) and operator normM=σ max(A) (right) in the 1-D synthetic experiment, comparing
+Full IRNO and training without deep supervision. Full IRNO consistently yields positive
+mand tightly boundedM, whereas removing deep supervision produces predominantly
+negativemvalues and much larger variability inM. The dashed line in the left panel marks
+the boundarym= 0. Both y-axes are log-scaled.
+U-Net models on TR-2D and Active Matter.We further evaluate the same criterion
+on the U-Net refinement models used in the main paper. Because exact Jacobian computa-
+tion is expensive at this scale, we estimate the spectrum using power iteration. As shown
+in Table 8, the estimated monotonicity constant is positive on essentially all test samples,
+yielding 100% on TR-2D and 99.5% on Active Matter. These results support the relevance
+of the strong monotonicity assumption in realistic settings.
+Overall, these experiments show that the bounded-and-strongly-monotone regime re-
+quired by Assumption 2 emerges empirically under the proposed training procedure.
+F Invariant-ball Condition
+We derive conditions under which the ballB r(y) is forward invariant under the iteration
+T(h) =h+αΦ(x, h). Leth∈B r(y) withr≤δ. Using the affine decomposition from
+Assumption 1,
+∥T(h)−y∥=∥h−y+αΦ(x, h)∥
+=∥(I−αA(x, h))(h−y) +αb+αR(x, h)∥
+≤ ∥I−αA(x, h)∥op∥e∥+α∥b∥+α∥R(x, h)∥.
+Applying Assumption 2 to bound∥I−αA(x, h)∥ op,
+∥I−αA(x, h)∥op ≤ ∥I−αA(x)∥op +α∥A(x, h)−A(x)∥ op ≤q+αµr,
+and applying the remainder bound∥R(x, h)∥ ≤ L
+2 ∥e∥2 ≤ L
+2 r2 from Assumption 1, we
+obtain
+∥T(h)−y∥ ≤qr+αµr 2 +α L
+2 r2 +α∥b∥=qr+cr 2 +α∥b∥,
+30\n\n--- page 31 ---\n\nwherec=α
+  L
+2 +µ
+
+≥0. ForB r(y) to be forward invariant, we need∥T(h)−y∥ ≤r,
+i.e.,
+qr+cr 2 +α∥b∥ ≤r⇐ ⇒α∥b∥ ≤(1−q)r−cr 2.
+Case 1.c= 0.The right-hand side is (1−q)r, giving the condition
+∥b∥ ≤(1−q)r
+α .
+Case 2.c >0.The function (1−q)r−cr 2 is maximized atr ∗ = 1−q
+2c , yielding maximum
+value (1−q)2
+4c . Therefore, a validr∈(0, δ] exists whenever
+∥b∥ ≤(1−q) 2
+4αc ,
+in which case the two positive roots of (1−q)r−cr 2 =α∥b∥are
+r± = (1−q)±
+p
+(1−q) 2 −4αc∥b∥
+2c ,
+andB r(y) is forward invariant for anyr∈[r −, r+].
+G Experimental Setup and Implementation Details
+G.1 Dataset Specifications
+G.1.1 Turbulent Radiative Layer-2D (TR-2D)
+Data Generation.The TR-2D dataset simulates Kelvin–Helmholtz instability using the
+ATHENA++ hydrodynamics code [Fielding et al., 2020]. Initial conditions consist of two
+gas layers with different temperatures and velocities, creating shear-driven turbulence.
+Physical system.This dataset models the interaction between hot, dilute gas and cold,
+dense gas moving at subsonic velocities, a configuration unstable to the Kelvin-Helmholtz in-
+stability. The turbulent mixing populates intermediate-temperature gas, which rapidly cools
+as heating and cooling become imbalanced. This process is fundamental to understanding
+phase structure in the interstellar and circumgalactic medium. The governing equations are
+given by
+∂ρ
+∂t +∇ ·(ρ⃗ v) = 0,
+∂(ρ⃗ v)
+∂t +∇ ·(ρ⃗ v⃗ v) =−∇P,
+∂E
+∂t +∇ ·((E+P)⃗ v) =−E
+tcool
+,
+whereρis density,⃗ vis the 2D velocity field,Pis pressure,Eis total energy, andt cool is the
+cooling time parameter.
+31\n\n--- page 32 ---\n\nDataset details.The dataset contains 90 trajectories (10 random initializations for each
+of 9 cooling time values:t cool ∈ {0.03,0.06,0.1,0.18,0.32,0.56,1.00,1.78,3.16}). Each tra-
+jectory consists of 101 timesteps at resolution 384×128, with spatial domainx∈[−0.5,0.5],
+y∈[−1,2] and temporal snapshots separated by ∆t= 1.597 in simulation time. Fields
+include density, pressure, and velocity components.
+Task.Given 4 consecutive frames{s t−3, st−2, st−1, st}wheres t = (ρ t, ⃗ vt, Pt), predict the
+next frames t+1. This conditional prediction task tests the model’s ability to capture short-
+term dynamics and turbulent evolution.
+G.1.2 Active Matter (AM)
+Physical system.This dataset simulates continuum dynamics of rod-like active parti-
+cles immersed in a Stokes fluid. The system captures collective behavior, including energy
+transfer across scales, vorticity-orientation coupling, and phase transitions from isotropic to
+nematic states. The governing equations (Eqs. 1-5 in the associated paper) describe the
+evolution of concentration, velocity, orientation tensor, and strain-rate tensor fields.
+Dataset details.The dataset contains 225 simulations spanning parameter spaceα∈
+{−1,−2,−3,−4,−5}(dipole strength),β= 0.8, andζ∈ {1,3,5,7,9,11,13,15,17}(align-
+ment strength), with 5 trajectories per parameter set using different random initializations.
+Each trajectory consists of 81 timesteps at resolution 256×256, covering temporal range
+t∈[0,20] seconds with snapshots every 0.25 seconds. The spatial domain isL x =L y = 10
+with periodic boundary conditions.
+Task.Given 4 consecutive frames{s t−3, st−2, st−1, st}wheres t = (ρ t, ⃗ vt, Dt, Ut) includes
+concentration, velocity, orientation tensor, and strain-rate tensor, predict the next frame
+st+1.
+G.1.3 ERA5 Weather Super-Resolution
+We conduct our experiments on the climate super-resolution benchmark provided by Super-
+Bench [Ren et al., 2025], which is constructed from the ERA5 reanalysis dataset [Hersbach
+et al., 2020]. In this work, we strictly follow the dataset construction and experimental
+protocol defined in SuperBench.
+Data Source and Task Definition.ERA5 is a global atmospheric reanalysis dataset pro-
+duced by the European Centre for Medium-Range Weather Forecasts (ECMWF) on a regular
+latitude–longitude grid. Following SuperBench, we focus on three climate variables: kinetic
+energy, temperature, and total column water vapor. We follow Scenario (i) (the general
+computer vision setting) from SuperBench, in which low-resolution (LR) atmospheric states
+are obtained by bicubic downsampling without noise. The task is formulated as supervised
+spatial super-resolution, mapping LR climate fields of resolution 45×90 to corresponding
+high-resolution (HR) targets of resolution 720×1440, resulting in a×16 super-resolution
+factor along each spatial dimension.
+32\n\n--- page 33 ---\n\nDataset construction.We follow the official data construction and temporal splits pro-
+vided by SuperBench. Training data are selected from the years 2008, 2010, 2011, and 2013.
+The validation sets for interpolation and extrapolation (look-back) evaluation are drawn
+from 2012 and 2007, respectively. The test sets for the corresponding interpolation and ex-
+trapolation tasks are from 2009 and 2014–2015, respectively. All methods are trained and
+evaluated on the same splits to ensure fair comparison. For visualizations in the main paper,
+we use samples from the interpolation test set (year 2009).
+Data Preprocessing.Following SuperBench, we standardize each variable using statistics
+computed from the training split, and apply the same normalization to the validation and
+test sets. No additional data augmentation or task-specific preprocessing is performed.
+G.1.4 CE-Gauss (Irregular Mesh)
+Physical system.CE-Gauss is an unstructured-mesh benchmark from the RIGNO dataset [Mousavi
+et al., 2025]. It simulates convection-diffusion dynamics on irregular Gaussian-distributed
+point clouds, capturing transport phenomena on non-uniform spatial domains that are not
+representable on regular grids. The dataset provides 4 physical variables per node.
+Dataset details.The mesh contains 16,384 nodes with irregular spatial distribution. We
+follow the official train/validation/test splits provided with the RIGNO benchmark. The
+evaluation task is autoregressive rollout over 7 timesteps.
+Task.Given the current state on the irregular mesh, predict the next timestep. IRNO is
+applied withK= 4 refinement steps andα= 0.3, using RIGNO as the base operator. This
+experiment shows that the IRNO framework extends to graph-based operators on irregular
+meshes.
+The refinement model for CE-Gauss shares the same RIGNO architecture as the frozen
+base operator. It takes an 8-channel input formed by concatenating the current estimate ˆhk
+with the frozen model’s initial prediction ˆh0, and outputs a 4-channel correction field. The
+update is applied in normalized solution space, making the step-sizeαdimensionless and
+consistent across output variables. Training minimizes a trajectory supervision loss averaged
+overKunrolled refinement steps rather than only the final-step loss, which stabilizes the
+iterative dynamics. At inference, refinement is applied at every autoregressive step as zero-
+shot generalization; the model is trained only for single-step prediction.
+G.2 Architecture Details
+G.2.1 Base Operators
+Fourier Neural Operator (FNO).We adopt the FNO2D from the Well and SuperBench
+as the base operator, which implements the Fourier Neural Operator [Li et al., 2021]. Table 9
+summarizes the hyperparameters used for FNO and TFNO across all datasets.
+33\n\n--- page 34 ---\n\nTable 9: Hyperparameters of FNO and TFNO across different datasets.
+Dataset Model Modes Blocks Hidden Size
+TR-2D FNO 16 4 128
+TFNO 16 4 128
+Active Matter FNO 16 4 128
+TFNO 16 4 128
+ERA5 FNO 12 4 64
+Tucker-Factorized Fourier Neural Operator (TFNO).To improve parameter effi-
+ciency and generalization, we also employ the TFNO [Kovachki et al., 2023]. TFNO replaces
+the dense spectral convolution layers in the standard FNO with Tucker-factorized tensor
+contractions. This decomposition allows for significant compression of the network weights
+while preserving expressivity. As shown in Table 9, the TFNO follows a similar architectural
+configuration to the FNO (in terms of depth and channel width).
+Wide Activation Super-Resolution (WDSR).We adopt the WDSR-A architecture [Fan
+et al., 2018] as a CNN-based base operator for scientific super-resolution within the Super-
+Bench framework. The model follows a head–body–tail design and emphasizes local feature
+extraction through wide-activation residual blocks. Hyperparameter details are provided in
+Tables 10.
+•Residual Blocks.The network body consists of 18 lightweight residual blocks, each
+using an expansion ratio of 4 and residual scaling factor of 0.1. Each block contains
+two 3×3 convolutional layers with ReLU activation and weight normalization.
+•Upsampling and Skip Connection.The output is produced by a tail convolution
+followed by pixel-shuffle upsampling. In parallel, a skip branch directly upsamples the
+input using a separate convolution and pixel-shuffle, and the two paths are summed to
+form the final output.
+Table 10: Hyperparameters of the WDSR-A model across different datasets.
+Dataset #ResBlocks Width Expansion Res. Scale Upscale
+ERA5 18 32 4 0.1 16
+G.2.2 Refinement OperatorΦ θ
+The refinement operator is implemented as a lightweight U-Net with the following specifica-
+tions:
+34\n\n--- page 35 ---\n\nEncoder Path.The encoder receives the concatenation of the original inputxand the
+current estimateh k, resulting in 2Cinput channels. It consists of 3 levels of downsampling.
+Each level contains aconvolutional blockfollowed by a 2×2max-poolinglayer. Each
+convolutional block is composed of two successive sequences of:
+Conv2d(3×3)→BatchNorm2d→GELU
+The number of feature channels doubles at each level, starting fromCbase and reaching 4Cbase
+before the bottleneck.
+Bottleneck.The bottleneck bridges the encoder and decoder at the lowest spatial resolu-
+tion. It consists of a single convolutional block (two 3×3 convolutions with BatchNorm and
+GELU) that processes the features in a 2 depthCbase-dimensional latent space.
+Decoder Path.The decoder is symmetric to the encoder and performs 3 levels of upsam-
+pling. At each level, the feature maps are first upsampled usingbilinear interpolation
+(scale factor of 2) followed by a 3×3 convolution that halves the channel dimension. These
+features are then concatenated with the corresponding skip connections from the encoder.
+The merged features pass through a standard dual-convolutional block.
+Output Head & Initialization.A final 1×1 convolution maps theC base hidden channels
+back to the output dimension. To ensure the iterative process starts with stable, small-
+magnitude corrections, we applyXavier uniform initializationto the weights with a gain
+of 0.1 and initialize all biases to zero.
+Padding.To respect the periodic nature of the scientific datasets used in our benchmark,
+all 3×3 convolutional layers in Φθ utilizecircular paddinginstead of zero padding, ensuring
+spatial continuity.
+Parameter Count.Table 11 reports the parameter counts (in millions) of all models
+across different datasets. A cross (×) indicates that the corresponding model is not used
+for that dataset. For our proposed Iterative Refinement Neural Operator (IRNO), we report
+the cumulative number of parameters required for a complete inference cycle consisting of
+Krefinement iterations. The last three rows correspond to large monolithic baselines with
+different refinement models, which are introduced and discussed in the main paper 4.7.
+G.3 Training Configuration
+Base Operator Training.In our experiments, the base operators are initialized from a
+pretrained checkpoint. The base operators are kept frozen during all subsequent training
+and evaluation stages.
+35\n\n--- page 36 ---\n\nTable 11: Model parameter counts (in millions) across different datasets.
+Model TR-2D(M) Active Matter(M) ERA5(M)
+FNO (base) 19.0 19.0 4.8
+TFNO (base) 19.3 19.3×
+WDSR (base)× ×1.6
+Refinement Φθ 8.6 8.7 2.1
+FNO + IRNO (K= 6) 27.6 27.7 6.9
+FNO + SRCNN× ×6.6
+FNO + UNet (×15)× ×37.3
+FNO + FNO× ×9.5
+Refinement Operator Training.Algorithm 1 provides the complete training procedure
+for IRNO, detailing the progressive refinement steps, combined spatial-spectral losses, and
+fixed-point regularization.
+The refinement operator is optimized using AdamW with an initial learning rate of
+3×10 −4 and weight decay 1×10 −5. We employ a cosine learning rate scheduler with
+a minimum learning rate of 10 −6. Training is conducted for 250 epochs with a per-GPU
+batch size of 16, and gradient norms are clipped to a maximum value of 1.0 to ensure
+stability. During training, the refinement operator is unrolled forK= 6 andK= 4 iterative
+refinement steps when used with the FNO and WDSR/TFNO base models, respectively,
+with a fixed step sizeα ref ine= 0.25 for ERA5 dataset andα ref ine= 0.2 for TR-2D and AM
+datasets. The training objective consists of the standard reconstruction loss augmented with
+a spectral loss term, as described below.
+Baseline implementations.We reproduce HFS [Khodakarami et al., 2026] and HiNOTE
+[Luo et al., 2024] from their respective official code repositories, evaluated on the ERA5 16×
+super-resolution task under the same dataset split and evaluation protocol used for IRNO.
+Progressive Spectral Loss Schedule.We incorporate a spectral loss to encourage accu-
+rate reconstruction across different frequency bands. Two distinct mechanisms control the
+spectral emphasis. The frequency exponentλ k determines the per-step weighting of high-
+frequency components, and the spectral loss weightβ spectral scales the overall spectral term
+in the training objective.
+For the TR-2D and Active Matter datasets, the frequency exponentλ k increases linearly
+fromλ start = 1.0 toλ end = 2.0 over theKrefinement steps within each forward pass. The
+spectral loss weightβ spectral undergoes a linear warm-up over the first 5 training epochs before
+being held fixed for the remainder of training.
+For the ERA5 dataset, we adopt the same progressive exponent schedule (λ k ∈[1.0,2.0]
+over refinement steps). Table 12 shows that the progressive schedule improves ACC from
+0.875 to 0.892 and reduces RFNE from 0.235 to 0.214 relative to a fixed exponent (λk = 1.5),
+confirming that progressive spectral emphasis benefits the super-resolution task.
+36\n\n--- page 37 ---\n\nAlgorithm 1Training Iterative Refinement Neural Operator (IRNO)
+1:Input:DatasetD={(x i, yi)}N
+i=1, base operatorT base, refinement stepsK, step sizeα,
+weightsβ sp, βfp
+2:Initialize:Refinement parametersθ
+3:forepoch = 1, . . . , Edo
+4:forbatch (x, y)∈ Ddo
+5:h 0 ← Tbase(x)▷Base prediction (No gradient)
+6:L accum ←0
+7:fork= 1toKdo
+8:h k ←h k−1 +α·Φ θ(x, hk−1)▷Refinement step
+9:L k ← Lspatial(hk, y) +βsp · Lspectral(hk, y)
+10:L accum ← Laccum +L k
+11:end for
+12:L fp ←β fp · ∥Φθ(x, y)∥2 ▷Fixed-point regularization
+13:L total ← 1
+K Laccum +L fp
+14:Updateθby minimizingL total
+15:end for
+16:end for
+Table 12: ERA5 spectral loss schedule ablation (FNO base,K= 6). Progressiveλ k ∈
+[1.0,2.0] vs. fixedλ k = 1.5.
+Schedule ACC↑RFNE↓
+Fixedλ k = 1.5 0.875 0.235
+Progressiveλ k ∈[1.0,2.0]0.892 0.214
+Training Compute Budget.Table 13 reports per-batch wall-clock timing for the IRNO
+refinement operator (U-Net backbone) on Active Matter at different unrolling horizonsK.
+Training overhead scales sublinearly in total wall-clock time, withK= 4 incurring 2.69×
+overhead relative toK= 1 andK= 6 incurring 4.14×, reflecting the amortization of
+optimizer and data-loading costs across longer unrolls.
+Table 13: Per-batch training timing (ms) for IRNO on Active Matter at different unrolling
+horizonsK. Measurements on a single NVIDIA RTX PRO 6000 Blackwell Max-Q GPU.
+KU-Net fwd Loss Backward Optimizer Total / batch
+1 14.52 ms 0.14 ms 45.32 ms 1.27 ms 101.63 ms (1×)
+4 54.69 ms 0.62 ms 170.86 ms 1.13 ms 273.89 ms (2.69×)
+6 81.71 ms 0.86 ms 285.90 ms 1.14 ms 420.93 ms (4.14×)
+37\n\n--- page 38 ---\n\nG.4 Implementation Details
+Software and Libraries.All experiments are implemented in Python 3.10.16 using Py-
+Torch 2.5.1 with CUDA 12.1. NumPy and Matplotlib are used for numerical processing and
+visualization, respectively. FLOPs are measured usingfvcore.
+Hardware.All experiments were conducted on NVIDIA GPUs. Specifically, we used
+NVIDIA L40 GPUs with 48 GB memory and NVIDIA RTX PRO 6000 Blackwell GPUs
+with 96 GB memory.
+G.5 Evaluation Metrics
+G.5.1 Primary Metrics
+Variance-scaled Root Mean Squared Error (VRMSE).For TR-2D and Active Mat-
+ter, we report the variance-scaled root mean squared error (VRMSE)Ohana et al. [2024],
+defined as the square root of the mean squared error normalized by the variance of the
+ground-truth field. Specifically, given a predictionuand referencevwith spatial mean ¯v, we
+compute
+VRMSE(u, v) =
+ ⟨|u−v| 2⟩
+⟨|v−¯v|2⟩+ε
+1/2
+,
+where⟨·⟩denotes averaging over all spatial locations and output channels, andεis a small
+constant for numerical stability.
+Anomaly Correlation Coefficient (ACC).For ERA5 dataset, we report the Anomaly
+Correlation Coefficient (ACC) to assess the spatial pattern similarity between predictions
+and ground truth. Given a predicted field ˆuand reference fieldu, we first compute their
+anomalies by removing the spatial mean:
+ˆu′ = ˆu−ˆu, u ′ =u− u,
+where (·) denotes the spatial mean. The ACC is then defined as
+ACC = ⟨ˆu′, u′⟩p
+⟨ˆu′,ˆu′⟩ ⟨u′, u′⟩
+,
+where⟨·,·⟩denotes the inner product over all spatial locations and channels. ACC mea-
+sures the similarity of spatial anomaly patterns and is particularly suitable for evaluating
+geophysical and climate variables.
+Relative Frobenius Norm Error (RFNE).We evaluate reconstruction accuracy using
+the Relative Frobenius Norm Error (RFNE), which measures the normalized discrepancy
+between the predicted field ˆuand the ground-truth fieldu. Specifically, RFNE is defined as
+RFNE = ∥ˆu−u∥F
+∥u∥F
+,
+38\n\n--- page 39 ---\n\nwhere∥·∥ F denotes the Frobenius norm over all spatial dimensions and channels. RFNE
+provides a scale-invariant measure of global reconstruction error and is widely adopted in
+scientific super-resolution benchmarks.
+G.6 Computational Cost Analysis
+FLOPs Calculation.We compute floating-point operation counts (FLOPs) using Py-
+Torch’sFlopCountAnalysiswith custom operator handlers designed to match the actual
+execution graph of our models. FLOPs are estimated at the operator level using the tensor
+shapes observed during a forward pass. Reported values correspond to a single forward pass
+of the base operator network, and cumulative FLOPs across multiple refinement steps are
+obtained by linear accumulation.
+Memory Profiling.We measure peak GPU memory usage during inference using Py-
+Torch’s CUDA memory profiler. All measurements are conducted with models in evaluation
+mode and undertorch.no grad()to exclude gradient storage.
+Peak GPU memory usage is measured during inference using PyTorch’s CUDA memory
+profiler. For the base FNO model, peak memory is obtained from a single forward pass. For
+iterative models with refinement steps (IRNO), memory usage is profiled throughout the
+refinement process by querying the peak allocated memory after each refinement step, and
+the maximum value observed across all iterations is reported as the peak memory usage for
+a given number of stepsK. Specifically, we record the maximum allocated CUDA memory
+viatorch.cuda.max memory allocated.
+G.7 Monolithic Residual Correction Models
+Table 14 summarizes the architectural designs of the large monolithic refinement model
+baselines, performing single-pass inference, see 4.7.
+Table 14: Architectural configurations of monolithic refinement model baselines used for
+comparison.
+Component UNet(×15) FNO SRCNN
+Architecture Type U-Net encoder–decoder Fourier Neural Operator CNN-based network
+Depth / Blocks 5 encoder–decoder levels 4 Fourier blocks 3 convolutional blocks
+Channel Width [64, 128, 256, 512, 1024] 64 256
+H Additional Tables and Visualization
+Numerical values for scatter plots.Figure 8 in the main text presents the trade-offs
+between accuracy and computational cost for all compared models. To provide a precise
+quantitative reference, Table 15 lists the corresponding numerical values. For the iterative
+39\n\n--- page 40 ---\n\nrefinement baseline (IRNO), we report cumulative FLOPs, as well as peak memory usage
+across the entire inference process.
+Table 15: Detailed numerical results corresponding to the scatter plots in the main text. The
+table reports ACC, RFNE, peak memory (MB), and cumulative FLOPs (G) for the base
+model, IRNO iterations, and the three large monolithic refinement model baselines.
+Model / Step ACC(%) RFNE (%) Peak Memory (MB) FLOPs (G)
+Base (FNO) 75.23 32.47 32469.00 87.74
+IRNO (K=1) 77.30 31.32 32503.58 289.26
+IRNO (K=2) 79.21 30.18 32503.58 490.77
+IRNO (K=3) 80.92 29.08 32503.58 692.28
+IRNO (K=4) 82.38 28.05 32503.58 893.80
+IRNO (K=5) 83.58 27.13 32503.58 1095.31
+IRNO (K=6) 84.55 26.32 32503.58 1296.83
+IRNO (K=7) 85.33 25.63 32503.58 1498.34
+IRNO (K=8) 85.94 25.03 32503.58 1699.86
+IRNO (K=9) 86.43 24.53 32503.58 1901.37
+IRNO (K=10) 86.82 24.10 32503.58 2102.89
+IRNO (K=11) 87.13 23.75 32503.58 2304.40
+IRNO (K=12) 87.38 23.45 32503.58 2505.91
+FNO + UNet (×15) 78.82 29.80 33262.86 1131.39
+FNO + FNO 76.50 32.13 33372.85 175.72
+FNO + SRCNN 71.42 35.44 33237.83 1935.33
+Inference Time per Step.We report the wall-clock inference time per step for different
+refinement pipelines on a single GPU. All measurements are conducted on an NVIDIA RTX
+PRO 6000 Blackwell Max-Q Workstation Edition GPU. For each method, the inference time
+is measured over five independent runs, and we report the mean and standard deviation. The
+reported numbers correspond to the average wall-clock time of one forward step, measured
+in milliseconds (ms).
+Table 16: Inference time per step (ms) on a single NVIDIA RTX PRO 6000 Blackwell Max-Q
+GPU. Results are reported as mean±standard deviation over five runs.
+Model Time per step (ms)
+FNO + IRNO (ours)308.29±30.07
+FNO + FNO 435.94±1.01
+FNO + SRCNN 653.85±3.04
+FNO + UNet (×15) 769.24±23.99
+40\n\n--- page 41 ---\n\nFigure 10: Qualitative results on ERA5 for Kinetic Energy (top) and Temperature Field
+(bottom) under 8×spatial downsampling. The model is trained with up to4 refinement
+steps. We visualize the ground truth, the base FNO prediction, and the progressive refine-
+ment results after each refinement step.
+Visualization for ERA5 with8×upscale factor.Figure 10 presents qualitative results
+on ERA5 for Kinetic Energy and Temperature Field under the 8×spatial downsampling.
+The visualizations demonstrate that the proposed iterative correction framework consistently
+improves predictions across different physical fields and upsampling factors.
+Figure 11 shows the temporal evolution of anomaly correlation coefficient (ACC) on ERA5
+for three different physical fields under the 8×downsampling. Across all fields, increasing
+the number of refinement steps consistently improves forecasting accuracy compared to the
+base FNO. These trends indicate that the iterative refinement framework generalizes well
+across both different fields and lower upsampling factors.
+Visualization for ERA5 with16×upscale factor.Figure 12 presents additional qual-
+itative results on ERA5 for the Temperature Field under the 16×spatial downsampling,
+complementing Figure 1 in the main paper, which reports results on the Kinetic Energy
+Field. Visualizations demonstrate that the proposed iterative correction framework general-
+izes consistently across different physical fields.
+Figure 13 reports the temporal evolution of anomaly correlation coefficient (ACC) on
+ERA5 for three different physical fields under the 16×downsampling setting. Across all
+fields, increasing the number of refinement steps consistently improves forecasting accuracy
+compared to the base FNO. These trends are consistent across different fields, suggesting
+41\n\n--- page 42 ---\n\nFigure 11: Temporal evolution of ACC on ERA5 under 8×spatial downsampling for Field
+1: Kinetic Energy, Field 2: Temperature, and Field 3: Precipitation (left to right). The
+model is trained with up to4 refinement steps. We report the base FNO and predictions
+obtained after different numbers of iterative refinement steps.
+that the performance improvements are not field-specific but arise from the proposed iterative
+correction framework.
+Figure 14 illustrates the prediction results for three large monolithic baseline models.
+These single-step refinement (right column) still fail to resolve small-scale turbulent features.
+In contrast, our IRNO framework, see Figure 1 is more effective at capturing fine-grained
+physics.
+Visualization for TR-2D and Active Matter.Figure 15 and 16 visualize predictions of
+FNO-based and TFNO-based IRNO on TR-2D density field. Figure 17 visualizes predictions
+of FNO-based and TFNO-based IRNO on Active Matter velocity field.
+Long-Horizon Extrapolation.Figure 18 shows VRMSE as a function of refinement step
+k, evaluated beyond the training horizon ofK= 6 up tok= 48 on Active Matter with FNO
+base operator. With step sizeα= 0.20, the error reaches a minimum of approximately
+0.0505 neark≈14 before diverging to 0.0806 atk= 48. Withα= 0.05, refinement remains
+stable throughout without divergence. Two complementary strategies can protect against
+divergence. First, step-size scheduling reducesαaskincreases. Second, adaptive stopping
+halts iteration when∥Φ θ(x, hk)∥falls below a user-defined threshold tied to the bias level
+α∥b∥/(1−q) from Corollary 3.3.
+HFS-ResUNet and IRNO Complementarity.Table 17 reports VRMSE at each refine-
+ment step when IRNO is applied on top of an HFS-ResUNet base on Active Matter. Starting
+from the HFS base error of 0.0631, IRNO progressively reduces error to 0.0486 atk= 6, re-
+maining stable atk= 8 (0.0487), demonstrating that iterative refinement compounds gains
+from frequency-aware architectures. Figure 19 further shows that IRNO achieves lower spec-
+tral error energy than HFS-ResUNet across the full radial frequency range.
+42\n\n--- page 43 ---\n\nFigure 12: Qualitative results on ERA5 for Temperature Field under 16×spatial downsam-
+pling. The model is trained with up to6 refinement steps. We visualize the ground truth,
+the base FNO prediction, and the progressive refinement results after each refinement step.
+Table 17: HFS-IRNO VRMSE per refinement step on Active Matter.
+Base (HFS)k= 1k= 2k= 3k= 4k= 6k= 8
+VRMSE 0.0631 0.0518 0.0504 0.0495 0.0490 0.0486 0.0487
+Alternative Refinement Architectures.Table 18 reports VRMSE for IRNO with dif-
+ferent refinement backbone architectures on Active Matter (TFNO base,K= 4). All archi-
+tectures achieve substantial error reduction, confirming that IRNO’s gains are driven by the
+iterative mechanism rather than a specific backbone choice.
+Table 18: IRNO with alternative refinement architectures on Active Matter (TFNO base,
+K= 4).
+Refinement Arch Initial VRMSE IRNO VRMSE Reduction
+ResNet 0.1946 0.0430 77.88%
+ConvNext 0.1946 0.0438 77.43%
+FNO 0.1946 0.0559 71.26%
+Normalization Ablation.Table 19 compares IRNO trained with BatchNorm, Layer-
+Norm, and GroupNorm on TR-2D (TFNO base,K= 4). All three normalization choices
+achieve consistent error reduction, confirming that the iterative refinement mechanism is
+robust to this architectural choice.
+43\n\n--- page 44 ---\n\nFigure 13: Temporal evolution of ACC on ERA5 under 16×spatial downsampling for Field
+1: Kinetic Energy, Field 2: Temperature, and Field 3: Precipitation (left to right). We
+report the base FNO and predictions obtained after different numbers of iterative refinement
+steps.
+Table 19: Normalization ablation on TR-2D (TFNO base). VRMSE and improvement over
+base operator atk= 4 andk= 8.
+Normalization VRMSE (k= 4) Improv. (k= 4) VRMSE (k= 8) Improv. (k= 8)
+BatchNorm (ours) 0.1102 53.52% 0.1042 56.05%
+LayerNorm 0.1038 56.61% 0.0988 58.70%
+GroupNorm 0.1031 57.46% 0.1006 58.50%
+F-Adapter vs. IRNO.Table 20 compares F-Adapter [Zhang et al., 2026] and IRNO
+(FNO base) on Active Matter. F-Adapter targets minimal-parameter adaptation, achieving
+2.31% VRMSE reduction with gains concentrated in mid- and high-frequency bands. IRNO
+trades additional training cost for substantially larger gains (50.73% overall) with broad
+spectral improvements across all frequency bands. Figure 20 visualizes the spectral error
+profile of F-Adapter and its per-frequency improvement over the FNO baseline.
+Table 20: F-Adapter vs. IRNO on Active Matter (FNO base). Frequency-band improvements
+are relative to the base FNO.
+Method VRMSE Improvement Low freq Mid freq High freq
+F-Adapter 0.0994 2.31% 6.8% 58.6% 79.6%
+IRNO 0.0501 50.73% 58.4% 67.8% 92.3%
+44\n\n--- page 45 ---\n\nFigure 14: Qualitative comparison between Ground Truth, Base FNO, and single-step refine-
+ment across three large monolithic baseline architectures (Models UNet (10×), FNO, and
+SRCNN).
+45\n\n--- page 46 ---\n\nFigure 15: Qualitative results on TR-2D with FNO as base operator. The model is trained
+with up to6 refinement steps. We visualize the ground truth, the base FNO prediction,
+and the progressive refinement results after each refinement step.
+Figure 16: Qualitative results on TR-2D with TFNO as base operator. The model is trained
+with up to4 refinement steps. We visualize the ground truth, the base TFNO prediction,
+and the progressive refinement results after each refinement step.
+46\n\n--- page 47 ---\n\n(a) FNO base operator (6 refinement steps)
+(b) TFNO base operator (4 refinement steps)
+Figure 17: Qualitative results on Active Matter with different base operators. We visualize
+the ground truth, base operator predictions, and progressive refinement results after each
+correction step.
+Figure 18: VRMSE vs. refinement stepkup to 8×the training horizon (K= 6, dashed
+vertical line) forα= 0.05 (stable) andα= 0.20 (diverges) with FNO-based IRNO on Active
+Matter.
+47\n\n--- page 48 ---\n\nFigure 19: Spectral error energy vs. radial frequency for HFS-ResUNet and IRNO on Active
+Matter. Shaded regions denote±1 standard deviation.
+Figure 20: Spectral error vs. radial frequency for F-Adapter (left) and per-frequency im-
+provement over FNO baseline (right) on Active Matter.
+48\n

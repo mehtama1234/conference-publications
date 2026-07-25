@@ -1,0 +1,1246 @@
+\n\n--- page 1 ---\n\nControlled LLM Training on Spectral Sphere
+Tian Xie1 *
+Haoming Luo2 Haoyu Tang2 Yiwen Hu2 Jason Klein Liu4 Qingnan Ren1
+Yang Wang1 Wayne Xin Zhao2,4 Rui Yan3 Bing Su2 Chong Luo1 Baining Guo1
+1Microsoft Research Asia 2Renmin University 3Wuhan University 4IQuest Research
+Project Page:Spectral-Sphere-Optimizer
+Abstract
+Scaling large models requires optimization strategies that ensure rapid convergence
+grounded in stability. Maximal Update Parametrization (µP) provides a theoretical
+safeguard for width-invariantΘ(1) activation control, whereas emerging optimizers
+like Muon are only “half-aligned” with these constraints: they control updates
+but allow weights to drift. To address this limitation, we introduce theSpectral
+Sphere Optimizer (SSO), which enforces strict module-wise spectral constraints
+on both weights and their updates. By deriving the steepest descent direction on the
+spectral sphere, SSO realizes a fully µP-aligned optimization process. To enable
+large-scale training, we implement SSO as an efficient parallel algorithm within
+Megatron. Through extensive pretraining on diverse architectures, including Dense
+1.7B, MoE 8B-A1B, and 200-layer DeepNet models, SSO consistently outperforms
+AdamW and Muon. Furthermore, we observe significant practical stability benefits,
+including improved MoE router load balancing, suppressed outliers, and strictly
+bounded activations.
+0 5000 10000 15000 20000
+Training Steps
+100
+101
+102
+103
+Attn Hidden State AbsMax (Outliers)
+AdamW
+Muon
+Spectral Sphere
+(a)AbsMax(outliers) of Attention Activations
+0 5000 10000 15000 20000
+Training Steps
+10−1
+100
+101
+102
+FFN Hidden State RMS
+AdamW
+Muon
+Spectral Sphere (b)RMSof FFN Activations
+Figure 1:Training dynamics of Dense-1.7B activations (log-scaled cross-layer averages).Our
+Spectral Sphere maintains constant activation magnitudes throughout training because itsµP-metrized
+constraints on the spectral manifold ensure that the activation RMS remains at Θ(1) scale. Muon
+activations show a mild drift due to learning rate decay and weight decay. By contrast, AdamW
+proves the most unstable, generating significantly larger activations, with attention AbsMax and FFN
+RMSreaching∼100×magnitude compared to those spectral optimizers.
+*Corresponding to unakar666@gmail.com
+1
+arXiv:2601.08393v3  [cs.LG]  5 Mar 2026\n\n--- page 2 ---\n\nContents
+1 Introduction 3
+2 Preliminary 3
+2.1 Maximal Update Parametrization (µP) . . . . . . . . . . . . . . . . . . . . . . . 3
+2.2 Steepest Descent under Different Norms . . . . . . . . . . . . . . . . . . . . . . . 4
+2.3 Muon Optimizer . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+3 Method 5
+3.1 Optimization Target Formulation . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+3.2 First-Order Tangent Space Constraint . . . . . . . . . . . . . . . . . . . . . . . . 6
+3.3 Second-Order Manifold Constraint . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+3.4 Overall Algorithm & Interpretation . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+4 Algorithm Details 8
+4.1 Spectral Radius Scale . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+4.2 Learning Rate Scaler . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+4.3 Module Granularity . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+5 Infrastructure Design 10
+5.1 Bottleneck Analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+5.2 Optimization Pipeline . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+5.3 Future Improvements . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+6 Scaling Experiments 12
+6.1 Experimental Setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+6.2 Dense 1.7B . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+6.3 MoE 8B-A1B . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+6.4 DeepNet 200-Layer . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+7 Discussion 14
+A Appendix 19
+A.1 Duality with Spectral Norm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+A.2 Proofs: Localization of the Root ofh(λ). . . . . . . . . . . . . . . . . . . . . . 19
+A.3 Dynamic Spectral Weight Decay . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+A.4 MoE Routing Scaling Factor . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+A.5µP Width Scaling . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+2\n\n--- page 3 ---\n\n1 Introduction
+LLM training is, at its core, a pursuit ofconvergence speedgrounded in the necessity ofstability.
+While the community has explored various optimization strategies, we argue that the essential
+principle governing training stability is theMaximal Update Parametrization( µP) [Yang et al., 2024].
+By mandating that the spectral norms of weights and updates scale as Θ(
+p
+dout/din) to ensure width-
+invariant activations remains Θ(1) scale, µP serves as the mathematical safeguard against activation
+explosions [Takase et al., 2025]. However, the current landscape is saturated with methods that fail to
+satisfy these fundamental conditions. Conventional soft regularization methods, such as decoupled
+weight decay or initialization strategies, prove insufficient over long training horizons [Kosson et al.,
+2025]. This unconstrained weight drift destabilizes theeffective step size(update-to-weight ratio) and
+degrades feature learning.
+On the other side of the spectrum lies the pursuit of optimal convergence. The recent Muon
+optimizer [Jordan et al., 2024] has demonstrated remarkable efficiency, often interpreted as steepest
+descent under the spectral norm. In analyzing Muon, we uncover a surprising insight: it acts as a“half-
+aligned”solution to theµP constraints. However, maintaining stable features requires constraining
+not only the updates but also the weights themselves. Unstable activations like attention logits
+explosion were still observed in Muon training [Kimi Team et al., 2025]. Consequently, practitioners
+are forced to rely on “non-essential” architectural patches to artificially force stability — ranging
+from aggressive normalization schemes like SandwichNorm [Ding et al., 2021] and QK-Norm [Henry
+et al., 2020], to ad-hoc fixes like logit softcapping [Kimi Team et al., 2025] — often at the cost of
+model expressivity and requiring extensive hyperparameter tuning. This observation motivates a
+fundamental question:
+What if an optimizer could simultaneously satisfy the steepest descent property for
+convergence speedand the strictµP constraints forfundamental stability?
+To answer this, we propose the mathematically unique solution that unifies these two objectives. By
+identifying the spectral sphere as the natural manifold for stable feature learning, SSO derives the
+steepest descent direction constrained within this geometry. Unlike heuristic manifold projection
+methods [Xie et al., 2025, Pethick et al., 2025], SSO solves a constrained optimization problem in
+the tangent space via a Lagrange multiplier search, followed by a retraction step to map the trajectory
+back onto the spectral sphere.
+To enable large-scale training, we offer a systematic implementation in Megatron. We provide
+principled guidelines for spectral preconditioned optimization, specifically deriving the optimal
+learning rate scaler, determining the criticalatomic module granularity, and identifying the optimal
+spectral radiusto control activation at optimal scales precisely. These offer a robust recipe for
+large-scale training. Specifically to mitigate the overhead of the iterative root solver, we utilize a
+novel distributed strategy centered on atomic module sharding[NVIDIA, 2025]. This technique
+partitions fused params into independent spectral units, enabling communication-free local updates.
+We further address solver-induced workload imbalance through a size-aware ping-pong placement
+strategy, and accelerate matrix operations using adaptive kernel dispatcher, alongside multi-stream
+execution and singular vector caching.
+Empirically, we validate SSO through extensive pretraining experiments across various scales,
+including Dense 1.7B, MoE 8B-A1B, and 200-layer DeepNet models. SSO consistently outperforms
+AdamW and Muon while uniquely preserving stable µP learning rate transfer. Notably, it yields
+superior training dynamics: it significantly improves MoE router load balancing, suppresses outliers
+in deep networks, and strictly bounds activations within a tunable scale.
+2 Preliminary
+2.1 Maximal Update Parametrization (µP)
+µP prescribes how activations and weight updates should scale with width to preserve feature
+learning [Yang et al., 2024]. Ideal feature learning requires the scale of activations to remain as
+invariant as possible. We useoperator normto characterize how the norm of activations changes
+through a linear layer.
+3\n\n--- page 4 ---\n\nConsidering a linear layery=W xwithW∈R dout×din ,x∈R din, the RMS norm is defined as
+∥x∥rms := ∥x∥2√din
+,(1)
+while the RMS-to-RMS operator norm is defined as
+∥W∥ rms→rms := sup
+x̸=0
+∥W x∥rms
+∥x∥rms
+.(2)
+µP scale invariance requires maintaining∥y∥rms =∥x∥ rms = Θ(1), which is equivalent to enforcing
+the RMS-to-RMS condition ∥W∥ rms→rms =∥W∥ 2
+p
+din/dout = Θ(1). This induces the following
+spectral norm constraint on the weight matrix ∥W∥ 2 = Θ(
+p
+dout/din). A similar requirement
+applies to parameter updates; together, we refer to these as the spectralµP condition below.
+SpectralµP Condition
+Yang et al. [2024] shows that preservingscale-invariant activationsfor feature learning requires
+the same law to hold for both weights and their updates:
+∥W∥ 2 = Θ
+ r
+dout
+din
+!
+,∥Φ∥ 2 = Θ
+ r
+dout
+din
+!
+.
+2.2 Steepest Descent under Different Norms
+Following Bernstein and Newhouse [2024], Franz Louis Cesista [2025], many successful optimizers
+can be interpreted asfirst-ordermethods without convexity assumptions. Specifically, after switching
+off exponential moving averages, these algorithms reduce to instances of steepest descent governed
+by distinct norms: SGD corresponds to the Frobenius norm ∥·∥ F , AdamW [Loshchilov and Hutter,
+2019] to theℓ ∞ norm, and Shampoo [Gupta et al., 2018] to the spectral norm∥·∥ 2.
+In this view, we determine the update Φ by iteratively minimizing a first-order Taylor approximation
+of the loss around the current weightsW, subject to a hard constraint on the step size:
+Φ:= argmin
+∥Φ∥≤η
+{L(W) +⟨∇ W L(W),Φ⟩}= argmin
+∥Φ∥≤η
+⟨G,Φ⟩,(3)
+where G:=∇ W L(W) is the gradient of the loss function at W . The update is thus determined by
+two priors: anorm ∥·∥ assigned according to the specificfunctional roleof the module, and astep
+sizeηthat governs the update scale. The solution is as follows:
+Definition 1: Steepest Descent Update
+Given a norm ∥·∥ defining the geometry and a step size η governing the scale, thesteepest
+descent updatesolution to Equation (3) is given by
+Φ=−η·Φ unit,whereΦ unit := arg max
+∥T∥≤1
+⟨G,T⟩,(4)
+2.3 Muon Optimizer
+Following the framework of metrized deep learning (Section 2.2), Muon [Jordan et al., 2024] can be
+interpreted as steepest descent under thespectral norm. For a 2D weight matrix W , the spectral
+norm∥·∥ 2 1 gives the tightest bound on the matrix’s input-output gain:
+∥W∥ 2 := sup
+x̸=0
+∥W x∥2
+∥x∥2
+,(5)
+1For vectors,∥v∥ 2 denotes theℓ 2 norm; for matrices,∥W∥ 2 denotes the (inducedℓ 2 →ℓ 2) spectral norm.
+4\n\n--- page 5 ---\n\nBy choosing the spectral norm to constrain the update direction Φ, the steepest descent direction is
+uniquely given by thematrix sign function (msign)(Appendix A.1):
+msign(G) =Usign(Σ)V ⊤ =U [:,:r]V ⊤
+[:,:r],(6)
+where G=UΣV ⊤ is the singular value decomposition (SVD). The msign operation orthogonalizes
+the gradient, equalizing all active singular directions and yielding a spectrum isotropic update. A
+key contribution of Muon is the efficient approximation of msign(G) via Newton–Schulz iterations
+which can be implemented on GPUs.
+However, Muon constrains only the backward update Φ, leaving the forward weights W uncon-
+strained. This often leads to unstable µP feature learning in hidden states rms, motivating our
+development ofa fully aligned approach that constrains bothWandΦ.
+3e-3 5e-3 7e-3 9e-31e-2 1.5e-2 2e-2 3e-2
+2.6
+2.8
+3.0
+3.2
+3.4Val Loss
+3.4649
+3.1240
+2.8506
+2.6608
+Muon Optimizer
+3e-3 5e-3 7e-3 9e-31e-2 1.5e-2 2e-2 3e-2
+2.6
+2.8
+3.0
+3.2
+3.4Val Loss
+3.4578
+3.1119
+2.8383
+2.6481
+Spectral Sphere Optimizer
+LR
+width=256 width=512 width=1024 width=2048 Min Loss
+Figure 2: µP width scaling across 25× model sizes (70M to 1.8B).Although µP aims for width-
+invariant scaling, Muon still exhibits notable optimal learning rate drift. In contrast, our Spectral
+Sphere achieves stable LR transfer, while also obtaininglower optimal loss thanMuon. More details
+and related experiments are provided in Appendix A.5.
+3 Method
+3.1 Optimization Target Formulation
+We start by focusing on a hidden layer matrix W∈R dout×din. To satisfy the spectral µP scaling
+condition in Section 2.1, we set the spectral scale to target radiusR:
+R= Θ
+p
+dout/din
+
+.(7)
+Following metrized deep learning (Section 2.2), we define the unit update Φ as the solution to a
+constrained optimization problem:
+Formulation: Steepest Descent on the Spectral Sphere
+We performsteepest descentunder thespectral norm, constraining both theweightsand
+theupdatesto a spectral sphere of radius R. Specifically, we parameterize the update step as
+∆W=ηRΦ, whereηis the base learning rate. The update directionΦis the solution to:
+max
+Φ
+⟨G,Φ⟩
+s.t.∥Φ∥ 2 = 1,
+∥W−ηRΦ∥ 2 =∥W∥ 2 =R.
+(8)
+5\n\n--- page 6 ---\n\n3.2 First-Order Tangent Space Constraint
+Assisted by the uniqueness of the top singular value 2, the spectral norm ∥W∥ 2 is differentiable
+with gradient Θ:=∇ W ∥W∥ 2 =u 1v⊤
+1 , where (u1,v 1) are the principal left and right singular
+vectors [Watson, 1992]. We consider a first-order Taylor Expansion of the spectral norm aroundW :
+∥W−ηRΦ∥ 2 =∥W∥ 2 −ηR⟨Θ,Φ⟩+O(η 2R2∥Φ∥2
+2).(9)
+To enforce the invariance condition∥W−ηRΦ∥ 2 =∥W∥ 2, the first-order term must vanish, which
+implies the tangent constraint:⟨Θ,Φ⟩= 0. Equation (8) thus reduces to
+max
+Φ
+⟨G,Φ⟩s.t.∥Φ∥ 2 = 1,⟨Θ,Φ⟩= 0.eq(10)
+We then introduce aLagrange multiplier λ and maximizeLagrangian L(Φ;λ) =⟨G+λΘ,Φ⟩
+under constraint∥Φ∥ 2 = 1. The analytical solution and numerical method are summarized below.
+Solution: Tangent Space Update viaλ-Search
+For a fixedλ, the steepest descent direction is (proof in Appendix A.1)
+Φ⋆(λ) = msign(G+λΘ),(11)
+whereλ ⋆ is the unique root of the constraint function
+h(λ) :=⟨Θ,msign(G+λΘ)⟩, h(λ ⋆) = 0.(12)
+Theoretical Properties(proof in Appendix A.2, visualized in Figure 3):
+i) Monotonicity:The function h(λ) is monotonically non-decreasing and transitions from −1
+to+1asλvaries from−∞to+∞.
+ii) Root Localization:The solution λ⋆ is strictly bounded within the interval
+[−2∥G∥∗,2∥G∥ ∗], providing a finite search space a.
+Numerical Algorithm(overhead analysis in Section 5):
+Given the monotonic nature ofh(λ), we locateλ ⋆ efficiently:
+▷ Bracketing:Leveraging monotonicity, we start from λ= 0 and exponentially expand the
+search bracket in the opposite direction of the sign ofh(0)until the root is enclosed.
+▷Bisection:We isolateλ ⋆ via standard bisection within the bracketed interval.
+aNuclear norm∥·∥ ∗ is the sum of singular values.
+−1.00 −0.75 −0.50 −0.25 0.00 0.25 0.50 0.75 1.00
+¸
+−1.00
+−0.75
+−0.50
+−0.25
+0.00
+0.25
+0.50
+0.75
+1.00
+h(¸)
+5 repeats
+Averaged h(¸)
+Averaged ¸ ⋆
+−0.010 −0.005 0.000 0.005 0.010
+−0.3
+−0.2
+−0.1
+0.0
+0.1
+0.2
+0.3
+(3.01e-5, -7.13e-5)
+Zoom: [-0.01, 0.01]
+(a)1024×3072matrix
+−1.00 −0.75 −0.50 −0.25 0.00 0.25 0.50 0.75 1.00
+¸
+−1.00
+−0.75
+−0.50
+−0.25
+0.00
+0.25
+0.50
+0.75
+1.00
+h(¸)
+5 repeats
+Averaged h(¸)
+Averaged ¸ ⋆
+−0.010 −0.005 0.000 0.005 0.010
+−0.3
+−0.2
+−0.1
+0.0
+0.1
+0.2
+0.3
+(3.80e-4, 2.86e-5)
+Zoom: [-0.01, 0.01] (b)4096×1024matrix
+Figure 3:Empirical curves of h(λ) =⟨Θ,msign(G+λΘ)⟩ for random matrices. h(λ) is
+monotonic non-decreasing in λ, and its root λ⋆ lies close to zero (proof in Appendix A.2). Here, each
+curve is obtained by averaging over 5 repeats, and each matrix is initialized fromN(0,0.02 2).
+2Numerical coincidence of singular values is a measure-zero event for random matrices [Tao and Vu, 2014].
+Quantitatively, it occurs with probability at mostexp(−cmax(d in, dout))[Han, 2025].
+6\n\n--- page 7 ---\n\n3.3 Second-Order Manifold Constraint
+Note that the remainder O(η2R2∥Φ∥2
+2) in Equation (9) may accumulate over iterations, causing
+gradual drift off the spectral sphere. To enforce the exact constraint ∥W∥ 2 =R throughout training,
+we apply a retraction step that projects the weights back onto the manifold:
+W←W· R
+∥W∥ 2
+.(13)
+While the retraction is conceptually a post-update projection, we implement it as a pre-update
+correction for efficiency, which is operationally equivalent. This reordering allows us to invoke the
+computationally expensive Power Iteration only once per step, reusing the resulting singular triplet
+for both the manifold retraction and the tangent projectorΘ(Lines 6–9 in Algorithm 1).
+The retraction strictly constrains ∥W∥ 2 =R , which via Equation (14), automatically bounds the
+weight magnitudes. As a result, weight decay, which is primarily introduced to limit the weight
+scale, becomes redundant. We thereforeeliminate weight decayin hidden 2D weights 3, removing a
+sensitive hyperparameter from training. More details can be found in Appendix A.3.
+∥W∥ F ≤
+p
+rank(W)∥W∥ 2 ≤
+p
+min(dout, din)R.(14)
+3.4 Overall Algorithm & Interpretation
+Algorithm 1Spectral Sphere Optimizer (SSO)
+Require: Initial 2D weights W0 ∈R dout×din, spectral µP scaler R=
+p
+dout/din, learning rate η,
+momentum coefficientβ, precision toleranceϵ
+1:Initialize:W 0 ←R·W 0/∥W0∥2,M 0 ←0
+2:fort= 0,1, . . .do
+3:G t ← ∇W L(Wt)
+4:M t ←βM t + (1−β)G t
+5: cMt ←M t/∥Mt∥F ▷Normalize for Numerical Stability
+// 1. Spectral Geometry Analysis
+6:(σ t,u t,v t)←PowerIteration(W t)▷Top Singular Value & Vectors
+7:Θ t ←u tv⊤
+t ▷Tangent Space Projector
+// 2. Retraction to Spectral Sphere
+8:W t ←W t ·R/σ t
+// 3. Steepest Descent Lagrange Solver
+9:Defineh(λ) :=⟨Θ t,msign( cMt +λΘ t)⟩
+10:λ ∗
+t ←Bisection(h,tolerance=ϵ)▷Find root ofh(λ) = 0
+// 4.µP-Scaled Update
+11:Φ t ←msign( cMt +λ ∗
+t Θt)
+12:W t+1 ←W t −η·R·Φ t ▷µP Style Update
+13:end for
+In this paper, we set AdamW and Muon as baselines. Additionally, we introduce MuonSphere, a
+variant similar to Scion [Pethick et al., 2025]4, which can be viewed as Spectral Sphere with λ= 0 .
+While Spectral Sphere follows a steepest-descent approach, MuonSphere simply normalizes 2D
+hidden weights onto the spectral sphere before each update. Figure 4 provides a sketch of the latter
+three spectral-preconditioned optimizers’ update.
+3We still apply weight decay to params like Embedding for possible scaling stability, although our ablations
+on 1.7B model suggest that disabling weight decay may actually be slightly better.
+4Unlike Scion, which applies ColNorm→Spectral→Sign (l∞) norm chain throughout the network, Muon-
+Sphere retains Sign→Spectral→Sign norm scheme. We find ColNorm input hurts performance.
+7\n\n--- page 8 ---\n\nFigure 4:Geometry of Steepest Descent Update Directions.The left solid arc denotes the W
+sphere, while the right dotted arc denotes the ∆W sphere (unit Φ scaled by η). The shaded region
+represents the feasible set within thetangent spaceof the W sphere at step Wi. Under weight
+constraint, projectingGonto the tangent space (Spectral Sphere) yields the largest update angle.
+4 Algorithm Details
+4.1 Spectral Radius Scale
+Given the target spectral radius
+R= Θ
+p
+dout/din
+
+=c
+p
+dout/din
+
+,
+the constant c serves as a scalar that sets the branch output magnitude relative to the residual stream.
+By tuning c, one can precisely control the signal-to-noise ratio along the deep residual path, balancing
+the contributions of the Attention/FFN blocks against the skip connection. Properly choosing c is
+therefore essential for stabilizing depth-wise signal propagation in Transformers.
+c = 0:1 c = 0:5 c = 1:0 c = 2:0 c = 10:0
+1e-3 5e-3 1e-2 5e-2
+Learning Rate
+2.60
+2.65
+2.70
+2.75
+2.80
+2.85
+2.90Final Loss
+(a) Radius scale search.
+2000 4000 6000 8000 10000
+Step
+101
+102
+103
+104
+105
+AbsMax (b)AbsMaxof FFN activations.
+2000 4000 6000 8000 10000
+Step
+10−4
+10−3
+10−2
+10−1
+100
+101
+102
+RMS (c)RMSof FFN activations.
+Figure 5:Ablation of radius scaling onoptimizationandactivation.(a) Final loss vs. learning
+rate for varying radius scales c. A moderate scale (e.g. c= 2.0 ) achieves the best performance. (b)
+AbsMax and (c) RMS of FFN activations during training. AbsMax monotonically follows the radius
+scale, whereas RMS follows a clear power-law scaling withc.
+4.2 Learning Rate Scaler
+We propose a unified view in which each learning rate scaler enforces a consistenteffective step size
+under a chosennorm metricandinitialization scheme.
+In the update rule W←W−ηRΦ , R scales the update size. To avoid instability caused by
+heterogeneous layer shapes, we select R to maintain a constanteffective step size— defined as the
+8\n\n--- page 9 ---\n\nratio of update-to-weight magnitude under a norm metric∥·∥:
+∥∆W∥
+∥W∥ = ∥ηRΦ∥
+∥W∥ ≈η.(15)
+We evaluate three common learning rate scalers below:
+R=
+
+
+
+p
+dout/din,(SpectralµP Scaler)
+p
+max(dout, din)·0.2,(Align-Adam-RMS Scaler)
+p
+max(1, dout/din),(Spectral Kaiming Scaler)
+(16)
+5000 6000 7000 8000 9000 10000 11000 12000 13000
+Training Steps
+2.70
+2.72
+2.74
+2.76
+2.78
+2.80
+2.82
+2.84
+2.86Train Loss
+Spectral ¹P (Standard)
+Spectral Kaiming
+Align Adam RMS
+Figure 6:Ablation of learning rate scalers.Each curve represents the optimal validation loss
+obtained via a learning rate grid search.Spectral µP(yellow) outperformsAlign-Adam-RMS(blue),
+validating the optimality ofµP-aligned scaling under the SpectralµP condition.
+• Spectral µP Scaler.Enforces theRMS-to-RMS operator norminvariance from Section 2.1. It
+ensures that both W and ∆W satisfy the µP scaling ∥W∥ 2 = Θ(
+p
+dout/din), forming the
+geometric basis of our Spectral Sphere Optimizer.
+• Align-Adam-RMS Scaler.A heuristic for consistent relative learning rates in theRMS normunder
+fixed standard-deviation initialization. Empirically, it aligns per-layer update RMSnorm to AdamW,
+enabling direct transfer of AdamW-tuned hyperparameters (e.g. learning rate, weight decay) to the
+spectral method [Liu et al., 2025].
+• Spectral Kaiming Scaler.Targets thespectral normunder Kaiming initialization ( W∼
+N(0,1/d in)) [He et al., 2015]. Random matrix theory establishes that such matrices satisfy
+∥W∥ 2 ≈1 +
+p
+dout/din. This scaling prevents vanishing pre-activations in bottleneck layers
+whered out ≪d in [Pethick et al., 2025].
+Experimental results (Figure 6) favor theSpectral µPscaler, supporting the theoretical scaling
+condition in Section 2.1. This demonstrates thatoptimizing on a spectral manifold requires a scaler
+explicitly calibrated to the spectral norm.
+4.3 Module Granularity
+To maximize computational efficiency, modern Transformer implementations such as Megatron-
+LM [Shoeybi et al., 2019] fuse several matrices into a single physical tensor (e.g. the QKV projections
+or the SwiGLU gate/up matrices). However, since these modules have distinct functional roles,
+imposing a unified constraint on the fused tensor is suboptimal as shown in Figure 7. Instead, we
+decompose fused tensors and treat each submatrix as an independent module. We applyper module
+spectral initialization and optimizationat this finer granularity by default (e.g. splitting attention
+QKV per head and separating FFN gate/up). Note that granularity is tunable depending on infra
+speed.
+Under our spectral µP initialization scheme (also discussed in Section 4.2), the weight matrix is
+constructed by first sampling Wk ∼ N(0, σ2) and subsequently projecting it onto the spectral sphere:
+W=c
+r
+dout
+din
+· Wk
+∥Wk∥2
+.
+9\n\n--- page 10 ---\n\n5000 6000 7000 8000 9000 10000 11000 12000 13000
+Training Steps
+2.700
+2.725
+2.750
+2.775
+2.800
+2.825
+2.850
+2.875Train Loss
+All Split (Standard)
+Split QKV Only
+Split FFN Only
+Figure 7:Ablation of module granularity forinitializationandoptimization.Splitting QKV
+per head alone yields the most significant performance gain. Although splitting the FFN gate/up
+weights produces nearly the same loss curve as no-split, we maintain this split to respect their distinct
+functional roles; the overlapping curve is omitted from the figure.
+5 Infrastructure Design
+5.1 Bottleneck Analysis
+The main challenge inSSOimplementation comes from thebracket-and-bisectroot solver that runs
+at every update. To satisfy the tangent-space constraint, we must find a Lagrange multiplier λ such
+that h(λ) = 0. We first expand the search interval bybracketing, and then we runbisectioninside
+the bracket to obtain aλ ⋆ that meets a target tolerance. This solver introduces non-trivial overhead:
+1. Workload Imbalance:different bracketing range and tolerance settings can change the number of
+search and bisection steps, leading to unstable runtime and workload imbalance between devices.
+2. Computational Cost:Each step in the search also evaluates h(λ), which calls msign( cM+λΘ) ;
+these extra matrix computations accumulate and add noticeable cost to every optimizer step.
+3. Synchronization Overhead:Iterative search creates frequent synchronization between the GPU
+and the CPU, because the algorithm must finish each evaluation and then check a scalar condition
+before choosing the nextλand continuing.
+5.2 Optimization Pipeline
+We introduce a holistic optimization pipeline designed to mitigate these overheads while preserving
+numerical precision.All performance statistics are collected from Dense 1.7B model pretraining.
+Atomic Module Sharding.We employ a fine-grained, parameter-wise sharding strategy [NVIDIA,
+2025]. As noted by [Liu et al., 2025], while standard ZeRO-1 is efficient for element-wise optimizers
+(e.g. AdamW), its flat-buffer sharding approach is incompatible with spectral methods that require
+full gradient matrices to compute updates. To reconcile this, we shard parameters asatomic modules
+rather than flattened buffers. An atomic module is defined as the minimal independent weight matrix
+required to remain intact for spectral operations (see Section 4.3).
+Load Balancing Strategy.To resolve the workload imbalance caused by variable solver depths,
+we employ a “ping-pong” load balancing strategy adapted from [NVIDIA, 2025]. Empirical results
+indicate this method outperforms both greedy size-descent sorting and default round-robin allocation.
+We sort atomic modules by size and assign them to DP ranks in an alternating zigzag pattern. This
+heuristic effectively balancing the solver workload without complex runtime scheduling. Finally, we
+synchronize the updated params using iterative All-Gather collective from NVIDIA [2025].
+Adaptive Kernel Selection.We observe that the optimal implementation for Matrix Sign compu-
+tation is highly sensitive to matrix dimensions. As shown in Table 1, applying specialized kernels
+indiscriminately can degrade performance. We therefore implement an Adaptive Dispatcher:
+10\n\n--- page 11 ---\n\n• Small Matrices (<512 ): We use a JIT-compiled PyTorch implementation built ontorch.addmm.
+This avoids the launch overhead of specialized kernels.
+• Large Matrices (≥512 ): We dispatch to a custom Triton kernel implementing the SYmmetric
+Rank-K (SYRK) NVIDIA [2025] update, which exploits the symmetry of Newton–Schulz iterations
+to halve memory reads.
+Multi-Stream Parallelism.For layers composed of many small independent matrices (e.g. per
+head attention split), single-stream execution suffers from kernel launch latency bubbles. We exploit
+this independence by dispatching spectral updates across multiple CUDA streams.
+Mixed-Precision.The Power Iteration for spectral norm estimation is performed in BFloat16, while
+the sensitivemsign remains in FP32 with 8 iterations.
+Cache Top Singular Vectors.The singular vectors of model weights evolve slowly during training.
+Leveraging this temporal locality, we initialize the current Power Iteration using the cached singular
+vectors u and v from the previous step. This reuse mechanism drastically accelerates convergence,
+requiring only a few iterations to maintain approximation accuracy.
+Table 1: Optimization breakdown on end-to-end latency for 4M tokens/step on NVIDIA B200.
+↓denotes improvement, while↑denotes regression. Note there is still room for improvement.
+Time (ms)∆vs Baseline∆vs Prev.
+Naive Baseline (No opt.) 10928.5 - -
++ Load balance & All Gather 9365.5 -1563.0 (-14.3%)↓-1563.0 (-14.3%)↓
++ Triton SYRK Kernel 10284.2 -644.3 (-5.9%)↓+918.7 (+9.8%)↑
++ Adaptive & Multi-stream 9383.4 -1545.1 (-14.2%)↓-900.8 (-8.8%)↓
++ BF16 & Torch.compile (Final)7666.3 -3262.2 (-29.9%)↓-1717.1 (-18.3%)↓
+Table 2: End-to-end per-step latency for 4M tokens/step on NVIDIA B200. Muon as baseline.
+AdamW Muon MuonSphere Spectral Sphere
+Time (ms) 6734.15 (-2.10%) 6878.83 6949.85 (+1.03%) 7666.32 (+11.45%)
+5.3 Future Improvements
+• GPU-Native Solver.Profiling indicates that the current CPU-based bisection solver introduces
+latency due to frequent device-host synchronization. Although the bracketing phase converges
+rapidly (<2 steps), the bisection phase averages 5–7 steps, creating synchronization bubbles.
+Future work will prioritize implementing a pure GPU-native solver to eliminate these overheads.
+Additionally, we plan to adopt higher convergence algorithms, such as Brent’s method or n-section
+search, and optimize initial bracketing intervals to minimize msign calls.
+• Kernel Optimization.The theoretical advantage of SSO relies on the accuracy of the tangent
+space projection; when errors are high, the update direction may degrade to the “worst-case” Muon
+update. Currently, we ensure precision via 8 iterations of msign in FP32. To follow standard Muon
+practices, we plan to use msign in BFloat16 within 5 steps. Furthermore, we intend to replace
+current JIT-compiled operations with custom, fully optimized kernels (e.g. for batched msign and
+Power Iterations) to better exploit the hardware features of next-generation GPUs.
+• Low-precision Training.While weight matrics are spectral constrained, we find the residual
+stream remains the primary source of outliers. We aim to explore “fully manifold constrained”
+architectures, i.e. using mHC [Xie et al., 2025]. Additionally, given SSO’s demonstrated stability,
+we plan to explore low-precision training (e.g. FP8/NVFP4) to leverage the high throughput of
+low-bit arithmetic for better training efficiency.
+11\n\n--- page 12 ---\n\n6 Scaling Experiments
+6.1 Experimental Setup
+Hyperparameters.Following the µP protocol, we perform a learning rate sweep on the 1.7B
+model with AdamW between [10−3, 10−2] and find 5×10 −3 to be the optimal value. Training uses
+500 warmup steps, a global batch size of ∼4M tokens (1024 sequences × 4096 tokens each), and a
+cosine learning rate decay reduced to10%peak. We use BF16 mixed-precision training.
+Following Kimi Moonlight [Liu et al., 2025], all optimizers use a weight decay of 0.1. However,
+distinct from their approach of aligning updates to AdamW RMS (intended to reuse current scal-
+ing laws), we find that spectral µP LR scaler outperforms the uniform 0.2 update-rms alignment
+(Section 4.2). For msign coefficients, we use the Polar Express method [Amsel et al., 2025] with 8
+Newton–Schulz iterations5. We employ Nesterov momentum and, by default, split attention heads
+and FFN gate/up projections for separate initialization and optimization. For Spectral Sphere, we set
+the λ-solver’s maximum iterations to 20, Lagrange solver precision tolerance to 2e-4, and remove
+weight decay for all hidden 2D weights, as retraction maintains the weight constraint (Section 3.3).
+Training Data.We use the OLMo-Mix-1124 dataset [Team OLMo et al., 2025], tokenized with the
+OLMo-2 tokenizer. We randomly sample 100 billion tokens for training and reserve 1 billion tokens
+for validation. Data indices are built offline to guarantee a deterministic training order.
+Benchmarks.We primarily evaluate on the following downstream tasks: ARC [Clark et al., 2018],
+BoolQ [Clark et al., 2019], CSQA [Talmor et al., 2019], HellaSwag [Zellers et al., 2019], PIQA [Bisk
+et al., 2020], WinoGrande [Sakaguchi et al., 2021] and LAMBADA [Paperno et al., 2016].
+6.2 Dense 1.7B
+We adopt the architecture configuration of Qwen3-1.7B [Qwen-Team et al., 2025], replacing its
+original tokenizer with that of OLMo-2 [Team OLMo et al., 2025]. The core architecture utilizes
+Grouped Query Attention (GQA), QK-Norm, SwiGLU activations, Rotary Positional Embeddings
+(RoPE), and pre-normalization RMSNorm. We do not tie the embedding and the head.
+8000 10000 12000 14000 16000 18000 20000 22000
+Training Steps
+2.55
+2.60
+2.65
+2.70
+2.75
+2.80Val Loss
+1.24× faster
+1.14× faster
+AdamW
+Muon
+Muon Sphere
+Spectral Sphere
+Figure 8:Validation loss of training dense 1.7B model on 100B tokens.As a reference point,
+AdamW attains a final validation loss of 2.588 at 23k steps. The overall setup favors AdamW, since
+the learning rate is set for it (5e-3), rather than the higher optimal rate (1e-2) for Muon and Spectral
+Sphere. Even under this setting, spectral-based optimizers exhibit higher efficiency: Muon reaches
+the same validation loss level in 12% fewer steps, while Spectral Sphere does so in 19% fewer steps.
+6.3 MoE 8B-A1B
+The configuration largely follows DeepSeek-V3 [DeepSeek-AI et al., 2025]. The model has 27 layers:
+the first is a standard dense FFN, followed by 26 MoE layers. We utilize 64 experts in total, with a
+top-4 routing expert plus 1 shared expert.
+5We tested 5 and 8 iterations as well as different msign coefficients and observed negligible differences in
+training loss (< 1e-3). We retain 8 iterations for improved numerical accuracy.
+12\n\n--- page 13 ---\n\nTable 3: Performance comparison of different optimizers on Dense 1.7B models.
+Optimizer LMB. LMB. CSQA PIQA Hella. Wino. ARC-e ARC-c BoolQ Avg.
+(PPL)↓ (Acc)↑(Acc)↑(Acc)↑(Acc)↑(Acc)↑(Acc)↑(Acc)↑(Acc)↑ (Acc)↑
+AdamW 5.40 63.71 19.66 74.70 47.90 62.59 68.81 37.37 63.24 54.75
+Muon 5.05 65.19 19.00 75.35 48.91 61.72 70.24 37.46 64.22 55.26
+MuonSphere 4.87 65.5520.07 74.97 49.20 62.83 71.5138.40 66.97 56.19
+Spectral Sphere 5.00 65.0721.05 75.95 49.25 63.77 71.8038.31 65.57 56.35
+Router and Load Balancing.The router is implemented in FP32 precision. We adopt the auxiliary-
+loss-free strategy [Wang et al., 2024], which demonstrated superior expert load balancing compared
+to global auxiliary loss [Qiu et al., 2025] in our ablations. We enable expert bias with an update rate
+of 0.001. The sequence-level auxiliary loss is removed, as we find it redundant when expert bias is
+enabled. we use a sigmoid gate with top-k scores renormalized and scaled by 2. (see Appendix A.4).
+To evaluate router load balancing, we employ Maximal Violation (MaxVio) [Wang et al., 2024],
+where 0 indicates perfect balance. As shown in Figure 9, weight spectral normalization effectively
+promotes balanced routing, leading to superior validation loss.
+6000 8000 10000 12000 14000 16000 18000 20000 22000
+Training Steps
+2.40
+2.45
+2.50
+2.55
+2.60
+2.65
+2.70
+2.75Val Loss
+AdamW
+Muon
+Muon Sphere
+Spectral Sphere
+(a) Validation Loss across four optimizers.
+0 5000 10000 15000 20000
+Training Steps
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0Max Vio
+AdamW
+Muon
+Spectral Sphere (b) MaxVio as a MoE load-balance metric.
+Figure 9:MoE 8B-A1B training.Spectral Sphere achieves the lowest validation loss while main-
+taining the best expert load balance. In contrast, AdamW exhibits substantially larger MaxVio
+with frequent spikes, indicating unstable routing and poorer utilization of effective model capacity.
+Compared to Muon, constraining each expert on the spectral sphere further improves load balance.
+6.4 DeepNet 200-Layer
+To evaluate the stability of different optimizers under extreme depth, we extended the baseline’s
+28 layers to 200 layers. This deep and narrow serves as a stress test for stability. The training loss
+in Figure 10 shows that Spectral Sphere outperforms baselines with lower loss and higher stability.
+2000 3000 4000 5000 6000 7000
+Training Steps
+1.70
+1.75
+1.80
+1.85
+1.90
+1.95
+2.00
+2.05
+2.10LM Loss
+AdamW
+Muon
+Spectral Sphere
+Figure 10:Deepnet 200 layers training loss.AdamW shows pronounced instability, characterized by
+frequent loss spikes and a growing gap in performance relative to spectral-based optimizers. Spectral
+Sphere attains both the lowest loss and the highest stability.
+13\n\n--- page 14 ---\n\n7 Discussion
+In this work, we propose a novel perspective on optimizer design grounded in spectral µP principles.
+As detailed in Section 2.1, µP provides a mathematical safeguard that strictly controls hidden layer
+activations at the desired scale. By identifying the spectral sphere as the natural geometry for stable
+feature learning, we derive the Spectral Sphere Optimizer (SSO) — the unique solution for steepest
+descent constrained within both weight and update manifolds (Section 3). This formulation effectively
+achieves rapid convergence grounded in fundamental training stability. Empirically, SSO consistently
+outperforms AdamW and Muon, while uniquely preserving stable µP learning rate transfer. Notably,
+it yields superior training dynamics: it significantly improves MoE router load balancing, suppresses
+outliers in deep networks, and strictly bounds activations within a tunable scale.
+A critical distinction exists between our approach and emerging works on Stiefel manifold opti-
+mization [Bernstein, 2025]: while Stiefel manifold requiresallsingular values to be exactly 1, SSO
+constrains only themaximalsingular value. This relaxation allows the internal spectrum to evolve
+freely below the bound, avoiding the overly rigid isotropy of the Stiefel manifold.
+Beyond the theoretical contribution, we provide a complete and systematic recipe (Section 4) imple-
+mented in Megatron-LM. Our guidelines on atomic granularity, “ping-pong” load balancing strategy,
+learning rate scaler, and spectral radius scale serve as a robust empirical practice for the broader
+class of spectral optimizers. Finally, while we acknowledge that the current root solver introduces
+non-trivial latency, we have outlined concrete pathways to mitigate this overhead in Section 5.3. For
+scenarios prioritizing infra cost, we recommend MuonSphere — a variant that retains equivalent
+activation control with minimal overhead.
+Acknowledgements
+We sincerely thank Jianlin Su for his excellent blog, Scientific Spaces. We also thank Yifei Shen for his
+thoughtful discussions, and Franz Louis Cesista for helping clarify several conceptual formulations.
+14\n\n--- page 15 ---\n\nReferences
+Noah Amsel, David Persson, Christopher Musco, and Robert M. Gower. The polar express: Optimal
+matrix sign methods and their application to the muon algorithm, 2025. URL https://arxiv.
+org/abs/2505.16932.
+Jeremy Bernstein. Modular manifolds, 2025. URL https://thinkingmachines.ai/blog/
+modular-manifolds/.
+Jeremy Bernstein and Laker Newhouse. Old optimizer, new norm: An anthology, 2024. URL
+https://arxiv.org/abs/2409.20325.
+Yonatan Bisk, Rowan Zellers, Ronan Le Bras, Jianfeng Gao, and Yejin Choi. PIQA: reasoning
+about physical commonsense in natural language. InThe Thirty-Fourth AAAI Conference on
+Artificial Intelligence, AAAI 2020, pages 7432–7439, 2020. doi: 10.1609/AAAI.V34I05.6239.
+URLhttps://doi.org/10.1609/aaai.v34i05.6239.
+Christopher Clark, Kenton Lee, Ming-Wei Chang, Tom Kwiatkowski, Michael Collins, and Kristina
+Toutanova. BoolQ: Exploring the surprising difficulty of natural yes/no questions. In Jill
+Burstein, Christy Doran, and Thamar Solorio, editors,Proceedings of the 2019 Conference
+of the North American Chapter of the Association for Computational Linguistics: Human Lan-
+guage Technologies, Volume 1 (Long and Short Papers), pages 2924–2936, Minneapolis, Min-
+nesota, June 2019. Association for Computational Linguistics. doi: 10.18653/v1/N19-1300. URL
+https://aclanthology.org/N19-1300/.
+Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick, and
+Oyvind Tafjord. Think you have solved question answering? try arc, the ai2 reasoning challenge,
+2018. URLhttps://arxiv.org/abs/1803.05457.
+DeepSeek-AI, Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang, Bochao Wu, Chengda Lu, Chenggang
+Zhao, Chengqi Deng, Chenyu Zhang, Chong Ruan, Damai Dai, Daya Guo, Dejian Yang, Deli
+Chen, Dongjie Ji, Erhang Li, Fangyun Lin, Fucong Dai, Fuli Luo, Guangbo Hao, Guanting Chen,
+Guowei Li, H. Zhang, Han Bao, Hanwei Xu, Haocheng Wang, Haowei Zhang, Honghui Ding,
+Huajian Xin, Huazuo Gao, Hui Li, Hui Qu, J. L. Cai, Jian Liang, Jianzhong Guo, Jiaqi Ni, Jiashi
+Li, Jiawei Wang, Jin Chen, Jingchang Chen, Jingyang Yuan, Junjie Qiu, Junlong Li, Junxiao Song,
+Kai Dong, Kai Hu, Kaige Gao, Kang Guan, Kexin Huang, Kuai Yu, Lean Wang, Lecong Zhang,
+Lei Xu, Leyi Xia, Liang Zhao, Litong Wang, Liyue Zhang, Meng Li, Miaojun Wang, Mingchuan
+Zhang, Minghua Zhang, Minghui Tang, Mingming Li, Ning Tian, Panpan Huang, Peiyi Wang,
+Peng Zhang, Qiancheng Wang, Qihao Zhu, Qinyu Chen, Qiushi Du, R. J. Chen, R. L. Jin, Ruiqi
+Ge, Ruisong Zhang, Ruizhe Pan, Runji Wang, Runxin Xu, Ruoyu Zhang, Ruyi Chen, S. S. Li,
+Shanghao Lu, Shangyan Zhou, Shanhuang Chen, Shaoqing Wu, Shengfeng Ye, Shengfeng Ye,
+Shirong Ma, Shiyu Wang, Shuang Zhou, Shuiping Yu, Shunfeng Zhou, Shuting Pan, T. Wang,
+Tao Yun, Tian Pei, Tianyu Sun, W. L. Xiao, Wangding Zeng, Wanjia Zhao, Wei An, Wen Liu,
+Wenfeng Liang, Wenjun Gao, Wenqin Yu, Wentao Zhang, X. Q. Li, Xiangyue Jin, Xianzu Wang,
+Xiao Bi, Xiaodong Liu, Xiaohan Wang, Xiaojin Shen, Xiaokang Chen, Xiaokang Zhang, Xiaosha
+Chen, Xiaotao Nie, Xiaowen Sun, Xiaoxiang Wang, Xin Cheng, Xin Liu, Xin Xie, Xingchao Liu,
+Xingkai Yu, Xinnan Song, Xinxia Shan, Xinyi Zhou, Xinyu Yang, Xinyuan Li, Xuecheng Su,
+Xuheng Lin, Y . K. Li, Y . Q. Wang, Y . X. Wei, Y . X. Zhu, Yang Zhang, Yanhong Xu, Yanhong
+Xu, Yanping Huang, Yao Li, Yao Zhao, Yaofeng Sun, Yaohui Li, Yaohui Wang, Yi Yu, Yi Zheng,
+Yichao Zhang, Yifan Shi, Yiliang Xiong, Ying He, Ying Tang, Yishi Piao, Yisong Wang, Yixuan
+Tan, Yiyang Ma, Yiyuan Liu, Yongqiang Guo, Yu Wu, Yuan Ou, Yuchen Zhu, Yuduan Wang, Yue
+Gong, Yuheng Zou, Yujia He, Yukun Zha, Yunfan Xiong, Yunxian Ma, Yuting Yan, Yuxiang Luo,
+Yuxiang You, Yuxuan Liu, Yuyang Zhou, Z. F. Wu, Z. Z. Ren, Zehui Ren, Zhangli Sha, Zhe Fu,
+Zhean Xu, Zhen Huang, Zhen Zhang, Zhenda Xie, Zhengyan Zhang, Zhewen Hao, Zhibin Gou,
+Zhicheng Ma, Zhigang Yan, Zhihong Shao, Zhipeng Xu, Zhiyu Wu, Zhongyu Zhang, Zhuoshu
+Li, Zihui Gu, Zijia Zhu, Zijun Liu, Zilin Li, Ziwei Xie, Ziyang Song, Ziyi Gao, and Zizheng Pan.
+Deepseek-v3 technical report, 2025. URLhttps://arxiv.org/abs/2412.19437.
+Ming Ding, Zhuoyi Yang, Wenyi Hong, Wendi Zheng, Chang Zhou, Da Yin, Junyang Lin, Xu Zou,
+Zhou Shao, Hongxia Yang, and Jie Tang. Cogview: Mastering text-to-image generation via
+transformers, 2021. URLhttps://arxiv.org/abs/2105.13290.
+15\n\n--- page 16 ---\n\nKaiyue Wen Franz Louis Cesista. Critical batch size for steepest descent under
+arbitrary norms, November 2025. URL https://leloykun.github.io/ponder/
+steepest-descent-crit-bz/.
+Vineet Gupta, Tomer Koren, and Yoram Singer. Shampoo: Preconditioned stochastic tensor optimiza-
+tion. InInternational Conference on Machine Learning, pages 1842–1850. PMLR, 2018. URL
+http://proceedings.mlr.press/v80/gupta18a/gupta18a.pdf.
+Yi Han. Repeated singular values of a random symmetric matrix and decoupled singular value
+estimates, 2025. URLhttps://arxiv.org/abs/2504.15992.
+Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Delving deep into rectifiers: Surpassing
+human-level performance on imagenet classification. In2015 IEEE International Conference
+on Computer Vision (ICCV), pages 1026–1034, 2015. doi: 10.1109/ICCV .2015.123. URL
+https://ieeexplore.ieee.org/document/7410480.
+Alex Henry, Prudhvi Raj Dachapally, Shubham Pawar, and Yuxuan Chen. Query-key normalization
+for transformers, 2020. URLhttps://arxiv.org/abs/2010.04245.
+Keller Jordan, Yuchen Jin, Vlado Boza, Jiacheng You, Franz Cesista, Laker Newhouse, and Jeremy
+Bernstein. Muon: An optimizer for hidden layers in neural networks, 2024. URL https:
+//kellerjordan.github.io/posts/muon/.
+Kimi Team, Yifan Bai, Yiping Bao, Guanduo Chen, Jiahao Chen, Ningxin Chen, Ruijue Chen,
+Yanru Chen, Yuankun Chen, Yutian Chen, Zhuofu Chen, Jialei Cui, Hao Ding, Mengnan Dong,
+Angang Du, Chenzhuang Du, Dikang Du, Yulun Du, Yu Fan, Yichen Feng, Kelin Fu, Bofei Gao,
+Hongcheng Gao, Peizhong Gao, Tong Gao, Xinran Gu, Longyu Guan, Haiqing Guo, Jianhang
+Guo, Hao Hu, Xiaoru Hao, Tianhong He, Weiran He, Wenyang He, Chao Hong, Yangyang Hu,
+Zhenxing Hu, Weixiao Huang, Zhiqi Huang, Zihao Huang, Tao Jiang, Zhejun Jiang, Xinyi Jin,
+Yongsheng Kang, Guokun Lai, Cheng Li, Fang Li, Haoyang Li, Ming Li, Wentao Li, Yanhao
+Li, Yiwei Li, Zhaowei Li, Zheming Li, Hongzhan Lin, Xiaohan Lin, Zongyu Lin, Chengyin
+Liu, Chenyu Liu, Hongzhang Liu, Jingyuan Liu, Junqi Liu, Liang Liu, Shaowei Liu, T. Y . Liu,
+Tianwei Liu, Weizhou Liu, Yangyang Liu, Yibo Liu, Yiping Liu, Yue Liu, Zhengying Liu, Enzhe
+Lu, Lijun Lu, Shengling Ma, Xinyu Ma, Yingwei Ma, Shaoguang Mao, Jie Mei, Xin Men, Yibo
+Miao, Siyuan Pan, Yebo Peng, Ruoyu Qin, Bowen Qu, Zeyu Shang, Lidong Shi, Shengyuan
+Shi, Feifan Song, Jianlin Su, Zhengyuan Su, Xinjie Sun, Flood Sung, Heyi Tang, Jiawen Tao,
+Qifeng Teng, Chensi Wang, Dinglu Wang, Feng Wang, Haiming Wang, Jianzhou Wang, Jiaxing
+Wang, Jinhong Wang, Shengjie Wang, Shuyi Wang, Yao Wang, Yejie Wang, Yiqin Wang, Yuxin
+Wang, Yuzhi Wang, Zhaoji Wang, Zhengtao Wang, Zhexu Wang, Chu Wei, Qianqian Wei, Wenhao
+Wu, Xingzhe Wu, Yuxin Wu, Chenjun Xiao, Xiaotong Xie, Weimin Xiong, Boyu Xu, Jing Xu,
+Jinjing Xu, L. H. Xu, Lin Xu, Suting Xu, Weixin Xu, Xinran Xu, Yangchuan Xu, Ziyao Xu, Junjie
+Yan, Yuzi Yan, Xiaofei Yang, Ying Yang, Zhen Yang, Zhilin Yang, Zonghan Yang, Haotian Yao,
+Xingcheng Yao, Wenjie Ye, Zhuorui Ye, Bohong Yin, Longhui Yu, Enming Yuan, Hongbang Yuan,
+Mengjie Yuan, Haobing Zhan, Dehao Zhang, Hao Zhang, Wanlu Zhang, Xiaobin Zhang, Yangkun
+Zhang, Yizhi Zhang, Yongting Zhang, Yu Zhang, Yutao Zhang, Yutong Zhang, Zheng Zhang,
+Haotian Zhao, Yikai Zhao, Huabin Zheng, Shaojie Zheng, Jianren Zhou, Xinyu Zhou, Zaida Zhou,
+Zhen Zhu, Weiyu Zhuang, and Xinxing Zu. Kimi k2: Open agentic intelligence, 2025. URL
+https://arxiv.org/abs/2507.20534.
+Atli Kosson, Jeremy Welborn, Yang Liu, Martin Jaggi, and Xi Chen. Weight decay may matter more
+than mup for learning rate transfer in practice, 2025. URL https://arxiv.org/abs/2510.
+19093.
+Jingyuan Liu, Jianlin Su, Xingcheng Yao, Zhejun Jiang, Guokun Lai, Yulun Du, Yidao Qin, Weixin
+Xu, Enzhe Lu, Junjie Yan, Yanru Chen, Huabin Zheng, Yibo Liu, Shaowei Liu, Bohong Yin,
+Weiran He, Han Zhu, Yuzhi Wang, Jianzhou Wang, Mengnan Dong, Zheng Zhang, Yongsheng
+Kang, Hao Zhang, Xinran Xu, Yutao Zhang, Yuxin Wu, Xinyu Zhou, and Zhilin Yang. Muon is
+scalable for llm training, 2025. URLhttps://arxiv.org/abs/2502.16982.
+Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. InInternational Confer-
+ence on Learning Representations (ICLR), 2019. URL https://openreview.net/forum?id=
+Bkg6RiCqY7.
+16\n\n--- page 17 ---\n\nNVIDIA. OrthogonalizedOptimizer, 2025. URL https://docs.nvidia.com/nemo/
+emerging-optimizers/latest/apidocs/orthogonalized-optimizers.html.
+Denis Paperno, Germán Kruszewski, Angeliki Lazaridou, Ngoc Quan Pham, Raffaella Bernardi,
+Sandro Pezzelle, Marco Baroni, Gemma Boleda, and Raquel Fernández. The LAMBADA dataset:
+Word prediction requiring a broad discourse context. In Katrin Erk and Noah A. Smith, editors,
+Proceedings of the 54th Annual Meeting of the Association for Computational Linguistics (Volume
+1: Long Papers), pages 1525–1534, Berlin, Germany, August 2016. Association for Computational
+Linguistics. doi: 10.18653/v1/P16-1144. URLhttps://aclanthology.org/P16-1144/.
+Thomas Pethick, Wanyun Xie, Kimon Antonakopoulos, Zhenyu Zhu, Antonio Silveti-Falls, and
+V olkan Cevher. Training deep learning models with norm-constrained lmos, 2025. URLhttps:
+//arxiv.org/abs/2502.07529.
+Zihan Qiu, Zeyu Huang, Bo Zheng, Kaiyue Wen, Zekun Wang, Rui Men, Ivan Titov, Dayiheng
+Liu, Jingren Zhou, and Junyang Lin. Demons in the detail: On implementing load balancing loss
+for training specialized mixture-of-expert models, 2025. URL https://arxiv.org/abs/2501.
+11873.
+An Yang Qwen-Team, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen
+Yu, Chang Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Dayiheng Liu, Fan Zhou, Fei Huang,
+Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jialong Tang, Jian Yang, Jianhong Tu, Jianwei Zhang,
+Jianxin Yang, Jiaxi Yang, Jing Zhou, Jingren Zhou, Junyang Lin, Kai Dang, Keqin Bao, Kexin
+Yang, Le Yu, Lianghao Deng, Mei Li, Mingfeng Xue, Mingze Li, Pei Zhang, Peng Wang, Qin
+Zhu, Rui Men, Ruize Gao, Shixuan Liu, Shuang Luo, Tianhao Li, Tianyi Tang, Wenbiao Yin,
+Xingzhang Ren, Xinyu Wang, Xinyu Zhang, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang,
+Yinger Zhang, Yu Wan, Yuqiong Liu, Zekun Wang, Zeyu Cui, Zhenru Zhang, Zhipeng Zhou, and
+Zihan Qiu. Qwen3 technical report, 2025. URLhttps://arxiv.org/abs/2505.09388.
+Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Winogrande: an adver-
+sarial winograd schema challenge at scale.Commun. ACM, 64(9):99–106, August 2021. ISSN
+0001-0782. doi: 10.1145/3474381. URLhttps://doi.org/10.1145/3474381.
+Mohammad Shoeybi, Mostofa Patwary, Raul Puri, Patrick LeGresley, Jared Casper, and Bryan Catan-
+zaro. Megatron-lm: Training multi-billion parameter language models using model parallelism.
+arXiv preprint arXiv:1909.08053, 2019. URLhttps://arxiv.org/abs/1909.08053.
+Jianlin Su. A preliminary exploration of mup: Cross-model scale migration rules of hyperparameters,
+Mar 2025a. URLhttps://kexue.fm/archives/10770.
+Jianlin Su. Higher-order mup: simpler but wiser spectral conditioning scaling, Mar 2025b. URL
+https://kexue.fm/archives/10795.
+Jianlin Su. Moe travelogue: 5. reflections on uniform distribution, May 2025c. URL https:
+//kexue.fm/archives/10945.
+Jianlin Su. Steepest decent on manifolds: 4. muon + spectral sphere, Aug 2025d. URL https:
+//kexue.fm/archives/11241.
+Sho Takase, Shun Kiyono, Sosuke Kobayashi, and Jun Suzuki. Spike no more: Stabilizing the
+pre-training of large language models, 2025. URLhttps://arxiv.org/abs/2312.16903.
+Alon Talmor, Jonathan Herzig, Nicholas Lourie, and Jonathan Berant. CommonsenseQA: A question
+answering challenge targeting commonsense knowledge. In Jill Burstein, Christy Doran, and
+Thamar Solorio, editors,Proceedings of the 2019 Conference of the North American Chapter
+of the Association for Computational Linguistics: Human Language Technologies, Volume 1
+(Long and Short Papers), pages 4149–4158, Minneapolis, Minnesota, June 2019. Association for
+Computational Linguistics. doi: 10.18653/v1/N19-1421. URL https://aclanthology.org/
+N19-1421/.
+Terence Tao and Van Vu. Random matrices have simple spectrum, 2014. URL https://arxiv.
+org/abs/1412.1438.
+17\n\n--- page 18 ---\n\nTeam OLMo, Pete Walsh, Luca Soldaini, Dirk Groeneveld, Kyle Lo, Shane Arora, Akshita Bhagia,
+Yuling Gu, Shengyi Huang, Matt Jordan, Nathan Lambert, Dustin Schwenk, Oyvind Tafjord,
+Taira Anderson, David Atkinson, Faeze Brahman, Christopher Clark, Pradeep Dasigi, Nouha
+Dziri, Allyson Ettinger, Michal Guerquin, David Heineman, Hamish Ivison, Pang Wei Koh,
+Jiacheng Liu, Saumya Malik, William Merrill, Lester James V . Miranda, Jacob Morrison, Tyler
+Murray, Crystal Nam, Jake Poznanski, Valentina Pyatkin, Aman Rangapur, Michael Schmitz,
+Sam Skjonsberg, David Wadden, Christopher Wilhelm, Michael Wilson, Luke Zettlemoyer, Ali
+Farhadi, Noah A. Smith, and Hannaneh Hajishirzi. 2 olmo 2 furious, 2025. URL https:
+//arxiv.org/abs/2501.00656.
+Lean Wang, Huazuo Gao, Chenggang Zhao, Xu Sun, and Damai Dai. Auxiliary-loss-free load
+balancing strategy for mixture-of-experts, 2024. URLhttps://arxiv.org/abs/2408.15664.
+G.A. Watson. Characterization of the subdifferential of some matrix norms.Linear Alge-
+bra and its Applications, 170:33–45, 1992. ISSN 0024-3795. doi: https://doi.org/10.1016/
+0024-3795(92)90407-2. URL https://www.sciencedirect.com/science/article/pii/
+0024379592904072.
+Zhenda Xie, Yixuan Wei, Huanqi Cao, Chenggang Zhao, Chengqi Deng, Jiashi Li, Damai Dai,
+Huazuo Gao, Jiang Chang, Liang Zhao, Shangyan Zhou, Zhean Xu, Zhengyan Zhang, Wangding
+Zeng, Shengding Hu, Yuqing Wang, Jingyang Yuan, Lean Wang, and Wenfeng Liang. mHC:
+Manifold-constrained hyper-connections, 2025. URLhttps://arxiv.org/abs/2512.24880.
+Greg Yang, Edward J. Hu, Igor Babuschkin, Szymon Sidor, Xiaodong Liu, David Farhi, Nick Ryder,
+Jakub Pachocki, Weizhu Chen, and Jianfeng Gao. Tensor programs v: Tuning large neural networks
+via zero-shot hyperparameter transfer, 2022. URLhttps://arxiv.org/abs/2203.03466.
+Greg Yang, James B. Simon, and Jeremy Bernstein. A spectral condition for feature learning, 2024.
+URLhttps://arxiv.org/abs/2310.17813.
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali Farhadi, and Yejin Choi. HellaSwag: Can a
+machine really finish your sentence? In Anna Korhonen, David Traum, and Lluís Màrquez,
+editors,Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics,
+pages 4791–4800, Florence, Italy, July 2019. Association for Computational Linguistics. doi:
+10.18653/v1/P19-1472. URLhttps://aclanthology.org/P19-1472/.
+18\n\n--- page 19 ---\n\nA Appendix
+A.1 Duality with Spectral Norm
+We may first prove Theorem A.1, and we can then directly derive Equation (11).
+Theorem A.1.Nuclear norm∥·∥ ∗ is the dual norm of spectral norm∥·∥ 2, which means
+∥G∥∗ = max
+∥T∥ 2=1
+⟨G,T⟩.
+msign(·)is the dual map based on∥·∥ 2, which means
+msign(G) = argmax
+∥T∥ 2=1
+⟨G,T⟩.
+Proof. Since G∈R n×m has Singular Vector DecompositionG=UΣV ⊤ = Pr
+i=1 σiuiv⊤
+i where
+ui ∈R n andv i ∈R m are left and right singular vectors, we have
+⟨G,T⟩= tr(G ⊤T) = tr(
+rX
+i=1
+σiviu⊤
+i T) =
+rX
+i=1
+σiu⊤
+i T vi.(17)
+With∥T∥ 2 = 1and∥u i∥2 =∥v i∥2 = 1, we haveu ⊤
+i T vi ≤ ∥T∥2∥ui∥2∥vi∥2 = 1, hence
+⟨G,T⟩=
+rX
+i=1
+σiu⊤
+i T vi ≤
+rX
+i=1
+σi =∥G∥ ∗.(18)
+Equality is attained whenu ⊤
+i T vi = 1for alli= 1, . . . , r, that is when
+T=
+rX
+i=1
+uiv⊤
+i =U [:,:r]V ⊤
+[:,:r] = msign(G).(19)
+Note that for this T we indeed have ∥T∥ 2 = 1 (its nonzero singular values are all equal to 1), so T is
+feasible and achieves the upper bound. Therefore, we have
+argmax
+∥T∥ 2=1
+⟨G,T⟩= msign(G),(20)
+and according to Equation (18), the maximum value equals∥G∥ ∗.
+A.2 Proofs: Localization of the Root ofh(λ)
+In this section, we first prove the localization of the root λ⋆ to h(λ) = 0 , which is required
+in Section 3.2. We then present experiments showing that the computational overhead of the proposed
+λ-solver is negligible compared to the whole training process.
+We first prove Theorem A.2, from which Theorem A.3 follows.
+Theorem A.2.The function
+h(λ) =⟨Θ,Φ ⋆(λ)⟩=⟨Θ,msign(G+λΘ)⟩
+is monotonic non-decreasing inλ.
+Proof. Recall that the matrix sign function can be equivalently defined as the solution of the spectral-
+norm constrained maximization as in Theorem A.1:
+msign(G) = argmax
+∥T∥ 2=1
+⟨G,T⟩.(21)
+Consider two values λ2 > λ1. By the definition of Φ⋆(λ) as the maximizer of ⟨G+λΘ,·⟩ , we
+obtain
+⟨G+λ 1Θ,Φ ⋆(λ1)⟩ ≥⟨G+λ1Θ,Φ ⋆(λ2)⟩
+⇒ ⟨G,Φ ⋆(λ1)⟩+λ 1⟨Θ,Φ ⋆(λ1)⟩ ≥ ⟨G,Φ⋆(λ2)⟩+λ 1⟨Θ,Φ ⋆(λ2)⟩,(22)
+⟨G+λ 2Θ,Φ ⋆(λ2)⟩ ≥⟨G+λ2Θ,Φ ⋆(λ1)⟩
+⇒ ⟨G,Φ ⋆(λ2)⟩+λ 2⟨Θ,Φ ⋆(λ2)⟩ ≥ ⟨G,Φ⋆(λ1)⟩+λ 2⟨Θ,Φ ⋆(λ1)⟩.(23)
+19\n\n--- page 20 ---\n\nSumming Equation (22) and Equation (23), we can derive
+λ1⟨Θ,Φ ⋆(λ1)⟩+λ 2⟨Θ,Φ ⋆(λ2)⟩ ≥λ1⟨Θ,Φ ⋆(λ2)⟩+λ 2⟨Θ,Φ ⋆(λ1)⟩(24)
+⇒(λ 2 −λ 1)⟨Θ,Φ ⋆(λ2)⟩ ≥(λ2 −λ 1)⟨Θ,Φ ⋆(λ1)⟩ ⇒ ⟨Θ,Φ ⋆(λ2)⟩ ≥ ⟨Θ,Φ⋆(λ1)⟩,
+(25)
+withλ 2 −λ 1 >0. Hence,h(λ) =⟨Θ,msign(G+λΘ)⟩is monotonic non-decreasing inλ.
+Theorem A.3.There exists someλ ⋆ ∈Rsuch thath(λ ⋆) = 0, and any such root satisfies
+|λ⋆| ≤2∥G∥∗.
+Proof. We first prove the existence of a root λ⋆. Since Θ=u 1v⊤
+1 is a rank-one matrix with
+unit-norm singular vectors, its nuclear norm satisfies ∥Θ∥∗ = 1. Moreover, by construction, we have
+∥Φ⋆(λ)∥2 =∥msign(G+λΘ)∥ 2 = 1.(26)
+By Theorem A.1, lettingT 1 = Φ⋆(λ)
+∥Φ⋆(λ)∥2
+,T 2 =− Φ⋆(λ)
+∥Φ⋆(λ)∥2
+, we have
+∥T1∥2 =∥T 2∥2 = 1and thus⟨Θ,T 1⟩ ≤ ∥Θ∥∗ and⟨Θ,T 2⟩ ≤ ∥Θ∥∗.(27)
+Therefore, we have
+|⟨Θ,msign(G+λΘ)⟩| ≤ ∥Θ∥∗ ∥msign(G+λΘ)∥ 2 = 1,(28)
+which implies |h(λ)| ≤1for all λ∈R . Moreover, since h(λ) is monotonic non-decreasing by The-
+orem A.2, the limits limλ→−∞ h(λ) and limλ→+∞ h(λ) exist. Using the property msign(λT) =
+msign(T), we have
+lim
+λ→+∞
+msign(G+λΘ) = lim
+λ→+∞
+msign
+
+λ
+ 
+Θ+ 1
+λ G
+
+= msign(Θ) =Θ,(29)
+where the last equality is satisfied by definition ofmsign(·)andΘ. Consequently,
+lim
+λ→+∞
+h(λ) =⟨Θ,Θ⟩= tr(v 1u⊤
+1 u1v⊤
+1 ) = 1.(30)
+Similarly, we can also obtain limλ→−∞ h(λ) =−1 . Since msign(G+λΘ) is a subgradient of a
+convex function ∥G+λΘ∥ ∗ with respect to λ according to Watson [1992], monotonic non-decreasing
+h(λ) satisfies the intermediate value property. Consequently, there exists at least oneλ⋆ ∈R such
+thath(λ ⋆) = 0.
+We next localize the root. For anyλ >2∥G∥ ∗ >0and any matrixTwith∥T∥ 2 = 1, we have
+λ⟨Θ,T⟩=⟨G+λΘ,T⟩ − ⟨G,T⟩.(31)
+By Equation (27),⟨G,T⟩ ≤ ∥G∥∗. LetT= msign(G+λΘ), using Theorem A.1, we can derive
+λh(λ) =∥G+λΘ∥ ∗ − ⟨G,T⟩ ≥
+∥G∥∗ −λ∥Θ∥ ∗
+ − ∥G∥∗ ≥λ−2∥G∥ ∗ >0,(32)
+and this implies h(λ)>0 . Similarly, if λ <−2∥G∥ ∗, h(λ)<0 . Since h(λ) is monotonic non-
+decreasing, any root λ⋆ satisfying h(λ⋆) = 0 must therefore lie in the interval [−2∥G∥∗,2∥G∥ ∗].
+Theorem A.3 actually provides a theoretical guarantee that the correctness of using the bisection
+algorithm to solve the root λ⋆. To further validate this theoretical result, we randomly generate several
+zero-centered matrices with varying dimensions, construct G and Θ as described in this section, and
+plot the curve of h(λ) together with its root. As shown in Figure 3, f(λ) is indeed monotonic in λ,
+and its root lies close toλ= 0, which is consistent with our theoretical analysis.
+A.3 Dynamic Spectral Weight Decay
+In this section, we introduce spectral retraction mechanisms to counteract the accumulation of higher-
+order errors that may gradually drift the weights off the spectral sphere. As noted in Section 3.3, the
+remainder term O(η2R2∥Φ∥2
+2) in the Taylor expansion can accumulate over iterations. To enforce
+the exact constraint ∥W∥ 2 =R throughout training, we apply Equation (13) that projects the weights
+back onto the spectral manifold.
+In practice, we consider two retraction variants that differ in how strictly the spectral constraint is
+enforced. The hard variant applies an explicit projection to maintain ∥W∥ 2 =R at every step, while
+the dynamic variant replaces the exact projection with a soft, learning-rate-scaled radial correction
+that steers ∥W∥ 2 toward the target radius. These two variants correspond to enforcing the spectral
+constraint exactly or approximately, and lead to different interactions with conventional weight decay.
+20\n\n--- page 21 ---\n\n0 5000 10000 15000 20000 25000
+2.6
+2.8
+3.0
+3.2
+3.4
+3.6Loss
+Train Loss
+0 5000 10000 15000 20000 25000
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7RMS
+Attention Hidden State RMS
+0 5000 10000 15000 20000 25000
+0
+20
+40
+60
+80Absmax
+Attention Hidden State Absmax
+Muon without wd Muon
+Figure 11:Abaltion of weight decay in Muon.In contrast with Spectral Sphere (Figure 1), without
+weight constraint, Muon training dynamics become instable, which in-turn would hurt performance.
+Hard retraction (exact projection).The hard variant applies the retraction map explicitly using
+an estimated top singular valueσ≈ ∥W∥2 which is computed via Power Iteration.
+W← R
+σ W.(33)
+This enforces the exact constraint ∥W∥ 2 =R at every step, with deviations arising solely from the
+approximation error in σ. Under this setting, Spectral Sphere is typically used together with standard
+decoupled weight decay as in AdamW: weight decay shrinks the full parameter vector, while the
+spectral retraction constrains the dominant singular value.
+Dynamic retraction (soft spectral decay).The dynamic variant replaces the exact projection with
+a small, sign-controlled radial adjustment with hyperparameterλ.
+W←
+ 
+1 +λ ηsign(R−σ)
+
+W.(34)
+Instead of strictly enforcing the constraint ∥W∥ 2 =R , this update gently adjusts the spectral norm
+toward the target radiusR based on σ. Since the correction is proportional toη, the adjustment strength
+diminishes automatically as learning rate schedules. Under this formulation, dynamic retraction
+functions as a spectrally aligned, layer-wise analogue to decoupled weight decay. Consequently,
+we tie λ to the AdamW weight decay coefficient and employ the dynamic variant as a drop-in
+replacement for conventional weight decay.
+From a geometric perspective, the two variants above can both be viewed as approximate projections
+onto the spectral sphere. As discussed in Section 3.3, applying retraction at the beginning of iteration
+t+ 1 instead of after the update at iteration t only introduces O(η2) discrepancies. Consequently, the
+update remains first-order equivalent to steepest descent on the spectral manifold.
+A.4 MoE Routing Scaling Factor
+Following [Su, 2025c], in our MoE architecture, the output y is the sum of the shared experts and the
+routed experts. A critical issue arises from the magnitude mismatch between the two parts:
+y=
+NsharedX
+i=1
+eshared,i
+| {z }
+Weight≈1
++
+X
+j∈TopK
+gjerouted,j
+| {z }
+Weightg j ≪1
+(35)
+The shared experts are directly added to the residual stream, effectively having a coefficient of 1.
+In contrast, the routed experts are multiplied by sigmoid probabilities gj, which are typically small.
+Consequently, the variance (signal energy) of the routed experts is significantly lower than that of the
+shared experts, causing the optimizer to neglect the routed part.
+To balance the contributions, we compute a scaling factorMto the routed experts:
+y=
+NsharedX
+i=1
+eshared,i +M
+X
+j∈TopK
+gjerouted,j (36)
+21\n\n--- page 22 ---\n\nWe aim to choose M such that the expected variance of the routed term matches that of the shared
+term, under assumption that experts have unit variance:
+M≈
+s
+Nshared
+E[P g2
+j ] (37)
+Using numerical simulation (Listing 1) withNshared = 1 and Top-4 sigmoid routing, we findM≈2.0 .
+We find this scaling factor is crucial for MoE training stability.
+Listing 1: Python implementation for estimating the MoE scaling factorM.
+1import numpy as np
+2
+3def e s t i m a t e _ s c a l i n g _ f a c t o r ( n_total =64 , k_routed =4 , n_shared =1) :
+4factors = []
+5for _ in range (10000) :
+6# 1. Simulate logits
+7logits = np . random . randn ( n_total - n_shared )
+8
+9# 2. Get Sigmoid Scores
+10scores = 1 / (1 + np . exp ( - logits ) )
+11
+12# 3. Select Top - K routed scores
+13scores = np . sort ( scores ) [:: -1][: k_routed ]
+14
+15# 3. No rm al iz e scores
+16scores /= scores . sum ()
+17
+18# 4. Ca lc ul at e M ag ni tu de
+19m ag ni tu de = np . sum ( scores **2) **0.5
+20
+21factors . append ( n_shared **0.5 / ma gn itu de )
+22
+23return np . mean ( factors )
+A.5µP Width Scaling
+In Figure 2, we conduct experiment to validate µP width scaling across different model sizes from
+70M to 1.8B. Additional AdamW results are included in Figure 12. We scale the hidden size,
+intermediate size, and number of attention heads (while fixing head dimensions). The models are
+trained on 30B tokens sampled from the Olmo2-mix-1124 dataset [Team OLMo et al., 2025]. All
+optimizers use the SpectralµP LR Scaler.
+• The LR is swept across {1e-3, 3e-3, 5e-3, 7e-3, 9e-3, 1e-2, 1.5e-2, 2e-2, 3e-2}.
+• Hidden size is swept across {256, 512, 1024, 2048}.
+1e-3 3e-3 5e-3 7e-39e-31e-2
+1.5e-2
+2e-2 3e-2
+2.6
+2.8
+3.0
+3.2
+3.4
+3.6Val Loss
+3.4827
+3.1679
+2.8968
+2.7043
+AdamW
+1e-3 3e-3 5e-3 7e-39e-31e-2
+1.5e-2
+2e-2 3e-2
+2.6
+2.8
+3.0
+3.2
+3.4
+3.6
+3.4649
+3.1240
+2.8506
+2.6608
+Muon
+1e-3 3e-3 5e-3 7e-39e-31e-2
+1.5e-2
+2e-2 3e-2
+2.6
+2.8
+3.0
+3.2
+3.4
+3.6
+3.4578
+3.1119
+2.8383
+2.6481
+Spectral Sphere
+LR LR
+width=256 width=512 width=1024 width=2048 Min Loss
+Figure 12: µP LR grid search with AdamW, Muon and Spectral Sphere.AdamW shows even
+worse validation loss, with drifting optimal LR.
+22\n

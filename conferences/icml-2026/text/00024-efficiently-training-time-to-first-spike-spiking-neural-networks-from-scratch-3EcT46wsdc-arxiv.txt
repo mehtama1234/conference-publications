@@ -1,0 +1,1312 @@
+\n\n--- page 1 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+Kaiwei Che 1 2 Zhengyu Ma 2 * Yifan Huang 3 Peng Xue 2 4 Li Yuan1 2 Timothée Masquelier 5
+Wei Fang1 Yonghong Tian1 2 3
+Abstract
+Spiking Neural Networks (SNNs), with their
+event-driven and biologically inspired mecha-
+nisms, are well-suited for energy-efficient neu-
+romorphic hardware. Neural coding, which is
+critical to SNNs, determines how information is
+represented via spikes. While Time-to-First-Spike
+(TTFS) coding uses a single spike per neuron to
+offer extreme sparsity and energy efficiency, it
+often suffers from unstable training and low ac-
+curacy due to its sparse firing. To address these
+challenges, we propose a training framework that
+incorporates parameter initialization, training nor-
+malization, a temporal output decoder, and a re-
+evaluation of the pooling layer. The proposed
+parameter initialization and training normaliza-
+tion mitigate signal diminishing and gradient van-
+ishing, which helps stabilize training. Our out-
+put decoder aggregates temporal spikes to en-
+courage earlier firing, thereby reducing latency.
+The re-evaluation of the pooling layer demon-
+strates that max-pooling violates single-spike
+constraints, which should be avoided, whereas
+average-pooling preserves them. Experiments
+show that our framework stabilizes and acceler-
+ates training, reduces latency, and achieves state-
+of-the-art accuracy for step-by-step TTFS SNNs
+on MNIST (99.48%), Fashion-MNIST (92.90%),
+CIFAR10 (90.56%), CIFAR100 ( 70.27%) and
+DVS Gesture ( 95.83%). Code and experimen-
+tal logs are available in: https://github.
+com/CheKaiWei/ETTFS.
+1Shenzhen Graduate School, Peking University, China
+2Pengcheng Laboratory, China 3School of Computer Science,
+Peking University, China 4Shenzhen Institute of Advanced
+Technology, Chinese Academy of Sciences, China 5Centre de
+Recherche Cerveau et Cognition (CERCO), UMR5549 CNRS
+- Univ. Toulouse 3, France. Correspondence to: Zhengyu Ma
+<mazhy@pcl.ac.cn>.
+Proceedings of the 43 rd International Conference on Machine
+Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026
+by the author(s).
+1. Introduction
+Spiking Neural Networks (SNNs) are recognized as the
+third generation of neural models characterized by event-
+driven spike communication (Maass, 1997). This paradigm
+enables highly energy-efficient computation as validated
+by neuromorphic hardware including TrueNorth (Merolla
+et al., 2014), Loihi (Davies et al., 2021), and Tianjic (Pei
+et al., 2019). Although their biological plausibility benefits
+neuroscience research (Eliasmith et al., 2012; Stimberg et al.,
+2019), traditional training methods like Hebbian learning
+(Hebb, 2005) or Spike-Timing-Dependent Plasticity (STDP)
+(Bi & Poo, 1998) often yields suboptimal accuracy. To
+address this, recent advancements integrate deep learning
+techniques to significantly enhance performance (Fang et al.,
+2021; Che et al., 2024), establishing SNNs as a critical
+bridge between neuroscience and computational science.
+Neural coding, which is fundamental to SNNs, governs how
+information is represented through spikes. Among the ex-
+isting coding methods, Time-to-First-Spike (TTFS) coding
+encodes information through the timing of the first spike,
+enabling rapid biological processing (Gollisch & Meister,
+2008). TTFS thus provides extreme sparsity and energy
+efficiency for neuromorphic hardware, attracting signifi-
+cant research interest and yielding methods such as ANN-
+to-SNN conversion (Rueckauer & Liu, 2018) and direct
+training (Kheradpisheh et al., 2022). However, strict spike
+constraints in TTFS SNNs pose significant training chal-
+lenges. These constraints typically result in substantially
+lower accuracy than that of traditional SNNs. To address
+this limitation, we propose an efficient framework that inte-
+grates parameter initialization, weight normalization, and a
+temporal decoder. Our contributions are as follows:
+1. We identify the signal diminishing problem caused
+by Kaiming initialization (Figure 1a) and solve it
+by proposing a novel parameter initialization method
+(ETTFS-init). This method stabilizes the mean and
+variance of post-synaptic currents across layers, result-
+ing in a stable distribution as shown in Figure 1b and
+Section 4.2.
+2. We introduceweight normalizationto stabilize
+weights around their initialized state, which prevents
+1
+arXiv:2410.23619v3  [cs.NE]  16 Jun 2026\n\n--- page 2 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+l = 0 µ = 0.01,σ 2 = 0.12
+l = 1 µ =−0.03,σ 2 = 0.04
+l = 2 µ = 0.01,σ 2 = 0.05
+l = 3 µ = 0.02,σ 2 = 0.04
+−2 −1 0 1 2 3
+Post-synaptic current
+l = 4 µ =−0.00,σ 2 = 0.02
+(a)Kaiming init
+l = 0 µ = 0.05,σ 2 = 0.77
+l = 1 µ =−0.05,σ 2 = 0.91
+l = 2 µ = 0.01,σ 2 = 0.83
+l = 3 µ = 0.03,σ 2 = 1.10
+−2 −1 0 1 2 3
+Post-synaptic current
+l = 4 µ = 0.10,σ 2 = 0.87 (b)ETTFS-init
+0 20 40 60 80 100
+Epochs
+77.5
+80.0
+82.5
+85.0
+87.5
+90.0
+92.5
+Accuracy (%)
+Kaiming init
+ETTFS-init
+ETTFS-init+norm
+(c)Training accuracy
+MNIST FashionMNIST CIFAR DVSGesture0
+1
+2
+3
+4
+5
+6
+7Average inference time-steps
+Ours+TWD
+Ours+TQ-TTFS decoder
+TQTTFS (d)Average inference time-steps
+Figure 1.An overview of the impacts and performance of the
+proposed methods. (a) The default Kaiming initialization causes
+the signal diminishing problem, where the post-synaptic current
+variance (σ2) rapidly decreases across layers (l). (b) Our proposed
+ETTFS-init method regulates these distributions. (c) ETTFS-init
+accelerates convergence and improves accuracy, with performance
+further enhanced by weight normalization. (d) Our proposed de-
+coder reduces the average inference time-steps compared to the
+previous TQ-TTFS decoder across four datasets.
+distribution shifts during training. This approach ac-
+celerates convergence, improves accuracy, and can be
+fused with synaptic weights without increasing compu-
+tational overhead during inference, as shown in Figure
+1c and Section 4.3.
+3. We propose a noveltemporal weighting decoderto
+encourage early firing, which improves performance
+and dramatically decreases the number of inference
+time-steps, as shown in Figure 1d and Section 4.4.
+4. We re-evaluate the pooling layers in TTFS SNNs and
+argue for using average-pooling to maintain the one-
+spike characteristic. This is a precondition for the pa-
+rameter initialization and weight normalization meth-
+ods described in Section 4.5.
+5. Equipped with this proposed efficient training frame-
+work, we achieve state-of-the-art accuracy among
+all step-by-step TTFS SNNs on several benchmark
+datasets, including MNIST (99.48%), Fashion-MNIST
+(92.90%), CIFAR10 (90.56%), CIFAR100 (70.29%),
+and DVS Gesture (95.83%).
+2. Related Work
+2.1. Neural Coding in SNNs
+Neural coding in SNNs represents information through spike
+patterns. Rate coding measures average spike counts propor-
+tional to input strength, enabling ANN-to-SNN conversion
+but requiring long time windows (Kim et al., 2018). Conse-
+quently, temporal coding using the temporal information of
+spikes has been explored to reduce the number of time-steps.
+Among temporal coding methods, phase coding represents
+values in powers of two (Wang et al., 2022), while burst
+coding employs graded spikes to surpass rate-based con-
+version accuracy (Li & Zeng, 2022). TTFS coding repre-
+sents information through the timing of the first spike. This
+scheme achieves theoretically minimal energy consumption
+in SNNs. Consequently, it is a prominent approach for
+both ANN-to-SNN conversion (Hu et al., 2023) and direct
+training (Yang et al., 2024).
+2.2. Initialization of Networks
+Proper weight initialization ensures stable information flow
+in deep neural networks. Similar to recurrent neural net-
+works (RNNs), SNNs suffer from vanishing and exploding
+gradients due to combined spatial and temporal dimensions
+(Fang et al., 2021). Consequently, SNN-specific initializa-
+tion strategies remain significantly underdeveloped.
+Existing approaches predominantly adopt generic methods
+such as Kaiming initialization (He et al., 2015). Ding et al.
+(Ding et al., 2022) first derived the approximate response
+curve of spiking neurons, based on which the parameters
+were initialized to overcome the gradient vanishing prob-
+lem. However, their method fails to scale to deep SNNs
+trained on complex datasets. Rossbroich et al. (Rossbroich
+et al., 2022) proposed an initialization strategy for the Leaky-
+Integrate-and-Fire (LIF) neuron with exponential current-
+based synapses but could not extend their method to stateless
+synapses, which are predominant in deep SNNs. This gap
+arises because spiking neuron dynamics exhibit greater tem-
+poral complexity than the non-linear activations in ANNs.
+3. Preliminary
+3.1. Vanilla Spiking Neuron Model
+We first introduce the discrete-time spiking neuron model
+underlying conventional SNNs (Fang et al., 2023a):
+H[t] =f(V[t−1], X[t]),(1)
+S[t] = Θ (H[t]−V th),(2)
+V[t] =
+(
+H[t]·(1−S[t]) +V reset ·S[t],hard reset,
+H[t]−V th ·S[t],soft reset,
+(3)
+2\n\n--- page 3 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+(a) Layer-by-layer propagation (b) Step-by-step propagation
+one element
+whole sequence
+Figure 2.Physical latency comparison between (a) layer-by-layer propagation and (b) step-by-step propagation in a three-layer SNN with
+T= 4 time-steps. Each layer consumes one time unit to process one time-step, and the output spike Si[t] is transmitted immediately after
+it is generated, where i denotes the layer index and t denotes the time-step. In layer-by-layer propagation, each layer must wait for the
+complete input spike sequence before producing its own output sequence, which leads to latency accumulation with network depth. In
+step-by-step propagation, spikes are forwarded across layers at every time-step, which reduces physical latency.
+This model updates the neuronal state through three stages:
+charge,fire, andreset. In Eq. (1), X[t] denotes the input cur-
+rent at time-step t, V[t−1] and V[t] denote the membrane
+potentials before and after the update, respectively, H[t] is
+the membrane potential after charging but before reset, and
+f(·) is the neuron-specific charging function. Eq. (2) gener-
+ates the output spike S[t] when H[t] reaches the threshold
+Vth, where Θ(·) is the Heaviside step function. Eq. (3)
+then updates the post-spike membrane potential: hard reset
+clamps the neuron to Vreset after firing, whereas soft reset
+subtracts the thresholdV th fromH[t].
+3.2. Propagation Paradigms of TTFS SNNs
+TTFS SNNs can be divided into non-causal and causal mod-
+els according to their temporal dependency. Non-causal
+models determine output spikes from the complete input
+spike sequence and therefore restrictly require layer-by-
+layer execution. ANN-to-SNN conversion is a representa-
+tive example, because each layer must receive all T time-
+steps before producing its output sequence.
+Causal TTFS models, by contrast, update neuronal states
+using only the current and past inputs. This property allows
+two mathematically equivalent execution modes: layer-by-
+layer propagation for efficient GPU training, and step-by-
+step propagation for low-latency neuromorphic hardware
+deployment. As shown in Figure 2, layer-by-layer propaga-
+tion incurs depth-dependent latency because deeper layers
+must wait for the full output sequence of shallower layers,
+whereas step-by-step propagation forwards spikes immedi-
+ately at each time-step.
+In general, non-causal TTFS models achieve higher accu-
+racy because they can optimize with access to the complete
+input spike sequence, whereas causal models rely only on
+the current and past inputs at each time-step, which limits
+their expressive capacity. Our method belongs to the causal
+paradigm and addresses its main challenge: maintaining the
+low physical latency of step-by-step propagation without
+sacrificing accuracy.
+4. Methods
+4.1. At-Most-One-Spike Spiking Neuron Model
+The At-Most-One-Spike (AMOS) spiking neuron model
+(Yang et al., 2024) is an extension of the general discrete-
+time spiking neuron model (Fang et al., 2023b) with the
+restriction of firing no more than once. The neuronal dy-
+namics of the AMOS spiking neuron are governed by three
+sequential stages:charge,fire, andmask update, as shown
+in Figure 3 and the following equations:
+H[t] =f(H[t−1], X[t]),(4)
+S[t] = (1−F[t−1])·Θ(H[t]−V th),(5)
+F[t] =F[t−1] +S[t],(6)
+where H[t] is the membrane potential, X[t] is the input
+current, S[t] is the output spike, and F[t] is the firing mask
+at time-step t. The neuronal charge function f in Eq. (4)
+is neuron-specific. For example, the formulation for the IF
+neuron is:
+H[t] =H[t−1] +X[t].(7)
+The Heaviside function Θ(x) satisfies Θ(x) = 1 if x≥0
+and 0 otherwise. Spiking is governed by the mask F[t]
+that accumulates via Eq. (6), with initial states H[−1] =
+F[−1] = 0 . When S[i] = 1 at time-step i, F[i] = 1 pre-
+vents subsequent firing. Hence, the neuron can fire no more
+than one spike and is named the AMOS spiking neuron.
+Compared to traditional spiking neurons, the neuronal dy-
+namics of the AMOS neuron omit the reset mechanism,
+allowing for post-spike resting that could enhance energy
+efficiency in asynchronous neuromorphic chips. During
+training, the neuron is forced to fire a spike at the last time-
+step t=T−1 if it has not fired from t= 0 to t=T−2 .
+This setting is also implemented without an if-else statement
+by updatingS[T−1]as:
+S[T−1]←S[T−1] + 1−F[T−1].(8)
+3\n\n--- page 4 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+charge
+mask update
+fire
+Figure 3.The neuronal dynamics of the AMOS neuron include
+three stages:charge,fire, andmask update. In thechargestage, the
+membrane potential H[t] accumulates via the input X[t]. During
+thefirestage, the neuron generates a spike S[t] = 1if both the
+membrane potential H[t] surpasses the threshold Vth and the mask
+F[t−1] is zero; otherwise, S[t] = 0. The mask F[t] is updated
+by accumulatingS[t]at themask updatestage.
+Eq. (8) is used after Eq. (6) at the last time-step. This setting
+preserves the one-spike characteristic, which is crucial for
+theoretical analysis and will be frequently referred to in the
+following sections. During inference, the AMOS neuron
+is not forced to fire at the last time-step. Instead, it runs
+in step-by-step mode. This enables early stopping when a
+spike occurs in the last layer.
+4.2. Initialization for TTFS SNNs
+The goal of Xavier (Glorot & Bengio, 2010) and Kaiming
+initialization (He et al., 2015) is to maintain element-wise
+stability. Specifically, Kaiming initialization aims for the ex-
+pectation and variance of each element of the pre-activations
+to be 0 and 1, respectively. Consequently, we also enforce
+that the initial expectation and variance of the AMOS neu-
+ron are maintained at 0 and 1. Without loss of generality,
+suppose we have an SNN composed of L stacked fully con-
+nected AMOS spiking neuron layers. Thel-th layer can be
+formulated as:
+X l =S l−1W l,(9)
+Sl =AMOS(X l).(10)
+Here, Sl−1 ∈ {0,1}T×N l is the input spike from the(l−1) -
+th layer, whereTis the number of time-steps andN l is the
+number of input features of the l-th layer. W l ∈R Nl×Ml
+is the weight of the fully connected synapses, where Ml is
+the number of output features. X l ∈R T×M l is the input
+current for the AMOS spiking neurons. Sl ∈ {0,1}T×M l
+is the output spike of the l-th layer, and AMOS represents
+the AMOS spiking neuron. Sl−1 maintains the one-spike
+characteristic: PT−1
+t=0 Sl−1[t][j] = 1for anyj-th neuron.
+For X l[t][i], the i-th element of the input current of the l-th
+layer at time-stept, it is calculated as:
+X l[t][i] =
+Nl−1X
+j=0
+Sl−1[t][j]·W l[j][i],(11)
+where W l[j][i] denotes the synapse weight fromj-th neuron
+in(l−1)-th layer toi-th neuron inl-th layer.
+Let the weights of the l-th layer follow a distribution with
+mean µl and variance σ2
+l . Note that W l and Sl−1 are in-
+dependent. Denote the expectation operator as E and the
+variance operator as D. Then the expectation E(X l[t][i]) is:
+E(X l[t][i]) =E(
+Nl−1X
+j=0
+Sl−1[t][j]·W l[j][i])
+=
+Nl−1X
+j=0
+E(Sl−1[t][j]·W l[j][i])
+=
+Nl−1X
+j=0
+E(Sl−1[t][j])·E(W l[j][i])
+=
+Nl−1X
+j=0
+E(Sl−1[t][j])·µ l.(12)
+Similar to Xavier (Glorot & Bengio, 2010) and Kaiming
+initialization (He et al., 2015), we also set µl = 0 to make
+E(X l[t][i]) = 0in Eq. (12). The varianceD(X l[t][i])is:
+D(X l[t][i]) =D
+
+
+Nl−1X
+j=0
+Sl−1[t][j]·W l[j][i]
+
+
+=N l ·D(S l−1[t][j]·W l[j][i])
+=N l ·
+ 
+E((Sl−1[t][j]·W l[j][i])2)
+−E 2(Sl−1[t][j]·W l[j][i])
+
+=N l ·(E((S l−1[t][j])2)·E((W l[j][i])2)
+−E 2(Sl−1[t][j])·0)
+=N lσ2
+l ·E((S l−1[t][j])2)
+=N lσ2
+l ·E(S l−1[t][j]).(13)
+Unfortunately, Eq. (13) depends on Sl−1[t][j], which is not
+independent and identically distributed, making it impos-
+sible to keep D(X l[t][i]) as a constant. Alternatively, we
+stabilize the average input current of the neuron for each
+time step, as follows:
+4\n\n--- page 5 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+1
+T
+T−1X
+t=0
+D(X l[t][i]) = 1
+T
+T−1X
+t=0
+Nlσ2
+l ·E(S l−1[t][j])
+= Nlσ2
+l
+T ·E(
+T−1X
+t=0
+Sl−1[t][j])
+= Nlσ2
+l
+T .(14)
+When using Kaiming initialization (He et al., 2015), the
+default weight initialization in PyTorch, the weight will be
+sampled from a uniform distribution U
+
+− 1√Nl
+, 1√Nl
+
+. It
+satisfies the zero mean of weights according to Eq. (12).
+However, according to Eq. (14), the variance is:
+Nl
+T · 1
+12 ·
+ 1√Nl
+−
+
+− 1√Nl
+2
+= 1
+3T ,(15)
+which decays asymptotically to zero as the number of
+time-steps T increases. As the surrogate function pro-
+duces near-zero values for membrane potentials far from the
+threshold, extremely small weights cause the silent neuron
+problem and vanishing gradients. To maintain initialized
+weights within a stable range decoupled from T , we set
+1
+T
+PT−1
+t=0 D(X l[t][i]) = 1. From Eq. (14), σ2
+l must satisfy
+σ2
+l = T
+Nl
+. We thus propose ETTFS-init: for layer l in a
+TTFS SNN (T time-steps), initialize W l from the following
+uniform distribution:
+W l ∼ U
+ 
+−
+r
+3T
+Nl
+,
+r
+3T
+Nl
+!
+.(16)
+For fully-connected layers, Nl denotes the number of input
+features. For convolutional layers, Nl =C l
+in ·N l
+kernel,
+where C l
+in is the number of input channels and N l
+kernel is
+the number of elements in the kernel. With Eq. (16), the
+input current for the l-th AMOS spiking neuron layer is
+stabilized:
+E(X l[t][i]) = 0, 1
+T
+T−1X
+t=0
+D(X l[t][i]) = 1.(17)
+4.3. Weight Normalization
+Although the ETTFS-init method offers a reasonable starting
+point, the distribution of weights may shift during gradient
+descent and consequently violate Eq. (17) during the training
+process as shown in Figure 4.
+To address this, we employ weight normalization (Qiao
+et al., 2019) to maintain a consistent weight distribution:
+W l ← W l −E(W l)p
+D(W l) +ϵ
+·σ W l ,(18)
+l = 0 µ = 0.23,σ 2 = 0.19
+w/o WN
+l = 1 µ =−0.14,σ 2 = 1.04
+l = 2 µ = 0.02,σ 2 = 0.36
+l = 3 µ = 0.01,σ 2 = 0.52
+−5.0 −2.5 0.0 2.5 5.0
+Post-synaptic current
+l = 4 µ =−0.19,σ 2 = 0.63
+(a)First epoch
+l = 0 µ = 0.48,σ 2 = 1.76
+w/o WN
+l = 1 µ =−0.08,σ 2 = 0.95
+l = 2 µ =−0.20,σ 2 = 2.04
+l = 3 µ =−0.11,σ 2 = 2.66
+−5.0 −2.5 0.0 2.5 5.0
+Post-synaptic current
+l = 4 µ =−0.16,σ 2 = 0.59 (b)Last epoch
+l = 0 µ = 0.03,σ 2 = 0.52
+w/ WN
+l = 1 µ = 0.03,σ 2 = 0.33
+l = 2 µ = 0.01,σ 2 = 0.27
+l = 3 µ = 0.02,σ 2 = 0.85
+−5.0 −2.5 0.0 2.5 5.0
+Post-synaptic current
+l = 4 µ =−0.00,σ 2 = 1.52
+(c)First epoch
+l = 0 µ = 0.14,σ 2 = 1.78
+w/ WN
+l = 1 µ = 0.20,σ 2 = 0.38
+l = 2 µ = 0.03,σ 2 = 0.26
+l = 3 µ = 0.09,σ 2 = 0.50
+−5.0 −2.5 0.0 2.5 5.0
+Post-synaptic current
+l = 4 µ = 0.01,σ 2 = 0.44 (d)Last epoch
+Figure 4.Comparison of the distribution of X l during training with
+the ETTFS-init method only and with an additional weight normal-
+ization (WN) method. Without normalization, the distribution of
+X l shifts significantly as the epoch increases. With normalization,
+the distribution ofX l remains stable and shifts only minimally.
+where W l is the weight of the l-th layer, E(W l) and D(W l)
+denote the mean and variance of W l, respectively; ϵ is
+a small constant for numerical stability; and σW l is the
+standard deviation of the initial weights determined by Eq.
+(16) when using ETTFS-init.
+Eq. (18) constrains weight scaling and limits representa-
+tional capacity. Inspired by batch normalization (Ioffe &
+Szegedy, 2015) and layer normalization (Lei Ba et al., 2016),
+which resolve fixed-scale issues via learnable affine trans-
+forms, we apply a learnable affine transform to the synaptic
+outputX l with weightγ l and biasβ l:
+X l ←γ lX l +β l,(19)
+where γl and βl are initialized as all-ones and all-zeros
+tensors, respectively. Both weight normalization and the
+learnable affine transform are applied only during training;
+at inference, the affine transform is absorbed into the synap-
+tic weights. Consequently, the fused weight ˜W l and bias
+˜Bl for thel-th layer are given by:
+˜W l =γ l ·W l, ˜Bl =β l.(20)
+Fusing the affine transform into synaptic weights eliminates
+computational overhead during inference. During training,
+weight normalization prevents distributional shifts and main-
+tains a stable activation distribution forX l. Thus, the model
+achieves both inference efficiency and training stability.
+5\n\n--- page 6 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+neuron
+neuron
+(a)
+Max-pooling
+Average-pooling
+neuron index (b)
+Figure 5.(a) The mechanism of the temporal weighting decoder.
+The weight w[t] is set as an exponential or linear decay function
+of t, ensuring that neurons firing earlier produce larger outputs
+(e.g., ti < tj implies Y[i]> Y[j] ). (b) Comparison between
+average-pooling and max-pooling in TTFS SNNs.
+4.4. Temporal Weighting Decoder
+Traditional SNN decoders use output layer firing rates (Wu
+et al., 2018), which are ineffective for TTFS networks due
+to uniform firing rates (1/T ) across neurons during training.
+The temporal nature of TTFS coding suggests decoding
+through the earliest spike timing. More specifically, suppose
+the SNN is designed for a classification task with C classes
+and the number of time-steps is T . The output of the SNN
+is the tensorO∈ {0,1}T×C . The predicted class is then:
+Ypredict =argmin i{t|O[t][i] = 1}.(21)
+Equation (21) is used in inference, not training. However,
+since argmin is non-differentiable, this rule is used only
+during inference—not training. Therefore, an effective de-
+coder approach for TTFS SNNs must have two key features:
+differentiability and an emphasis on early firing.
+Existing TTFS decoders such as TQ-TTFS decoder exhibit
+computational complexity and underutilize temporal infor-
+mation (Yang et al., 2024). To solve these issues, we pro-
+pose the temporal weighting decoder, which aggregates the
+outputs using decayed temporal weights w∈R T over time-
+steps, prioritizing early firing while preserving differentia-
+bility as shown in Figure 5a. Consequently, the decoded
+output Y∈R C is defined as the weighted sum of outputs
+over time-steps:
+Y=
+T−1X
+t=0
+w[t]·O[t].(22)
+We set w[0] = 1 and w[t]> w[t+ 1] for any t∈
+{0,1, . . . , T−2}. The weighting factor w can be set as
+an exponential decay function or a linear decay function:
+w[t] =γ −t, w[t] =γ· T−t
+T .(23)
+This formulation ensures differentiability prioritizes earlier
+firing times via scaling factor γ >1. Thus, if neuron i fires
+at ti and neuron j fires at tj with ti < tj, the decoder yields
+a higher contribution from neuroni:
+Y[i] =w[t i]> w[tj] =Y[j].(24)
+Derived from Eq. (24), the neuron that has the earliest firing
+time-step also enjoys the largest decoded value:
+argmini{t|O[t][i] = 1}=argmax i{Y[i]}.(25)
+Most prior TTFS methods use spike timing decoder requir-
+ing long time windows for accurate gradients and large
+computational overhead for converting continuous timing
+to binary spikes (Wei et al., 2023). In contrast, our tem-
+poral weighting decoder achieves lower latency through
+step-by-step propagation while preserving strictly sparse
+binary representations.
+4.5. Pooling for One-Spike Characteristic
+Pooling layers reduce spatial dimensions to extract com-
+pact features. However, prior work (Yang et al., 2024)
+adopts max-pooling without considering its compatibility
+with TTFS coding. Consider a pooling window over n
+one-spike input sequences Sin ∈ {0,1}T×n , the sum of the
+max-pooled outputS out ∈ {0,1}T×1 is:
+T−1X
+t=0
+Sout[t] =
+T−1X
+t=0
+max(Sin[t][0], Sin[t][1], ..., Sin[t][n−1])
+=
+T−1X
+t=0
+min
+ n−1X
+i=0
+Sin[t][i],1
+!
+.(26)
+Max-pooling selects the maximum across spatial dimension
+at each time-step. PT−1
+t=0 Sout[t]>1 occurs when more
+than one neuron in the pooling window fires at different
+time-steps, which seriously violates the one-spike assump-
+tion. Conversely, average-pooling does not suffer from this
+problem as it averages over the spatial dimension n while
+the sum of each sequence is always1:
+T−1X
+t=0
+Sout[t] =
+T−1X
+t=0
+1
+n
+n−1X
+i=0
+Sin[t][i] = 1.(27)
+Moreover, as both average-pooling and convolutional layers
+are linear operations, they can theoretically be fused into a
+single linear layer to reduce computation overhead.
+5. Experiments
+In this section, we evaluate the accuracy and latency of ET-
+TFS based on SpikingJelly framework (Fang et al., 2023a).
+6\n\n--- page 7 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+Method MNIST Fashion-MNIST CIFAR10 CIFAR100 DVS Gesture
+Model Acc. Model Acc. Model Acc. Model Acc. Model Acc.
+Conversion
+TTFS clamped (Rueckauer & Liu, 2018) LeNet-5 98.53% - - - - - - - -
+LC-TTFS (Yang et al., 2023) - - - - VGG-1692.72%VGG-16 70.15% - -
+T2FSNN (Park et al., 2020) - - - - VGG-16 91.43% VGG-16 68.79% - -
+Direct training
+Mostafa (Mostafa, 2017) FC800-FC10 97.5% - - - - - - - -
+Comsa et al. (Comsa et al., 2020) FC340-FC10 97.9% - - - - - - - -
+Göltz et al. (Göltz et al., 2021) FC350-FC10 97.2% - - - - - - - -
+S4NN (Kheradpisheh & Masquelier, 2020) FC600-FC10 97.4% FC1000-FC10 88.0% - - - - - -
+BS4NN (Kheradpisheh et al., 2022) FC600-FC10 97.0% FC1000-FC10 87.3% - - - - - -
+Zhang et al. (Zhang et al., 2021) FC400-FC10 98.1% SCNN 1 90.1% - - - - - -
+Sakemi et al. (Sakemi et al., 2023) SCNN 2 99.25% SCNN 2 89.5% SCNN 3 80.0% - - - -
+STiDi-BP (Mirsadeghi et al., 2023) SCNN 4 99.2% SCNN 5 92.8% - - - - - -
+DTA-TTFS (Wei et al., 2023) SCNN1 99.4% - - VGG16 93.55% p VGG16 69.66% p
+- -
+VGG16 80.38% † VGG16 1 % †
+TQ-TTFS (Yang et al., 2024) FC400-FC10 98.6% FC400-FC400-FC10 88.1% SCNN6 67.47 %† SCNN6 1%† SCNN7 88.89%†
+SCNN1 90.2%
+ETTFS (ours) FC400-FC1098.67 ±0.14% FC400-FC400-FC1090.21 ±0.16% SCNN 6 93.89±0.28%p SCNN6 72.70±0.44%p
+SCNN7 95.83±0.69%SCNN1 99.48±0.07% SCNN 5 92.90±0.11% SCNN 6 90.56±0.33% SCNN 6 70.27±0.52%
+Table 1.Comparison on MNIST, Fashion-MNIST, CIFAR10/100, and DVS Gesture datasets. † denotes our implementation. p denotes
+using pre-trained ReLU weights. Notation: FCn (fully-connected layer with n output features). Refer to the Supplementary Materials
+Table 9 for more details about the symbolic representations of the network structure.
+5.1. Comparison with the State-of-the-Art
+We evaluate ETTFS on the static MNIST, Fashion-MNIST,
+CIFAR10/100, and the neuromorphic DVS Gesture dataset
+(Amir et al., 2017).
+5.1.1. ACCURACY
+ETTFS achieves state-of-the-art accuracy among all direct
+training methods on all benchmarks. Both DTA-TTFS and
+conversion-based methods require a large VGG16 model
+(138.36M parameters) and significantly more time-steps
+(>100 steps). While DTA-TTFS employs direct training, it
+remain reliant on costly ReLU pre-trained weights.
+In contrast, ETTFS uses a compact SCNN (70.11M param-
+eters) and outperforms DTA-TTFS both with and without
+pre-training with only 2.93 average time-steps. For a fair
+comparison to other methods, we thus report 90.56% as
+our CIFAR10 baseline. Furthermore, ETTFS’s step-by-step
+propagation matches the asynchronous, event-driven nature
+of neuromorphic hardware, whereas conversion methods
+rely on layer-by-layer inference, which incurs high latency.
+DVS data requires spikes in different time-steps to represent
+motion, which conflicts with the strict spike constraint of
+TTFS coding. Consequently, training TTFS SNNs on DVS
+datasets is challenging and no prior TTFS results exist in
+DVS Gesture dataset. To address this, we provide the first
+implementation of TQ-TTFS and the proposed ETTFS on
+DVS benchmarks, where competing methods typically fail
+to converge.
+Method MNIST Fashion-MNIST CIFAR10/100 DVS Gesture
+T2FSNN20 ∗ (40) -400 ∗ (680) -
+Mostafa3.5 ∗ (5∗) - - -
+Comsa et al.20 ∗ (50∗) - - -
+S4NN 89.7 (256) - - -
+BS4NN112.2 ∗ (256)100.20 ∗ (256) - -
+STiDi-BP 71.1 (100) 61.3 (100) - -
+DTA-TTFS - - 160 (160) -
+TQ-TTFS2.93 † (8)4.21 † (8)4.62 † (8)4.08 † (8)
+ETTFS (ours) 1.01(8)2.03(8)2.93(8)1.20(8)
+Table 2.Comparison of time-steps on MNIST, Fashion-MNIST,
+CIFAR10/100, and DVS Gesture datasets. Each element denotes:
+inference time-steps (training time-steps). Some prior works report
+results in figures (denoted by ∗). † denotes our implementation.
+time-stepsN s SOPs E1 E2 (Normalized) E3
+Rate coding8 4.54×10 5 11.02×10 6 87.79uJ1 108.59uJ
+TQ-TTFS4.62 2.71×10 5 3.78×10 6 20.59uJ0.596 39.77uJ
+ETTFS2.93 2.69×10 5 3.45×10 6 12.19uJ0.592 27.56uJ
+Table 3.Comparison of inference time-steps, the number of spikes
+Ns, synaptic operations (SOPs), and three estimated energy con-
+sumption metrics on CIFAR10.
+5.1.2. LATENCY ANDENERGYCONSUMPTION
+TTFS SNNs enable early inference stopping upon the first
+output spike. This early stopping reduces inference time-
+steps far below training. Table 2 reports the average time-
+steps over the test set. Conversion methods require substan-
+tially more time-steps and suffer from latency inflation in
+hardware due to mandatory layer-by-layer propagation. In
+contrast, direct training methods like TQ-TTFS and ours
+leverage step-by-step propagation to achieve minimal train-
+ing time-steps.
+7\n\n--- page 8 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+−6 −4 −2 0 2 4
+Gradient ×10−7
+100
+101
+102
+Counts
+Kaiming init
+(a)First layer
+−4 −2 0 2 4
+Gradient ×10−10
+100
+101
+102
+103
+104
+105
+Counts
+Kaiming init (b)Last layer
+−1 0 1 2 3
+Gradient ×10−2
+100
+101
+Counts
+ETTFS-init
+(c)First layer
+−7.5−5.0−2.5 0.0 2.5 5.0 7.5
+Gradient ×10−3
+100
+101
+102
+103
+104
+105
+Counts
+ETTFS-init (d)Last layer
+Figure 6.Comparison of the gradients of weights initialized by the
+Kaiming initialization and the ETTFS-init method. The Kaiming
+initialization results in extremely small gradients, with a scale
+of less than 10−7. In contrast, our ETTFS-init method leads to
+appropriate gradients with a scale larger than10 −3.
+5 9 10 11
+Number of Layers
+0
+20
+40
+60
+80
+100Accuracy (%)
+Kaiming init
+ETTFS-init
+Figure 7.Evaluation of the stability of ETTFS-init on Fashion-
+MNIST. Increasing the number of layers from5to11.
+Prior SNN research emphasizes synaptic energy, neglect-
+ing memory access costs (Chowdhury et al., 2021). To
+achieve a comprehensive measurement, we measure energy
+consumption using three distinct metrics:
+E1. Event-driven synaptic-operation energy.The first
+estimate evaluates the energy spent by spike-triggered synap-
+tic accumulations. Following the commonly adopted 45 nm
+CMOS setting, we use EAC = 0.9 pJ for one accumula-
+tion operation (Rathi & Roy, 2021). Given an SNN with L
+layers, the estimated energy is
+E1 =E AC
+L−1X
+l=0
+TFLOPs(l)r l,(28)
+where T denotes the inference time-steps, FLOPs(l) is
+the operation count of layer l in its dense counterpart, and
+rl is the average spike firing rate of that layer. However,
+this SOP-based metric overemphasizes synaptic sparsity
+while neglecting the dominant impact of spike count on
+neuromorphic hardware energy.
+E2. Spike-count-aware static dynamic energy.The sec-
+ond estimate metric captures the temporal and spiking en-
+ergy costs in neuromorphic hardware (Wei et al., 2023). It
+is defined as:
+E2 =α statT+α dynNs,(29)
+where Ns is the total spike count over all neurons and time-
+steps. The coefficients αstat and αdyn are hardware-specific
+constants that characterize static and dynamic energy, re-
+spectively. For the TrueNorth platform (Merolla et al.,
+2014), we set(α stat, αdyn) = (0.6,0.4).
+E3. Memory access energymetric models the memory
+access energy of neuromorphic chips in Spikesim (Moitra
+et al., 2023). We report the results for a 262 M-neuron
+scenario with input dimensions of Ci, Co, k, H, W=
+256,256,3,32,32.
+ETTFS shows advantages over rate coding and TQ-TTFS in
+terms of time-steps, number of spikes, SOPs, and three dif-
+ferent energy consumption metrics due to temporal weight-
+ing decoder’s early stopping mechanism and temporal decay
+strategy, as shown in Table 3.
+5.2. Ablation Study
+Our methods achieve high accuracy and low latency com-
+pared to prior work. We conduct ablation studies to examine
+the impact of each component. Further ablation study on
+time-step and post-synaptic variance impact are in Supple-
+mentary Materials A.
+5.2.1. ETTFS-INIT ONBACKWARDPROPAGATION
+We analyze backward propagation gradients through weight
+gradients ∂L
+∂W l in SCNN5 (Figure 6). With Kaiming initial-
+ization, gradients scale from 10−7 to 10−10 across layers,
+leading to the diminishing post-synaptic currents in Figure
+1a. In contrast, ETTFS-init maintains stable gradient scales,
+thereby mitigating the vanishing gradient problem.
+5.2.2. VERIFICATION ONDEEPTTFS SNNS
+Deeper networks suffer from increased training instability
+especially in TTFS SNNs. For networks expanded from 5 to
+11 layers, Kaiming initialization causes accuracy degrada-
+tion and convergence failure, whereas ETTFS-init maintains
+high accuracy, as shown in Figure 7.
+5.2.3. ACCURACYCONTRIBUTIONS
+We evaluate each component of ETTFS on Fashion-MNIST
+as shown in Table 4. The baseline is SCNN 5 with max-
+pooling and the TQ-TTFS decoder. Starting from the
+baseline SCNN5, ETTFS-init accelerates convergence and
+boosts accuracy compared with Kaiming initialization;
+adding weight normalization further enhances performance,
+as shown in Figure 8.
+8\n\n--- page 9 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+ETTFS-init Avg-pooling Norm Norm with affine TWD Accuracy
+89.61%
+✓89.72%
+✓90.27%
+✓ ✓90.47%
+✓ ✓90.41%
+✓ ✓ ✓90.88%
+✓ ✓ ✓ ✓91.61%
+✓ ✓ ✓ ✓92.90%
+Table 4.Evaluating the components of ETTFS on the Fashion-
+MNIST dataset. TWD denotes the temporal weighting decoder.
+The baseline uses max-pooling with the TQ-TTFS decoder.
+0 20 40 60 80 100
+Epochs
+75
+80
+85
+90
+95Accuracy (%)
+Kaiming init
+ETTFS-init
+ETTFS-init+norm
+(a)Fashion-MNIST
+0 50 100 150 200
+Epochs
+65
+75
+85
+95Accuracy (%) (b)CIFAR10
+0 100 200 300 400
+Epochs
+70
+80
+90
+100Accuracy (%) (c)DVS Gesture
+Figure 8.Comparison of the epoch-accuracy curves of the Kaiming
+and ETTFS initialization methods on three datasets. The curves
+in dark colors represent the moving average of the test accuracy,
+while the original data are plotted in light colors.
+1 1.5 2 2.5 3
+γ
+89
+90
+91
+92
+93Accuracy (%)
+lin.
+exp.
+(a)Fashion-MNIST
+1 1.5 2 2.5 3
+γ
+82
+84
+86
+88
+90Accuracy (%) (b)CIFAR10
+1 1.5 2 2.5 3
+γ
+93
+94
+95
+96Accuracy (%) (c)DVS Gesture
+Figure 9.Comparisons of weight decay methods with different
+γ values for the temporal weighting decoder method on three
+datasets. The highest accuracy on each dataset is marked by★.
+5.2.4. WEIGHTDECAYSTRATEGIES FORTEMPORAL
+WEIGHTINGDECODER
+Larger γ values enhance early-spike emphasis but risk van-
+ishing gradients. We evaluate exponential and linear decay
+methods across three datasets, observing an optimal γ= 3
+for Fashion-MNIST (exponential decay) and CIFAR10 (lin-
+ear decay), while DVS Gesture shows stable accuracy for
+both methods, as shown in Figure 9. Consequently, γ re-
+quires dataset-specific empirical tuning.
+6. Conclusion
+We propose ETTFS, a training framework for high per-
+formance TTFS SNNs. It integrates weight initialization,
+normalization, temporal decoding, and average-pooling to
+stabilize training dynamics and reduce inference latency.
+Consequently, it achieves state-of-the-art accuracy among
+directly trained TTFS SNNs. Currently, our paper only
+focuses on small-scale datasets, as do most TTFS SNNs,
+rather than large-scale datasets such as ImageNet. Therefore,
+future research should address these limitations to bridge
+the performance gap and broaden their applicability.
+Acknowledgements
+We sincerely apologize for the omission of Timothée
+Masquelier, who should have been listed as the 7-th au-
+thor. He was inadvertently omitted during the OpenReview
+submission process due to a submission oversight on our
+part. After the submission was completed, the author list
+could no longer be modified at this stage due to ICML
+policy constraints. We are deeply grateful for Timothée
+Masquelier’s contributions to and support of this research.
+Readers are encouraged to cite the arXiv version of this
+work: https://arxiv.org/abs/2410.23619.
+The study was funded by the Guangdong S&T Program
+(2024B0101010003), the National Natural Science Foun-
+dation of China under contracts No. 62425101, No.
+62332002, No.62088102, the major key project of the Peng
+Cheng Laboratory (PCL2025A02), and Shenzhen KQTD
+(No.20240729102051063).
+Impact Statement
+This paper presents work whose goal is to advance the field
+of machine learning. There are many potential societal
+consequences of our work, none of which we feel must be
+specifically highlighted here.
+References
+Amir, A., Taba, B., Berg, D., Melano, T., McKinstry, J.,
+Di Nolfo, C., Nayak, T., Andreopoulos, A., Garreau, G.,
+Mendoza, M., Kusnitz, J., Debole, M., Esser, S., Del-
+bruck, T., Flickner, M., and Modha, D. A low power,
+fully event-based gesture recognition system. InProceed-
+ings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pp. 7243–7252, 2017.
+Bi, G.-q. and Poo, M.-m. Synaptic modifications in cul-
+tured hippocampal neurons: Dependence on spike timing,
+synaptic strength, and postsynaptic cell type.Journal of
+Neuroscience, 18(24):10464–10472, 1998.
+Che, K., Zhou, Z., Niu, J., Ma, Z., Fang, W., Chen, Y .,
+Shen, S., Yuan, L., and Tian, Y . Auto-spikformer: Spik-
+former architecture search.Frontiers in Neuroscience, 18:
+1372257, 2024.
+Chowdhury, S. S., Rathi, N., and Roy, K. One timestep is
+all you need: Training spiking neural networks with ultra
+low latency.arXiv preprint arXiv:2110.05929, 2021.
+9\n\n--- page 10 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+Comsa, I. M., Potempa, K., Versari, L., Fischbacher, T.,
+Gesmundo, A., and Alakuijala, J. Temporal coding in
+spiking neural networks with alpha synaptic function. In
+ICASSP 2020-2020 IEEE International Conference on
+Acoustics, Speech and Signal Processing (ICASSP), pp.
+8529–8533. IEEE, 2020.
+Davies, M., Wild, A., Orchard, G., Sandamirskaya, Y .,
+Guerra, G. A. F., Joshi, P., Plank, P., and Risbud, S. R.
+Advancing neuromorphic computing with loihi: A survey
+of results and outlook.Proceedings of the IEEE, 109(5):
+911–934, 2021.
+Ding, J., Zhang, J., Yu, Z., and Huang, T. Accelerating
+training of deep spiking neural networks with parameter
+initialization. 2022. URL https://openreview.
+net/forum?id=T8BnDXDTcFZ.
+Eliasmith, C., Stewart, T. C., Choo, X., Bekolay, T., DeWolf,
+T., Tang, Y ., and Rasmussen, D. A large-scale model of
+the functioning brain.Science, 338(6111):1202–1205,
+2012. doi: 10.1126/science.1225266.
+Fang, W., Yu, Z., Chen, Y ., Huang, T., Masquelier, T., and
+Tian, Y . Deep residual learning in spiking neural net-
+works.Advances in Neural Information Processing Sys-
+tems, 34, 2021.
+Fang, W., Chen, Y ., Ding, J., Yu, Z., Masquelier, T., Chen,
+D., Huang, L., Zhou, H., Li, G., and Tian, Y . Spikingjelly:
+An open-source machine learning infrastructure platform
+for spike-based intelligence.Science Advances, 9(40):
+eadi1480, 2023a.
+Fang, W., Yu, Z., Zhou, Z., Chen, D., Chen, Y ., Ma, Z.,
+Masquelier, T., and Tian, Y . Parallel spiking neurons with
+high efficiency and ability to learn long-term dependen-
+cies.Advances in Neural Information Processing Systems,
+36, 2023b.
+Glorot, X. and Bengio, Y . Understanding the difficulty
+of training deep feedforward neural networks. InPro-
+ceedings of the thirteenth international conference on
+artificial intelligence and statistics, pp. 249–256. JMLR
+Workshop and Conference Proceedings, 2010.
+Gollisch, T. and Meister, M. Rapid neural coding in the
+retina with relative spike latencies.science, 319(5866):
+1108–1111, 2008.
+Göltz, J., Kriener, L., Baumbach, A., Billaudelle, S., Bre-
+itwieser, O., Cramer, B., Dold, D., Kungl, A. F., Senn, W.,
+Schemmel, J., et al. Fast and energy-efficient neuromor-
+phic deep learning with first-spike times.Nature machine
+intelligence, 3(9):823–835, 2021.
+He, K., Zhang, X., Ren, S., and Sun, J. Delving deep
+into rectifiers: Surpassing human-level performance on
+imagenet classification. InProceedings of the IEEE Inter-
+national Conference on Computer Vision, pp. 1026–1034,
+2015.
+Hebb, D. O.The Organization of Behavior: a Neuropsycho-
+logical Theory. 2005.
+Hu, Y ., Zheng, Q., Jiang, X., and Pan, G. Fast-snn:
+Fast spiking neural network by converting quantized
+ann.IEEE Transactions on Pattern Analysis and Ma-
+chine Intelligence, 45(12):14546–14562, 2023. doi:
+10.1109/TPAMI.2023.3275769.
+Ioffe, S. and Szegedy, C. Batch normalization: Accelerating
+deep network training by reducing internal covariate shift.
+InInternational conference on machine learning, pp. 448–
+456. PMLR, 2015.
+Kheradpisheh, S. R. and Masquelier, T. Temporal backprop-
+agation for spiking neural networks with one spike per
+neuron.International journal of neural systems, 30(06):
+2050027, 2020.
+Kheradpisheh, S. R., Mirsadeghi, M., and Masquelier, T.
+Bs4nn: Binarized spiking neural networks with temporal
+coding and learning.Neural Processing Letters, 54(2):
+1255–1273, 2022.
+Kim, J., Kim, H., Huh, S., Lee, J., and Choi, K. Deep neural
+networks with weighted spikes.Neurocomputing, 311:
+373–386, 2018.
+Lei Ba, J., Kiros, J. R., and Hinton, G. E. Layer normaliza-
+tion.ArXiv e-prints, pp. arXiv–1607, 2016.
+Li, Y . and Zeng, Y . Efficient and accurate conversion of
+spiking neural network with burst spikes. 2022.
+Maass, W. Networks of spiking neurons: the third genera-
+tion of neural network models.Neural networks, 10(9):
+1659–1671, 1997.
+Merolla, P. A., Arthur, J. V ., Alvarez-Icaza, R., Cassidy,
+A. S., Sawada, J., Akopyan, F., Jackson, B. L., Imam, N.,
+Guo, C., Nakamura, Y ., et al. A million spiking-neuron
+integrated circuit with a scalable communication network
+and interface.Science, 345(6197):668–673, 2014.
+Mirsadeghi, M., Shalchian, M., Kheradpisheh, S. R., and
+Masquelier, T. Spike time displacement-based error
+backpropagation in convolutional spiking neural net-
+works.Neural Computing and Applications, 35(21):
+15891–15906, 2023.
+10\n\n--- page 11 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+Moitra, A., Bhattacharjee, A., Kuang, R., Krishnan, G., Cao,
+Y ., and Panda, P. Spikesim: An end-to-end compute-in-
+memory hardware evaluation tool for benchmarking spik-
+ing neural networks.IEEE Transactions on Computer-
+Aided Design of Integrated Circuits and Systems, 42(11):
+3815–3828, 2023.
+Mostafa, H. Supervised learning based on temporal coding
+in spiking neural networks.IEEE Transactions on Neural
+Networks and Learning Systems, 29(7):3227–3235, 2017.
+Park, S., Kim, S., Na, B., and Yoon, S. T2fsnn: deep
+spiking neural networks with time-to-first-spike coding.
+InProceedings of the 57th ACM/EDAC/IEEE Design
+Automation Conference, DAC ’20. IEEE Press, 2020.
+ISBN 9781450367257.
+Pei, J., Deng, L., Song, S., Zhao, M., Zhang, Y ., Wu, S.,
+Wang, G., Zou, Z., Wu, Z., He, W., et al. Towards artificial
+general intelligence with hybrid tianjic chip architecture.
+Nature, 572(7767):106–111, 2019.
+Qiao, S., Wang, H., Liu, C., Shen, W., and Yuille, A. Micro-
+batch training with batch-channel normalization and
+weight standardization.arXiv preprint arXiv:1903.10520,
+2019.
+Rathi, N. and Roy, K. Diet-snn: A low-latency spiking
+neural network with direct input encoding and leakage
+and threshold optimization.IEEE Transactions on Neural
+Networks and Learning Systems, 2021.
+Rossbroich, J., Gygax, J., and Zenke, F. Fluctuation-driven
+initialization for spiking neural network training.Neuro-
+morphic Computing and Engineering, 2(4):044016, 2022.
+Rueckauer, B. and Liu, S.-C. Conversion of analog to spik-
+ing neural networks using sparse temporal coding. In
+2018 IEEE international symposium on circuits and sys-
+tems (ISCAS), pp. 1–5. IEEE, 2018.
+Sakemi, Y ., Yamamoto, K., Hosomi, T., and Aihara, K.
+Sparse-firing regularization methods for spiking neural
+networks with time-to-first-spike coding.Scientific Re-
+ports, 13(1):22897, 2023.
+Stimberg, M., Brette, R., and Goodman, D. F. Brian 2, an
+intuitive and efficient neural simulator.eLife, 8:e47314,
+2019.
+Wang, Z., Gu, X., Goh, R. S. M., Zhou, J. T., and Luo, T.
+Efficient spiking neural networks with radix encoding.
+IEEE Transactions on Neural Networks and Learning
+Systems, 35(3):3689–3701, 2022.
+Wei, W., Zhang, M., Qu, H., Belatreche, A., Zhang, J., and
+Chen, H. Temporal-Coded Spiking Neural Networks with
+Dynamic Firing Threshold: Learning with Event-Driven
+Backpropagation. In2023 IEEE/CVF International Con-
+ference on Computer Vision (ICCV), pp. 10518–10528,
+Paris, France, October 2023. IEEE. ISBN 979-8-3503-
+0718-4. doi: 10.1109/ICCV51070.2023.00968.
+Wu, Y ., Deng, L., Li, G., Zhu, J., and Shi, L. Spatio-
+temporal backpropagation for training high-performance
+spiking neural networks.Frontiers in neuroscience, 12:
+331, 2018.
+Yang, Q., Zhang, M., Wu, J., Tan, K. C., and Li, H. Lc-ttfs:
+Toward lossless network conversion for spiking neural
+networks with ttfs coding.IEEE Transactions on Cogni-
+tive and Developmental Systems, 16(5):1626–1639, 2023.
+Yang, Y ., Xuan, Z., and Kang, Y . Tq-ttfs: High-accuracy and
+energy-efficient spiking neural networks using temporal
+quantization time-to-first-spike neuron. In2024 29th
+Asia and South Pacific Design Automation Conference
+(ASP-DAC), pp. 836–841. IEEE, 2024.
+Zhang, M., Wang, J., Wu, J., Belatreche, A., Amornpaisan-
+non, B., Zhang, Z., Miriyala, V . P. K., Qu, H., Chua, Y .,
+Carlson, T. E., et al. Rectified linear postsynaptic poten-
+tial function for backpropagation in deep spiking neural
+networks.IEEE Transactions on Neural Networks and
+Learning Systems, 33(5):1947–1958, 2021.
+11\n\n--- page 12 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+A. Further Ablation Study
+A.1. Time-step impact
+We applied a fixed 8 time-steps to ensure a fair comparison
+with prior work. To further assess the effect of time-step
+variation, we evaluated configurations from 2 to 12 time-
+steps on three key datasets; results are reported in Table 5.
+T Fashion-MNIST(%)DVSGesture(%)CIFAR10(%)
+2 87.02 71.18 88.97
+3 87.07 96.53 90.82
+4 89.63 95.83 91.21
+5 91.86 95.49 90.58
+6 92.5395.86 90.72
+7 92.85 94.44 90.22
+8 92.90 95.83 90.56
+9 92.87 93.06 90.12
+1093.0194.12 89.84
+11 92.75 93.40 89.69
+12 92.75 92.36 89.68
+Table 5.Time-step impact on three datasets.
+A.2. Post-synaptic variance impact
+According to Eq. (14), the average of input current variance
+at each time-step given by:
+1
+T
+T−1X
+t=0
+D(X l[t][i]) = Nlσ2
+l
+T .(30)
+When using Kaiming initialization, the default weight ini-
+tialization in PyTorch, the weight will be sampled from
+a uniform distribution U
+
+− 1√Nl
+, 1√Nl
+
+. The variance be-
+comes:
+Nl
+T · 1
+12 ·( 1√Nl
+−(− 1√Nl
+))2 = 1
+3T ,(31)
+AsTincreases, the variance approaches:
+T→ ∞, 1
+T
+T−1X
+t=0
+D(X l[t][i])→0(32)
+Many TTFS SNNs require large time-steps (e.g., 100), re-
+sulting in 1
+T
+PT−1
+t=0 D(X l[t][i])<0.003 . It is a extremely
+small value, which will cause the silence problem during
+forward propagation, leading to vanishing gradients as the
+surrogate function produces near-zero values when mem-
+brane potentials are distant from the threshold.
+Therefore, we set the value to 1 as an normal choice. The
+variance can also be set to other values, as long as it can
+decouple T and will not lead to over-small weights. But
+our analysis across datasets confirms that a variance of 1
+consistently outperforms smaller variances, which often
+lead to suboptimal performance as shown in Table 6.
+σ2
+l Fashion-MNIST(%)DVSGesture(%)CIFAR10(%)
+4 92.31 95.14 90.45
+2 92.85 94.80 90.48
+192.9 95.83 90.56
+0.5 93.05 93.75 90.02
+0.25 91.83 92.08 88.64
+Table 6.Comparison with difference initial values of varience
+across different datasets.
+A.3. Comparison with rate coding
+To facilitate a clearer comparison of the performance gap
+with rate coding with the same network structure and trained
+it on the same datasets. The results are reported in Table 7.
+B. Experimental Settings
+To ensure reproducibility, we provide all experimental set-
+tings in Table 8. Additionally, all source code, trained model
+weights, and training logs for each benchmark are included
+in the Supplementary Material, enabling full replication
+of our results. All experiments are conducted on a sin-
+gle NVIDIA RTX 4090 GPU with 24GB memory. For
+a fair comparison, we use the same network structures
+as previous methods. The detailed layer descriptions and
+output sizes can be found in Table 9. Code and experi-
+mental logs are available in: https://github.com/
+CheKaiWei/ETTFS.
+12\n\n--- page 13 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+Method MNIST Fashion-MNIST CIFAR10 CIFAR100 DVS Gesture
+Model Acc. Model Acc. Model Acc. Model Acc. Model Acc.
+Rate SCNN 1 99.54%SCNN 5 93.21%SCNN 6 94.29%SCNN 6 73.21%SCNN 7 93.47%
+ETTFS (ours)SCNN 1 99.48% SCNN 5 92.90% SCNN 6 93.89% SCNN 6 72.70% SCNN 7 95.83%
+Table 7.Comparison between rate coding and TTFS coding on MNIST, Fashion-MNIST, CIFAR10, CIFAR100, and DVS Gesture.
+Dataset Fashion-MNIST CIFAR10 DVS Gesture
+& MNIST
+Batch size 128 64 16
+Epochs 100 200 400
+Optimizer AdamW SGD AdamW
+LR1e−3 1e−6→0.1 1e−6→0.1
+Loss function MSE CrossEntropy MSE
+Time step 8 8 8
+DA Mixup
+Mixup, cutmix,
+horizontal flip,
+autoaugment,
+random erase
+Random
+temporal
+delete
+Table 8.Experimental settings on MNIST, Fashion-MNIST, CI-
+FAR10, and DVS Gesture datasets. LR denotes learning rate, DA
+denotes data augmentation.
+13\n\n--- page 14 ---\n\nEfficiently Training Time-to-First-Spike Spiking Neural Networks from Scratch
+#Layer Description
+FC400-FC10 (MNIST)
+FC400 lin.28×28,400
+FC10 lin.400,10
+TWD temporal weighting decoder
+FC400-FC400-FC10 (Fashion-MNIST)
+FC400 lin.28×28,400
+FC400 lin.400,400
+FC10 lin.400,10
+TWD temporal weighting decoder
+SCNN1 (MNIST)
+C16K5 conv.1×5×5×16stride 1
+P2 avg.2×2
+C32K5 conv.16×5×5×32stride 1
+P2 avg.2×2
+FC800 lin.512,800
+FC128 lin.800,128
+FC10 lin.800,10
+TWD temporal weighting decoder
+SCNN5 (Fashion-MNIST)
+C20K5 conv.1×5×5×20stride 1
+P2 avg.2×2
+C40K5 conv.20×5×5×40stride 1
+P2 avg.2×2
+FC1000 lin.640,1000
+FC10 lin.1000,10
+TWD temporal weighting decoder
+#Layer Description
+SCNN6 (CIFAR10/100)
+C256K3*3 conv.3×3×3×256stride 1 *3
+P2 avg.2×2
+C256K3*3 conv.256×3×3×256stride 1 *3
+P2 avg.2×2
+FC4096 lin.16384,4096
+FC10/100 lin.4096,10/100
+TWD temporal weighting decoder
+SCNN7 (DVS Gesture)
+C128K3 conv.2×3×3×128stride 1
+P2 avg.2×2
+C128K3 conv.2×3×3×128stride 1
+P2 avg.2×2
+C128K3 conv.2×3×3×128stride 1
+P2 avg.2×2
+C128K3 conv.2×3×3×128stride 1
+P2 avg.2×2
+C128K3 conv.2×3×3×128stride 1
+P2 avg.2×2
+FC521 lin.2048,512
+FC11 lin.512,11
+TWD temporal weighting decoder
+Table 9.Detailed architecture on MNIST, Fashion-MNIST, CIFAR10/100, and DVS Gesture. Notation: FCn (fully-connected layer with n
+output features), CmKn (convolutional layer with m output channels and n kernel size), Pn (pooling layer with stride n). SCNN1 is C16K5-
+P2-C32K5-P2-FC128-FC10. SCNN2 is C6K5-P2-C16K5-P2-FC400-FC400-10. SCNN3 is C32K3-P2-C64K3-P2-C128K3-P2-FC10.
+SCNN4 is C40K5-P2-FC1000-FC10. SCNN 5 is C20K5-P2-C40K5-P2-FC1000-FC10. SCNN 6 is {{C256K3}*3-P2}*2-FC2048-FC10.
+SCNN7 is {C128K3-P2}*5-FC512-FC11.
+14\n

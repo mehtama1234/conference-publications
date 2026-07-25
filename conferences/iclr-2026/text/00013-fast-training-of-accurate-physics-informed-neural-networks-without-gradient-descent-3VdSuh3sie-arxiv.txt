@@ -1,0 +1,3343 @@
+\n\n--- page 1 ---\n\nPublished as a conference paper at ICLR 2026
+FAST TRAINING OF ACCURATE PHYSICS-INFORMED
+NEURAL NETWORKS WITHOUT GRADIENT DESCENT
+Chinmay Datar1,2,3∗,Taniya Kapoor 4,Abhishek Chandra 5,Qing Sun 1,3,Erik Bolager 1,3,
+Iryna Burak1,3,Anna Veselovska 1,Massimo Fornasier 1,2,3,6,Felix Dietrich 1,3,6
+1Technical University of Munich (TUM) 2TUM Institute for Advanced Study
+3Munich Center for Machine Learning 4Wageningen University & Research
+5KTH Royal Institute of Technology 6Munich Data Science Institute
+ABSTRACT
+Solving time-dependent Partial Differential Equations (PDEs) is one of the most
+critical problems in computational science. While Physics-Informed Neural Net-
+works (PINNs) offer a promising framework for approximating PDE solutions,
+their accuracy and training speed are limited by two core barriers: gradient-descent-
+based iterative optimization over complex loss landscapes and non-causal treatment
+of time as an extra spatial dimension. We presentFrozen-PINN, a novel PINN
+based on the principle of space-time separation that leverages random features
+instead of training with gradient descent, and incorporates temporal causality by
+construction. On nine PDE benchmarks, including challenges like extreme ad-
+vection speeds, shocks, and high-dimensionality, Frozen-PINNs achieve superior
+training efficiency and accuracy over state-of-the-art PINNs, often by several orders
+of magnitude. Our work addresses longstanding training and accuracy bottlenecks
+of PINNs, delivering quickly trainable, highly accurate, and inherently causal
+PDE solvers, a combination that prior methods could not realize. Our approach
+challenges the reliance of PINNs on stochastic gradient-descent-based methods and
+specialized hardware, leading to a paradigm shift in PINN training and providing a
+challenging benchmark for the community.
+1 INTRODUCTION
+Partial Differential Equations (PDEs) provide a unifying framework for modeling complex dynamical
+systems across physics, biology, and engineering, yet developing efficient methods to solve them
+remains a longstanding challenge (Farlow, 1993). Deep neural networks have recently shown
+significant promise for approximating solutions of PDEs because of the mesh-free construction of
+basis functions, high expressivity of neural networks (Rudi & Rosasco, 2021), their ability to represent
+functions in high dimensions (E, 2020; Wu & Long, 2022; Han et al., 2018), and powerful software
+for automatic differentiation (e.g., Pytorch (Paszke et al., 2017), TensorFlow (Abadi et al., 2015),
+DeepXDE (Lu et al., 2021b)). Earlier work on solving PDEs using neural networks (Dissanayake &
+Phan-Thien, 1994; Lagaris et al., 1998) was recently popularized in the form of Physics-informed
+neural networks (PINNs) (Raissi et al., 2019; Karniadakis et al., 2021; Sirignano & Spiliopoulos,
+2018). PINNs incorporate physical constraints by minimizing a loss function involving the PDE,
+boundary condition, and initial condition residuals during training. Despite their promise, we identify
+two root causes limiting the performance of PINNs in terms of accuracy and training time.
+1. Inherent challenges posed by the PINN optimization problem:Many studies (Wang et al.,
+2021; 2022) show that even in very simple settings, the PINN loss is quite challenging to minimize
+using iterative gradient-descent-based optimization methods leveraging the classical back-propagation
+algorithm (Rumelhart et al., 1986). Krishnapriyan et al. (2021) show that incorporating PDE-based
+soft constraints into the PINN loss function yields a highly nontrivial loss landscape, rendering
+optimization particularly challenging. Wang et al. (2022) analyze PINN training dynamics via the
+Neural Tangent Kernel (NTK) and highlight issues with spectral bias and different convergence rates
+across different loss components. Rathore et al. (2024) show that differential operators in the PDE
+∗Corresponding author, chinmay.datar@tum.de.
+1
+arXiv:2405.20836v3  [math.NA]  15 Apr 2026\n\n--- page 2 ---\n\nPublished as a conference paper at ICLR 2026
+residual loss induce “ill-conditioning”, characterized by steep and shallow gradients in different
+directions near the optimum, complicating the optimization.
+Efforts to improve PINN training, such as balancing loss terms (Yao et al., 2023), effective regulariza-
+tion (Lu et al., 2021c; Yu et al., 2022), architectural innovations (Wang et al., 2024b), and improved
+optimizers (Müller & Zeinhofer, 2023; Liu et al., 2024), have been explored. We assert that such
+approaches address the symptoms rather than the root cause that makes training PINNs extremely
+challenging: the PINN optimization problem is high-dimensional (large number of trainable parame-
+ters), multi-objective (simultaneous minimization of PDE, and initial and boundary condition losses),
+and non-convex, with inherently conflicting loss terms (Liu et al., 2024) and further complicated by
+treating time as an additional dimension in space.
+2. Non-causal treatment of time as an extra spatial dimension:The temporal structure of initial
+value PDEs is inherently Markovian as the solution at each subsequent time step depends solely on
+the solution at the preceding time step. Most PINN-based approaches fail to incorporatetemporal
+causalityexplicitly, and time is treated as an extra dimension in the input layer. This leads to
+neural bases spanning the entire space-time domain, exacerbating the optimization. Such approaches
+struggle to capture high-frequency temporal dynamics (Krishnapriyan et al., 2021), and solving PDEs
+over a long time horizon, without resorting to domain decomposition techniques (Meng et al., 2020).
+Previous studies have sought to enforce temporal causality by progressively penalizing residuals
+in time (Wang et al., 2024d), training distinct models across disjoint intervals with integral-form
+losses within each interval (Jung et al., 2024), or applying implicit time-differencing with transfer
+learning to sequentially update PINNs on each interval (Li et al., 2024). Nonetheless, such approaches
+are difficult to implement, require precise tuning of temporal windows and weight scheduling, and
+remain computationally demanding (Kim & Son, 2025; Li et al., 2024; Penwarden et al., 2023). See
+Section A for an extended literature review and Section B.1 for a detailed discussion on PINNs.
+Time-dependent 
+output layer 
+coefficients
+Time
+(1) Space-time separation
+(2) Decouple the PINN loss and 
+optimize each term separately
+Space Frozen-PINN solution
+Basis functions in 
+space: sampled and 
+frozen  
+Total loss: 
+Classical 
+ODE solvers 
+with step-size 
+control
+Impose hard 
+constraints
+Solve a least 
+squares problem 
+.
+Figure 1:Core ideas of Frozen-PINNs:(1)Space–time separation: For x∈R d, spatial bases
+ϕi =σ(w i ·x+b i) with σ= tanh , wi ∈R d, bi ∈R are sampled and frozen (shown for d= 1 );
+output layer parameters ci(t) are evolved via ODEs. Each pair (ϕi, ci) is color-matched. (2)Loss
+decoupling: PDE, boundary, and initial condition lossesLPDE, LBC, LIC are optimized independently.
+To address the root causes of accuracy and training bottlenecks of PINNs rather than the symptoms,
+we investigate:How can the PINN optimization problem be simplified while enforcing temporal
+causality for time-dependent PDEs?We propose “Frozen-PINN” based on space-time separation —a
+novel approach thatsimplifies the PINN optimization problemandenforces temporal causality by
+construction. We achieve this by: (a) sampling and freezing space-dependent hidden layer parameters
+to reduce the dimensionality, (b) decoupling the PINN loss and optimizing each term separately, and
+(c) computing time-dependent output layer parameters using least squares and adaptive Ordinary
+Differential Equation (ODE) solvers, replacing gradient-descent-based training (see Figure 1). In
+Figure 8, we contrast Frozen-PINNs with classical PINNs. Our key contributions are:
+1. Training algorithm:Frozen-PINNs break the longstanding training and accuracy bottle-
+necks of PINNs, making PINNs rapidly trainable, temporally causal, and highly accurate, a
+combination realized for the first time, defining a new state-of-the-art, to our knowledge.
+2. Extensive empirical evaluation:Across nine challenging PDE benchmarks and rigorous
+ablation studies, we show that Frozen-PINNs achieve up to 4-5 orders of magnitude faster
+training than state-of-the-art (SOTA) PINNs, attain high-precision accuracies that are com-
+parable to efficient mesh-based methods in low dimensions, which most SOTA neural PDE
+2\n\n--- page 3 ---\n\nPublished as a conference paper at ICLR 2026
+solvers fail to match, and scale efficiently to high-dimensional problems where mesh-based
+solvers fail.
+3. Adaptive solution-driven network parameters:We use solution data from previous time-
+steps to compute efficient neural network parameters. This extends previous work on random
+feature methods (Bolager et al., 2023) for self-supervised PDE learning tasks.
+4. Model compression:We introduce anSVD layerthat reduces the number of neurons in the
+last hidden layer of the network by up to20times and speeds up training up to75times.
+2 SOLVING TIME-DEPENDENTPDES USINGFROZEN-PINNS
+In this section, we discuss the theoretical details of Frozen-PINNs.
+2.1 FROZEN-PINNANSATZ
+In this work, we consider time-dependent PDEs on domain Ω⊂R d for space dimension d with
+boundary ∂Ω, seeking solutions u: Ω×R→R of PDEs defined by linear operators L and B
+that only involve derivative operators in space, forcing f: Ω→R , boundary g:∂Ω→R , initial
+conditionu 0 : Ω→R, and a nonlinear operatorγNforγ∈R(γ= 0for linear PDEs):
+ut(x, t) +Lu(x, t) +γN(u)(x, t) =f(x), x∈Ω, t∈[0, T],(1a)
+whereu t denotes the time derivative ofu, with boundary and initial conditions given by
+Bu(x, t) =g(x), x∈∂Ω, t∈[0, T],and, u(x,0) =u 0(x), x∈Ω,(1b)
+respectively. We parameterize the approximation of the solution to the PDE (Equation (1)) with a
+Frozen-PINN having a single hidden layer withMneurons and activation functionσ= tanhas
+ˆu(x, t) =C(t)[Φ(x),1] =c(t)σ(W x⊤ +b) +c 0(t).(2)
+Here, c(t)∈R 1×M and c0(t)∈R are time-dependent parameters, W∈R M×d and b∈R M×1 are
+space-dependent parameters, and C:= [c, c0]∈R 1×(M+1) . The activation functions are stacked in
+Φ = [ϕ 1, . . . , ϕM ], where ϕm(x) =σ(w mx⊤ +b m). Note that our approach does not require the
+PDE solution to be separable in space and time. We next discuss how to sample parameters W and b.
+2.2 COMPUTING HIDDEN LAYER PARAMETERS WITHOUT GRADIENT DESCENT
+We sample space-dependent hidden layer parameters in Frozen-PINNs using either ELM or SWIM.
+Hidden layer parameters are frozen (kept independent of time) after sampling (except Section 3.4).
+ELM (Data-agnostic): In the Extreme Learning Machine (ELM) approach (Huang et al., 2006), the
+weights are sampled from a Gaussian distribution, and biases are sampled from a uniform distribution
+in[−η, η]for each hidden layer, whereηis a hyper-parameter.
+SWIM (Data-dependent): The Sample Where It Matters (SWIM) approach follows Bolager et al.
+(2023) and samples weights and biases using a data-dependent distribution. Each pair (wm, bm) is
+computed using two collocation pointsx(1), x(2) ∈Ω : wm =s 1 x(2)−x(1)
+∥x(2)−x(1)∥2 , b m =−⟨w m, x(1)⟩+
+s2, where s1, s2 ∈R depend on the activation function. In the unsupervised setting, one can choose
+pairs of collocation points from a uniform distribution over all possible pairs of collocation points,
+which is the default setting in this paper, as we do not know the solution of the PDE beforehand.
+In the supervised setting (Section 3.4, Section 3.7), collocation pairs (x(1), x(2)) are sampled with
+density ∥f(x (2))−f(x (1))∥/∥x(2) −x (1)∥. Neuron weights and biases are set so that the tanh
+output is −0.5 at x(1) and +0.5 at x(2), ensuring centers of activations tanh lie inside the domain
+and are aligned with the direction x(1) →x (2), unlike ELM. The suitability of each of the proposed
+approaches depends on the true PDE solution’s gradient distribution. See Section B.2.1 for details. In
+Figure 2, we illustrate the difference between the basis functions sampled with ELM and SWIM.
+3\n\n--- page 4 ---\n\nPublished as a conference paper at ICLR 2026
+Data-driven sampling
+Data-agnostic sampling
+Figure 2: Sampling in Frozen-PINNs: (Left): SWIM (data-driven, places bases with steep gradients
+near regions with shocks) vs. (Right): ELM (data-agnostic, no control over basis placement).
+2.3 SOLVING TIME-DEPENDENTPDES USINGFROZEN-PINNS BY SEPARATION OF VARIABLES
+We now discuss the computation of time-dependent output layer parameters c(t). We insert the
+ansatz (Equation (2)) into the PDE Equation (1a), reformulating it as an ODE for c(t), preserving the
+inherent causal structure of time-dependent PDEs, thereby enforcing temporal causality by design.
+We assemble Nc collocation points in X∈R Nc×d, sample weights and biases of M neurons,
+compute hidden layer outputΦ(X), and obtain the ODE
+Ct(t) =R(X, C(t))[Φ(X),1] +,where
+R(X, C(t)) =−C(t)L[Φ(X),1]−γN(C(t)[Φ(X),1]) + [f(X)] ⊤,
+(3)
+where [Φ(X),1]∈R (M+1)×N c and the pseudo-inverse is denoted by ·+. The initial condition is
+computed via a least squares solution: C(0) =u(X,0) ⊤[Φ(X),1] +, which decouples the initial
+condition loss from PDE and boundary losses, simplifying the optimization problem. We compute
+C(t) via ODE solvers with step-size control (e.g., RK45 (Dormand & Prince, 1980), LSODA
+(Petzold, 1983)) instead of gradient descent, and interpolate solutions at test points. See Section B.2.2,
+Section B.2.3 for detailed derivations of PDE-to-ODE reformulations for all PDEs considered here.
+2.4 APPROACHES FOR SATISFYING BOUNDARY CONDITIONS FORFROZEN-PINNS
+We propose two different strategies to satisfy boundary conditions for Frozen-PINNs: the first utilizes
+a boundary-compliant layer, and the second augments the reformulated ODE.
+Boundary-compliant layer:Certain boundary conditions can be enforced via a linear map A∈
+RMb×Ms (Ms :=M ) applied after the sampled hidden layer, forming aboundary-compliant layer
+(see Figure 3). DefiningΦ A := [AΦ,1]andC(t)∈R 1×(Mb+1), we rewrite Equation (3) to
+Ct(t) =R(X, C(t))ΦA(X) +,where
+R(X, C(t)) =−C(t)LΦA(X)−γN(C(t)Φ A(X)) + [f(X)] ⊤.
+(4)
+Boundary conditions defined by B and g determine the construction of A; see Section B.2.4 for
+details. With a boundary-compliant layer, boundary conditions are satisfied by construction, fully
+decoupling the PINN loss so that the ODE solver minimizes only the PDE residual. The rationale for
+outer basis functions is discussed in Section B.2.1.
+Augmented ODE:This strategy eliminates the need for a boundary-compliant layer by augmenting
+the ODE with a correction term enforcing boundary conditions. ForDirichlet boundary condition
+u(x) =g(x), we addˆu t(x) =−κ(ˆu(x)−g(x))forx∈∂Ωand solve the augmented system:
+Ct(t) = [R(X, C(t)),−κ(C(t)ΦA(Xb)−g(Xb)⊤)]| {z }
+∈R1×(Nc +Nb )
+ΦA([X, Xb])+
+| {z }
+∈R(Nc +Nb )×(Mb +1)
+,(5)
+where κ >0 is a fixed parameter, X are the Nc collocation points and Xb ∈R Nb×d is a collection of
+Nb points on the boundary ∂Ω. For consistency of notation, we set A=I in Equation (4) when using
+the augmented ODE. In practice, we skip the boundary-compliant layer if we adopt this approach.
+The intuition behind this technique is that the augmented ODE (Equation (5)) corrects the solution
+by steering ˆu(x, t)toward g(x)forx∈∂Ω at rate κ(ˆu−g), with κ= 10 5 as a default value. We
+empirically investigate the effect of κ on the boundary loss and the time to solution (see Figure 15).
+This still partially decouples the PINN loss, with the initial condition treated separately. Depending
+on the PDE, domain, and boundary type, either strategy can be applied (see Section B.2.5).
+4\n\n--- page 5 ---\n\nPublished as a conference paper at ICLR 2026
+2.5 SVD LAYER
+As the last step in the Frozen-PINN architecture, we add a linear layer to reduce the stiffness of
+the associated ODE (Equation (4)) and the size of the ODE system. To achieve this, we propose
+orthogonalizing the basis functions using anSVD layer. We compute a truncated singular value
+decomposition of AΦ(X)∈R Mb×Nc to obtain matrices Vr,Σ r, and Ur with r≤M b such that
+VrΣrU ⊤
+r =AΦ(X) +O(Σ r+1). We then define Ar :=V ⊤
+r A and use it instead of the matrix A and
+C(t)∈R 1×(r+1). This ensures ArΦ(X) are orthogonal functions on the data X, and the matrix
+ArΦ(X) has a bounded condition number. The SVD layer accelerates computation by up to 75 times
+while reducing the ODE system dimension 20 times, as validated by an extensive ablation study (see
+Section C). Figure 3 visualizes the complete Frozen-PINN architecture.
+2.6 SUMMARY OF THE TRAINING ALGORITHM FORFROZEN-PINNS
+We summarize our training process in Algorithm 1, where ϵSV Dis the SVD threshold that governs
+the SVD-layer width. See Section B.2 for additional methodological details, and Section B.2.1 for
+extended discussion on PINN vs. Frozen-PINN training, comparison between sampling strategies,
+influence of random sampling, rationale for outer bases, and the Kolmogorovn-width barrier.
+SVD
+layer
+Output
+layer
+ELM/
+SWIM
+Boundary-
+compliant
+layerInput
+layer
+Figure 3: Architecture of Frozen-
+PINNs trained with a gradient-
+descent-free training algorithm.
+Algorithm 1Frozen-PINN training algorithm
+Input:PDE (Equation (1)), test grid pointsX test ×T test
+Output:PDE Solution on the test grid pointsˆu(Xtest, Ttest)
+Parameters:N c,M s,M b ∈N,ϵ SV D∈R
+1:SampleN c collocation points:X∈R Nc ×d
+2:Construct hidden layer params{w m, bm}Ms
+m=1 (SWIM/ELM)▷Section 2.2
+3:Compute hidden layer outputΦ(X)∈R Ms ×Nc
+4:Constructboundary-compliant layer:AΦ(X)∈R Mb ×Nc ▷Section 2.4
+5: Compute truncated SVD: VrΣrU ⊤
+r =AΦ(X) andSVD layeroutput
+V ⊤
+r AΦ(X) =A rΦ(X)
+6:Compute neural bases:Φ Ar (X) := (A rΦ(X),1) ⊤ ∈R (r+1)×Nc
+7:Initializeoutput-layerparams (least-squares):C(0) =u(X,0) ⊤ΦAr (X) +
+8:Solve ODE forC(t)∈R 1×(r+1) usingΦ Ar ▷Equation (4)
+9:Evaluateˆu(X test, Ttest) =C(T test)ΦAr (Xtest)▷Equation (2)
+3 EMPIRICAL RESULTS
+In this section, with a comprehensive empirical study across nine challenging low- and high-
+dimensional PDE benchmarks, we demonstrate that Frozen-PINNs consistently outperform existing
+state-of-the-art neural PDE solvers with orders-of-magnitude faster training in all cases and higher
+accuracy in almost all cases without requiring specialized hardware like GPUs. Moreover, our work
+includes rigorous evaluation against the classical SOTA approaches like IGA-FEM (see Section B.3)
+(Hughes et al., 2005; Cottrell et al., 2006; 2009) or FEM for low-dimensional PDEs, bridging a gap
+not sufficiently addressed in the literature between neural and mesh-based solvers.
+Section C contains details of the PDEs, important ablation studies for our experiments (for the SVD
+layer and the width of the network), metrics used for comparison, train and test data, software and
+hardware environments, the absolute error plots on test points, and elaborate explanations of results.
+Figure 12 visually summarizes all the PDE benchmarks used for evaluation, identifies the specific
+challenges posed by each PDE, and shows true solutions. We perform all experiments with three
+seeds and report the mean and standard deviation. The code to reproduce experiments from the paper,
+and a refactored version that will be actively maintained are available at:
+https://gitlab.com/felix.dietrich/swimpde-paper,
+https://gitlab.com/fd-research/swimpde.
+To ensure fair comparisons, we follow the two rules outlined by McGreivy & Hakim (2024): (i) we
+benchmark at (almost) equal accuracy, defining low-precision (1e-2 to 1e-4) and high-precision
+(1e-5 to 1e-10) regimes, configuring Frozen-PINNs to marginally outperform the best PINN
+baselines in the low-precision regime and aligning FEM/IGA-FEM fidelity with Frozen-PINNs in
+the high-precision regime; (ii) wecompare against efficient numerical methods, including SOTA
+5\n\n--- page 6 ---\n\nPublished as a conference paper at ICLR 2026
+IGA-FEM or classical FEM for low-dimensional PDEs, while highlighting neural solvers’ scalability
+in high-dimensional benchmarks where FEM and IGA-FEM suffer from the curse of dimensionality.
+3.1 HIGH ADVECTION SPEEDS,FAST CONVERGENCE,AND LONG-TIME SIMULATION
+We benchmark the linear advection equation to demonstrate how Frozen-PINNs resolve three im-
+portant well-known challenges for PINNs: (1) handling high advection speeds (Krishnapriyan et al.,
+2021), (2) achieving fast convergence with increasing width (Cuomo et al., 2022), and (3) long-time
+simulations (Lippe et al., 2024; Kapoor et al., 2024a). We describe all details in Section C.1.
+High advection speeds:We solve the advection equation for increasing advection coefficients,
+denoted by β. Figure 4 (Left) shows that approaches using basis functions in the entire spatiotemporal
+domain, such as PINNs, ELM, and SWIM, completely fail as the flow velocityβ increases beyond 40.
+In contrast, Frozen-PINNs can accurately solve the PDE, even for extremely high values ofβ (as high
+as 104) with relative L2 errors less than 10−4. Table 1 shows that for β= 40 , Frozen-PINNs train
+45 to 533 times faster than other alternatives at similar accuracy in the low-precision regime. With
+the exception of Frozen-PINNs, none of the neural PDE solvers evaluated here attain high-precision
+accuracy. Frozen-PINNs outperform existing neural PDE solvers by over six orders of magnitude in
+accuracy and approach the fidelity of IGA-FEM, which unsurprisingly is the most accurate solver.
+Fast convergence (error decay with hidden layer width):For a low value of advection coefficient
+β= 10 , Figure 4 (Middle) shows that errors with classical PINNs do not decay quickly with width,
+primarily due to the difficulties in training. In contrast, the relative L2 error decays exponentially
+with hidden layer width for Frozen-PINNs, ultimately plateauing at a value more than four orders of
+magnitude smaller than that obtained with PINNs.
+Long-time simulation:Neural PDE solvers employing joint space–time basis functions, like vanilla
+PINNs, encounter substantial challenges in accurately approximating dynamics over extended time
+spans. Here, we consider the advection equation with the advection coefficient β= 1 . As shown in
+Figure 4 (Right), Frozen-PINNs can simulate the advection equation for 1000 seconds with a relative
+L2 error under0.001%in just0.94seconds.
+10 2
+ 10 1
+ 100 101 102 103 104
+10 8
+10 6
+10 4
+10 2
+100
+Relative  2 error
+PINN
+Causal PINN
+ELM
+SWIM
+Frozen-PINN-swim
+Frozen-PINN-elm
+10 20 30 40
+Number of basis functions
+10 8
+10 6
+10 4
+10 2
+Relative  2 error
+Frozen-PINN-elm
+Frozen-PINN-swim
+PINN
+0 250 500 750 1000
+Time
+10 9
+10 8
+10 7
+10 6
+10 5
+Relative  2 error
+Frozen-PINN-elm
+Frozen-PINN-swim
+Figure 4: Illustration of experimental results for the advection equation:(Left): high advection
+speeds- effect of advection coefficient β on the test error for different PDE solvers,(Middle): fast
+convergence- with β= 10 , Frozen PINNs achieve exponential decay in test error as indicated by the
+reference dotted line, while standard PINNs display plateaued error decay despite increasing number
+of basis functions (hidden layer size),(Right): long time simulation- Slow error growth with time.
+3.2 HIGHER-ORDER DERIVATIVES IN SPACE AND TIME
+We consider two variants of the Euler-Bernoulli beam equation —classical Euler-Bernoulli beam
+equation and its extension with a Winkler foundation. See Section C.2 for details. The main challenge
+posed by both PDEs for PINNs is the higher-order differential terms (fourth- and second-order
+derivatives in space and time, respectively). Frozen-PINNs eliminate expensive evaluation of higher-
+order derivatives via backpropagation, cutting training cost by four orders of magnitude in the
+low-precision regime, while achieving IGA-FEM–level accuracy that is more than six orders of
+magnitude accurate compared to other SOTA PINN benchmarks considered here (see Table 1).
+6\n\n--- page 7 ---\n\nPublished as a conference paper at ICLR 2026
+3.3 MULTI-SCALE SOLUTIONS
+To demonstrate the capability of our method to solve PDEs with multi-scale solutions, we consider
+a Wave equation benchmark (Hao et al., 2024). We examine two settings: one with two distinct
+frequencies and another with three well-separated frequencies, which increases the spatial complexity
+and significantly broadens the range of scales in the solution. For the two-frequency setup, we
+compare the performance against prior PINN baselines in Table 1 and observe that CPU-trained
+Frozen-PINNs achieve 625 to 5500 times faster training than GPU-trained competing PINN variants,
+while simultaneously being four to five orders of magnitude more accurate. Frozen-PINNs also solve
+the wave equation in the three-frequency scenario (illustrated in Figure 19) extremely quickly and
+with high precision, reinforcing their potential for solving PDEs with complex, multiscale dynamics.
+Additional implementation details and extended results are provided in Section C.3.
+3.4 NON-LINEARITY AND SHOCKS
+In this example, we highlight how using pairs of data points to sample neural basis functions using the
+SWIM algorithm can be leveraged to resolve locally steep gradients in the solution of the non-linear
+viscous Burgers’ equation, as shown in Figure 2 (Left). See Section C.4 for details.
+Frozen-PINN-swim creates numerous basic functions with steep gradients, accurately placing them
+near the location of the shock, leveraging the SWIM algorithm and solutions from previous time-steps
+to fit neural basis functions, given enough collocation points in the domain’s center (see Figure 20a
+(Left)). To concentrate collocation points near the shock in the domain’s center, we resample them
+periodically after a set number of time steps, guided by a probability distribution that leverages the
+gradient of the approximate solution (see Figure 5a (Top)). At the resampling time tr ∈[0, T], we
+approximate the probability density p(x)∼ |∇ˆu(x, tr)|, which we then use to re-sample collocation
+points as illustrated in Figure 5a (Bottom), placing more collocation points near the shock region.
+(a) (Top): Probability distribution,
+(Bottom): Sampled collocation
+points.
+C. SWIM basis func�on 
+(with projec�on)
+B. SWIM basis func�on 
+(without projec�on)
+A. Ini�al PDE solu�on 
+(Varies only in       )
+(b) Illustration of embedding directional information to orient Frozen-PINN-
+swim basis functions along the gradient of the initial condition: (Left): A
+toy initial condition u0 :R 2 →R varying in a single direction, (Middle): A
+randomly selected pair of points (x(1), x(2)) leads to a SWIM basis function
+misaligned with the gradient of the initial solution, (Right): A projected pair
+of points (ˆx(1),ˆx(2)) yields a basis function aligned with the gradient of u0.
+Figure 5: Constructing useful Frozen-PINN-swim bases. (Left): shock-aware sampling (Burgers,
+(Section 3.4)) and (Right): direction-aware bases (reaction–diffusion, Section 3.7).
+As shown in Table 1, Frozen-PINNs achieve46 to 2945 times speedups in training time over other
+PINN variants in the low-precision regime. Remarkably, even in the high-precision regime, CPU-
+trained Frozen-PINNs remain 203 to 535 times faster than state-of-the-art GPU-trained PINNs
+at comparable accuracy. While optimizers like SSBroyden (Kiyani et al., 2025) can offer higher
+accuracy, they are extremely slow, resource-intensive, and difficult to implement. Furthermore,
+Frozen-PINN-swim basis functions handle shocks significantly better than Fourier or Chebyshev
+bases used in classical spectral methods (see Figure 22, Figure 23, Section C.4.1).
+3.5 NON-LINEARITY AND COMPLICATED DOMAIN GEOMETRY
+In this example, we consider a non-linear diffusion equation on a complicated domain geometry. See
+Section C.5 for details. For mesh-based methods, meshing can be resource-intensive and technically
+7\n\n--- page 8 ---\n\nPublished as a conference paper at ICLR 2026
+demanding (see Figure 24), unlike neural PDE solvers. As shown in Table 1, Frozen-PINNs are
+145 to 456 times faster than PINNs and 4.83 times faster than FEM at comparable low-precision
+accuracy, and can achieve over1000 times better accuracy than other PINNs. Notably, Frozen-PINNs
+require only 350 basis functions versus around 2000 finite elements in FEM for similar accuracy (see
+Table 18), mainly due to the global support of neural bases. For fairness, the FEM grid points are
+reused as collocation points for minimizing the PDE residual in Frozen-PINNs.
+3.6 CHAOS AND STRONG NON-LINEARITY
+We tackle the highly nonlinear Kuramoto-Sivashinsky equation, which models laminar flame-front
+instabilities that exhibit spatiotemporal chaos. As shown in Figure 6, our Frozen-PINN captures
+the characteristic chaotic pattern over a long-time horizon t∈[0,5] , with an average training time
+of only 6.9 seconds on CPU (averaged over 5 seeds). Further experimental details are provided in
+Section C.7. Since chaotic dynamics amplify small numerical differences, trajectory-level errors are
+not meaningful, and we assess performance based on the qualitative spatiotemporal patterns.
+3.7 HIGH-DIMENSIONALPDES WITH LOW-DIMENSIONAL SOLUTION MANIFOLDS
+In this benchmark (Zang et al., 2020), we solve a five-dimensional non-linear reaction-diffusion
+equation, where the solution only changes in two dimensions that are a priori unknown. We construct
+SWIM basis functions aligned with the two intrinsic dimensions of variation, directly embedding
+directional information unlike in PINNs and ELMs, by using spatial coordinates projected onto
+the gradient of the initial solution to sample SWIM basis functions, as shown in Figure 5b. See
+Section C.6 for further details.
+Table 1 shows that Frozen-PINN-swim is over 3400 times faster than other PINNs at comparable
+low-precision accuracy. It is the only method to reach the high-precision regime, achieving 2–3
+orders of magnitude higher accuracy than other PINN variants and weak adversarial networks (Zang
+et al., 2020). These results confirm that explicitly embedding informative basis functions yields far
+more efficient and accurate models than relying on iterative optimization to learn them implicitly.
+3.8 HIGH-DIMENSIONALITY
+High-dimensional PDEs, such as the 100-dimensional heat equation, are computationally prohibitive
+for grid-based methods, which require more than 1030 grid points, considering only two points per
+dimension. The following examples demonstrate Frozen-PINNs’ ability to solve such PDEs efficiently
+and accurately. We evaluate our approach on two established benchmarks: one introduced in Wang
+& Dong (2024), which addresses the heat equation in up to 10 dimensions on a unit hypercube,
+and another introduced in He et al. (2023), which focuses on a 100-dimensional variant of the heat
+equation on a unit ball. We discuss all details in Section C.8.
+Frozen-PINN-elm is consistently 10–1000 times more accurate than classical PINNs for up to 100-
+dimensional PDEs Figure 7 (top), with error decaying rapidly with network width until saturation
+Figure 7 (bottom). For the 10-d heat equation, Frozen-PINN-elm trains 100−1000 times faster
+than other PINNs while achieving higher accuracy. For the 100-d heat equation, CPU-trained
+Frozen-PINNs remain hundreds of times faster than GPU-trained PINNs while delivering an order-
+of-magnitude better accuracy (Table 1), underscoring both their computational efficiency and high
+accuracy. Table 2 summarizes the advantages of our algorithm over classical mesh-based and
+physics-informed methods based on iterative gradient-descent-based methods.
+4 CONCLUSION
+Frozen-PINNs directly address the longstanding training and accuracy bottlenecks of PINNs by
+fundamentally simplifying the optimization problem and enforcing temporal causality by construc-
+tion, leveraging the idea of space-time separation. Our extensive empirical analysis reveals that
+Frozen-PINNs consistently realize extremely fast training and high precision (often several orders
+of magnitude better than SOTA PINNs), and preserve temporal causality on a broad range of PDEs
+involving challenges such as extreme flow velocities, long-time simulation, higher-order spatial and
+temporal derivatives, complicated spatial domains, non-linearities, shocks, and high-dimensionality,
+8\n\n--- page 9 ---\n\nPublished as a conference paper at ICLR 2026
+Table 1:Summary of empirical results on eight PDE benchmarks, including results from prior
+works: dashes denote training times not reported in prior works; Training times labeled with + were
+obtained using GPUs; thus, CPU-based training, as with Frozen-PINNs, would lead to substantially
+larger values. For each PDE, solvers above/below the horizontal line correspond to low-/high-
+precision regimes. Normalized training times relative to Frozen-PINNs are computed as the ratio of
+each method’s training time to that of Frozen-PINNs, and are computed at similar accuracy.
+PDE benchmark Method Training Normalized RelativeL 2 error
+time (s) training time
+Advection (β= 40)PINN (Adam) - - Fail forβ=40
+SWIM - - Fail forβ=40
+ELM - - Fail forβ=40
+Causal PINN 357.635332.90e0±1.2e0
+PINN (L-BFGS) 30.5 45.5 6.92e-1±2.96e-2
+Krishnapriyan et al. (2021) PINN (seq2seq, L-BFGS) - - 2.41e-1
+Krishnapriyan et al. (2021) PINN (Curriculum training, L-BFGS) - - 5.33e-2
+Frozen-PINN-elm (our)
+ 0.6714.19e-3±2.97e-3
+Frozen-PINN-swim (our)
+ 0.7 1 8.42e-9±1.12e-8
+Mesh-based method (IGA)0.070.11.17e-10
+Euler-Bernoulli (classical)PINN (Adam) 4209.82 84196 3.95e-2±1.79e-2
+Kapoor et al. (2023) PINN (L-BFGS) 2303.71 46074 4.21e-3±9.56e-4
+Frozen-PINN-elm (our)
+ 0.0512.82e-4±2.15e-4
+Mesh-based method (IGA)0.940.13 4.21e-7
+Frozen-PINN-elm (our)
+ 6.90 19.33e-9±4.36e-9
+Euler-Bernoulli (Winkler)PINN (L-BFGS)1858 + 37160+ 5.33e+0
+Kapoor et al. (2024b) Adaptive PINN 3807.89761405.32e+0
+Kapoor et al. (2024b) Self-adaptive PINN 4042.57808405.15e+0
+Kapoor et al. (2024b)) Wavelet PINN 4764.25952804.38e+0
+Kapoor et al. (2024b) Causal PINN1873 + 37460+ 3.00e-2
+Frozen-PINN-elm (our)
+ 0.0511.41e-2±4.19e-3
+Frozen-PINN-swim (our)
+ 2.41 1 1.42e-7±1.20e-7
+Mesh-based method (IGA)1.080.442.70e-8
+WaveHao et al. (2024) PINN (FBPINN)3090 + 5517.9+ 5.91e-1±4.74e-2
+Hao et al. (2024) PINN (L-BFGS)350 + 625+ 5.88e-1±9.63e-2
+Hao et al. (2024) PINN (gPINN)775 + 1383.9+ 5.56e-1±1.67e-2
+Hao et al. (2024) PINN (NTK)840 + 1500+ 9.79e-2±7.72e-3
+Frozen-PINN-elm (our)
+ 0.5611.81e-6±1.01e-6
+BurgersCausal PINN 1531.79 2945.75 1.60e-2±8.97e-3
+PINN (L-BFGS) 275.2 529.2 3.88e-3±2.61e-3
+Kiyani et al. (2025) PINN (BFGS with trust region)24 + 46.1+ 1.1e-3
+Frozen-PINN-swim (our)
+ 0.521 1.00e-3±1.13e-3
+Chen et al. (2024b) PINN (residual-based attention) - - 8.22e-4±2.33e-4
+McClenny & Braga-Neto (2023) Self-adaptive PINN - - 4.80e-4±1e-4
+Chen et al. (2024b) PINN (balanced residual decay rate) - - 1.38e-4±0.85e-4
+Kiyani et al. (2025) PINN (RAdam + BFGS) 1070203 + 6e-6
+Urbán et al. (2025) PINN (SSBroyden) - - 2.9e-6±0.4e-6
+Frozen-PINN-swim (our)
+ 5.2512.27e-7±6.89e-8
+Mesh-based method (IGA)76.32 14.5 1.12e-7
+Kiyani et al. (2025)PINN (Adam + SSBroyden)2812 + 535+ 1.62e-8
+Nonlinear diffusionPINN (Adam) 81.36 145.2 2.09e-2±3.14e-3
+PINN (L-BFGS) 255.9456.91.22e-2±2.38e-4
+Mesh-based method (FEM)2.714.832.68e-3
+Frozen-PINN-elm (our)
+ 0.5612.60e-3±1.61e-3
+Frozen-PINN-swim (our)
+ 423 -2.00e-6±1.99e-6
+5-d Reaction diffusionPINN (Adam) 171.43 3428.6 3.40e-1±1.79e-2
+PINN (L-BFGS) 183.38 3667.6 3.33e-2±1.54e-2
+Zang et al. (2020) Weak Adversarial Network - - 2.8e-2
+Frozen-PINN-swim (our)
+ 0.0511.07e-2±4.52e-4
+Frozen-PINN-swim (our)
+ 12.43-9.99e-5±6.21e-9
+10-d heatPINN (Adam) 1002.49 3037.8 1.68e-1±3.21e-2
+Wang & Dong (2024) PINN (L-BFGS) 189.6574.56.06e-4±1.00e-4
+benchmark extended tod= 10Frozen-PINN-elm (our)
+ 0.3314.35e-4±5.91e-5
+Frozen-PINN-elm (our)
+ 168.6 -2.28e-5±2.1e-5
+100-d heatHe et al. (2023) PINN (Adam)141 + 1084.6+ 0.60e-2
+He et al. (2023) PINN (no stacked-backpropagation)49.8 + 383.1+ 0.63e-2
+PINN (Adam+L-BFGS)26.25 + 201.9+ 4.98e-3±2.96e-4
+Frozen-PINN-elm (our)
+ 0.1314.12e-4±1.70e-5
+9\n\n--- page 10 ---\n\nPublished as a conference paper at ICLR 2026
+without requiring specialized hardware like GPUs. Frozen-PINNs maintain high precision over long
+time spans and capture high-frequency temporal dynamics where prior neural PDE solvers fail.
+Within the scope of the empirical study in this work, in low dimensions, Frozen-PINNs match the
+accuracy of classical mesh-based solvers while retaining advantages such as mesh-free basis functions,
+ease of implementation, the ability to handle complex domains, spectral convergence for PDEs with
+smooth solutions, and scalability for high-dimensional PDEs where mesh-based approaches struggle.
+Figure 6: Frozen-PINN solution of the strongly non-
+linear and chaotic Kuramoto-Sivashinsky equation.
+PDE setting IGA-FEM/ PINNs Frozen-PINNs
+FEM
+Solutions with shocks✓ ✓ ✓(SWIM)
+Complex domains mesh Easy Easy
+High dimensionality✗(CoD)✓ ✓
+Performance/features
+Accuracy/Precision High Often low High
+Speed Fast Slow (training) Fast
+Temporal causality✓ ✗(soft constraint)✓
+Table 2: Comparison of Frozen-PINNs with mesh-based
+FEM and classical PINNs in different problem settings
+presented in this paper: The comparison is grounded in
+results reported in Section 3 for the PDEs and solvers
+studied. ✓ denotes compatibility, and ✗ denotes either
+incompatibility or the need for substantial modifications.
+Curse of Dimensionality is abbreviated as CoD.
+3 5 7 10 100
+Dimension of the PDE
+10 3
+10 4
+10 5
+10 6
+Relative  2 error
+PINN Frozen-PINN-elm
+102 103
+Width (before SVD layer)
+10 5
+10 3
+10 1
+Relative  2 error
+d = 3
+d = 3
+d = 5
+d = 5
+d = 7
+d = 7
+d = 10
+d = 10
+d = 100
+d = 100
+Figure 7: High-dimensional heat equation:
+(Top): comparison of test errors for vary-
+ing PDE dimensions (different hatch pat-
+terns indicate different benchmarks), (Bot-
+tom): fast decay of test error with network
+width (dashed: Frozen-PINN-swim, solid:
+Frozen-PINN-elm).
+Limitations and future work:Our method assumes knowledge of the PDE, but its speed makes
+it well-suited for inverse problems via fast forward solves. While Frozen-PINNs efficiently deal
+with extreme temporal complexity, as shown in the advection equation with extreme flow velocities,
+dealing with spatial complexity encountered while solving PDEs like Navier–Stokes is an exciting
+next step, where one could leverage domain decomposition to deal with the added complexity
+(Moseley et al., 2023; Howard et al., 2024). Finally, universal approximation properties concerning
+specific PDE settings and understanding the role of re-sampling network parameters in overcoming
+the Kolmogorov n-width barrier (Peherstorfer, 2022) are some of the most challenging, yet important
+theoretical open areas of investigation, beyond the scope of this paper.
+Frozen-PINNs take a decisive step toward practical neural PDE solvers through a lightweight opti-
+mization process and extremely fast training without GPUs, promoting low-carbon AI development
+(Verdecchia et al., 2023), advancing state-of-the-art performance, and establishing a formidable
+benchmark for the community to build upon in advancing rapid and accurate neural PDE solvers.
+Reproducibility statement:The source code used to reproduce the experimental results, along
+with comprehensive reproducibility instructions, is included in the supplementary material and
+publicly available as an open-source repository. All experiments are run with multiple seeds, and the
+corresponding seed values are stored in the repository to ensure reproducibility.
+Ethics statement:Neural networks are inherently dual-use technologies, and ethical considerations
+are essential for any new machine learning approach. Frozen-PINNs are grounded in classical
+scientific computing principles, which offer well-understood behavior and interpretability. By
+bridging neural PDE solvers with classical numerical methods, our framework enables clearer
+analysis of robustness, failure modes, and reproducibility. We believe this transparency reduces the
+risk of misuse and enhances controllability, making Frozen-PINNs safe and interpretable. Thus, we
+believe that the benefits of our approach far outweigh the potential downsides of misuse because a
+system that is better understood can also be controlled more straightforwardly.
+10\n\n--- page 11 ---\n\nPublished as a conference paper at ICLR 2026
+ACKNOWLEDGMENTS
+We are grateful to Tim Bürchner for providing an initial version of the IGA code and to Jana Huhne for
+providing an initial version of the Frozen-PINN code. We sincerely thank Dinesh Parthasarathy, Ana
+Cukarska, and Adwait Datar for the detailed feedback on the manuscript. Their careful review and
+suggestions greatly strengthened the manuscript. We further express our appreciation to Wil Schilders
+for engaging discussions and valuable perspectives. F.D., I.B., and E.B. acknowledge funding by
+the German Research Foundation—project 468830823, and association with DFG-SPP-229. C.D. is
+partially funded by the Institute for Advanced Study (IAS) at the Technical University of Munich.
+F.D. and Q.S. are supported by the TUM Georg Nemetschek Institute - Artificial Intelligence for the
+Built World. F.D. and C.D. acknowledge Sølve Eidnes and Martine Mahlum for a great workshop on
+physics in machine learning in Oslo, 2024, which provided us with good feedback on the work.
+REFERENCES
+Martín Abadi, Ashish Agarwal, Paul Barham, Eugene Brevdo, Zhifeng Chen, Craig Citro, Greg S.
+Corrado, Andy Davis, Jeffrey Dean, Matthieu Devin, Sanjay Ghemawat, Ian Goodfellow, Andrew
+Harp, Geoffrey Irving, Michael Isard, Yangqing Jia, Rafal Jozefowicz, Lukasz Kaiser, Manjunath
+Kudlur, Josh Levenberg, Dandelion Mané, Rajat Monga, Sherry Moore, Derek Murray, Chris Olah,
+Mike Schuster, Jonathon Shlens, Benoit Steiner, Ilya Sutskever, Kunal Talwar, Paul Tucker, Vincent
+Vanhoucke, Vijay Vasudevan, Fernanda Viégas, Oriol Vinyals, Pete Warden, Martin Wattenberg,
+Martin Wicke, Yuan Yu, and Xiaoqiang Zheng. TensorFlow: Large-scale machine learning on
+heterogeneous systems, 2015. Software available from tensorflow.org.
+Joubine Aghili, Joy Zialesi Atokple, Marie Billaud-Friess, Guillaume Garnier, Olga Mula, and
+Norbert Tognon. A Dynamical Neural Galerkin Scheme for Filtering Problems, January 2024.
+Igor A. Baratta, Joseph P. Dean, Jørgen S. Dokken, Michal Habera, Jack S. Hale, Chris N. Richardson,
+Marie E. Rognes, Matthew W. Scroggs, Nathan Sime, and Garth N. Wells. DOLFINx: the next
+generation FEniCS problem solving environment. preprint, 2023.
+Cea Basdevant, M Deville, P Haldenwang, JM Lacroix, J Ouazzani, R Peyret, Paolo Orlandi, and
+AT0612 Patera. Spectral and finite difference solutions of the burgers equation.Computers &
+fluids, 14(1):23–41, 1986.
+Jules Berman and Benjamin Peherstorfer. Randomized sparse neural galerkin schemes for solving
+evolution equations with deep networks.Advances in Neural Information Processing Systems, 36,
+2024.
+Jules Berman, Paul Schwerdtner, and Benjamin Peherstorfer. Neural Galerkin schemes for sequential-
+in-time solving of partial differential equations with deep networks. InHandbook of Numerical
+Analysis, volume 25, pp. 389–418. Elsevier, 2024. ISBN 978-0-443-23984-7. doi: 10.1016/bs.hna.
+2024.05.006.
+Dimitri E Beskos. Boundary element methods in dynamic analysis.Applied Mechanics Reviews, 40
+(1):1–23, 1987.
+Erik L Bolager, Iryna Burak, Chinmay Datar, Qing Sun, and Felix Dietrich. Sampling weights of
+deep neural networks. InAdvances in Neural Information Processing Systems, volume 36, pp.
+63075–63116. Curran Associates, Inc., 2023.
+Mayur P Bonkile, Ashish Awasthi, C Lakshmi, Vijitha Mukundan, and VS Aswin. A systematic
+literature review of burgers’ equation with recent advances.Pramana, 90:1–21, 2018.
+N. F. Britton.Reaction-diffusion equations and their applications to biology.Academic Press,
+London, 1986. ISBN 9780121351403.
+Joan Bruna, Benjamin Peherstorfer, and Eric Vanden-Eijnden. Neural Galerkin schemes with active
+learning for high-dimensional evolution equations.Journal of Computational Physics, 496:112588,
+January 2024. ISSN 00219991. doi: 10.1016/j.jcp.2023.112588.
+Hans-Joachim Bungartz and Michael Griebel. Sparse grids.Acta numerica, 13:147–269, 2004.
+11\n\n--- page 12 ---\n\nPublished as a conference paper at ICLR 2026
+Francesco Calabrò, Gianluca Fabiani, and Constantinos Siettos. Extreme learning machine collocation
+for the numerical solution of elliptic PDEs with sharp gradients.Computer Methods in Applied
+Mechanics and Engineering, 387:114188, December 2021. ISSN 00457825. doi: 10.1016/j.cma.
+2021.114188.
+Jingrun Chen, Weinan E, and Yifei Sun. Optimization of random feature method in the high-precision
+regime.Communications on Applied Mathematics and Computation, pp. 1–28, 2024a.
+Peter Yichen Chen, Jinxu Xiang, Dong Heon Cho, Yue Chang, G A Pershing, Henrique Teles Maia,
+Maurizio M Chiaramonte, Kevin Thomas Carlberg, and Eitan Grinspun. CROM: Continuous
+reduced-order modeling of PDEs using implicit neural representations. InThe Eleventh Interna-
+tional Conference on Learning Representations, 2023. URL https://openreview.net/
+forum?id=FUORz1tG8Og.
+Wen Chen, Zhuo-Jia Fu, and C.S. Chen.Recent Advances in Radial Basis Function Collocation Meth-
+ods. Springer Berlin Heidelberg, 2014. ISBN 9783642395727. doi: 10.1007/978-3-642-39572-7.
+Wenqian Chen, Amanda A Howard, and Panos Stinis. Self-adaptive weights based on balanced
+residual decay rate for physics-informed neural networks and deep operator networks.arXiv
+preprint arXiv:2407.01613, 2024b.
+Pao-Hsiung Chiu, Jian Cheng Wong, Chinchun Ooi, My Ha Dao, and Yew-Soon Ong. Can-pinn:
+A fast physics-informed neural network based on coupled-automatic–numerical differentiation
+method.Computer Methods in Applied Mechanics and Engineering, 395:114909, 2022.
+Junwoo Cho, Seungtae Nam, Hyunmo Yang, Seok-Bae Yun, Youngjoon Hong, and Eunbyung Park.
+Separable physics-informed neural networks.Advances in Neural Information Processing Systems,
+36, 2024.
+Ronald R Coifman and Stéphane Lafon. Diffusion maps.Applied and computational harmonic
+analysis, 21(1):5–30, 2006.
+J. Austin Cottrell, Thomas J. R. Hughes, and Yuri Bazilevs.Isogeometric Analysis: Toward Integration
+of CAD and FEA. Wiley Publishing, 1st edition, 2009. ISBN 0470748737.
+J.A. Cottrell, A. Reali, Y . Bazilevs, and T.J.R. Hughes. Isogeometric analysis of structural vibrations.
+Computer Methods in Applied Mechanics and Engineering, 195(41):5257–5296, 2006. ISSN
+0045-7825. doi: https://doi.org/10.1016/j.cma.2005.09.027. John H. Argyris Memorial Issue. Part
+II.
+M. G. COX. The Numerical Evaluation of B-Splines*.IMA Journal of Applied Mathematics, 10(2):
+134–149, 10 1972. ISSN 0272-4960. doi: 10.1093/imamat/10.2.134.
+Salvatore Cuomo, Vincenzo Schiano Di Cola, Fabio Giampaolo, Gianluigi Rozza, Maziar Raissi,
+and Francesco Piccialli. Scientific machine learning through physics–informed neural networks:
+Where we are and what’s next.Journal of Scientific Computing, 92(3):88, 2022.
+Chinmay Datar, Adwait Datar, Felix Dietrich, and Wil Schilders. Systematic construction of
+continuous-time neural networks for linear dynamical systems.SIAM Journal on Scientific
+Computing, 47(4):C820–C845, 2025.
+Carl de Boor. On calculating with b-splines.Journal of Approximation Theory, 6(1):50–62, 1972.
+ISSN 0021-9045. doi: https://doi.org/10.1016/0021-9045(72)90080-9.
+MWMG Dissanayake and Nhan Phan-Thien. Neural-network-based approximations for solving
+partial differential equations.communications in Numerical Methods in Engineering, 10(3):
+195–201, 1994.
+Suchuan Dong and Zongwei Li. Local extreme learning machines and domain decomposition for
+solving linear and nonlinear partial differential equations.Computer Methods in Applied Mechanics
+and Engineering, 387:114129, 2021.
+12\n\n--- page 13 ---\n\nPublished as a conference paper at ICLR 2026
+Suchuan Dong and Jielin Yang. On computing the hyperparameter of extreme learning machines:
+Algorithm and application to computational pdes, and comparison with classical and high-order
+finite elements.Journal of Computational Physics, 463:111290, 2022.
+John R Dormand and Peter J Prince. A family of embedded runge-kutta formulae.Journal of
+computational and applied mathematics, 6(1):19–26, 1980.
+Gideon Dresdner, Dmitrii Kochkov, Peter Christian Norgaard, Leonardo Zepeda-Nunez, Jamie Smith,
+Michael Brenner, and Stephan Hoyer. Learning to correct spectral methods for simulating turbulent
+flows.Transactions on Machine Learning Research, 2022.
+Yifan Du and Tamer A Zaki. Evolutional deep neural network.Physical Review E, 104(4):045303,
+2021.
+Yiheng Du, Nithin Chalapathi, and Aditi Krishnapriyan. Neural spectral methods: Self-supervised
+learning in the spectral domain.arXiv preprint arXiv:2312.05225, 2023.
+Vikas Dwivedi and Balaji Srinivasan. Physics informed extreme learning machine (pielm)–a rapid
+method for the numerical solution of partial differential equations.Neurocomputing, 391:96–118,
+2020.
+Vikas Dwivedi, Nishant Parashar, and Balaji Srinivasan. Distributed learning machines for solving
+forward and inverse problems in partial differential equations.Neurocomputing, 420:299–316,
+2021.
+Weinan E. Towards a Mathematical Understanding of Neural Network-Based Machine Learning:
+What We Know and What We Don’t.CSIAM Transactions on Applied Mathematics, 1(4):561–615,
+June 2020. ISSN 2708-0560, 2708-0579. doi: 10.4208/csiam-am.SO-2020-0002.
+Gianluca Fabiani, Francesco Calabrò, Lucia Russo, and Constantinos Siettos. Numerical solution
+and bifurcation analysis of nonlinear partial differential equations with extreme learning machines.
+Journal of Scientific Computing, 89(2):44, November 2021. ISSN 0885-7474, 1573-7691. doi:
+10.1007/s10915-021-01650-5.
+Stanley J. Farlow.Partial Differential Equations for Scientists and Engineers. Dover Publications,
+New York, 1993. ISBN 9780486676203.
+Marc Finzi, Andres Potapczynski, Matthew Choptuik, and Andrew Gordon Wilson. A stable and scal-
+able method for solving initial value pdes with neural networks.arXiv preprint arXiv:2304.14994,
+2023.
+Evangelos Galaris, Gianluca Fabiani, Ioannis Gallos, Ioannis Kevrekidis, and Constantinos Siettos.
+Numerical Bifurcation Analysis of PDEs From Lattice Boltzmann Model Simulations: A Parsi-
+monious Machine Learning Approach.Journal of Scientific Computing, 92(2):34, August 2022.
+ISSN 0885-7474, 1573-7691. doi: 10.1007/s10915-022-01883-y.
+Christophe Geuzaine and Jean-François Remacle. Gmsh: A 3-d finite element mesh generator
+with built-in pre- and post-processing facilities.International Journal for Numerical Methods in
+Engineering, 79:1309 – 1331, 09 2009. doi: 10.1002/nme.2579.
+R. A. Gingold and J. J. Monaghan. Smoothed particle hydrodynamics: theory and application to
+non-spherical stars.Monthly Notices of the Royal Astronomical Society, 181(3):375–389, 12 1977.
+ISSN 0035-8711. doi: 10.1093/mnras/181.3.375.
+Xavier Glorot and Yoshua Bengio. Understanding the difficulty of training deep feedforward neural
+networks. InProceedings of the thirteenth international conference on artificial intelligence and
+statistics, pp. 249–256. JMLR Workshop and Conference Proceedings, 2010.
+David Gottlieb and Chi-Wang Shu. On the gibbs phenomenon and its resolution.SIAM review, 39(4):
+644–668, 1997.
+Jiequn Han, Arnulf Jentzen, and Weinan E. Solving high-dimensional partial differential equations
+using deep learning.Proceedings of the National Academy of Sciences, 115(34):8505–8510, 2018.
+13\n\n--- page 14 ---\n\nPublished as a conference paper at ICLR 2026
+Zhongkai Hao, Jiachen Yao, Chang Su, Hang Su, Ziao Wang, Fanzhi Lu, Zeyu Xia, Yichi Zhang,
+Songming Liu, Lu Lu, and Jun Zhu. Pinnacle: a comprehensive benchmark of physics-informed
+neural networks for solving pdes. InProceedings of the 38th International Conference on Neural
+Information Processing Systems, NIPS ’24, Red Hook, NY , USA, 2024. Curran Associates Inc.
+ISBN 9798331314385.
+Di He, Shanda Li, Wenlei Shi, Xiaotian Gao, Jia Zhang, Jiang Bian, Liwei Wang, and Tie-Yan Liu.
+Learning physics-informed neural networks without stacked back-propagation. InInternational
+conference on artificial intelligence and statistics, pp. 3034–3047. PMLR, 2023.
+Amanda A Howard, Bruno Jacob, Sarah H Murphy, Alexander Heinlein, and Panos Stinis. Finite
+basis kolmogorov-arnold networks: domain decomposition for data-driven and physics-informed
+problems.arXiv preprint arXiv:2406.19662, 2024.
+Guang-Bin Huang, Qin-Yu Zhu, and Chee-Kheong Siew. Extreme learning machine: theory and
+applications.Neurocomputing, 70(1-3):489–501, 2006.
+Xinquan Huang and Tariq Alkhalifah. Efficient physics-informed neural networks using hash
+encoding.Journal of Computational Physics, 501:112760, 2024.
+T.J.R. Hughes, J.A. Cottrell, and Y . Bazilevs. Isogeometric analysis: Cad, finite elements, nurbs,
+exact geometry and mesh refinement.Computer Methods in Applied Mechanics and Engineering,
+194(39):4135–4195, 2005.
+Tanveer ul Islam and Prasanna S Gandhi. Viscous fingering in multiport hele shaw cell for controlled
+shaping of fluids.Scientific reports, 7(1):16602, 2017.
+Ameya D Jagtap, Kenji Kawaguchi, and George Em Karniadakis. Adaptive activation functions
+accelerate convergence in deep and physics-informed neural networks.Journal of Computational
+Physics, 404:109136, 2020.
+Jacques Janssen, Oronzio Manca, and Raimondo Manca.Applied diffusion processes from engineering
+to finance. John Wiley & Sons, 2013.
+Jeahan Jung, Heechang Kim, Hyomin Shin, and Minseok Choi. Ceens: Causality-enforced evolutional
+networks for solving time-dependent partial differential equations.Computer Methods in Applied
+Mechanics and Engineering, 427:117036, 2024.
+Taniya Kapoor, Hongrui Wang, Alfredo Núñez, and Rolf Dollevoet. Physics-informed neural
+networks for solving forward and inverse problems in complex beam systems.IEEE Transactions
+on Neural Networks and Learning Systems, 2023.
+Taniya Kapoor, Abhishek Chandra, Daniel M Tartakovsky, Hongrui Wang, Alfredo Nunez, and
+Rolf Dollevoet. Neural oscillators for generalization of physics-informed machine learning. In
+Proceedings of the AAAI Conference on Artificial Intelligence, volume 38, pp. 13059–13067,
+2024a.
+Taniya Kapoor, Hongrui Wang, Alfredo Núñez, and Rolf Dollevoet. Transfer learning for improved
+generalizability in causal physics-informed neural networks for beam simulations.Engineering
+Applications of Artificial Intelligence, 133:108085, 2024b.
+George Em Karniadakis, Ioannis G Kevrekidis, Lu Lu, Paris Perdikaris, Sifan Wang, and Liu Yang.
+Physics-informed machine learning.Nature Reviews Physics, 3(6):422–440, 2021.
+Mariella Kast and Jan S Hesthaven. Positional embeddings for solving pdes with evolutional deep
+neural networks.Journal of Computational Physics, 508:112986, 2024.
+Jaeseung Kim and Hwijae Son. Causality-aware training of physics-informed neural networks for
+solving inverse problems.Mathematics, 13(7):1057, 2025.
+Elham Kiyani, Khemraj Shukla, Jorge F Urbán, Jérôme Darbon, and George Em Karniadakis. Which
+optimizer works best for physics-informed neural networks and kolmogorov-arnold networks?
+arXiv preprint arXiv:2501.16371, 2025.
+14\n\n--- page 15 ---\n\nPublished as a conference paper at ICLR 2026
+Nikola B. Kovachki, Zongyi Li, Burigede Liu, Kamyar Azizzadenesheli, Kaushik Bhattacharya,
+Andrew M. Stuart, and Anima Anandkumar. Neural operator: Learning maps between function
+spaces.CoRR, abs/2108.08481, 2021.
+Aditi Krishnapriyan, Amir Gholami, Shandian Zhe, Robert Kirby, and Michael W Mahoney. Char-
+acterizing possible failure modes in physics-informed neural networks.Advances in neural
+information processing systems, 34:26548–26560, 2021.
+Isaac E Lagaris, Aristidis Likas, and Dimitrios I Fotiadis. Artificial neural networks for solving
+ordinary and partial differential equations.IEEE transactions on neural networks, 9(5):987–1000,
+1998.
+King-Yeung Lam and Yuan Lou.Introduction to reaction-diffusion equations: Theory and applica-
+tions to spatial ecology and evolutionary biology. Springer Nature, 2022.
+Peter Lancaster and Kestutis Salkauskas. Surfaces generated by moving least squares methods.
+Mathematics of Computation, 37:141–158, 1981.
+Henning Lange, Steven L Brunton, and J Nathan Kutz. From fourier to koopman: Spectral methods
+for long-term time series prediction.Journal of Machine Learning Research, 22(41):1–38, 2021.
+Huilai Li, Zhuoqun Wu, Jingxue Yin, and Junning Zhao.Nonlinear Diffusion Equations. World
+Scientific, 2001.
+Ye Li, Siqi Chen, Bin Shan, and Sheng-Jun Huang. Causality-enhanced discreted physics-informed
+neural networks for predicting evolutionary equations. InProceedings of the Thirty-Third Interna-
+tional Joint Conference on Artificial Intelligence, pp. 4497–4505, 2024.
+Zongyi Li, Nikola Borislavov Kovachki, Kamyar Azizzadenesheli, Kaushik Bhattacharya, Andrew
+Stuart, Anima Anandkumar, et al. Fourier neural operator for parametric partial differential
+equations. InInternational Conference on Learning Representations, 2020.
+Phillip Lippe, Bas Veeling, Paris Perdikaris, Richard Turner, and Johannes Brandstetter. Pde-
+refiner: Achieving accurate long rollouts with neural pde solvers.Advances in Neural Information
+Processing Systems, 36, 2024.
+Qiang Liu, Mengyu Chu, and Nils Thuerey. Config: Towards conflict-free training of physics
+informed neural networks.arXiv preprint arXiv:2408.11104, 2024.
+Lu Lu, Pengzhan Jin, Guofei Pang, Zhongqiang Zhang, and George Em Karniadakis. Learning
+nonlinear operators via deeponet based on the universal approximation theorem of operators.
+Nature machine intelligence, 3(3):218–229, 2021a.
+Lu Lu, Xuhui Meng, Zhiping Mao, and George Em Karniadakis. DeepXDE: A deep learning
+library for solving differential equations.SIAM Review, 63(1):208–228, 2021b. doi: 10.1137/
+19M1274067.
+Lu Lu, Raphael Pestourie, Wenjie Yao, Zhicheng Wang, Francesc Verdugo, and Steven G Johnson.
+Physics-informed neural networks with hard constraints for inverse design.SIAM Journal on
+Scientific Computing, 43(6):B1105–B1132, 2021c.
+L. B. Lucy. A numerical approach to the testing of the fission hypothesis.The Astronomical Journal,
+82:1013–1024, December 1977. doi: 10.1086/112164.
+Levi D McClenny and Ulisses M Braga-Neto. Self-adaptive physics-informed neural networks.
+Journal of Computational Physics, 474:111722, 2023.
+Robert McGraw, Fan Yang, and Laura M Fierce. Preserving tracer correlations in moment-based atmo-
+spheric transport models.Journal of Advances in Modeling Earth Systems, 16(5):e2023MS003621,
+2024.
+Nick McGreivy and Ammar Hakim. Weak baselines and reporting biases lead to overoptimism in
+machine learning for fluid-related partial differential equations.Nature Machine Intelligence, 6
+(10):1256–1269, 2024.
+15\n\n--- page 16 ---\n\nPublished as a conference paper at ICLR 2026
+Xuhui Meng, Zhen Li, Dongkun Zhang, and George Em Karniadakis. Ppinn: Parareal physics-
+informed neural network for time-dependent pdes.Computer Methods in Applied Mechanics and
+Engineering, 370:113250, 2020.
+Brek Meuris, Saad Qadeer, and Panos Stinis. Machine-learning-based spectral methods for partial
+differential equations.Scientific Reports, 13(1):1739, 2023.
+Ben Moseley, Andrew Markham, and Tarje Nissen-Meyer. Finite basis physics-informed neural
+networks (fbpinns): a scalable domain decomposition approach for solving differential equations.
+Advances in Computational Mathematics, 49(4):62, 2023.
+Johannes Müller and Marius Zeinhofer. Achieving high accuracy with pinns via energy natural
+gradient descent. InInternational Conference on Machine Learning, pp. 25471–25485. PMLR,
+2023.
+Masao Nagasawa.Schrödinger equations and diffusion theory. Springer Science & Business Media,
+2012.
+Adam Paszke, Sam Gross, Soumith Chintala, Gregory Chanan, Edward Yang, Zachary DeVito,
+Zeming Lin, Alban Desmaison, Luca Antiga, and Adam Lerer. Automatic differentiation in
+PyTorch, 2017.
+Benjamin Peherstorfer. Breaking the kolmogorov barrier with nonlinear model reduction.Notices of
+the American Mathematical Society, 69(5):725–733, 2022.
+Michael Penwarden, Ameya D Jagtap, Shandian Zhe, George Em Karniadakis, and Robert M Kirby.
+A unified scalable framework for causal sweeping strategies for physics-informed neural networks
+(pinns) and their temporal decompositions.Journal of Computational Physics, 493:112464, 2023.
+Linda Petzold. Automatic selection of methods for solving stiff and nonstiff systems of ordinary
+differential equations.SIAM journal on scientific and statistical computing, 4(1):136–148, 1983.
+Tobias Pfaff, Meire Fortunato, Alvaro Sanchez-Gonzalez, and Peter Battaglia. Learning mesh-based
+simulation with graph networks. InInternational Conference on Learning Representations, 2021.
+Les Piegl and Wayne Tiller.The NURBS book (2nd ed.). Springer-Verlag, Berlin, Heidelberg, 1997.
+ISBN 3540615458.
+M J D Powell. The Theory of Radial Basis Function Approximation in 1990. InAdvances in
+Numerical Analysis: Wavelets, Subdivision Algorithms, and Radial Basis Functions. Oxford
+University Press, 04 1992. ISBN 9780198534396. doi: 10.1093/oso/9780198534396.003.0003.
+Serge Prudhomme, Frédéric Pascal, J.Tinsley Oden, and Albert Romkes. A priori error estimate for
+the baumann–oden version of the discontinuous galerkin method.Comptes Rendus de l’Académie
+des Sciences - Series I - Mathematics, 332(9):851–856, 2001. ISSN 0764-4442. doi: https:
+//doi.org/10.1016/S0764-4442(01)01936-X.
+Atamert Rahma, Chinmay Datar, and Felix Dietrich. Training hamiltonian neural networks without
+backpropagation.arXiv preprint arXiv:2411.17511, 2024.
+Atamert Rahma, Chinmay Datar, Ana Cukarska, and Felix Dietrich. Rapid training of hamiltonian
+graph networks without gradient descent.arXiv preprint arXiv:2506.06558, 2025.
+Maziar Raissi, Paris Perdikaris, and George E Karniadakis. Physics-informed neural networks: A
+deep learning framework for solving forward and inverse problems involving nonlinear partial
+differential equations.Journal of Computational physics, 378:686–707, 2019.
+Pratik Rathore, Weimu Lei, Zachary Frangella, Lu Lu, and Madeleine Udell. Challenges in training
+pinns: A loss landscape perspective.arXiv preprint arXiv:2402.01868, 2024.
+Richard B Rood. Numerical advection algorithms and their role in atmospheric transport and
+chemistry models.Reviews of geophysics, 25(1):71–100, 1987.
+Alessandro Rudi and Lorenzo Rosasco. Generalization Properties of Learning with Random Features,
+April 2021.
+16\n\n--- page 17 ---\n\nPublished as a conference paper at ICLR 2026
+David E Rumelhart, Geoffrey E Hinton, and Ronald J Williams. Learning representations by
+back-propagating errors.nature, 323(6088):533–536, 1986.
+Guillermo Sapiro. Geometric partial differential equations and image analysis.Geometric Partial
+Differential Equations and Image Analysis, pp. 440, 2001.
+M.S. Shadloo, G. Oger, and D. Le Touzé. Smoothed particle hydrodynamics method for fluid flows,
+towards industrial applications: Motivations, current state, and challenges.Computers & Fluids,
+136:11–34, 2016. ISSN 0045-7930. doi: https://doi.org/10.1016/j.compfluid.2016.05.029.
+Yong Shang and Fei Wang. Randomized Neural Networks with Petrov–Galerkin Methods for
+Solving Linear Elasticity and Navier–Stokes Equations.Journal of Engineering Mechanics, 150
+(4):04024010, April 2024. ISSN 0733-9399, 1943-7889. doi: 10.1061/JENMDT.EMENG-7463.
+Ramansh Sharma and Varun Shankar. Accelerated training of physics-informed neural networks
+(pinns) using meshless discretizations.Advances in Neural Information Processing Systems, 35:
+1034–1046, 2022.
+Donald Shepard. A two-dimensional interpolation function for irregularly-spaced data. InProceedings
+of the 1968 23rd ACM National Conference, ACM ’68, pp. 517–524, New York, NY , USA, 1968.
+Association for Computing Machinery. ISBN 9781450374866. doi: 10.1145/800186.810616.
+Justin Sirignano and Konstantinos Spiliopoulos. Dgm: A deep learning algorithm for solving partial
+differential equations.Journal of computational physics, 375:1339–1364, 2018.
+Shashank Subramanian, Robert M Kirby, Michael W Mahoney, and Amir Gholami. Adaptive self-
+supervision algorithms for physics-informed neural networks. InECAI 2023, pp. 2234–2241. IOS
+Press, 2023.
+Jingbo Sun, Suchuan Dong, and Fei Wang. Local randomized neural networks with discontinu-
+ous Galerkin methods for partial differential equations.Journal of Computational and Applied
+Mathematics, 445:115830, August 2024. ISSN 03770427. doi: 10.1016/j.cam.2024.115830.
+Ziya Uddin, Sai Ganga, Rishi Asthana, and Wubshet Ibrahim. Wavelets based physics informed
+neural networks to solve non-linear differential equations.Scientific Reports, 13(1):2882, 2023.
+Jorge F Urbán, Petros Stefanou, and José A Pons. Unveiling the optimization process of physics
+informed neural networks: How accurate and competitive can pinns be?Journal of Computational
+Physics, 523:113656, 2025.
+Roberto Verdecchia, June Sallou, and Luís Cruz. A systematic review of green ai.Wiley Interdisci-
+plinary Reviews: Data Mining and Knowledge Discovery, 13(4):e1507, 2023.
+Pauli Virtanen, Ralf Gommers, Travis E. Oliphant, Matt Haberland, Tyler Reddy, David Cournapeau,
+Evgeni Burovski, Pearu Peterson, Warren Weckesser, Jonathan Bright, Stéfan J. van der Walt,
+Matthew Brett, Joshua Wilson, K. Jarrod Millman, Nikolay Mayorov, Andrew R. J. Nelson, Eric
+Jones, Robert Kern, Eric Larson, C J Carey, ˙Ilhan Polat, Yu Feng, Eric W. Moore, Jake VanderPlas,
+Denis Laxalde, Josef Perktold, Robert Cimrman, Ian Henriksen, E. A. Quintero, Charles R. Harris,
+Anne M. Archibald, Antônio H. Ribeiro, Fabian Pedregosa, Paul van Mulbregt, and SciPy 1.0
+Contributors. SciPy 1.0: Fundamental Algorithms for Scientific Computing in Python.Nature
+Methods, 17:261–272, 2020. doi: 10.1038/s41592-019-0686-2.
+Haoxiang Wang, Tao Yu, Tianwei Yang, Hui Qiao, and Qionghai Dai. Neural physical simulation
+with multi-resolution hash grid encoding. InProceedings of the AAAI Conference on Artificial
+Intelligence, volume 38, pp. 5410–5418, 2024a.
+Sifan Wang, Yujun Teng, and Paris Perdikaris. Understanding and mitigating gradient flow pathologies
+in physics-informed neural networks.SIAM Journal on Scientific Computing, 43(5):A3055–A3081,
+2021.
+Sifan Wang, Xinling Yu, and Paris Perdikaris. When and why pinns fail to train: A neural tangent
+kernel perspective.Journal of Computational Physics, 449:110768, 2022.
+17\n\n--- page 18 ---\n\nPublished as a conference paper at ICLR 2026
+Sifan Wang, Bowen Li, Yuhan Chen, and Paris Perdikaris. Piratenets: Physics-informed deep learning
+with residual adaptive networks.Journal of Machine Learning Research, 25(402):1–51, 2024b.
+Sifan Wang, Shyam Sankaran, and Paris Perdikaris. Respecting causality for training physics-
+informed neural networks.Computer Methods in Applied Mechanics and Engineering, 421:
+116813, 2024c.
+Sifan Wang, Shyam Sankaran, and Paris Perdikaris. Respecting causality for training physics-
+informed neural networks.Computer Methods in Applied Mechanics and Engineering, 421:
+116813, 2024d.
+Yiran Wang and Suchuan Dong. An extreme learning machine-based method for computational pdes
+in higher dimensions.Computer Methods in Applied Mechanics and Engineering, 418:116578,
+2024.
+Lei Wu and Jihao Long. A Spectral-Based Analysis of the Separation between Two-Layer Neural
+Networks and Linear Methods.Journal of Machine Learning Research, 23(1), January 2022. ISSN
+1532-4435.
+Mingtao Xia, Lucas Böttcher, and Tom Chou. Spectrally adapted physics-informed neural networks
+for solving unbounded domain problems.Machine Learning: Science and Technology, 4(2):
+025024, 2023.
+Chenhui Xu, Dancheng Liu, Yuting Hu, Jiajie Li, Ruiyang Qin, Qingxiao Zheng, and Jinjun Xiong.
+Sub-sequential physics-informed learning with state space model. InForty-second International
+Conference on Machine Learning, 2025.
+Jiachen Yao, Chang Su, Zhongkai Hao, Songming Liu, Hang Su, and Jun Zhu. Multiadam: Parameter-
+wise scale-invariant optimizer for multiscale training of physics-informed neural networks. In
+International Conference on Machine Learning, pp. 39702–39721. PMLR, 2023.
+Yuan Yin, Matthieu Kirchmeyer, Jean-Yves Franceschi, Alain Rakotomamonjy, and Patrick Gallinari.
+Continuous pde dynamics forecasting with implicit neural representations. InInternational
+Conference on Learning Representations, 2023. URL https://openreview.net/forum?
+id=B73niNjbPs.
+Jeremy Yu, Lu Lu, Xuhui Meng, and George Em Karniadakis. Gradient-enhanced physics-informed
+neural networks for forward and inverse pde problems.Computer Methods in Applied Mechanics
+and Engineering, 393:114823, 2022.
+Yaohua Zang, Gang Bao, Xiaojing Ye, and Haomin Zhou. Weak adversarial networks for high-
+dimensional partial differential equations.Journal of Computational Physics, 411:109409, 2020.
+Zhiyuan Zhao, Xueying Ding, and B Aditya Prakash. Pinnsformer: A transformer-based framework
+for physics-informed neural networks. InThe Twelfth International Conference on Learning
+Representations, 2024.
+18\n\n--- page 19 ---\n\nPublished as a conference paper at ICLR 2026
+APPENDIX
+CONTENTS
+1 Introduction 1
+2 Solving time-dependent PDEs using Frozen-PINNs 3
+2.1 Frozen-PINN ansatz . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+2.2 Computing hidden layer parameters without gradient descent . . . . . . . . . . . . 3
+2.3 Solving time-dependent PDEs using Frozen-PINNs by separation of variables . . . 4
+2.4 Approaches for satisfying boundary conditions for Frozen-PINNs . . . . . . . . . 4
+2.5 SVD Layer . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+2.6 Summary of the training algorithm for Frozen-PINNs . . . . . . . . . . . . . . . . 5
+3 Empirical results 5
+3.1 High advection speeds, fast convergence, and long-time simulation . . . . . . . . . 6
+3.2 Higher-order derivatives in space and time . . . . . . . . . . . . . . . . . . . . . . 6
+3.3 Multi-scale solutions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+3.4 Non-linearity and shocks . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+3.5 Non-linearity and complicated domain geometry . . . . . . . . . . . . . . . . . . 7
+3.6 Chaos and strong non-linearity . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+3.7 High-Dimensional PDEs with low-dimensional solution manifolds . . . . . . . . . 8
+3.8 High-dimensionality . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+4 Conclusion 8
+A Extended review of related work 21
+B Supplementary methodological details on PDE solvers 22
+B.1 Physics-Informed Neural Networks . . . . . . . . . . . . . . . . . . . . . . . . . 22
+B.2 Frozen-PINN-swim and Frozen-PINN-elm . . . . . . . . . . . . . . . . . . . . . . 23
+B.2.1 Extended Discussion on Frozen-PINNs . . . . . . . . . . . . . . . . . . . 23
+B.2.2 Computing spatial and temporal differential operators in PDEs . . . . . . . 27
+B.2.3 Reformulating PDEs as ODEs using Frozen-PINN ansatz . . . . . . . . . . 28
+B.2.4 Handling boundary conditions via boundary-compliant layer . . . . . . . . 31
+B.2.5 Handling boundary conditions via augmented ODE . . . . . . . . . . . . . 31
+B.3 IGA-FEM . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31
+C Supplementary details on numerical experiments 32
+C.1 Linear advection equation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 33
+C.2 Euler-Bernoulli equation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 35
+C.3 Wave equation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 38
+19\n\n--- page 20 ---\n\nPublished as a conference paper at ICLR 2026
+C.4 Burgers . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 42
+C.4.1 Comparison with classical spectral methods . . . . . . . . . . . . . . . . . 44
+C.5 Nonlinear diffusion equation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46
+C.6 Nonlinear reaction-diffusion equation . . . . . . . . . . . . . . . . . . . . . . . . 50
+C.7 Kuramoto-Sivashinsky equation . . . . . . . . . . . . . . . . . . . . . . . . . . . 54
+C.8 High-dimensional diffusion equation . . . . . . . . . . . . . . . . . . . . . . . . . 54
+20\n\n--- page 21 ---\n\nPublished as a conference paper at ICLR 2026
+A EXTENDED REVIEW OF RELATED WORK
+In this section, we provide a comprehensive extended review of the literature and highlight how it
+relates to our work.
+Physics-informed neural networksare widely used to solve PDEs with neural networks. In
+this work, we benchmark our approach against various PINN variants such as adaptive activation
+PINNs (Jagtap et al., 2020), self-adaptive PINNs (McClenny & Braga-Neto, 2023), wavelet PINNs
+(Uddin et al., 2023), and causal PINNs (Wang et al., 2024c), among others. For high-frequency
+temporal variations in the PDE solutions, Krishnapriyan et al. (2021) propose curriculum learning
+with gradually increasing advection coefficients. Compared to curriculum learning, our approach
+with space-time separation is much easier to implement, computationally efficient, and accurate, as
+we demonstrate in Section 3.1. Subramanian et al. (2023) propose using adaptive self-supervision of
+PINNs for sampling collocation points using the gradient of the loss function. We instead use the
+solution gradient to capture locally sharp features in the solution (see Section 3.4). Many specialized
+approaches based on PINNs (Cho et al., 2024; Meng et al., 2020; Sharma & Shankar, 2022; Chiu
+et al., 2022), methods based on hash-encoding (Huang & Alkhalifah, 2024; Wang et al., 2024a), and
+transfer learning (Kapoor et al., 2024b) have been proposed, but are still based on gradient-based
+iterative optimization and back-propagation, unlike ours.
+Other recent advances of PINNs include methods that model the PDE system as pseudo-sequences.
+For instance, PINNsFormer employs a Transformer-based architecture that constructs pseudo-
+sequences from spatio-temporal samples and uses self-attention to model long-range temporal
+dependencies (Zhao et al., 2024). Another work, PINNMamba, is based on State Space Models
+(SSMs) and sub-sequence alignment, enabling continuous–discrete temporal modeling and improved
+propagation of initial-condition information (Xu et al., 2025). Although these methods model
+PDE systems as pseudo-sequences, these architectures often lead to more computational time and
+out-of-memory issues owing to their architecture, as presented by Xu et al. (2025).
+Physics-informed approaches using randomized neural networksfor solving PDEs have mostly
+been studied by combining Extreme Learning Machines (ELMs) with the self-supervised setting of
+PINNs (Chen et al., 2024a; Wang & Dong, 2024; Shang & Wang, 2024; Sun et al., 2024). For instance,
+Dwivedi & Srinivasan (2020) propose a physics-informed extreme learning machine (PIELM) to
+efficiently solve linear PDEs, while Calabrò et al. (2021); Galaris et al. (2022) employ ELMs to
+learn invariant manifolds as well as PDEs from data. Dong & Yang (2022) show that given a
+fixed computational budget, ELMs achieve substantially higher accuracy compared to classical
+second-order FEM and slightly higher accuracy compared to higher-order FEM. For static, nonlinear
+PDEs, ELMs can be used together with nonlinear optimization schemes (Fabiani et al., 2021). On
+larger spatiotemporal domains, Dong & Li (2021) and Dwivedi et al. (2021) propose using multiple
+distributed ELMs on multiple subdomains. Although the aforementioned methods simplify the
+optimization problem by randomly sampling hidden layer parameters and fixing them, they treat
+time as merely another spatial dimension. As a result, their neural basis functions span the full
+spatiotemporal domain, which limits their accuracy on PDEs exhibiting high-frequency temporal
+dynamics, unlike our approach.
+While the problem setting is restricted to Hamiltonian systems, Rahma et al. (2024; 2025) discuss
+how to train Hamiltonian neural networks and Hamiltonian graph neural networks using ELM and
+SWIM approaches, and demonstrate how random sampling can be leveraged to significantly speed
+up training compared to gradient-based iterative optimization. In this work, we show how random
+sampling can speed up training and resolve optimization challenges of PINNs for time-dependent
+PDEs.
+Neural Galerkin schemes(Finzi et al., 2023; Aghili et al., 2024; Berman et al., 2024; Bruna et al.,
+2024) offer an alternative to the full spatiotemporal approach of the randomized neural networks and
+PINNs. These approaches treat all or sparse subsets of network parameters, beyond just the last
+layer’s parameters, as time-dependent. This leads to a much larger system of ODEs compared to our
+approach. The work on neural implicit representations (Chen et al., 2023; Yin et al., 2023) also uses
+neural basis functions to represent only the space component, but relies on gradient-based iterative
+optimization via back-propagation, unlike our approach.
+21\n\n--- page 22 ---\n\nPublished as a conference paper at ICLR 2026
+Spectral methods for solving PDEspromise fast convergence with much fewer basis functions.
+Meuris et al. (2023) present a method to extract hierarchical spatial basis functions from a trained
+DeepONet and employ it in a spectral method to solve the given PDE. Xia et al. (2023) integrate
+adaptive techniques into PINN-based PDE solvers to obtain numerical solutions of unbounded domain
+problems that standard PINNs cannot efficiently approximate. Lange et al. (2021) propose spectral
+methods that fit linear and nonlinear oscillators to data and facilitate long-term forecasting of temporal
+signals. Dresdner et al. (2022) demonstrate spectral solvers that provide sub-grid corrections to
+classical spectral methods to improve their accuracy. Du et al. (2023) use fixed orthogonal bases to
+learn PDE solutions as a map between spectral coefficients and introduce a training strategy based on
+spectral loss. These methods differ from ours in problem setting, architecture, and training.
+Neural operator frameworks(Lu et al., 2021a; Kovachki et al., 2021; Li et al., 2020; Pfaff et al.,
+2021) are promising but are typically trained with PDE solutions with different initial conditions,
+spatial domains (geometries), or parameter settings. Datar et al. (2025) have demonstrated how
+continuous-time neural networks can be constructed for linear operator approximation for linear
+and time-invariant systems. Instead, in our setting here, we solve the PDE using given coefficients,
+domain, and initial conditions without relying on any training data. The ease of implementation,
+rapid training, and high accuracy of our backpropagation-free approach can be leveraged to generate
+PDE solution data for training operator networks.
+Mesh-free methodsare typically based on radial basis functions (RBFs, (Powell, 1992; Chen et al.,
+2014)) or Moving Least Squares (MLS) (Shepard, 1968; Lancaster & Salkauskas, 1981). These
+often do not have user-friendly software or are only applicable in specialized settings (e.g., smoothed
+particle hydrodynamics, (Lucy, 1977; Gingold & Monaghan, 1977; Shadloo et al., 2016)). Moreover,
+despite the ease of dealing with complicated geometries, these methods typically suffer from many
+challenges, such as the choice of kernel, imposing boundary conditions, and convergence issues.
+These methods are not the focus of this work.
+Classical numerical methodssuch as finite elements, finite volumes, and finite differences have
+been used to solve PDEs for decades. They often have a rich theoretical grounding and high accuracy.
+Isogeometric analysis (IGA) is one such method, in which spline-based basis functions are defined
+over a structured grid (Hughes et al., 2005; Cottrell et al., 2009; 2006). Mesh-based methods often
+entail a time-consuming setup phase, especially when mesh generation is challenging. Methods
+like sparse grids enable adaptivity through hierarchical bases but pose significant implementation
+challenges, particularly for irregular domains (Bungartz & Griebel, 2004). In this work, we benchmark
+our results against IGA and finite-element-based methods.
+B SUPPLEMENTARY METHODOLOGICAL DETAILS ONPDESOLVERS
+B.1 PHYSICS-INFORMEDNEURALNETWORKS
+This work benchmarks Frozen PINNs against many prominent variants of physics-informed neural
+networks. While we directly report results from other works for many PINN variants for different PDE
+benchmarks (see Table 1), we also implement two PINN variants for certain PDEs - classical physics-
+informed neural network (PINN) (Raissi et al., 2019) and causality-respecting physics-informed
+neural network (causal PINN) (Wang et al., 2024c). We now describe these two variants.
+Classical PINNs are feedforward deep neural networks designed to approximate PDE solutions by
+incorporating physical laws into the learning process. The architecture of a vanilla PINN includes a
+deep neural network that maps inputs (e.g., space and time coordinates) to outputs (e.g., physical
+quantities of interest) and is trained to minimize a loss function that combines data and physics-based
+errors. The data term ensures that the neural network fits the provided data points, while the physics
+term enforces the PDE constraints with automatic differentiation. The constraints on initial and
+boundary conditions are satisfied via additional loss terms. The loss function for a classical PINN is:
+L(µ) =λ 1LPDE(µ) +λ 2LIC(µ) +λ 3LBC(µ) +λ 4LData(µ),(6)
+where µ represents the trainable network parameters, and λi, for i= 1,2,3,4 represent the weighting
+factors for individual loss terms, which are hyperparameters. In this work, we consider the setting of
+unsupervised learning and thus neglect the data loss term.
+22\n\n--- page 23 ---\n\nPublished as a conference paper at ICLR 2026
+Let N be the total number of training points, which is the sum of the number of interior training points
+Nint (where the PDE residual is evaluated), initial condition training points Nic (where the initial
+condition is evaluated), and boundary condition training points Nb (where the boundary condition is
+evaluated). We denote the neural network solution at a point (x(n), t(n)) in the computational domain
+by u∗(x(n), t(n)). We consider the generic nonlinear PDE defined by equation 1. The PDE loss term
+is defined by
+LPDE(µ) = 1
+Nint
+NintX
+n=1
+||u∗
+t (x(n), t(n)) +Lu ∗(x(n), t(n)) +λN(u ∗)(x(n), t(n))−f(x (n))||p. (7)
+The boundary condition loss term is defined as
+LBC(µ) = 1
+Nb
+NbX
+n=1
+||Bu∗(x(n), t(n))−g(x (n))||p. (8)
+Similarly, the initial condition loss term is defined as
+LIC(µ) = 1
+Nic
+NicX
+n=1
+||u∗
+0(x(n))−u 0(x(n))||p. (9)
+We now describe a Causal PINN, which modifies the PINN loss function to impose temporal causality,
+inherent in time-dependent PDEs, as a soft constraint. In conventional PINNs, the loss is computed
+without prioritizing accuracy at earlier times, which disrupts temporal causality. The Causal PINN
+remedies this by assigning weights at each time step based on the cumulative loss from previous
+steps, ensuring that the model concentrates on accurately approximating solutions at earlier times
+before moving forward. This tries to incorporate the causal structure of the physical problem being
+solved as a soft constraint. The causal PDE loss term is defined by
+LPDE(µ) =
+NtX
+i=1
+wiLPDE(ti, µ),where
+w1 = 1, w i =e −ϵ Pi−1
+k=1 LPDE(tk,µ),fori= 2,3, . . . N t.
+(10)
+Here Nt represents the number of time steps into which the computational domain is divided. The
+causality hyperparameter ϵ regulates the steepness of the weights and is incorporated in the loss
+function, similar to Kapoor et al. (2024b). This modification introduces a weighting factor wi for the
+loss at each time level ti, with wi being dependent on the cumulative PDE loss up to time ti. The
+network prioritizes a fully resolved solution at earlier time levels by exponentiating the negative of
+this accumulated loss. Consequently, the modified PDE loss term for a causal PINN is expressed as
+LPDE(µ) = 1
+Nt
+"
+w1LPDE(t1, µ) +
+NtX
+i=2
+e−ϵ Pi−1
+k=1 LPDE(tk,µ)LPDE(ti, µ)
+#
+. (11)
+B.2 FROZEN-PINN-SWIM ANDFROZEN-PINN-ELM
+B.2.1 EXTENDEDDISCUSSION ONFROZEN-PINNS
+Difference compared to training physics-informed neural networks:We summarize the
+difference between training classical physics-informed neural networks and Frozen PINNs in Figure 8.
+Comparison between Frozen-PINN-swim and Frozen-PINN-elmOne of the main factors in-
+fluencing the performance of Frozen-PINN-swim and Frozen-PINN-elm is the underlying solution
+of the PDE. We explain, with an example of the Burgers’ equation, how the SWIM sampling can
+be leveraged when the solution has steep gradients, as one can sample localized basis functions in
+the part of the domain where the solution has steep gradients. For ELM, the probability of sampling
+steep basis functions with the vanilla ELM is lower, as illustrated in the Figure 2. Even if one uses
+a different distribution to sample the network parameters such that more basis functions with steep
+23\n\n--- page 24 ---\n\nPublished as a conference paper at ICLR 2026
+Boundary condi�on loss
+Ini�al condi�on loss 
+Network parameters: 
+Basis functions in the 
+space-�me domain
+`
+Compute derivatives 
+Physics/PDE loss
+Boundary condi�on loss
+Ini�al condi�on loss 
+Compute derivatives 
+Physics/PDE loss
+Classical	training	of	physics-informed	neural	networks	using	gradient-based	iterative	optimization.	
+Network parameters: 
+Basis functions only in 
+the space domain 
+(sampled and frozen)
+Time-dependent 
+output layer 
+parameters
+Solve a Least 
+squares 
+problem 
+Impose hard 
+constraints
+OR
+Classical ODE 
+solvers with 
+step-size 
+control
+Total loss: 
+- Solve the coupled optimization problem: 
+- Algorithm: Gradient-based iterative optimization (back-propagation) 
+- Total loss: 
+                  (Minimize the initial condition loss separately)
+- Algorithm: Sampling, least squares, and classical ODE solvers
+- Solve the de-coupled optimization problem: 
+Frozen	PINNs:	Training	physics-informed	neural	networks	without	gradient-descent.	
+Figure 8: Comparison of Frozen-PINNs (bottom row) that leverage a gradient-descent-free training
+algorithm, with conventional PINNs (top row) that rely on gradient-based iterative optimization:
+conventional PINNs use basis functions in the entire spatio-temporal domain and solve a fully coupled
+optimization problem involving multiple loss terms via gradient-based iterative training. In contrast,
+Frozen-PINNs sample basis functions only in space, make time dependence explicit only in the output
+layer, decouple initial/boundary conditions, and leverage least squares and adaptive ODE solvers.
+Parameters dependent on space, time, and both are indicated by blue, orange, and blue-orange colors,
+respectively, offering a direct visual representation of the space–time separation in Frozen-PINNs.
+Notation: The network output ˆu(x, t, θ)approximates the solution to the PDE. The total loss term
+(L(θ)) sums three loss terms - one for the initial condition (LIC(θ)), one for the boundary conditions
+(LBC(θ)), and one for the PDE residual (LPDE(θ)) that together impose physical constraints.
+gradients are sampled, placing the basis functions at appropriate spatial locations is another challenge.
+With ELM, one cannot resample or choose basis functions using data as it is data-agnostic. Thus,
+especially if the solution has localized steep gradients, the performance of ELM is typically worse
+compared to SWIM. We additionally demonstrate with a snapshot of the Burgers’ solution that SWIM
+basis functions exhibit a rapid exponential decay of error with increasing network width, where ELM,
+Fourier, and Chebyshev basis functions used in classical spectral methods suffer from the Gibbs
+phenomenon (see Section C.4.1) and lead to poor scaling and accuracy (see Figure 23, Figure 22).
+If the underlying solution is sufficiently smooth and does not have steep gradients anywhere in the
+domain, ELM typically performs very well, as seen in the example with the Advection equation (see
+Section 3.1), Euler Bernoulli equation (see Section 3.2), and high-dimensional diffusion equation
+(Section 3.8), where Frozen-PINN-elm performs much better than Frozen-PINN-swim as shown in
+Table 31. While we just use the vanilla SWIM algorithm in the presented results, one can easily adapt
+24\n\n--- page 25 ---\n\nPublished as a conference paper at ICLR 2026
+the algorithm and, after sampling the network parameters with SWIM, multiply the basis functions
+with a tunable scaling factor before applying the non-linearity to sample many more basis functions
+with shallow slopes.
+Thus, the choice between the two strategies is particularly governed by the underlying solution of
+the PDE. Apart from the favorable cases for each method mentioned above, both methods have
+comparable performance and typically outperform PINNs by several orders of magnitude in speed
+and time. Thus, the rapid training of our approach could be leveraged to try out both approaches if
+one has no information about what the solution of the PDE could look like.
+Influence of random sampling on the methodSimilar to the question of how PINNs trained with
+Adam/SGD perform based on their random network initialization, understanding the influence of
+weights on the output is a challenge. There are two main differences between (stochastic) gradient-
+based optimization and our setting. First, after fixing the internal weights, we use regularized
+least-squares (not a stochastic method) to fit the initial condition. Second, we do not use a stochastic
+method to solve over time. Therefore, even though PINNs can adapt their random initialization over
+the gradient-based optimization, precisely that optimization also adds stochasticity. If the number
+of neurons for the model increases, the randomness in our case decreases because the regularized
+least-squares fit to the initial condition (which converges to a single solution in the limit of many
+neurons), while stochastic gradient descent will only converge to a distribution (because of mini-batch
+optimization). This has been observed for the supervised learning problems in Bolager et al. (2023),
+particularly in the transfer learning experiments. In Table 1, we observe that our model’s performance
+is often orders of magnitude better, and the variance is on the same scale as the magnitude.
+“data-driven” and “data-agnostic” samplingIn this work, we assume that we do not have access
+to the true solution of the PDE. The term “data-driven sampling” can be misleading for the problem
+setting of this paper, which concerns unsupervised learning tasks. Thus, here we clarify what we
+mean by data-driven sampling. Our data are random pairs of collocation points, but we do not have
+access to the true function values (because, at the initial time point t= 0 , we have not solved the
+PDE yet). Thus, even though we do not have access to the true solution of the PDE, we call this
+"data-driven" sampling because we create the parameters of our basis functions (neurons) so that they
+are centered strictly within the domain. We achieve this by using data points sampled in the domain,
+thereby considering the geometry and bounds of the spatial domain. Note that with data-agnostic
+sampling in ELM, the neurons can easily be centered outside the spatial domain because weights and
+biases are chosen without considering any information about the geometry and bounds of the spatial
+domain. To summarize, though our algorithm proposes "data-driven" sampling, we do not start with
+time-series data and instead work in a self-supervised setting.
+Rationale for constructing outer basis functionsOne might reasonably ask that if one knows
+the outer basis functions analytically, why add another layer just to approximate them with tanh
+basis functions? When analytical basis functions are known, they should be used directly. However,
+in many cases, such expressions are not readily available. We argue that this idea of a boundary-
+compliant layer can be quite powerful for PDEs where the basis functions are not known analytically
+but only through boundary conditions, which we can then incorporate by constructing useful outer
+basis functions. For instance, to solve the diffusion equation on complex geometries, one can use the
+optimal bases consisting of the eigenfunctions of the Laplacian operator computed numerically at
+discrete points as the outer basis functions (Coifman & Lafon, 2006). Thus, representing them with
+tanh basis functions facilitates a straightforward computation of the derivatives needed for solving
+the PDE.
+Kolmogorov n-width barrierWithout resampling the internal network parameters, our method
+faces the Kolmogorov n-width barrier Peherstorfer (2022); Du & Zaki (2021); Berman & Peherstorfer
+(2024); Kast & Hesthaven (2024) because our basis functions are not time-dependent. However,
+resampling basis functions at certain time points of the Frozen-PINN-swim (as done in the Burgers’
+equation in Section 3.4) results in a solution- and time-dependent basis approximation of the solution
+manifold and, thus, in theory, can break the barrier. PINNs can theoretically break the Kolmogorov
+n-width barrier as time is treated as an extra spatial dimension, and internal network parameters are
+time-dependent. However, for PINNs, the optimization issues pose much more severe challenges even
+on very simple PDEs and in low dimensions (Krishnapriyan et al., 2021; Wang et al., 2021; 2022).
+25\n\n--- page 26 ---\n\nPublished as a conference paper at ICLR 2026
+10 14
+ 10 10
+ 10 6
+ 10 2
+rcond
+10 8
+10 5
+10 2
+101
+104
+107
+Rel 2 error (space-time solution)
+Frozen-PINN-elm
+Frozen-PINN-swim
+10 12
+ 10 9
+ 10 6
+ 10 3
+ 100
+Rel 2 error (initial condition)
+Frozen-PINN-elm
+Frozen-PINN-swim
+Figure 9: (Advection Equation): Empirical analysis of how initial condition loss affects the perfor-
+mance of Frozen-PINNs: (Left): Relative error of the full space-time solution Vs rcond, (Right):
+Relative error of the full space-time solution grows with the relative error of the initial condition
+(controlled viarcond).
+So even though our vanilla Frozen-PINN-swim/Frozen-PINN-elm approach (without periodically
+resampling hidden layer weights) faces the Kolmogorov n-width barrier, we outperform PINNs,
+typically by several orders of accuracy and time in practice.
+Analysis of residual initial condition loss and its impact on model performanceFor all PDEs
+considered here, the initial condition is relatively easy to fit, and one can approximate it accurately by
+sampling enough collocation points at t = 0, using enough basis functions, and setting a relatively low
+regularization constant (≈10 −12). So, the initial condition loss is not the bottleneck in any of the
+PDEs we considered here. However, it is interesting to investigate the impact of initial condition loss
+on the model’s performance.
+Given Nc collocation points X∈R Nc×d, M neurons, and hidden layer output Φ(X), the initial
+condition is computed via a least squares solution:
+C(0) =u(X,0) ⊤[Φ(X),1] +,(12)
+where [Φ(X),1]∈R (M+1)×N c and the pseudo-inverse is denoted by ·+. We compute this least
+squares solution C(0) using the Python function np.linalg.lstsq, which takes as an argument
+rcond which is the cut-off ratio for small singular values of [Φ(X),1] . High cut-off ratios reduce
+the accuracy of the least-squares solution, while very low ratios lead to poorly conditioned systems
+that can introduce numerical errors.
+We perform an experiment by progressively increasing the cut-off value to deliberately degrade the
+initial-condition fit and study its impact on the overall PDE residual. We solve the advection equation
+given in Equation (24), using the same hyperparameter settings as in Table 5, fix the advection
+coefficient to 40, and vary rcond from 10−1 to 10−17. Figure 9 shows that small rcond values
+yield highly accurate initial-condition fits and low relative error. Asrcond increases, more dominant
+singular values are discarded in the least-squares solve, degrading the initial-condition representation
+and leading to larger errors in the full space–time solution. Thus, for Frozen-PINNs, maintaining a
+reasonably accurate initial condition fit is important, as inaccuracies can influence the ODE solve and
+increase the overall error.
+On the choice of the SVD truncation threshold:The SVD truncation threshold is a crucial
+hyperparameter for Frozen-PINNs, determining the dimensionality of the ODE solver and affecting
+the speed and accuracy of Frozen-PINNs. We conduct an ablation study on the SVD truncation
+threshold for Burgers’ equation (Equation (28)), the nonlinear diffusion equation (Equation (29)), and
+the 10-dimensional diffusion equation (Equation (33)) with hyperparameters described in Table 14,
+Table 18, Table 29, respectively. We change the width to200 for the non-linear diffusion equation,
+and for all PDEs, we only vary the SVD truncation thresholds. For detailed problem setups please
+refer to Section C.4, Section C.5, Section C.8.
+Figure 10 highlights the well-known trade-off between accuracy and speed. Retaining fewer singular
+values reduces the dimensionality and stiffness of the last-layer ODE, yielding faster solutions with
+26\n\n--- page 27 ---\n\nPublished as a conference paper at ICLR 2026
+10 12
+ 10 9
+ 10 6
+ 10 3
+SVD cutoff
+10 5
+10 3
+10 1
+Relative 2 error
+ Relative 2 error
+Time
+10
+100
+Time (s)
+(a) Burgers’ equation
+10 13
+ 10 10
+ 10 7
+ 10 4
+SVD cutoff
+10 3
+10 2
+10 1
+100
+101
+Relative 2 error
+ Relative 2 error
+Time
+101
+102
+Time (s)
+ (b) Nonlinear diffusion
+10 12
+ 10 8
+ 10 4
+ 100
+SVD cutoff
+10 4
+10 3
+10 2
+10 1
+100
+Relative 2 error
+Relative 2 error
+Time
+100
+101
+102
+Time (s)
+ (c)10-dimensional diffusion
+Figure 10: Impact of the SVD truncation threshold ϵSV Dused for the SVD layer on the time-to-
+solution and accuracy of Frozen-PINN across three PDEs. Black triangles in the nonlinear diffusion
+plot indicate solution blow-up at large SVD cutoffs.
+similar or slightly lower accuracy. Retaining more singular values increases dimensionality and
+stiffness, which slows the solver but improves accuracy. Importantly, the performance is robust for
+SVD truncation thresholdsϵ SV D<10 −10.
+The choice of the optimal SVD truncation threshold depends highly on the application constraints.
+Higher thresholds (ϵSV D≥10 −8) are suitable for faster solutions with moderate accuracy, while
+very low thresholds (ϵSV D≤10 −13) are preferable when high accuracy is the primary goal. The
+default value we choose is 10−12 as it represents a good trade-off between accuracy and speed. We
+always set the rcond (regularization constant for the initial least squares solve) to the same value
+as the SVD truncation threshold because: (a) it also represents the cut-off ratio for the SVD of the
+feature matrix for the initial least squares solve and it does not make sense to solve this with extremely
+high or low precision when the data has already been passed through the SVD layer, to maintain a
+similar level of truncation as the SVD layer. (b) Empirically, we observe very robust performance if
+we set the regularization constant to be equal to the SVD threshold (see Figure 9, where the relative
+error stays the same for the rcond values in the range 10−17 −10 −11, when the SVD truncation
+threshold is set at10 −14).
+On the choice between the two strategies for enforcing boundary conditions:In practice, the
+choice between the boundary-compliant layer and the augmented ODE follows a simple cost-benefit
+tradeoff.
+We recommend using a boundary-compliant layer when a problem-specific transformation ϕA(X) is
+easy to derive (e.g., zero Dirichlet, periodic boundary conditions on simple domains). It enforces
+boundary conditions (almost) exactly and does not enlarge the ODE system, so it is typically more
+efficient. The main limitation is that it requires deriving ϕA(X), which may be non-trivial for
+complex geometries or boundary conditions.
+We recommend using the Augmented ODE strategy when boundary geometry or constraints make
+an analytic boundary-compliant mapping difficult. This is universally applicable and requires no
+problem-specific engineering since it soft-enforces boundary conditions by augmenting the state, at
+the cost of increasing system dimension and possibly worsening stiffness.
+B.2.2 COMPUTING SPATIAL AND TEMPORAL DIFFERENTIAL OPERATORS INPDES
+We use the notation described in Section 2 of the manuscript. We first discuss how to compute
+different spatial and temporal derivative terms appearing in the PDEs described in this manuscript
+using the neural network ansatz. We then use these expressions to reformulate the PDEs described in
+this manuscript as corresponding ODEs. We consider neural networks in the most general setting by
+considering the outer basis functions and the SVD layer (cf Algorithm 1).
+Computing spatial derivatives:We list and describe how to compute the spatial derivatives of the
+approximate PDE solutions:
+27\n\n--- page 28 ---\n\nPublished as a conference paper at ICLR 2026
+•First-order spatial derivativeof the approximate PDE solution is computed as:
+ˆux(x, t) =C(t)[ΦAr ]x(x)
+=C(t)[A rW⊙˜σ x(x),0]∈R 1×d, (13)
+where⊙is the Hadamard product, and
+˜σx(x) := [σz(z)|z=W x⊤+b, σz(z)|z=W x⊤+b, . . . , σz(z)|z=W x⊤+b]∈R Ms×d,(14)
+withσ z(z)∈R Ms andσ z is the first derivative of thetanhactivation function.
+•Second-order spatial derivativeof the approximate PDE solution is computed as:
+ˆuxx(x, t) =C(t)[ΦAr ]xx(x)
+=C(t)[A rW⊙W⊙˜σ xx(x),0]∈R 1×d, (15)
+where˜σxx(x)is defined equivalently as˜σx(x)but withσ xx being the second-order spatial
+derivative of thetanhactivation function.
+• TheLaplacianof the approximate PDE solution is computed as:
+∆ˆu(x, t) =C(t)[ΦAr ]xx(x)1,where,1∈R d×1
+=C(t)[A rW⊙W⊙˜σ xx(x),0]1∈R 1×1.
+(16)
+•Fourth-order spatial derivativeof the approximate PDE solution is computed as:
+ˆuxxxx(x, t) =C(t)[ΦAr ]xxxx(x)
+=C(t)[A rW⊙W⊙W⊙W⊙˜σ xxxx(x),0]∈R 1×d, (17)
+whereσ zzzz is the fourth-order spatial derivative of thetanhactivation function.
+Computing time derivatives:We now list and describe how to compute the time derivatives of the
+approximate PDE solutions:
+•First-order time derivativeof the approximate PDE solution is computed as:
+ˆut(x, t) =Ct(t)[ΦAr ](x). (18)
+•Second-order time derivativeof the approximate PDE solution is computed as:
+ˆutt(x, t) =Ctt(t)[ΦAr ](x). (19)
+B.2.3 REFORMULATINGPDES ASODES USINGFROZEN-PINNANSATZ
+The partial differential equations considered in this work are recast as ordinary differential equations
+for evolving output layer coefficients, making use of the spatial and temporal derivatives derived in
+Section B.2.2. We denote the pseudo-inverse by· +.
+Advection equation:The one-dimensional advection equation is
+ut(x, t) +βux(x, t) = 0,
+where β is a scalar. Approximating the solution with neural network ansatz (Equation (2)) and
+substituting Equation (18) and Equation (13) in the advection equation, we get,
+Ct(t)[ΦAr (X)] =−βC(t)[Φ Ar (X)] x,
+Ct(t) =−βC(t)[Φ Ar (X)] x[ΦAr (X)] +.
+The initial condition is given by
+C(0) =u(X,0) ⊤[ΦAr (X)] +.
+28\n\n--- page 29 ---\n\nPublished as a conference paper at ICLR 2026
+Euler-Bernoulli equation:The Euler-Bernoulli PDE considered in this manuscript is
+utt +u xxxx =f(x, t).
+Approximating the solution with neural network ansatz (Equation (2)) and substituting Equation (17)
+and Equation (19) in the Euler-Bernoulli equation, we get,
+Ctt(t)Φ(X) =f(X, t)⊤ −C(t)Φ xxxx(X)
+We rewrite this second-order ODE as a combination of first-order ODEs given by
+Ct(t) =D(t),
+Dt(t)Φ(X) =f(X, t)⊤ −C(t)Φ xxxx(X).
+We then reformulate the ODEs as
+(Ct(t)D t(t)) = (C(t)D(t) )
+
+0−Φ(X) xxxxΦ(X) +
+10
+
++ (01 ) [f(X, t)]⊤Φ(X) +.
+The initial condition is given by
+C(0) =u(X,0) ⊤Φ(X) +,
+D(0) =u t(X,0) ⊤Φ(X) +.
+The extension to the Euler-Bernoulli beam equation on a Winkler foundation is straightforward,
+where the reformulated ODE is written as:
+(Ct(t)D t(t)) = (C(t)D(t) )
+
+0−(Φ(X) xxxx +κΦ(X)) Φ(X) +
+10
+
++ (01 ) [f(X, t)]⊤Φ(X) +.
+Wave equation:The wave equation considered in this manuscript is
+utt −κu xx =f(X, t).
+Approximating the solution with neural network ansatz (Equation (2)) and substituting Equation (15)
+and Equation (19) in the wave equation, we get,
+Ctt(t)Φ(X) =f(X, t)⊤ −κ C(t)Φxx(X)
+We rewrite this second-order ODE as a combination of first-order ODEs given by
+Ct(t) =D(t),
+Dt(t)Φ(X) =f(X, t)⊤ −κC(t)Φ xx(X).
+We then reformulate the ODEs as
+(Ct(t)D t(t)) = (C(t)D(t) )
+
+0−κΦ(X) xxΦ(X) +
+10
+
++ (01 ) [f(X, t)]⊤Φ(X) +.
+The initial condition is given by
+C(0) =u(X,0) ⊤Φ(X) +,
+D(0) =u t(X,0) ⊤Φ(X) +.
+Burgers’ equation:The one-dimensional Burgers’ PDE we consider is
+ut +uu x −αu xx = 0,
+where α is a scalar. Approximating the solution with neural network ansatz (Equation (2)) and
+substituting Equation (18), Equation (13) and Equation (15) in the Burgers equation, we get,
+Ct(t)ΦAr (X) =−(C(t)Φ Ar (X)⊙C(t)[Φ Ar ]x(X)) +α(C(t)[Φ Ar ]xx(X)),
+Ct(t) =−(C(t) Φ Ar (X)⊙C(t) [Φ Ar ]x(X) +α(C(t) [Φ Ar ]xx (X))) [ΦAr (X)] +
+Note that the non-linearity is transferred to the right-hand side of the ODE. The initial condition is
+given by
+C(0) =u(X,0) ⊤Φ(X) +.
+29\n\n--- page 30 ---\n\nPublished as a conference paper at ICLR 2026
+Nonlinear diffusion equation:The two-dimensional nonlinear diffusion equation we consider is
+ut −u∆u=f(x, t), x∈Ω⊂R 2, t∈[0,1].(20)
+Approximating the solution with neural network ansatz (Equation (2)), substituting Equation (18),
+and Equation (15) in the nonlinear diffusion equation, we get,
+Ct(t)Φ(X) = (C(t)Φ(X)⊙[C(t)Φ xx(X)]1) + [f(X, t)] ⊤,
+Ct(t) =
+ 
+C(t) Φ(X)⊙[C(t) Φ xx(X)]1+ [f(X, t)] ⊤
+Φ(X) +.
+Note that the non-linearity is transferred to the right-hand side of the ODE. The initial condition is
+given by
+C(0) =u(X,0) ⊤Φ(X) +.
+Nonlinear reaction-diffusion equation:The two-dimensional nonlinear diffusion equation we
+consider is
+ut −∆u−u 2 =f(x, t), x∈Ω⊂R 5, t∈[0,1].(21)
+Approximating the solution with neural network ansatz (Equation (2)), substituting Equation (18),
+and Equation (15) in the nonlinear diffusion equation, we get,
+Ct(t)Φ(X) = [C(t)Φ xx(X)]1+ (C(t)Φ(X)⊙C(t)Φ(X)) + [f(X, t)] ⊤,
+Ct(t) =
+ 
+[C(t)Φ xx(X)]1+ (C(t)Φ(X)⊙C(t)Φ(X)) + [f(X, t)] ⊤
+Φ(X) +.
+The non-linearity u2 is transferred to the right-hand side of the ODE. The initial condition is given by
+C(0) =u(X,0) ⊤Φ(X) +.
+High-dimensional diffusion equation:The d-dimensional diffusion equation we consider is
+ut −∆u=f(x, t), x∈Ω⊂R d, t∈[0,1].(22)
+Approximating the solution with neural network ansatz (Equation (2)), substituting Equation (18),
+and Equation (15) in the diffusion equation, we get,
+Ct(t)Φ(X) = [C(t)Φ xx(X)]1+ [f(X, t)] ⊤,
+Ct(t) =
+ 
+[C(t) Φ xx(X)]1+ [f(X, t)] ⊤
+Φ(X) +.
+The initial condition is given by
+C(0) =u(X,0) ⊤Φ(X) +.
+Kuramoto-Sivashinsky equation:The governing PDE considered in this manuscript is
+ut +αuu x +βu xx +γu xxxx =f(X, t).
+Approximating the solution with neural network ansatz (Equation (2)) and substituting Equation (13),
+Equation (15), Equation (17) and Equation (18) in the Kuramoto-Sivashinsky equation, we get,
+Ct(t)Φ(X) =f(X, t)⊤ −αC(t)Φ(X)⊙C(t)Φ x(X)−β C(t)Φ xx(X)−γC(t)Φ xxxx(X).
+We can reformulate it as:
+Ct(t) =
+ 
+f(X, t)⊤ −αC(t)Φ(X)⊙C(t)Φ x(X)−β C(t)Φ xx(X)−γC(t)Φ xxxx(X)
+
+Φ(X) +.
+The initial condition is given by
+C(0) =u(X,0) ⊤Φ(X) +.
+Note on ODE solvers and interpolation in time:We use the solve_ivp routine of the SciPy
+package Virtanen et al. (2020). One can pass test points in time as an argument to the method
+solve_ivp. One can optionally set the parameter dense_output to true, which means that the
+output of the ODE is a function handle that can be evaluated by interpolation at any time point t∈Ω .
+The method specified dictates the interpolation order. RK23 uses a cubic Hermite polynomial, while
+DOPRI85 uses a seventh-order polynomial.
+30\n\n--- page 31 ---\n\nPublished as a conference paper at ICLR 2026
+B.2.4 HANDLING BOUNDARY CONDITIONS VIA BOUNDARY-COMPLIANT LAYER
+To enforceperiodic boundary conditions, it is sufficient for each basis function to satisfy the periodic
+condition individually, as the Frozen-PINN ansatz, which is a linear combination of these functions,
+will inherently satisfy it as well. For instance, for a one-dimensional spatial domain, we find A
+so that AΦ(xl) =AΦ(x r), where xl, xr are the left and right boundary points of the domain. In
+this paper, for certain PDEs (see Section C), for x∈Ω and k= 1,2, . . . , Ms, we approximate
+[AΦ]k(x) = sin(kx) (for k even) and [AΦ]k(x) = cos(kx) (for k odd) and set c0(t) = 1for allt .
+Forzero Dirichlet boundary conditiongiven by u(x) = 0, we can use the technique described above
+by choosing basis functions so that Aϕ(x) = 0 for x∈∂Ω . For other boundary conditions, we
+propose using the augmented ODE trick to satisfy the boundary conditions.
+B.2.5 HANDLING BOUNDARY CONDITIONS VIA AUGMENTEDODE
+Our approaches to satisfying the Dirichlet and periodic boundary conditions are already explained in
+the main text. Here, we explain how we handle time-dependent Dirichlet boundary conditions and
+Neumann boundary conditions.
+Time-dependent Dirichlet boundary conditions:For handling time-dependent Dirichlet bound-
+ary conditions (u(x, t) =g(x, t)for x∈∂Ω ), we set A to the identity map and augment the ODE
+(Equation (3)) with an additional equation given by
+ˆut(x, t) =gt(x, t)forx∈∂Ω =⇒C t(t) = [R(X, C(t)), gt(Xb, t)]| {z }
+∈R1×(Nc +Nb )
+ΦA([X, Xb])+
+| {z }
+∈R(Nc +Nb )×(Mb +1)
+.
+In the example in Section 3.5, we know the solution on the boundary at all time points, which is
+continuously differentiable. If the solution on the boundary points is not available at all time points,
+one can interpolate and approximate the derivative of the solution on the boundary.
+Neumann boundary conditions:For simple spatial domains, one can choose appropriate outer
+basis functions as described in Section 2.4 that inherently satisfy the Neumann boundary conditions.
+For instance, for zero Neumann boundary conditions on a one-dimensional domain, one can choose
+outer basis functions consisting of cosines of different frequencies scaled to the domain (function
+value is 1 at the boundaries) so that their spatial derivatives, which are the sine functions, are zero on
+the boundary points.
+On complicated domain geometries, to satisfy Neumann boundary conditions (∇u(x, t)·ˆn(x) = 0
+for x∈∂Ω ), we set A to the identity map and augment the ODE (Equation (3)) with an additional
+equation for the boundary points and solve
+Ct(t) = [R(X, C(t)),0]| {z }
+∈R1×(Nc +Nb )
+[ΦA(X),∇Φ A(Xb)[ˆn(Xb)]⊤]+
+| {z }
+∈R(Nc +Nb )×(Mb +1)
+.
+B.3 IGA-FEM
+First introduced in Hughes et al. (2005), Isogeometric analysis (IGA) is a numerical method developed
+to unify the fields of computer-aided design (CAD) and finite element analysis (FEA). The key idea
+is to represent the solution space for the numerical analysis using the same functions that define the
+geometry in CAD (Cottrell et al., 2009), which include the B-Splines and Non-Uniform Rational
+B-Splines (NURBS) (Piegl & Tiller, 1997).
+In this paper, we use B-Splines as the basis functions. The B-Splines are defined using the Cox-de
+Boor recursion formula (COX, 1972; de Boor, 1972), i.e.,
+Ni,0(ξ) =
+1ξ i ≤ξ < ξi+1
+0otherwise,
+Ni,p(ξ) = ξ−ξ i
+ξi+p −ξ i
+Ni,p−1(ξ) + ξi+p+1 −ξ
+ξi+p+1 −ξ i+1
+Ni+1,p−1(ξ),
+31\n\n--- page 32 ---\n\nPublished as a conference paper at ICLR 2026
+where ξi is the ith knot, and p is the polynomial degree. The vector Ξ = [ξ1, ξ2, . . . , ξn+p+1] is the
+knot vector, where n is the number of B-Splines. By specifying the knot vector, we define the basis
+functions we use to solve the PDEs. We use a uniform open knot vector, where the first and last
+knots have multiplicity p+ 1 , the inner knots have no multiplicity, and all knots that have different
+values are uniformly distributed. We refer to the knots with different values as "nodes". The intervals
+between two successive nodes are knot spans, which can be viewed as "elements". The elements
+form a "patch". A domain can be partitioned into subdomains, and each is represented by a patch. In
+our work, we use a single patch to represent the entire 1D domain. Figure 11a shows an example of
+such a patch, where the B-Splines are C p-continuous within the knot spans and C p−1 continuous
+at the inner knots. In order to address the boundary conditions, we adapt the B-Splines as shown in
+Figure 11b Figure 11c, so that the boundary conditions are directly built into the solution space.
+(a) Number of basis func-
+tions= 7.
+(b) Number of basis func-
+tions= 5.
+(c) Number of basis func-
+tions= 5.
+Figure 11: Examples of B-Splines representing the 1D domain [0,1] . Number of nodes = 6 and
+degree of polynomials = 2. (Left): The original B-Splines. (Middle): Adapted B-Splines to satisfy the
+Dirichlet boundary condition. (Right): Adapted B-Splines to satisfy the periodic boundary condition.
+Note that the first (blue) spline is identical to the second last (brown) one, and the second (orange)
+spline is identical to the last (pink) one, as they share the same coefficient. The gray dashed lines
+indicate where the domain starts and ends.
+In the following, we refer to the adapted B-Splines as basis functions ϕk(x). Thus, the solutions of
+PDEs are approximated by
+u(x, t) =
+KX
+k=1
+ck(t)ϕk(x).
+We solve the PDEs in the weak formulation. For the linear advection equation (see Equation (24)),
+the weak form of the equation is
+KX
+k=1
+c′
+k(t)
+Z
+X
+ϕk(x)v(x)dx+β
+KX
+k=1
+ck(t)
+Z
+X
+ϕ′
+k(x)v(x)dx= 0,(23)
+where v(x) are the test functions. The test functions are chosen to be the same as the basis functions.
+The integral of the functions is computed using Gaussian quadrature. Then we solve the linear
+Ordinary differential equation (ODE)
+M ˙c+Kc=0,
+where matrix M and matrix K contain the integral of the B-Splines and their derivatives, and the
+coefficient β, which are given. We solve the Euler-Bernoulli equation equation 25 and the Burgers’
+equation equation 28 in a similar way. The boundary condition for the Euler-Bernoulli equation is, in
+addition, weakly imposed, as is done in Prudhomme et al. (2001).
+C SUPPLEMENTARY DETAILS ON NUMERICAL EXPERIMENTS
+Here, we discuss additional experimental details for the PDEs considered in this work. We start by
+listing the details on the code repository, FEM software, hardware, error metrics, and ablation studies:
+32\n\n--- page 33 ---\n\nPublished as a conference paper at ICLR 2026
+• Code repository:The source code, along with the instructions on reproducing the results,
+is provided in the supplemental material (zipped file) and is made publicly available (see
+Section 3). The code repository provides Python scripts and notebooks that can be executed
+and tested readily. Moreover, we make the refactored repository publicly available and
+intend to actively maintain it.
+• FEM code:In this paper, we use DOLFINx 0.8.0 to solve the nonlinear diffusion equation
+(see equation 29). DOLFINx (Baratta et al., 2023), which is part of the FEniCS project,
+is a C++ and Python library used for solving PDEs with the finite element method (FEM).
+It provides tools for defining complex geometries, formulating variational problems, and
+solving them efficiently on distributed architectures. We used the software Gmsh (Geuzaine
+& Remacle, 2009) to generate a mesh for this experiment with complicated geometry, as
+shown in Figure 24a.
+• Hardware details:The computational experiments for Frozen PINNs, FEM, and IGA-FEM
+were performed with:Ubuntu20.04.6 LTS,NVIDIAdriver 515.105.01 and i7 CPU.
+• Metrics for computing errors:We use the Root Mean Squared Error (RMSE) and the
+relative L2 error to quantify errors in all experiments (see Section C for the definitions).
+We compute the test error on a uniform grid for all PDEs with 256 points in space and 100
+points in time, unless otherwise specified. We use float64 numerical precision in all the
+experiments.
+Let d be the dimension of space and Ω×[0, T]⊂R d ×R be the spatio-temporal domain.
+Given N points in a test set X, the error metrics we use to compare numerical results are
+Root Mean Squared Error (RMSE) and relativeL 2 error given by
+RMSE:=
+r P
+x∈X (utrue(x)−u pred(x))2
+N ,
+and
+RelativeL 2 error:=
+pP
+x∈X (utrue(x)−u pred(x))2
+pP
+x∈X (utrue(x))2 .
+For each experiment, the mean and standard deviation of the RMSE and therelativeL 2 error
+are computed with three seeds.
+• Ablation studies for neural architecture and SVD layer:We perform ablation studies
+whenever necessary for the neural architectures we considered in this work. Importantly, we
+also perform an ablation study on the SVD layer. To quantify the compression in width after
+the SVD layer, we define a compression ratio as Cr = Ms
+r , where Ms is the width of the
+(sampled) hidden layer before the SVD layer (assuming no-boundary-compliant layer), and
+r is the width of the SVD layer (see Figure 3). We define a speed-up in computation time
+as s= Tno-svd
+Tsvd
+as the ratio of computational time without the SVD layer to the time required
+with the SVD layer.
+We now describe the detailed problem setups, ablation studies, and plots comparing the results of
+Frozen-PINNs with those of other approaches for all PDEs considered here (see Figure 12).
+C.1 LINEAR ADVECTION EQUATION
+Problem setup:The linear advection equation describes the transport of a quantity and is used to
+model many real-life applications, such as simplified traffic flow models, transport of pollutants in
+rivers or the atmosphere (Rood, 1987; McGraw et al., 2024). Here, we consider the linear advection
+equation with periodic boundary conditions given by
+ut(x, t) +βux(x, t) = 0,forx∈[0,2π], t∈[0,1],(24a)
+u(x,0) = sin(x),forx∈[0,2π],(24b)
+u(0, t) =u(2π, t),fort∈[0,1].(24c)
+The analytical solution of Equation (24) is given by u(x, t) = sin(x−βt) . We describe detailed
+hyperparameter settings used for the experiments on: (a) high-advection speeds (how the error grows
+33\n\n--- page 34 ---\n\nPublished as a conference paper at ICLR 2026
+x
+t
+x
+t
+Winkler foundation
+x
+Applica�on 
+Key challenges 
+posed by the PDE 
+PDE and ground truth solu�on of the PDE  
+Advec�on 
+equa�on
+Extremely high-
+frequency temporal 
+varia�ons 
+Euler-Bernoulli
+beam 
+equa�on 
+Higher-order deriva-
+�ves in space and 
+�me
+Mul�-scale solu�ons
+Complicated 
+geometry
+Diﬀusion 
+equa�on
+Non-linearity and 
+complicated domain 
+geomtery
+Burgers' 
+equa�on
+Non-linearity and 
+shock
+diﬀusion 
+equa�on
+High-dimensionality
+Chao�c system
+PDE: 
+PDE (classical): 
+PDE : 
+PDE: 
+PDE: 
+PDE: 
+PDE: 
+PDE: 
+PDE (winkler foundation): 
+BC : 
+BC : Time-dependent Dirichlet
+Classical
+BC : Dirichlet
+BC : Time-dependent Dirichlet
+BC : Time-dependent Dirichlet
+BC : Periodic
+xt
+x
+Case 2. 
+Case 1. 
+Shock
+t
+t
+Case (1): 
+Case (1): 
+Case (2): 
+Long �me span  
+Rapid oscilla�ons
+x
+t
+Reac�on- 
+diﬀusion
+equa�on
+5-dimensional 
+100-dimensional
+Sivashinsky
+equa�on
+Kuramoto-
+high-dimensionality
+Non-linearity and 
+Wave
+equa�on 
+BC : Periodic
+BC : Periodic
+Non-linearity and 
+Figure 12: Overview of the PDE benchmarks considered in this study, highlighting the core challenges
+associated with each problem and their corresponding ground truth solutions. Boundary conditions
+are abbreviated as BC.
+34\n\n--- page 35 ---\n\nPublished as a conference paper at ICLR 2026
+with the advection coefficient β), (b) convergence (how the error decays with the number of basis
+functions for a fixed advection coefficient β= 10 ), (c) error for advection coefficient β= 40 (for a
+comparison with other PINN-based variants), and (d) long-time simulation for T= 1000 seconds
+for a fixed advection coefficient β= 1 in Table 3, Table 4, Table 5, and Table 8, respectively. The
+hidden layer weights for ELM and Frozen-PINN-elm are sampled from the Gaussian distribution and
+biases from a uniform distribution in [−4,4] . For SWIM and ELM, we use 1000 interior points for
+β∈ {10−2,10 −1,1,10} , and we use 8000 interior points for β∈ {40,100}. The code repository
+contains all the necessary Python notebooks to reproduce results for Frozen-PINNs for all the different
+cases of the advection equation considered here, including the three key experiments concerning high
+advection speeds, convergence, and long-time simulation (see Section 3.1).
+Deeper networks and further optimization experiments:Additional experiments are carried out
+for baseline PINN on deeper networks with 10 and 20 hidden layers, where each hidden layer has
+30 neurons. The experiments are run for 20000 epochs using Adam and L-BFGS optimizers under
+multiple learning rates for the advection equation withβ= 10 and β= 40 . Tables 6 and 7 summarize
+the RMSE, relative L2 errors, and training times for β= 10 and β= 40 cases, respectively. The
+results show consistency with the known literature of PINNs. First, deeper PINNs do not directly
+lead to better performance. Increasing depth from 10 to 20 layers often degrades accuracy for both
+optimizers, reflecting the optimization difficulty of fully-connected PINNs as the models become
+deeper. This behavior is also discussed previously in the literature, for instance by Wang et al. (2024b),
+where the authors show that PINN performance is known to degrade when larger and deeper neural
+network architectures are employed. Second, the β= 40 case is known to be challenging for PINNs
+(Krishnapriyan et al., 2021) due to high frequency features, and the results presented in Table 7 show
+failures across depths, learning rates, and optimizers. The results show that even with larger networks,
+longer training, and different optimizers, standard PINNs face challenges in achieving high accuracy,
+especially for β= 40 , and require more computational time. Thus, matching the accuracy of standard
+PINNs with the proposed method is inherently challenging and computationally expensive.
+Ablation studies:For the advection coefficient β= 10 , the ablation study for Frozen-PINN-swim,
+Frozen-PINN-elm, and vanilla PINNs is already presented in Figure 4(Middle) for varying the number
+of neurons and interior points. The ablation studies for PINNs for the network width and number
+of interior points are presented in Table 9, and Table 10, respectively. Since the network width is
+already quite low for optimal parameters, the SVD layer does not further reduce the dimension of the
+ODE system. Hence, we do not perform ablation studies for the SVD layer in Frozen-PINNs, as it is
+not used in this case.
+Comparison of results:Figure 13 shows the absolute errors obtained with the Frozen-PINN-swim,
+Frozen-PINN-elm, PINN, Causal PINN, and IGA methods along with the ground truth for β= 40 .
+One can observe that all approaches considered here, besides Frozen-PINNs and IGA-FEM, fail to
+capture the high-frequency temporal dynamics. Figure 14 shows the true solution at β= 1 for the
+example with long time simulation.
+C.2 EULER-BERNOULLI EQUATION
+Problem Setup:The time-dependent Euler–Bernoulli beam equation models the dynamic behavior
+of beams, including vibrations and transient loads. It is used to model loads on rail tracks, bridges,
+and aircraft wings, among many other applications (Beskos, 1987). We consider two different types
+of the Euler-Bernoulli beam equations in this work. The first is the classical Euler-Bernoulli beam
+equation that models a simply supported beam with varying transverse force and is described as
+utt +u xxxx =f(x, t)x∈[0, π], t∈[0,1],(25a)
+wheref(x, t) = (1−16π 2) sin (x) cos(4πt), with initial and boundary conditions
+u(x,0) = sin(x), u t(x,0) = 0,(25b)
+u(0, t) =u(π, t) =uxx(0, t) =uxx(π, t) = 0.(25c)
+The forcing function and the analytical solution are taken from Kapoor et al. (2023).
+We consider another variant of the Euler-Bernoulli beam equation, with a Winkler foundation (an
+elastic, deformable foundation) given by:
+utt +u xxxx +p(x, t) =f(x, t)x∈[0,8π], t∈[0,1].(26a)
+35\n\n--- page 36 ---\n\nPublished as a conference paper at ICLR 2026
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+0.0
+2.5
+5.0x
+3.3e-16 8.1e-08
+(a) Frozen-PINN-swim
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+0.0
+2.5
+5.0x
+1.1e-16 4.5e-08 (b) Frozen-PINN-elm
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+0.0
+2.5
+5.0x
+8.0e-11 1.6e-10 (c) IGA
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+0.0
+2.5
+5.0x
+6.0e-08 5.4e-01 1.1e+00
+(d) PINN
+ (e) Causal PINN
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+0.0
+2.5
+5.0x
+-8.0e-01 0.0e+00 8.0e-01 (f) Ground truth
+Figure 13: Advection equation (β= 40): absolute error plots and ground truth.
+Figure 14: Advection equation β= 1 , (long time simulation): Analytical solution u(x, t) =
+sin(x−βt).
+The forcing term isf(x, t) = (2−π 2) sin (x) cos(πt), with the initial and boundary conditions
+u(x,0) = sin(x), u t(x,0) = 0,(26b)
+u(0, t) =u(8π, t) =uxx(0, t) =uxx(8π, t) = 0.(26c)
+The foundation reaction force p(x, t)is assumed to be proportional to the displacement of the beam
+and modeled as p(x, t) =κu(x, t), where κ is the spring constant and is set to 1 in this case. The
+forcing function and the analytical solution for the Euler-Bernoulli beam equation with a Winkler
+foundation are taken from Kapoor et al. (2024b).
+Ablation studies:The ablation studies for the PINN-based variants for classical Euler Bernoulli
+and the one with the Winkler foundation could be found in Kapoor et al. (2023; 2024b). The
+hyperparameters for various neural PDE solvers used for solving the classical Euler-Bernoulli PDE
+and the one with the Winkler foundation are described in Table 11, and Table 12, respectively. The
+hidden layer weights for Frozen-PINN-elm are sampled from the Gaussian distribution and biases
+from a uniform distribution in[−2,2].
+For this example, we have employed the augmented ODE strategy to satisfy boundary conditions and
+obtain the results presented in Table 1. We empirically investigate the effect of the penalty term in the
+augmented ODE on the performance of Frozen-PINNs, considering both accuracy and computation
+time. For this experiment, we use the hyperparameters described in Table 11 for Frozen-PINN-elm
+(high-precision regime) and vary the value of κ. Figure 15 shows that: (a) for κ >105, the boundary
+loss is negligible (RMSE <10 −10) and the total loss is very low (RMSE ∼10 −5−10−9), and (b) for
+extremely large κ≥10 6, the augmented ODE becomes slightly stiffer, resulting in increased solution
+time.
+36\n\n--- page 37 ---\n\nPublished as a conference paper at ICLR 2026
+Table 3: Advection equation (high-advection speeds): Network hyper-parameters used for
+β∈ {10−2,10 −1,1,10,40,100,1000,10000} to study the influence of the advection coefficient
+on the errors (optimal hyper-parameters in bold) (see Figure 4(Left).
+Parameter Value
+Frozen-PINN-swim, Number of hidden layers2
+Frozen-PINN-elm Hidden layer width[140,380,560]
+Outer basis functions[10,14,20,40]
+Activationtanh
+L2-regularization[10 −8,10 −10,10 −12,10 −14]
+Loss mean-squared error
+boundary condition strategy boundary-compliant layer
+SWIM, ELM Number of hidden layers2
+SVD cutoff10 −12
+Hidden layer width[140,380,560]
+Activationtanh
+L2-regularization[10 −8,10 −10,10 −12]
+Loss mean-squared error
+# Initial and boundary points400
+IGA Number of nodes16
+Degree of polynomials8
+Number of basis functions15
+PINN Number of hidden layers4
+Layer width[10,20,30,40]
+Activationtanh
+Optimizer LBFGS
+Epochs5000
+Loss mean-squared error
+Learning rate0.1
+Batch size200
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 1,1
+# Interior points[500,1000,1500,2000]
+# Initial and boundary points600
+Causal PINN Number of hidden layers4
+Layer width30
+Activationtanh
+Optimizer ADAM followed by LBFGS
+ADAM Epochs2000
+LBFGS Epochs5000
+Loss mean-squared error
+Learning rate0.1
+Batch size2000
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 1,1
+# Interior points40000
+# Initial and boundary points6000
+Causality parameter,ϵ10
+101 103 105 107 109
+Augmented ODE penalty term 
+10 8
+10 4
+100
+RMSE
+T otal loss Boundary loss Time
+100
+101
+102
+Time (s)
+Figure 15: The effect of penalty term κ in the augmented ODE (see Equation (5)) on the losses and
+time to solution.
+Comparison of results:Figure 16 and Figure 17 present the absolute errors for the classical Euler-
+Bernoulli PDE and its variant with a Winkler foundation, respectively, using Frozen-PINN-swim,
+Frozen-PINN-elm, PINN, and IGA methods, along with the true solution. The error plots for the
+Euler-Bernoulli beam equation with a Winkler foundation for other variants of PINNs, such as
+37\n\n--- page 38 ---\n\nPublished as a conference paper at ICLR 2026
+Table 4: Advection equation (convergence for β= 10 ): Optimal hyper-parameters in the experiment
+designed to study how the error decays with the number of basis functions in the neural network (see
+Figure 4(Middle).
+Parameter Value
+Frozen-PINNs Number of hidden layers2
+(both variants) Hidden layer width[2, ...,30]
+Activationtanh
+L2-regularization[10 −7,10 −8,10 −9,10 −10,10 −11,10 −12]
+Loss mean-squared error
+boundary condition strategy boundary-compliant layer
+PINN Number of hidden layers4
+Layer width[10,20,30,40]
+Activationtanh
+Optimizer LBFGS
+Epochs5000
+Loss mean-squared error
+Learning rate0.1
+Batch size200
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 1,1
+Table 5: Advection equation (forβ= 40): Hyper-parameters for the results in Table 1.
+Parameter Value
+Frozen-PINN-elm (low-precision) Number of hidden layers2
+Hidden layer width50
+Outer basis functions[14]
+svd cutoff[10 −12]
+Activationtanh
+L2-regularization10 −10
+ODE solver tolerance10 −4
+Loss mean-squared error
+boundary condition strategy boundary-compliant layer
+Frozen-PINN-swim (high-precision) Number of hidden layers2
+Hidden layer width380
+Outer basis functions[14]
+svd cutoff[10 −12]
+Activationtanh
+L2-regularization10 −14
+ODE solver tolerance10 −8
+Loss mean-squared error
+boundary condition strategy boundary-compliant layer
+PINN Number of hidden layers4
+Layer width[10,20,30,40]
+Activationtanh
+Optimizer LBFGS
+Epochs5000
+Loss mean-squared error
+Learning rate0.1
+Batch size200
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 1,1
+Wavelet PINN, causal PINN, adaptive PINN, and self-adaptive PINNs, can be found in Kapoor et al.
+(2024b). Table 1 shows the summary of results for the classical Euler-Bernoulli beam equation and
+the variant considering the Winkler foundation for different methods.
+C.3 WAVE EQUATION
+Problem Setup:The acoustic wave equation models the propagation of sound waves through a
+medium. It describes how pressure or velocity evolve over time. We consider the wave equation on
+Ω = [0,1]for timet∈[0,1]from Hao et al. (2024), given by:
+utt −4u xx = 0, x∈Ω, t∈[0,1],(27a)
+38\n\n--- page 39 ---\n\nPublished as a conference paper at ICLR 2026
+Table 6: Results of PINNs for advection equation (β= 10 ) for dense networks (number of hidden
+layers = 10 and 20, with each hidden layer having 30 neurons). The experiment studies the perfor-
+mance of PINNs with L-BFGS and ADAM optimizers under different learning rates. Each case is
+run for 20000 epochs.
+Optimizer Learning rate RMSE RelativeL 2 error Training time (s)
+Hidden layers Hidden layers Hidden layers
+10 20 10 20 10 20
+L-BFGS 0.1 6.02e-4 1.23e-2 8.51e-4 1.74e-2 204.25 336.32
+0.01 1.57e-3 1.30e-2 2.22e-3 1.84e-2 213.26 327.41
+Adam 0.001 2.26e-2 1.64e-2 3.19e-2 2.32e-2 174.84 301.12
+0.0001 6.72e-3 2.07e-2 9.5e-3 2.92e-2 190.24 317.97
+Table 7: Results of PINNs for advection equation (β= 40 ) for dense networks (number of hidden
+layers = 10 and 20, with each hidden layer having 30 neurons). The experiment studies the perfor-
+mance of PINNs with ADAM and L-BFGS optimizers under different learning rates. Each case is
+run for 20000 epochs.
+Optimizer Learning rate RMSE RelativeL 2 error Training time (s)
+Hidden layers Hidden layers Hidden layers
+10 20 10 20 10 20
+L-BFGS 0.1 3.09e-3 1.53e+1 4.37e-3 2.17e+1 207.25 320.43
+0.01 1.46e-2 7.07e-1 2.07e-2 1.00e+0 205.08 323.43
+Adam 0.001 3.66e-1 7.07e-1 5.18e-1 1.00e+0 168.14 331.03
+0.0001 6.67e-1 6.82e-1 9.44e-1 9.65e-1 181.89 316.90
+Table 8: Advection equation (long-time simulation for β= 1 ): Optimal hyper-parameters for
+Frozen-PINNs in the experiment used to demonstrate that the errors with Frozen-PINNs stay low for
+simulations up to 1000 seconds (see Figure 4(Right)).
+Parameter Value
+Frozen-PINN Number of hidden layers2
+(both variants) Hidden layer width250
+Outer basis functions25
+Activationtanh
+L2-regularization[10 −10]
+Loss mean-squared error
+boundary condition strategy boundary-compliant layer
+Table 9: Advection equation (β= 10 ): Ablation study for PINN (LBFGS) with respect to the network
+width. The mean is computed over3seeds.
+Layer width Training time (s) RMSE RelativeL 2 error
+1024.47±0.191.24e-3±2.38e-4 1.76e-3±3.37e-4
+20 27.46±0.08 6.52e-4±2.59e-4 9.22e-4±3.66e-4
+30 30.43±0.503.69e-4±4.33e-5 5.23e-4±6.13e-5
+40 33.64±0.41 3.86e-4±9.37e-5 5.46e-4±1.32e-4
+with the initial condition
+u(x,0) = sin(πx) + 1
+2 sin(4πx), x∈Ω,(27b)
+ut(x,0) = 0, x∈Ω,(27c)
+and the boundary condition
+u(0, t) =u(1, t) = 0t∈[0,1].(27d)
+39\n\n--- page 40 ---\n\nPublished as a conference paper at ICLR 2026
+Table 10: Advection equation (β= 10 ): hyperparameter optimization for PINN (LBFGS) varying
+the number of interior points. The mean is computed over 3 seeds.
+Interior points Training time (s) RMSE RelativeL 2 error
+50025.76±0.294.10e-4±7.20e-5 5.80e-4±1.01e-4
+1000 27.44±0.25 3.72e-4±4.06e-5 5.27e-4±5.74e-5
+1500 29.61±0.16 5.68e-4±1.97e-4 8.03e-4±2.79e-4
+2000 30.43±0.503.69e-4±4.33e-5 5.23e-4±6.13e-5
+0.00 0.25 0.50 0.75 1.00
+t
+0.0
+2.5x
+2e-08 4e-08
+(a) Frozen-PINN-swim
+0.00 0.25 0.50 0.75 1.00
+t
+0.0
+2.5x
+2e-08 5e-08 7e-08 (b) Frozen-PINN-elm
+0.0 0.2 0.5 0.8 1.0
+t
+0.0
+2.5x
+0.0e+00 2.0e-07 4.0e-07 (c) IGA
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+0.0
+2.5x
+6.0e-08 5.4e-03 1.1e-02
+(d) PINN (LBFGS)
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+0.0
+2.5x
+1.8e-06 6.1e-02 1.2e-01 (e) PINN (Adam)
+0.0 0.2 0.5 0.8 1.0
+t
+0.0
+2.5x
+-8.0e-01 0.0e+00 8.0e-01 (f) Ground truth
+Figure 16: The classical Euler-Bernoulli beam equation: absolute error plots and ground truth.
+0 10 20
+x
+0
+1t
+2e-06 4e-06
+(a) Frozen-PINN-swim
+0 10 20
+x
+0
+1t
+5e-07 1e-06 (b) Frozen-PINN-elm
+0 10 20
+x
+0
+1t
+0e+00 2e-08 4e-08 (c) IGA
+0 10 20
+x
+0
+1t
+0.5
+ 0.0 0.5
+(d) Ground truth
+Figure 17: The Euler-Bernoulli beam equation on Winkler foundation: absolute error plots and
+ground truth.
+The analytical solution of the problem is
+u(x, t) = sin(πx) cos(2πt) +1
+2 sin(4πx) cos(8πt).(27e)
+40\n\n--- page 41 ---\n\nPublished as a conference paper at ICLR 2026
+Table 11: The classical Euler-Bernoulli beam equation for the results in Table 1: summary of all
+hyperparameters.
+Parameter Value
+Frozen-PINN-elm (low-precision) Number of hidden layers2
+Hidden layer width50
+SVD-cutoff10 −6
+Activationtanh
+L2-regularization10 −6
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Frozen-PINN-elm (high-precision) Number of hidden layers2
+Hidden layer width100
+SVD-cutoff10 −12
+Activationtanh
+L2-regularization10 −10
+Loss mean-squared error
+boundary condition strategy augmented ODE
+IGA Number of nodes27
+Degree of polynomials9
+Number of basis functions33
+PINN Number of hidden layers4
+Layer width20
+Activationtanh
+Optimizer LBFGS (ADAM)
+Epochs15000 (30000)
+Loss mean-squared error
+Learning rate0.1
+Batch size2000
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 0.1,1
+# Interior points10000
+# Initial and boundary points6000
+Table 12: The Euler-Bernoulli beam equation on Winkler foundation for the results in Table 1:
+summary of all hyperparameters.
+Parameter Value
+Frozen-PINN-elm (low-precision) Number of hidden layers2
+Hidden layer width200
+SVD-cutoff10 −6
+Activationtanh
+L2-regularization10 −6
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Frozen-PINN-swim (high-precision) Number of hidden layers2
+Hidden layer width400
+SVD-cutoff10 −10
+Activationtanh
+L2-regularization10 −10
+Loss mean-squared error
+boundary condition strategy augmented ODE
+IGA Number of nodes60
+Degree of polynomials6
+Number of basis functions63
+PINN Number of hidden layers4
+Layer width200
+Activationtanh
+Optimizer LBFGS
+Epochs10000
+Loss mean-squared error
+Learning rate0.1
+Batch size500
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 1,1
+# Interior points10000
+# Initial and boundary points1500
+41\n\n--- page 42 ---\n\nPublished as a conference paper at ICLR 2026
+In addition, we present a significantly challenging scenario involving a multi-scale solution by
+employing the initial condition
+u(x,0) = sin(πx) + 1
+2 sin(4πx) + 1
+4 sin(9πx), x∈Ω,(27f)
+ut(x,0) = 0, x∈Ω,(27g)
+for which the corresponding analytical solution is given by
+u(x, t) = sin(πx) cos(2πt) +1
+2 sin(4πx) cos(8πt) + 1
+4 sin(9πx) cos(18πt).(27h)
+Comparison of results:In Table 1, we compare the Frozen-PINN-swim result of Equation (27e)
+with other PINN methods from Hao et al. (2024), see Figure 18. The hyperparameters used for this
+experiment can be found in Table 13. Additionally, we demonstrate the capability of our proposed
+method by solving the multi-scale problem as in Equation (27h) using the same neural network
+architecture, and the relativeL 2 error is less than10 −5. The results are shown in Figure 19.
+Table 13: Wave equation: Hyper-parameters for the result in Table 1.
+Parameter Value
+Frozen-PINN-swim Number of hidden layers2
+Hidden layer width400
+Outer basis functions30
+Activationtanh
+L2-regularization10 −12
+Loss mean-squared error
+boundary condition strategy boundary-compliant layer
+Figure 18: Wave equation Equation (27e): Ground truth, Frozen-PINN-swim solution, absolute error.
+C.4 BURGERS
+Problem Setup:The Burgers’ equation in different settings is used to model traffic flows, large-
+scale structure formation in cosmology, and shock formation in inviscid flows, among other appli-
+cations (Bonkile et al., 2018). The inviscid Burgers’ equation is a nonlinear PDE, which can form
+shock waves. We consider Burgers’ equation on Ω = [−1,1] for time t∈(0,1] from Raissi et al.
+(2019), given by:
+ut +uu x −(0.01/π)u xx = 0, x∈Ω, t∈[0,1],(28a)
+with initial and boundary conditions
+u(0, x) =−sin(πx), x∈Ω,(28b)
+u(t,−1) =u(t,1) = 0t∈[0,1].(28c)
+We consider the analytical solution provided by Basdevant et al. (1986).
+42\n\n--- page 43 ---\n\nPublished as a conference paper at ICLR 2026
+(a) (Left): Ground truth, (Middle): Frozen-PINN-swim solution, (Right): point-wise absolute error.
+(b) 3D visualization of the multi-scale wave solution.
+Figure 19: Wave equation Equation (27h): Ground truth, Frozen-PINN-swim solution, absolute error,
+and multi-scale solution visualization.
+Why Frozen-PINN-elm can’t resolve shocks in PDE solutions?To accurately resolve PDE
+solutions with sharp gradients, it is essential to: (a) construct basis functions with steep gradients,
+and (b) position them particularly near the shock regions within the domain. Figure 20a (Right)
+illustrates why solution- or data-agnostic ELM basis functions make it very difficult for Frozen-
+PINN-elm to capture the sharp features in the solution, particularly at the center of the domain, due
+to the exponentially small probability of sampling steep basis functions (Huang et al., 2006). While
+sampling weights from a wider uniform distribution, as discussed by Calabrò et al. (2021) for linear
+PDEs, can increase the probability of sampling steeper basis functions, it offers no spatial control
+over their placement.
+Ablation studies:We describe additional details in solving the Burgers’ equation with various
+neural PDE solvers in Table 14 and Table 15. The results of the ablation study with the number
+of neurons in the hidden layer for Frozen-PINN-swim are presented in Table 16. We observe that
+starting with a width of 1200, the error decreases for a width up to 600 and increases again below
+600. We believe that for widths lower than 600, the network capacity seems to be the reason for the
+loss of accuracy. For very high widths, the regularization constant has to be kept to a higher value to
+avoid overfitting. Otherwise, the ODE system becomes highly stiff. With this high regularization
+constant, the training becomes stable, but it affects the training accuracy. We do not include results
+for Frozen-PINN-elm as it fails on all widths, as it is not able to capture the sharp shocks and exhibits
+Gibbs phenomenon (Gottlieb & Shu, 1997), which is explained in detail in Section C.4.1.
+We also perform an ablation study for the SVD layer for Frozen-PINN-swim. Please refer to Table 17.
+The ablation study reveals that the SVD layer compresses the number of neurons by a factor of 1.58,
+which reduces the output computation time by a factor of 7 for almost the same accuracy. This
+highlights the utility of the SVD layer.
+43\n\n--- page 44 ---\n\nPublished as a conference paper at ICLR 2026
+1.0
+ 0.5
+ 0.0 0.5 1.0
+1.0
+0.5
+0.0
+0.5
+1.0
+SWIM basis functions
+Burgers solution
+Gradient 182.69
+Gradient -150.62
+Gradient -168.55
+Gradient 141.73
+1.0
+ 0.5
+ 0.0 0.5 1.0
+1.0
+0.5
+0.0
+0.5
+1.0
+ELM basis functions
+Burgers solution
+Gradient -0.71
+Gradient 0.94
+Gradient 2.09
+Gradient 0.66
+(a) (Left): Re-sampled SWIM basis functions (with steep gradients centered
+around the shock) att= 0.66, (Right): data-agnostic ELM basis functions.
+0.0 0.5 1.0
+t
+0.5
+0.0
+0.5
+x
+Ground truth
+0.0 0.5 1.0
+t
+0.5
+0.0
+0.5
+Frozen-PINN-swim
+0.0 0.5 1.0
+t
+0.5
+0.0
+0.5
+Absolute error
+0.8
+ 0.0 0.8
+ 0.8
+ 0.0 0.8
+ 6e-07 1e-06
+(b) (Left): Ground truth, (Middle): Frozen-PINN-swim
+solution, where black and gray dashed lines mark time
+snapshots selected for a comparison (in (d) on the right)
+and the collocation points resampling times, respectively,
+(Right): point-wise absolute error.
+1
+ 0 1
+x
+1
+0
+1
+u(t, x)
+t = 0.25
+1
+ 0 1
+x
+1
+0
+1
+u(t, x)
+t = 0.50
+1
+ 0 1
+x
+1
+0
+1
+u(t, x)
+t = 0.75
+Ground truth Frozen-PINN-swim (resampling)
+(c) Comparison between Frozen-PINN-swim and
+numerical solutions at three time instances.
+Figure 20: Illustration of experimental results for the Burgers’ equation.
+Comparison of results:Figures 20b and 20c present a comparison between the Frozen-PINN-swim
+solution and the numerical solution from Raissi et al. (2019), validating the ability of Frozen-PINN-
+swim to resolve shocks with high accuracy. We demonstrate with a snapshot of the Burgers’ solution
+that SWIM basis functions exhibit a rapid exponential decay of error with increasing network width,
+where Fourier and Chebyshev basis functions suffer from the Gibbs phenomenon Gottlieb & Shu
+(1997) (See Figure 22, Figure 23, Section C.4.1). Figure 21 shows the absolute errors obtained with
+the PINN, Causal PINN, and IGA methods.
+C.4.1 COMPARISON WITH CLASSICAL SPECTRAL METHODS
+In this section, we study how the basis functions sampled with SWIM and ELM approaches perform
+in comparison to the basis functions typically employed in traditional spectral methods. We try to
+approximate a single snapshot of the solution to the Burgers’ equation, which has a locally steep
+gradient. If a method fails to even approximate a single snapshot well enough, it is highly unlikely to
+achieve better results in approximating the entire space-time solution of the PDE.
+Figure 22 shows the approximation of the Burgers’ equation solution at t= 0.99, using SWIM
+basis functions, ELM basis functions, Fourier series, and Chebyshev polynomials, respectively. The
+number of basis functions is 102 for all methods. Figure 23 shows the approximation error using a
+different number of basis functions. We can see that for ELM basis functions, Fourier basis functions,
+and Chebyshev polynomials, there are oscillations near the shock, and the error is large compared
+to the SWIM basis functions, where we are able to take advantage of resampling data points and
+sampling appropriate basis functions in order to adapt to the target function well. Note that in this
+experiment, the weights for the ELM basis functions are sampled from a Gaussian distribution
+44\n\n--- page 45 ---\n\nPublished as a conference paper at ICLR 2026
+(a) PINN
+ (b) Causal PINN
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+-1.0
+0.0
+1.0x
+0.0e+00 1.0e-03 2.0e-03 (c) IGA
+0.0 0.2 0.4 0.6 0.8 1.0
+t
+-1.0
+0.0
+1.0x
+-8.0e-01 0.0e+00 8.0e-01
+(d) Ground truth
+Figure 21: Burgers’ equation: absolute error plots and ground truth.
+Table 14: Burgers’ equation: Summary of hyper-parameters for Frozen-PINNs (see Table 1).
+Parameter Value
+Frozen-PINN-swim (low-precision) Number of hidden layers2
+Hidden layer width[300]
+Activationtanh
+L2-regularization[10 −6,10 −7,10 −8,10 −10,10 −12]
+svd cutoff10 −8
+Loss mean-squared error
+# collocation points (space)[600]
+# sampling points[1000]
+ODE solver tolerance10 −3
+# time windows for resampling 9
+boundary condition strategy augmented ODE
+Frozen-PINN-swim (high-precision) Number of hidden layers2
+Hidden layer width[450]
+Activationtanh
+L2-regularization[10 −6,10 −7,10 −8,10 −10,10 −12,10 −13]
+svd cutoff5×10 −11
+Loss mean-squared error
+# collocation points (space)[1000]
+# sampling points[6000]
+ODE solver tolerance10 −6
+# time windows for resampling 9
+boundary condition strategy augmented ODE
+Frozen-PINN-elm Number of hidden layers2
+Hidden layer width[2000]
+Activationtanh
+L2-regularization[10 −6,10 −7,10 −8,10 −10,10 −12]
+Loss mean-squared error
+# collocation points (space)[3000]
+# sampling points[6000]
+boundary condition strategy augmented ODE
+with a standard deviation of 10 in order to increase the number of basis functions. The biases are
+sampled from a uniform distribution in [−10,10] . For the Fourier basis functions and Chebyshev
+polynomials, we use equispaced grid points. We also experimented with quadrature points and placed
+more points near the steep gradient in an attempt to mitigate the oscillations associated with the Gibbs
+phenomenon and the Runge phenomenon, but it did not lead to any significant improvement in the
+45\n\n--- page 46 ---\n\nPublished as a conference paper at ICLR 2026
+Table 15: Burgers’ equation (see Table 1): Network hyper-parameters used for PINN, Causal PINN,
+and IGA.
+Parameter Value
+PINN Number of hidden layers9
+Layer width20
+Activationtanh
+Optimizer LBFGS
+Epochs10000
+Loss mean-squared error
+Learning rate0.1
+Batch size200
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 1,1
+# Interior points10000
+# Initial and boundary points600
+Causal PINN Number of hidden layers9
+Layer width20
+Activationtanh
+Optimizer ADAM followed by LBFGS
+ADAM Epochs5000
+LBFGS Epochs10000
+Loss mean-squared error
+Learning rate0.1
+Batch size200
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 1,1
+# Interior points40000
+# Initial and boundary points600
+Causality parameter,ϵ5
+IGA Number of nodes750
+Degree of polynomials9
+Number of basis functions756
+Table 16: Burgers’ equation: ablation study for the network width for Frozen-PINN-swim.
+Width RelativeL 2 error
+240 4.27e-4
+550 2.27e-7
+800 2.78e-6
+1200 1.54e-6
+Table 17: Burgers’ Equation: Ablation Study for the SVD layer with Frozen-PINN-swim.
+With SVD layer Without SVD layer Ratio
+Number of neurons 500 316 Width Compression≈1.58x
+Time (s) 141.5 989.84 Speed-up≈7x
+Rel.L 2 error 3.34e-4 3.28e-4 -
+results. This conclusively demonstrates that SWIM basis functions perform better than traditional
+bases used in spectral methods in accurately resolving shocks.
+C.5 NONLINEAR DIFFUSION EQUATION
+Problem Setup:The non-linear diffusion equation in different forms is used to model the spread of
+populations, bacterial colonies, and forest fires, as well as to model groundwater and ice-sheet flow
+in glaciers, and mass diffusion in reactive flows (Li et al., 2001). We consider a two-dimensional
+Nonlinear diffusion equation given by
+ut −u∆u=f(x, y, t),(x, y)∈Ω, t∈[0,1],(29a)
+with a forcing function
+f(x, y, t) = 5e−t sin(πx)y −3  
+−1 +e −t sin(πx)y −5  
+−12 +π 2y2
+(29b)
+46\n\n--- page 47 ---\n\nPublished as a conference paper at ICLR 2026
+x
+0.5
+0.0
+0.5
+u(t,x)
+SWIM basis
+x
+u(t,x)
+ELM basis
+1
+ 0 1
+x
+0.5
+0.0
+0.5
+u(t,x)
+Fourier function
+1
+ 0 1
+x
+u(t,x)
+Chebyshev
+ polynomial
+groud truth approximation
+Figure 22: Approximation of Burgers’ equation
+solution at t= 0.99 with four types of basis
+functions. The number of basis functions in all
+cases is 102. Oscillations can be seen near the
+steep gradient for the methods using ELM ba-
+sis functions, Fourier functions, and Chebyshev
+polynomials.
+50 100 150 200
+Number of basis functions
+10 6
+10 5
+10 4
+10 3
+10 2
+10 1
+Relative  2 error
+Function approximation error
+SWIM
+ELM
+Fourier
+Chebyshev
+Figure 23: Approximation error for four types of
+basis functions. Here, we directly fit the Burgers’
+equation solution at t= 0.99 . The approxima-
+tion error decreases as we increase the number
+of basis functions, and the SWIM basis functions
+yield the best result among all methods.
+on a complicated geometry inspired by a tree-like pattern occurring during the controlled shaping of
+fluids Islam & Gandhi (2017). The initial condition and time-dependent Dirichlet boundary conditions
+are obtained from the constructed solution of the PDE
+u(x, y, t) = 5e−t sin(πx)y −3,(x, y)∈Ω, t∈[0,1].(29c)
+The training is performed on 1500 data points in the interior and boundary. We test the neural-PDE
+solvers with 5000 data points in the interior and on the boundary. The weights of the hidden layer
+for the Frozen-PINN-elm are sampled from the Gaussian distribution and biases from a uniform
+distribution in [−1,1] . For our approach to handling time-dependent Dirichlet boundary conditions,
+please refer to Section B.2.5. The hyperparameters for various neural PDE solvers are outlined in
+Table 18. Figure 24 shows the mesh generated for the FEM and the sampled collocation points for
+the neural PDE solvers. For the mesh we consider for this problem (see Figure 24), we could not
+improve the accuracy further with FEM by using higher-order polynomial basis functions. While
+mesh refinement is possible, it’s time-consuming, and our method avoids this by working directly
+with point clouds.
+Ablation studies:The ablation study for the number of neurons in the hidden layer of the network
+for Frozen-PINN-elm and Frozen-PINN-swim is presented in Table 19. For PINN, the results for the
+ablation studies for the width of the network and the number of data points are included in Table 20,
+Table 21. Additionally, we perform an ablation study for the SVD layer to demonstrate its impact on
+the computation time saved in Table 22. Particularly, we observe that with the SVD layer, the number
+of basis functions (width after the SVD layer) is reduced by up to 22x for Frozen-PINN-elm and up
+to 1.5x for Frozen-PINN-swim, and we obtain substantial speed-ups (more than a factor of 50) in the
+computation time.
+Comparison of results:The comparison of training times and errors is presented in Table 1.
+Figure 25 shows the ground truth and Figure 26 shows the error plots with all approaches.
+47\n\n--- page 48 ---\n\nPublished as a conference paper at ICLR 2026
+(a) Generated Mesh: FEM
+ (b) Sampled collocation points: Neural PDE
+solvers
+Figure 24: Advantages of mesh-free methods: (a) For mesh-based methods, a complicated mesh
+must be constructed, whereas (b) for neural PDE solvers, one can easily sample arbitrary points in
+the interior (blue) and on the boundary (red) of the domain and work directly with point clouds.
+Table 18: Non-linear diffusion equation (see Table 1): Summary of hyper-parameters.
+Parameter Value
+Frozen-PINN-elm (low-precision) Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width350
+Activationtanh
+L2-regularization5×10 −11
+SVD cutoff5×10 −11
+ODE solver tolerance10 −6
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Frozen-PINN-swim (high-precision) Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width500
+Activationtanh
+L2-regularization10 −15
+SVD cutoff10 −15
+ODE solver tolerance10 −6
+Loss mean-squared error
+boundary condition strategy augmented ODE
+FEM Number of entities154
+Number of nodes1193
+Number of elements2070
+Type of elements Lagrange
+Shape of elements triangle
+Degree of polynomials1
+Number of basis functions1193
+Solver Newton solver
+Timestep size0.001
+PINN Number of hidden layers4
+Layer width[10,20,30,40]
+Activationtanh
+Optimizer LBFGS & ADAM
+Epochs10000
+Loss mean-squared error
+Learning rate0.01
+Batch size1000
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 0.01,1
+# Interior points[8790,1760,880,440]
+# Initial and boundary points[3140,630,320,160]
+48\n\n--- page 49 ---\n\nPublished as a conference paper at ICLR 2026
+Figure 25: Non-linear diffusion equation: ground truth.
+(a) Absolute error: Frozen-PINN-swim.
+(b) Absolute error: Frozen-PINN-elm.
+0.7 0.8 0.9
+x
+0.7
+0.8
+0.9
+t = 0
+0.7 0.8 0.9
+x
+t = 0.3
+0.7 0.8 0.9
+x
+t = 0.6
+0.7 0.8 0.9
+x
+t = 1
+0 2
+1e 1
+0 2
+1e 1
+0 2
+1e 1
+0 5
+1e 2
+Y
+Absolute error: FEM
+(c) Absolute error: FEM.
+(d) Absolute error: PINN (LBFGS).
+Figure 26: Non-linear diffusion equation: absolute error plots and ground truth at four-time instants.
+49\n\n--- page 50 ---\n\nPublished as a conference paper at ICLR 2026
+Table 19: Non-linear diffusion equation: ablation study for the network width for Frozen-PINN-swim
+and Frozen-PINN-elm. The mean is computed over3seeds.
+Width RelativeL 2 error (Frozen-PINN-swim) RelativeL 2 error (Frozen-PINN-elm)
+200 1.34e-4 4.92e-3
+300 5.07e-6 3.13e-5
+400 2.88e-61.02e-5
+5003.02e-71.52e-5
+Table 20: Non-linear diffusion equation: hyperparameter optimization for PINN varying layer width.
+The mean is computed over 3 seeds.
+Layer width Training time (s) RMSE RelativeL 2 error
+1061.09±1.624.11e-2±2.04e-3 1.50e-2±7.48e-4
+20 68.05±1.56 3.74e-2±1.04e-3 1.37e-2±3.82e-4
+30 76.01±0.573.67e-2±1.03e-3 1.34e-2±3.78e-4
+40 82.43±0.45 3.76e-2±1.69e-3 1.37e-2±6.21e-4
+Table 21: Non-linear diffusion equation: hyperparameter optimization for PINN varying interior
+points.
+Interior points Training time (s) RMSE RelativeL 2 error
+60065.08±4.233.74e-2±1.04e-3 1.37e-2±3.82e-4
+1200 98.48±3.78 3.51e-2±6.67e-4 1.28e-2±2.44e-4
+2390 143.31±5.503.34e-2±6.53e-4 1.22e-2±2.38e-4
+Table 22: Non-linear diffusion equation: Ablation study of the SVD layer in Frozen-PINN-swim and
+Frozen-PINN-elm. We report ∞ for runtimes exceeding 3 hours. Two variants of Frozen-PINN-elm
+are shown: Frozen-PINN-elm-accurate (higher accuracy, longer runtime) and Frozen-PINN-elm-fast
+(lower runtime, with error comparable to or better than PINNs, enabling fair comparison). The ratio
+of the hidden layer width to the SVD layer width is denoted byC r.
+Method Quantity With SVD layer Without SVD layer Ratio
+Frozen-PINN-elm-accurate Width 62 300C r ≈22.8x
+Time (s) 60.98 7087.38 Speed-up≈52x
+Rel.L 2 error 6.49e-8 1.02e-6 -
+Frozen-PINN-elm-fast Width 35 300C r ≈8.5x
+Time (s) 30.57∞Speed-up∞
+Rel.L 2 error 5.12e-5 - -
+Frozen-PINN-swim Width 316 500C r ≈1.5x
+Time (s) 328.03∞Speed-up∞
+Rel.L 2 error 2e-6 - -
+C.6 NONLINEAR REACTION-DIFFUSION EQUATION
+Problem Setup:The non-linear reaction–diffusion equation models biological pattern forma-
+tion, such as Zebra stripes, fish spots, in myriad chemical reactions, and flame propagation during
+combustion (Britton, 1986; Lam & Lou, 2022).
+In this benchmark from Zang et al. (2020), we consider a five-dimensional nonlinear diffusion
+equation given by
+ut −∆u−u 2 =f(x, t), x∈Ω⊂R d, t∈[0,1],(30a)
+f(x, t) = (π2 −2) sin
+ π
+2 x1
+
+cos
+ π
+2 x2
+
+e−t −4 sin 2
+ π
+2 x1
+
+cos2
+ π
+2 x2
+
+e−2t,(30b)
+50\n\n--- page 51 ---\n\nPublished as a conference paper at ICLR 2026
+on the domain Ω = [−1,1] d. The initial condition and time-dependent Dirichlet boundary conditions
+are obtained from the constructed solution of the PDE
+u(x, t) = 2 sin
+ π
+2 x1
+
+cos
+ π
+2 x2
+
+e−t.(31)
+Note that the solution is independent of three out of five dimensions. The training is performed
+on 1000 data points in the interior and 1000 data points on the boundary. The test data set is
+generated the same way as in Zang et al. (2020) to evaluate the weak adversarial networks. In
+particular, to compute the error in the 5-dimensional domain, we use a mesh of size 100×100 for
+the two coordinate directions in which the solution changes (here, (x1, x2)) and uniformly randomly
+sample the other coordinates (here, (x3, x4, x5)) in the domain. The hidden layer weights for the
+Frozen-PINN-elm are sampled from the standard Gaussian distribution and biases from a uniform
+distribution in [−1,1] . Please refer to Section B.2.5 for our approach to handling time-dependent
+Dirichlet boundary conditions.
+The sampling strategy for basis functions described in Section 3.7 using projected pairs of data points
+substantially improves efficiency and accuracy. Our approach requires 20 times fewer training points
+in the interior compared to Zang et al. (2020) while simultaneously achieving a relative L2 error
+more than two orders of magnitude lower.
+Details on the sampling well-oriented basis functions:For each pair of collocation points in the
+spatial domain x(1), x(2) ∈Ω , we project the vectorx(2) −x (1) onto the two-dimensional hyper-plane
+spanned by the gradient of the initial solution at x(1), x(2) and use the projected points as the new
+pair of points ˆx(1),ˆx(2) ∈Ω . Since ˆx(2) −ˆx(1) always points in the direction of the gradient of the
+initial solution, this allows the SWIM algorithm to embed directional information into basis functions,
+unlike PINNs and ELMs, which lack this control. This idea is illustrated in Figure 5b.
+Ablation studies:The ablation study for the number of neurons in the hidden layer of the network
+for Frozen-PINN-elm and Frozen-PINN-swim is presented in Table 23. We further validate the
+efficiency of sampling basis functions using projected pairs of data points with the Frozen-PINN-
+swim approach by performing an ablation study varying the number of internal collocation points in
+Table 24. Our results show that using just 1,000 data points achieves training errors that are nearly
+identical to those with 20,000 points. This highlights the effectiveness of the projection trick in
+reducing the need for excessive collocation points, thereby significantly lowering computational
+cost without compromising accuracy. Additionally, we perform an ablation study for the SVD layer
+to demonstrate its impact on the computation time saved in Table 25. We observe that with the
+SVD layer, the number of basis functions (width after the SVD layer) is reduced by up to 1.57x for
+Frozen-PINN-swim, and we obtain substantial speed-ups by a factor of 4.1x in the computation time.
+Table 23: Non-linear reaction diffusion equation: ablation study for the network width for Frozen-
+PINN-swim and Frozen-PINN-elm. The mean is computed over3seeds.
+Width Frozen-PINN-swim (with projection) Frozen-PINN-swim Frozen-PINN-elm
+100 1.44e-4 7.65e-2 2.08e-1
+400 9.99e-5 1.75e-2 6.37e-2
+700 9.92e-5 8.72e-3 3.65e-2
+1000 9.87e-55.70e-32.58e-2
+2000 9.86e-5 8.62e-31.67e-2
+40009.86e-59.98e-3 3.68e-2
+Table 24: Non-linear reaction diffusion equation: ablation study for the number of interior collocation
+points for Frozen-PINN-swim. The mean is computed over3seeds, and the network width is400.
+Interior points Training time (s) RMSE RelativeL 2 error
+100012.433.68e-5 +- 6.78e-12 9.99e-5 +- 1.84e-11
+2000 102.74 3.67e-5 +- 3.00e-10 9.90e-5 +- 8.16e-10
+20000 689.813.63e-5 +- 2.02e-9 9.87e-5 +- 5.49e-09
+51\n\n--- page 52 ---\n\nPublished as a conference paper at ICLR 2026
+Table 25: Non-linear reaction diffusion equation: Ablation Study for the SVD layer with Frozen-
+PINN-swim.
+With SVD layer Without SVD layer Ratio
+Number of neurons 254 400 Width Compression≈1.57x
+Time (s) 12.86 53.51 Speed-up≈4.1x
+Rel.L 2 error 9.99e-5 9.99e-5 -
+Comparison of results:The exact architectures and comparison of training times and errors are
+presented in Table 26 and Table 27. We observe that Frozen-PINN-swim with the projected pairs
+of points (Frozen-PINN-swim-p) far outperforms all the other approaches by around 2 orders of
+magnitude, while simultaneously being 9−50 times faster. Figure 27 shows the errors with all
+approaches and the ground truth.
+Table 26: Non-linear reaction diffusion equation: Summary of hyper-parameters.
+Parameter Value
+PINN Number of hidden layers4
+Activationtanh
+Optimizer LBFGS & ADAM
+Epochs10000
+Loss mean-squared error
+Learning rate0.001
+Batch size1000
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 0.01,1
+# Interior points1000
+# Initial and boundary points1000
+Frozen-PINN-swim Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width1000
+Activationtanh
+L2-regularization10 −10
+SVD cutoff10 −10
+ODE solver tolerance10 −4
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Frozen-PINN-elm Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width2000
+Activationtanh
+L2-regularization10 −10
+SVD cutoff10 −10
+ODE solver tolerance10 −4
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Frozen-PINN-swim Number of hidden layers 2 (nonlinear and SVD layer)
+(with projection) Hidden layer width700
+Activationtanh
+L2-regularization10 −10
+SVD cutoff10 −10
+ODE solver tolerance10 −4
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Table 27: Non-linear reaction diffusion equation: Summary of results.
+Method Train time (s) RMSE RelativeL 2 error architecture
+PINN (ADAM) 171.43 1.25e-1±6.60e-3 3.40e-1±1.79e-2 (6, 4×20, 1)
+PINN (LBFGS) 183.38 3.33e-2±1.54e-2 3.33e-2±1.54e-2 (6, 4×20, 1)
+Frozen-PINN-elm 621.2 6.17e-3±2.02e-4 1.67e-2±5.49e-4 (5, 2000, 1)
+Frozen-PINN-swim 117.24 2.09e-3±1.91e-5 5.70e-3±5.19e-5 (5, 1000, 1)
+Frozen-PINN-swim (projection) 12.43 3.67e-5±2.28e-9 9.99e-5±6.21e-9(5, 700, 1)
+52\n\n--- page 53 ---\n\nPublished as a conference paper at ICLR 2026
+(a) Ground truth.
+(b) Absolute error: Frozen-PINN-swim (with projected pairs of data
+points).
+(c) Absolute error: Frozen-PINN-elm.
+Figure 27: Non-linear reaction diffusion equation: absolute error plots and ground truth at four time
+instants.
+53\n\n--- page 54 ---\n\nPublished as a conference paper at ICLR 2026
+Figure 28: The Kuramoto-Sivashinsky equation: Reference solution, Frozen-PINN solution, and
+difference between two solutions.
+C.7 KURAMOTO-SIVASHINSKY EQUATION
+Problem Setup:The Kuramoto-Sivashinsky equation is a fourth-order nonlinear PDE, which
+models the instabilities in flames and exhibits chaos. We consider the equation from Hao et al. (2024)
+of the form:
+ut + +αuux +βu xx +γu xxxx = 0, x∈Ω, t∈T,(32a)
+with the parameters
+α= 100
+16 , β= 100
+162 , γ= 100
+164 .(32b)
+The domain is Ω×T= [0,2π]×[0,5] for the experiment in Figure 6, or Ω×T= [0,2π]×[0,1]
+for the experiment in Figure 28. The initial condition is
+u(x,0) = cos(x)(1 + sin(x)), x∈Ω,(32c)
+and we apply the periodic boundary condition.
+Comparison of results:In Figure 28, we compare our Frozen-PINN solution with the reference
+solution in Hao et al. (2024). The training time of Frozen-PINN is 2.7 seconds on CPU (averaged
+over 5 seeds). We also solve the PDE for a longer time span, as shown in Figure 6. The architecture
+of the model can be found in Table 28.
+Table 28: Kuramoto-Sivashinsky equation: Hyper-parameters for the result in Figure 6 and Figure 28.
+Parameter Value
+Frozen-PINN-swim Number of hidden layers2
+Hidden layer width2000
+Outer basis functions100
+Activationtanh
+L2-regularization10 −12
+Loss mean-squared error
+boundary condition strategy boundary-compliant layer
+C.8 HIGH-DIMENSIONAL DIFFUSION EQUATION
+Problem setup:High-dimensional diffusion plays an important role in various fields, including
+image processing, finance, and quantum mechanics (Sapiro, 2001; Janssen et al., 2013; Nagasawa,
+2012).
+We consider two benchmarks for the high-dimensional diffusion equation. In the first case, following
+(Wang & Dong, 2024), we solve the diffusion equation defined over the domainΩ = [−1,1] d and
+time intervalt∈(0,1], for dimensiond∈ {3,5,7,10}given by
+ut −∆u=
+ 1
+d −1
+
+cos
+ 
+1
+d
+dX
+i=1
+xi
+!
+exp (−t), x∈Ω, t∈[0,1],(33)
+54\n\n--- page 55 ---\n\nPublished as a conference paper at ICLR 2026
+with the exact solution given by
+u(x, t) = cos
+ 
+1
+d
+dX
+i=1
+xi
+!
+exp (−t).(34)
+The initial and boundary conditions are derived from Equation (34). For this high-dimensional
+diffusion equation, we use 16000 training points in the interior and 4000 points on the boundary
+randomly sampled using the Latin hypercube strategy. The test data contains 8000 points in the
+interior and 2000 points on the domain’s boundary, which were also sampled with a Latin hypercube
+strategy.
+For the second benchmark from He et al. (2023), we consider a 100-dimensional heat equation for
+x∈B(0,1),t∈(0,1)given by
+ut = ∆u, x∈B(0,1), t∈[0,1],(35a)
+u(x,0) = ||x||2
+2N , x∈B(0,1)(35b)
+u(x, t) =t+ 1
+2N , x∈∂B(0,1), t∈[0,1],(35c)
+where the true solution is
+u(x, t) =t+ ||x||2
+2d .(36)
+The value of d is 100 and represents the dimension of the PDE. To solve the 100-dimensional heat
+equation, we generate 1000 interior and 1000 boundary training samples using Latin hypercube
+sampling. The test dataset comprises 8000 interior points and 2000 boundary points, also selected via
+Latin hypercube sampling.
+Extended discussion on results:Note that, in general, it is extremely hard to accurately represent
+arbitrary 100-dimensional functions with a few hundred basis functions unless the solution is already
+in their span (e.g, approximating a linear solution with linear bases). The 100-dimensional heat
+equation benchmark from He et al. (2023), indeed, admits a true solution with very shallow gradients
+in space that varies linearly in time (see Equation (36)). Although this benchmark technically admits
+a quadratic analytical solution, rendering second-order polynomials a natural fit for this particular
+example, higher-order approximations, in general, quickly become infeasible due to the curse of
+dimensionality. For instance, a cubic approximation already requires millions of basis functions. A
+natural alternative could be to use lower-order approximations like linear regression. However, if
+one uses linear bases to solve the diffusion equation, they cannot capture temporal dynamics because
+linear basis functions are harmonic (the Laplacian is zero). By contrast, our approach provides mildly
+non-linear bases that have non-zero Laplacians, facilitating “almost linear” approximation at each
+point in time.
+The fact that Frozen-PINN-elm with a single hidden layer yields a significantly accurate and faster ap-
+proximation compared to PINNs with multiple hidden layers trained with classical back-propagation
+reveals an interesting observation that one does not necessarily benefit from using deeper neural net-
+works. While stochastic and iterative training methods might eventually identify suitable parameters,
+the highly non-linear, non-convex loss landscape makes such optimization particularly challenging.
+Due to the smoothness and lack of steep gradients in the solution of the PDE, Frozen-PINN-elm
+is more suitable for approximating the solution of the chosen PDE and is one to three orders of
+magnitude more accurate than vanilla Frozen-PINN-swim, as one would expect (see Section 2.2).
+Ablation studies:The ablation study with respect to the network width for Frozen-PINN-elm
+and Frozen-PINN-swim is already presented in Figure 7, where we observe a rapid exponential
+decay of error with respect to increasing width of the network (even exponential convergence for the
+high-dimensional diffusion equation in3and5dimensions).
+The hyperparameters for all neural PDE solvers considered in this work for the 10-d heat equation
+and the 100-d heat equation are presented in Table 29 and Table 30, respectively. The results for up
+55\n\n--- page 56 ---\n\nPublished as a conference paper at ICLR 2026
+to100-dimensional diffusion equations are summarized in Table 31. Please refer to He et al. (2023)
+for details on hyperparameters for PINNs for the100-dimensional heat equation.
+The results of the ablation study for the SVD layer with the high-dimensional diffusion equations for
+different dimensions are presented in Tables 32 and 33. We observe that for Frozen-PINN-elm, the
+SVD layer results in substantial speed-ups for 3, 5, and 7 dimensional heat equations - by factors of
+52, 77, and 21, respectively. We observe that the compression ratios achieved with the SVD layer
+are also substantial 22.8, 5, and 1.2, for dimensions 3, 5, and 7, respectively. For the 10-dimensional
+diffusion equation, to cover the high-dimensional space, we observe a (relatively lower compared
+to other dimensions) compression ratio of 1.4, as more basis functions are required to represent
+functions in high dimensions accurately. Thus, the time required with the SVD layer is around 6
+percent less than the time required without the SVD layer. In all the cases, the loss is always in the
+same order as the one without the SVD layer.
+Note that in all cases, the extra cost of computing the SVD easily pays off by substantially saving
+time in the ODE solver for Frozen-PINN-elm. This is because of the improved conditioning of the
+feature matrix and the reduction in the size of the ODE system to be solved. With Frozen-PINN-
+swim, the observations are similar but with lower compression ratios and speed-ups. But, for this
+problem, Frozen-PINN-swim is not the preferred method, as the underlying solution is smooth, has
+low-frequency spatial variations, and does not have steep gradients anywhere in the domain. Thus,
+SWIM basis functions are not optimal in the vanilla setting. See Section B.2.1 for details on this.
+Comparison of results:We demonstrate that Frozen-PINN-elm accurately solves the 10-
+dimensional and 100-dimensional heat equation by visualizing the time evolution of the solution at
+some sampled points in space in Figure 29 and Figure 30 in certain dimensions.
+Table 29: Summary of hyperparameters for the 10-dimensional diffusion equation.
+Parameter Value
+Frozen-PINN-swim Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width4000
+Activationtanh
+L2-regularization10 −10
+SVD cutoff10 −10
+ODE solver tolerance10 −6
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Frozen-PINN-elm (low-precision) Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width400
+Activationtanh
+L2-regularization10 −5
+SVD cutoff10 −5
+ODE solver tolerance10 −4
+parameter range [−rm, rm]r m = 0.05
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Frozen-PINN-elm (high-precision) Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width4000
+Activationtanh
+L2-regularization10 −10
+SVD cutoff10 −10
+ODE solver tolerance10 −6
+parameter range [−rm, rm]r m = 0.05
+Loss mean-squared error
+boundary condition strategy augmented ODE
+PINN Number of hidden layers4
+Layer width20
+Activationtanh
+Optimizer LBFGS (ADAM)
+Epochs1000(5000)
+Loss mean-squared error
+Learning rate0.1
+Batch size4000
+Parameter initialization Xavier (Glorot & Bengio, 2010)
+Loss weights,λ 1,λ 2 1,1
+# Interior points16000
+# Initial and boundary points4000
+56\n\n--- page 57 ---\n\nPublished as a conference paper at ICLR 2026
+1
+ 0 1
+x3
+0.0
+0.5
+1.0t
+Ground Truth
+0.50
+0.75
+1
+ 0 1
+x3
+0.0
+0.5
+1.0t
+Frozen-PINN-elm
+0.50
+0.75
+1
+ 0 1
+x3
+0.0
+0.5
+1.0t
+Absolute Error
+0.00005
+0.00010
+(a)x 3-tplane.
+1
+ 0 1
+x5
+0.0
+0.5
+1.0t
+Ground Truth
+0.50
+0.75
+1
+ 0 1
+x5
+0.0
+0.5
+1.0t
+Frozen-PINN-elm
+0.50
+0.75
+1
+ 0 1
+x5
+0.0
+0.5
+1.0t
+Absolute Error
+0.00005
+0.00010
+0.00015
+(b)x 5-tplane.
+1
+ 0 1
+x7
+0.0
+0.5
+1.0t
+Ground Truth
+0.50
+0.75
+1
+ 0 1
+x7
+0.0
+0.5
+1.0t
+Frozen-PINN-elm
+0.50
+0.75
+1
+ 0 1
+x7
+0.0
+0.5
+1.0t
+Absolute Error
+0.00005
+0.00010
+(c)x 7-tplane.
+Figure 29: 10-dimensional diffusion equation: Ground truth, Frozen-PINN-elm solution, and point-
+wise absolute error at various planes at different time points. The rest of the spatial coordinates are
+set to the center of the spatial-temporal domain.
+57\n\n--- page 58 ---\n\nPublished as a conference paper at ICLR 2026
+0.25
+ 0.00
+x1
+0.0
+0.5
+1.0t
+Ground Truth
+0.5
+1.0
+0.25
+ 0.00
+x1
+0.0
+0.5
+1.0t
+Frozen-PINN-elm
+0.5
+1.0
+0.25
+ 0.00
+x1
+0.0
+0.5
+1.0t
+Absolute Error
+0.0050
+0.0055
+(a)x 1-tplane.
+0.00 0.25
+x21
+0.0
+0.5
+1.0t
+Ground Truth
+0.5
+1.0
+0.00 0.25
+x21
+0.0
+0.5
+1.0t
+Frozen-PINN-elm
+0.5
+1.0
+0.00 0.25
+x21
+0.0
+0.5
+1.0t
+Absolute Error
+0.0050
+0.0055
+(b)x 21-tplane.
+0.25
+ 0.00
+x100
+0.0
+0.5
+1.0t
+Ground Truth
+0.5
+1.0
+0.25
+ 0.00
+x100
+0.0
+0.5
+1.0t
+Frozen-PINN-elm
+0.5
+1.0
+0.25
+ 0.00
+x100
+0.0
+0.5
+1.0t
+Absolute Error
+0.0050
+0.0055
+(c)x 100-tplane.
+Figure 30: 100-dimensional diffusion equation: Ground truth, Frozen-PINN-elm solution, and point-
+wise absolute error at various planes at different time points. The rest of the spatial coordinates are
+set to the center of the spatial-temporal domain.
+58\n\n--- page 59 ---\n\nPublished as a conference paper at ICLR 2026
+Table 30: Summary of hyper-parameters for the 100-dimensional diffusion equation.
+Parameter Value
+Frozen-PINN-swim Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width200
+Activationtanh
+L2-regularization10 −8
+SVD cutoff10 −8
+ODE solver tolerance10 −4
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Frozen-PINN-elm Number of hidden layers 2 (nonlinear and SVD layer)
+Hidden layer width125
+Activationtanh
+L2-regularization10 −4
+SVD cutoff10 −4
+ODE solver tolerance10 −2
+parameter range [−rm, rm]r m = 0.05
+Loss mean-squared error
+boundary condition strategy augmented ODE
+Table 31: Summary of results for high-dimensional diffusion equation. We denote the Frozen-
+PINN-elm results in the low-precision and high-precision regimes with Frozen-PINN-elm-fast and
+Frozen-PINN-elm-accurate, respectively.
+Dimension Method Time (s) RMSE RelativeL 2 error
+3-d PINN (LBFGS) 102.32 2.84e-4±3.73e-5 4.54e-4±5.97e-5
+Frozen-PINN-swim (our) 95.73 2.18e-6±1.93e-6 5.37e-6±4.27e-7
+Frozen-PINN-elm-fast (our) 0.92.42e-6±1.37e-6 3.90e-6±2.98e-6
+Frozen-PINN-elm-accurate (our)60.983.48e-8±2.17e-6 6.49e-8±4.31e-8
+5-d PINN (LBFGS) 133.95 2.91e-4±5.34e-5 4.52e-4±8.30e-5
+Frozen-PINN-swim (our) 129.65 1.03e-4±5.94e-5 2.39e-4±8.69e-5
+Frozen-PINN-elm-fast (our) 1.21.25e-4±2.42e-5 3.74e-4±5.37e-5
+Frozen-PINN-elm-accurate (our)102.954.71e-7±3.56e-7 7.5e-7±3.92e-7
+7-d PINN (LBFGS) 163.89 3.05e-4±2.94e-5 4.69e-4±4.51e-5
+Frozen-PINN-swim (our) 198.20 3.96e-4±1.03e-4 7.8e-4±2.50e-4
+Frozen-PINN-elm-fast (our) 5.951.05e-5±8.76e-6 2.21e-5±1.01e-5
+Frozen-PINN-elm-accurate (our)176.951.19e-6±2.93e-7 2.54e-6±5.10e-7
+10-d PINN (LBFGS) 189.67 3.98e-4±6.59e-5 6.06e-4±1.00e-4
+Frozen-PINN-swim (our) 61.07 1.01e-3±3.09e-4 2.31e-3±1.03e-3
+Frozen-PINN-elm-fast (our) 2.072.89e-4±5.91e-5 4.46e-4±9.61e-5
+Frozen-PINN-elm-accurate (our)182.911.04e-5±3.32e-6 2.28e-5±5.91e-6
+100-d Vanilla PINN ((He et al., 2023)) 141 - 6.00e-3
+PINN ((He et al., 2023)) 49.8 - 6.30e-3
+Frozen-PINN-swim (our) 68.39 1.00e-3±1.75e-5 1.71e-3±3.01e-5
+Frozen-PINN-elm (our) 5.24 2.40e-4±9.92e-6 4.12e-4±1.70e-5
+59\n\n--- page 60 ---\n\nPublished as a conference paper at ICLR 2026
+Table 32: High-dimensional diffusion equation: Ablation Study for the SVD layer with Frozen-PINN-
+swim.
+Dimension Quantity With SVD layer Without SVD layer Ratio
+3-d Width 1391 4000 Compression≈2.9x
+Time (s) 95.73 388.12 Speed-up≈4x
+Rel.L 2 error 5.29e-6 4.77e-6 -
+5-d Width 1437 4000 Compression≈2.8x
+Time (s) 129.65 199.92 Speed-up≈1.5x
+Rel.L 2 error 2.39e-4 2.18e-4 -
+7-d Width 3114 4000 Compression≈1.3x
+Time (s) 120.32 198.31 Speed-up≈1.6x
+Rel.L 2 error 7.83e-4 7.83e-4 -
+10-d Width 3100 4000 Compression≈1.3x
+Time (s) 121.93 111.8 Speed-up≈0.91x
+Rel.L 2 error 2.30e-3 2.30e-3 -
+100-d Width 200 200 Compression≈1x
+Time (s) 5.24 5.13 Speed-up≈0.97x
+Rel.L 2 error 3.82e-3 3.82e-3 -
+Table 33: High-dimensional diffusion equation: Ablation Study for the SVD layer with Frozen-PINN-
+elm.
+Dimension Quantity With SVD layer Without SVD layer Ratio
+3-d Width 175 4000 Compression≈22.8x
+Time (s) 60.98 7087.38 Speed-up≈52x
+Rel.L 2 error 6.49e-8 1.02e-6 -
+5-d Width 794 4000 Compression≈5x
+Time (s) 89.27 6873.8Speed-up≈77x
+Rel.L 2 error 7.30e-7 2.19e-6 -
+7-d Width 3336 4000 Compression≈1.2x
+Time (s) 176.95 3770.09 Speed-up≈21x
+Rel.L 2 error 2.54e-6 4.06e-6 -
+10-d Width 2856 4000 Compression≈1.4x
+Time (s) 119 127 Speed-up≈1.06x
+Rel.L 2 error 5.57e-5 4.36e-5 -
+100-d Width 552 600 Compression≈1.3x
+Time (s) 68.39 71.38 Speed-up≈0.96x
+Rel.L 2 error 1.71e-3 1.71e-3 -
+60\n
