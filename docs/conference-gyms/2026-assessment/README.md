@@ -46,6 +46,10 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-no-export-converter-smoke-results.json` - local no-export smoke results:
   `35` selected datasets passed both sample converters, while `mind2web`
   is blocked by missing local dependency `lxml`.
+- `adp-no-export-gym-format-smoke-manifest.json` - local gym-task schema smoke
+  manifest derived from the `35` passing ADP `sample_std` fixtures.
+- `adp-no-export-gym-format-smoke-results.json` - schema-only gym-format smoke
+  results: all `244` derived sample tasks passed local validation.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.

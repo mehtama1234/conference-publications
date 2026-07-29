@@ -301,6 +301,23 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## No-Export Gym-Format Smoke Results
+
+- Done: mapped the `35` converter-passing ADP rows into local gym-task schema smokes.
+- Manifest artifact: `docs/conference-gyms/2026-assessment/adp-no-export-gym-format-smoke-manifest.json`
+- Results artifact: `docs/conference-gyms/2026-assessment/adp-no-export-gym-format-smoke-results.json`
+- Result status: `passed`
+- Passed datasets: `35`
+- Failed datasets: `0`
+- Derived gym-task smokes: `244`
+- Passed gym-task smokes: `244`
+- Sample steps represented: `3116`
+- Sample tool calls represented: `1737`
+- Writes files: `false`
+- Network allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## License Reviewer Handoff Packet
 
 - Done: generated an operator handoff packet for the first ADP dataset license review.
@@ -485,4 +502,4 @@ Current implementation evidence:
 
 ## Next Move
 
-For movement without human review, build no-export gym-format smoke manifests for the `35` ADP rows that passed local converter smokes and open a dependency remediation task for `mind2web` (`lxml`). For production movement, collect filled license reviewer decision requests, validate them through `POST /api/conference-gyms/license-reviewer-batch-decision-preflight`, then record valid decisions through `POST /api/conference-gyms/approval-decision-receipt`.
+For movement without human review, build a local no-export adapter/run smoke around the `244` passing gym-task schema rows and open a dependency remediation task for `mind2web` (`lxml`). For production movement, collect filled license reviewer decision requests, validate them through `POST /api/conference-gyms/license-reviewer-batch-decision-preflight`, then record valid decisions through `POST /api/conference-gyms/approval-decision-receipt`.
