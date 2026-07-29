@@ -237,6 +237,25 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `actual_human_license_review_required`
 
+## License Reviewer Batch Decision Preflight
+
+- Done: added a non-mutating batch validator for filled ADP license reviewer decision requests.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-batch-decision-preflight.json`
+- BFF endpoint: `POST /api/conference-gyms/license-reviewer-batch-decision-preflight`
+- Runtime builder: `build_conference_world_adp_license_reviewer_batch_decision_preflight`
+- Preflight status: `awaiting_human_reviewer_decision_requests`
+- Dataset count: `56`
+- Filled decision requests: `0`
+- Ready decision receipt requests: `0`
+- Pending decision requests: `56`
+- Blocked decision requests: `0`
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Approval entry write allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
+
 ## License Reviewer Handoff Packet
 
 - Done: generated an operator handoff packet for the first ADP dataset license review.
@@ -421,4 +440,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Fill the non-mutating license reviewer decision template after actual human review, then record the decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded license decision through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-approval-evidence-bundle.json` to drive the next governed reviewer requests as the approval chain advances.
+Collect filled license reviewer decision requests for the batch handoff rows, validate them through `POST /api/conference-gyms/license-reviewer-batch-decision-preflight`, then record valid decisions through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only recorded license decisions through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-approval-evidence-bundle.json` to drive the next governed reviewer requests as the approval chain advances.

@@ -32,6 +32,9 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-license-reviewer-batch-handoff-manifest.json` - non-mutating batch
   manifest with `56` ready handoff packet request bodies for human review
   routing.
+- `adp-license-reviewer-batch-decision-preflight.json` - non-mutating batch
+  validator for filled reviewer decision requests; no requests are filled yet,
+  so `56` decisions remain pending and all gates remain blocked.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.
