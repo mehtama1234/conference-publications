@@ -100,6 +100,17 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## License Approval Request Packet
+
+- Done: generated the approval request packet for `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-approval-request-packet.json`
+- Implementation commit: `mystuff@f9f8648a7` (`Add ADP license approval request packet`)
+- Current request status: `awaiting_reviewer_decision`
+- Reviewer decision recorded: `false`
+- Requested reviewer role: `dataset_license_reviewer`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -110,4 +121,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Have a reviewer decide the license receipt `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories` using the hosted-conversion candidate and verifier evidence receipts; only then preview/write that single approval override and revalidate that downstream receipts remain blocked.
+Record an actual reviewer decision for the license receipt. If approved, run the existing approval-entry preview/write path for only `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`, then revalidate that privacy, split, hosted conversion, and training export remain blocked.
