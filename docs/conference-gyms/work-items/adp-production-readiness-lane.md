@@ -167,6 +167,7 @@ Current implementation evidence:
 - Done: added a read-only reconciliation ledger for ADP license reviewer decision receipts.
 - Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-review-decision-ledger.json`
 - BFF field: `adp_license_review_decision_ledger`
+- BFF endpoint: `POST /api/conference-gyms/license-review-decision-ledger`
 - Runtime builder: `build_conference_world_adp_license_review_decision_ledger`
 - Ledger status: `blocked_pending_reviewer_decisions`
 - Dataset count: `56`
