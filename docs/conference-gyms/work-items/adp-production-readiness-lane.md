@@ -220,6 +220,23 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `actual_human_license_review_required`
 
+## License Reviewer Batch Handoff Manifest
+
+- Done: added a non-mutating batch manifest for all ready ADP license reviewer handoff packet requests.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-batch-handoff-manifest.json`
+- BFF field: `adp_license_reviewer_batch_handoff_manifest`
+- Runtime builder: `build_conference_world_adp_license_reviewer_batch_handoff_manifest`
+- Manifest status: `ready_for_human_license_review_routing`
+- Dataset count: `56`
+- Ready handoff requests: `56`
+- Blocked handoff requests: `0`
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Approval entry write allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
+
 ## License Reviewer Handoff Packet
 
 - Done: generated an operator handoff packet for the first ADP dataset license review.

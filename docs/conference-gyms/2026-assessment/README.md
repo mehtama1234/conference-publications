@@ -29,6 +29,9 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-license-reviewer-handoff-readiness.json` - all-dataset handoff
   readiness plan; all `56` datasets now have metadata-backed evidence refs for
   reviewer handoff while approvals remain blocked.
+- `adp-license-reviewer-batch-handoff-manifest.json` - non-mutating batch
+  manifest with `56` ready handoff packet request bodies for human review
+  routing.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.
