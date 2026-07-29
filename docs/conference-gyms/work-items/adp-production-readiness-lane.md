@@ -148,6 +148,22 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Privacy/Policy Evidence Candidate
+
+- Done: added deterministic local sample scanning evidence for `privacy_or_policy_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-privacy-policy-evidence-candidate.json`
+- Implementation commit: `mystuff@991401279` (`Add ADP privacy policy evidence candidate`)
+- BFF field: `adp_privacy_policy_evidence_candidate`
+- Runtime builder: `build_agent_data_protocol_privacy_policy_evidence_candidate`
+- Scanned refs: metadata, sample raw, sample ATIF, and sample STD fixtures.
+- Sample scan completed: `true`
+- High-risk finding count: `0`
+- Medium-risk finding count: `0`
+- Current receipt status: `blocked`
+- Privacy/policy approval recorded: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -158,4 +174,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Record an actual reviewer decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded decision through `POST /api/conference-gyms/approval-decision-apply`, then use the progression preview to prepare the next `privacy_or_policy_review_approval` request with real privacy evidence.
+Record an actual reviewer license decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded license decision through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-privacy-policy-evidence-candidate.json` to prepare the next `privacy_or_policy_review_approval` request.
