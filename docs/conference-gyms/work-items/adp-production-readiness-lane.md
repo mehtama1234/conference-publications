@@ -123,6 +123,19 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Approval Decision Apply Path
+
+- Done: added a guarded apply path for an approved reviewer decision receipt.
+- Implementation commit: `mystuff@14ee82cc7` (`Add ADP approval decision apply path`)
+- BFF endpoint: `POST /api/conference-gyms/approval-decision-apply`
+- Runtime builder: `build_conference_world_adp_apply_approval_decision_receipt`
+- Applies decisions: only `decision_recorded` receipts whose decision is `approved`
+- Rejected or incomplete decisions mutate template: `false`
+- Apply path delegates to the existing approval-entry write validator and audit log.
+- Test posture: temp approval template copies only; no real ADP approval template mutation.
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -133,4 +146,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Record an actual reviewer decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, use the generated `approval_entry_preview_request` for only `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`, then write that single approval override and revalidate that privacy, split, hosted conversion, and training export remain blocked.
+Record an actual reviewer decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded decision through `POST /api/conference-gyms/approval-decision-apply`, then revalidate that privacy, split, hosted conversion, and training export remain blocked.
