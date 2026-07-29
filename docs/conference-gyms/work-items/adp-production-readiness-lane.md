@@ -193,6 +193,18 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Approval Chain Evidence Refresh
+
+- Done: refreshed `adp-approval-chain-review-packet.json` from `adp-approval-evidence-bundle.json`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-approval-chain-review-packet.json`
+- Implementation/artifact commit: `mystuff@6a85112d4` (`Refresh ADP approval chain evidence refs`)
+- Privacy/policy evidence now cites `adp-privacy-policy-evidence-candidate.json`.
+- Split integrity evidence now cites `adp-split-integrity-evidence-candidate.json`.
+- Hosted conversion evidence now also cites `adp-split-integrity-evidence-candidate.json`.
+- Current next reviewer receipt remains `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`.
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
