@@ -50,6 +50,10 @@ manifest of the local source checkouts rather than vendoring every repo.
   manifest derived from the `35` passing ADP `sample_std` fixtures.
 - `adp-no-export-gym-format-smoke-results.json` - schema-only gym-format smoke
   results: all `244` derived sample tasks passed local validation.
+- `adp-no-export-gym-package-manifest.json` - local no-export ADP sample gym
+  package manifest covering `35` datasets and `244` replay/schema tasks.
+- `adp-no-export-gym-package-replay-verifier-results.json` - deterministic
+  replay/schema verifier results; all `244` package tasks passed.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.
