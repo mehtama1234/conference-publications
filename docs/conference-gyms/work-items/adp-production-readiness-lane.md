@@ -188,9 +188,11 @@ Current implementation evidence:
 - Done: generated an operator handoff packet for the first ADP dataset license review.
 - Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-handoff-packet.json`
 - BFF field: `adp_license_reviewer_handoff_packet`
+- BFF endpoint: `POST /api/conference-gyms/license-reviewer-handoff-packet`
 - Runtime builder: `build_conference_world_adp_license_reviewer_handoff_packet`
 - Packet status: `ready_for_human_license_review`
 - Includes: dossier ref, decision template ref, fillable decision request, evidence checks, pre-submit checks, and post-submit checks.
+- Dataset targeting: accepts a queued `dataset_name` or `receipt_id`; handoff is blocked unless license-review evidence refs are supplied or match the same dataset evidence bundle.
 - Reviewer decision recorded: `false`
 - Template mutation: `false`
 - Approval entry write allowed: `false`
