@@ -19,6 +19,9 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `conference-world-adapter-readiness.json` - machine-readable readiness rollup.
 - `agent-data-protocol-approval-overrides.template.json` - ADP approval override
   template with dataset-level receipt entries.
+- `adp-quality-assessment-evidence-candidate.json` - local sample quality
+  assessment for the first governed ADP dataset; benchmark/export/production
+  gates remain blocked.
 - `LOCAL_GYM_REPO_MANIFEST.json` / `.md` - local cloned repo names, remotes,
   commits, branches, and dirty state at snapshot time.
 - `source-workspace-README.md` - README copied from the local gym workspace.

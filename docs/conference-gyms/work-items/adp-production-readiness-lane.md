@@ -205,6 +205,22 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Quality Assessment Evidence Candidate
+
+- Done: added deterministic local sample quality assessment evidence for `AlienKevin_SWE-ZERO-12M-trajectories`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-quality-assessment-evidence-candidate.json`
+- Implementation/artifact commit: `mystuff@5cff00b70` (`Add ADP quality assessment evidence candidate`)
+- BFF field: `adp_quality_assessment_evidence_candidate`
+- Runtime builder: `build_agent_data_protocol_quality_assessment_evidence_candidate`
+- Sample row counts: raw `3`, ATIF `3`, STD `3`
+- Sample row counts match: `true`
+- Sample trace integrity: `passed`
+- Quality finding: metadata expects minimum STD steps `35` and tool calls `30`; current local samples have minimum STD steps `8` and tool calls `6`.
+- Current receipt status: `blocked`
+- Benchmark execution allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
