@@ -22,6 +22,8 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.
+- `adp-license-review-dossier.json` - non-mutating reviewer dossier for the
+  first ADP dataset license approval request.
 - `LOCAL_GYM_REPO_MANIFEST.json` / `.md` - local cloned repo names, remotes,
   commits, branches, and dirty state at snapshot time.
 - `source-workspace-README.md` - README copied from the local gym workspace.

@@ -111,6 +111,21 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## License Review Dossier
+
+- Done: generated a non-mutating reviewer dossier for `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-review-dossier.json`
+- Implementation/artifact commit: `mystuff@dc99f3fcc` (`Add ADP license review dossier`)
+- BFF field: `adp_license_review_dossier`
+- Runtime builder: `build_conference_world_adp_license_review_dossier`
+- Dossier status: `ready_for_license_reviewer`
+- Evidence checks: license metadata review, hosted conversion candidate review, verifier evidence review.
+- Allowed reviewer decisions: `approved`, `rejected`, `needs_more_evidence`
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Reviewer Decision Receipt Path
 
 - Done: added a reviewer decision receipt path for the license approval request.
