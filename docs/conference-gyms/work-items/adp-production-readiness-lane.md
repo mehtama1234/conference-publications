@@ -160,6 +160,22 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `actual_human_license_review_required`
 
+## License Reviewer Handoff Preflight
+
+- Done: added a non-mutating preflight validator for a filled license reviewer decision request.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-handoff-preflight.json`
+- BFF field: `adp_license_reviewer_handoff_preflight`
+- BFF endpoint: `POST /api/conference-gyms/license-reviewer-handoff-preflight`
+- Runtime builder: `build_conference_world_adp_license_reviewer_handoff_preflight`
+- Default preflight status: `blocked`
+- Current blockers: `reviewer_ref_missing`, `approval_authority_ref_missing`, `decision_not_allowed`, `decision_reason_missing`
+- Would record decision receipt: `false`
+- Would write decision receipt: `false`
+- Would mutate approval template: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `filled_reviewer_decision_request_not_ready`
+
 ## Reviewer Decision Receipt Path
 
 - Done: added a reviewer decision receipt path for the license approval request.
