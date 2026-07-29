@@ -63,6 +63,17 @@ Current implementation evidence:
 - BFF field: `adp_approval_matrix`
 - Real `/gyms` template readback: `56` dataset rows, `280` approval receipt rows, `0` approved, `280` blocked, `training_export_allowed=false`
 
+## Hosted Conversion Receipt Candidate
+
+- Done: generated the first governed ADP hosted-conversion receipt candidate for `AlienKevin_SWE-ZERO-12M-trajectories`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-hosted-conversion-receipt-candidate.json`
+- Implementation commit: `mystuff@0a9b0cce3` (`Add ADP hosted conversion receipt candidate`)
+- Evidence captured: conversion manifest, schema refs, sample row counts, sample trace identity integrity, source/provenance hashes, verifier command.
+- Current receipt status: `blocked`
+- Hosted conversion completed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -73,4 +84,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Create the first governed hosted/full ADP conversion receipt for one dataset, then attach schema, provenance, conversion manifest, sample trace integrity, and verifier receipts before any heavy-run readiness claim.
+Execute the ADP verifier command for the selected dataset and attach the verifier output as reviewed evidence; then begin the ordered dataset approval chain without approving training export.
