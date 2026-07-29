@@ -33,6 +33,8 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-license-reviewer-handoff-preflight.json` - blocked preflight validation
   of the blank reviewer handoff request; it records no decision and writes no
   approval receipt.
+- `adp-license-reviewer-evidence-manifest.json` - hash manifest for the first
+  ADP license reviewer handoff evidence set; all referenced files are present.
 - `LOCAL_GYM_REPO_MANIFEST.json` / `.md` - local cloned repo names, remotes,
   commits, branches, and dirty state at snapshot time.
 - `source-workspace-README.md` - README copied from the local gym workspace.

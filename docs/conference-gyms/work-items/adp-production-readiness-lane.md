@@ -176,6 +176,23 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `filled_reviewer_decision_request_not_ready`
 
+## License Reviewer Evidence Manifest
+
+- Done: generated a hash manifest for the first ADP license reviewer handoff evidence set.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-evidence-manifest.json`
+- BFF field: `adp_license_reviewer_evidence_manifest`
+- Runtime builder: `build_conference_world_adp_license_reviewer_evidence_manifest`
+- Manifest status: `ready_for_reviewer_evidence_check`
+- Evidence files: `7`
+- Evidence file hashes: `7`
+- Missing evidence files: `0`
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Approval entry write allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
+
 ## Reviewer Decision Receipt Path
 
 - Done: added a reviewer decision receipt path for the license approval request.
