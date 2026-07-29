@@ -145,6 +145,21 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `actual_human_license_review_required`
 
+## License Reviewer Handoff Packet
+
+- Done: generated an operator handoff packet for the first ADP dataset license review.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-handoff-packet.json`
+- BFF field: `adp_license_reviewer_handoff_packet`
+- Runtime builder: `build_conference_world_adp_license_reviewer_handoff_packet`
+- Packet status: `ready_for_human_license_review`
+- Includes: dossier ref, decision template ref, fillable decision request, evidence checks, pre-submit checks, and post-submit checks.
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Approval entry write allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
+
 ## Reviewer Decision Receipt Path
 
 - Done: added a reviewer decision receipt path for the license approval request.

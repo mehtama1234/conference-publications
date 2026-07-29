@@ -27,6 +27,9 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-license-reviewer-decision-template.json` - fillable reviewer decision
   template for the first ADP license approval request; it records no decision
   and keeps export/production gates blocked.
+- `adp-license-reviewer-handoff-packet.json` - operator handoff packet that
+  bundles the dossier, decision template, evidence checks, and submit-time
+  guardrails for the first ADP license review.
 - `LOCAL_GYM_REPO_MANIFEST.json` / `.md` - local cloned repo names, remotes,
   commits, branches, and dirty state at snapshot time.
 - `source-workspace-README.md` - README copied from the local gym workspace.
