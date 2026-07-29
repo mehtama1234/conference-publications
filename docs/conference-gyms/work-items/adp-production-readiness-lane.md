@@ -136,6 +136,18 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Next Request After Apply Preview
+
+- Done: added a non-mutating progression preview for the next reviewer request after one approved decision is applied to a temporary template copy.
+- Implementation commit: `mystuff@9fd60ab7b` (`Preview ADP next approval request after apply`)
+- BFF endpoint: `POST /api/conference-gyms/approval-next-request-after-apply-preview`
+- Runtime builder: `build_conference_world_adp_next_request_after_apply_preview`
+- Preview behavior: applies the approved decision only to a temporary approval template copy, then reuses the approval-chain and approval-request builders.
+- Expected next receipt after the first license approval: `privacy_or_policy_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`
+- Source approval template mutation: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -146,4 +158,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Record an actual reviewer decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded decision through `POST /api/conference-gyms/approval-decision-apply`, then revalidate that privacy, split, hosted conversion, and training export remain blocked.
+Record an actual reviewer decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded decision through `POST /api/conference-gyms/approval-decision-apply`, then use the progression preview to prepare the next `privacy_or_policy_review_approval` request with real privacy evidence.
