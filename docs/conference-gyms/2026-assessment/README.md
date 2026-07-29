@@ -38,6 +38,9 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-ai-license-review-draft.json` - AI-generated triage draft for the `56`
   ADP dataset license rows; it is not human approval and does not open any
   export/production gate.
+- `adp-ai-triage-nonproduction-progression-plan.json` - no-human-review
+  progression plan that selects `36` AI draft-approved rows for local
+  non-production, no-export dry-run planning and holds `20` rows.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.

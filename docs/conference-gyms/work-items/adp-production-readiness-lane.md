@@ -271,6 +271,20 @@ Current implementation evidence:
 - Production allowed: `false`
 - Important boundary: this draft is triage only and does not satisfy the human approval gate.
 
+## No-Human-Review Progression Plan
+
+- Done: added a local-only progression plan that moves clean AI draft rows forward without claiming approval.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-ai-triage-nonproduction-progression-plan.json`
+- Plan status: `ready_for_nonproduction_no_export_progression`
+- Selected for local non-production planning: `36`
+- Held for remediation or review: `20`
+- Human approval recorded: `false`
+- Approval entry write allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Allowed without human review: local metadata/schema inspection, converter smoke planning, no-export benchmark planning.
+- Disallowed without human review: approval writes, training export, hosted publication, public benchmark claims, production promotion.
+
 ## License Reviewer Handoff Packet
 
 - Done: generated an operator handoff packet for the first ADP dataset license review.
@@ -455,4 +469,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Collect filled license reviewer decision requests for the batch handoff rows, validate them through `POST /api/conference-gyms/license-reviewer-batch-decision-preflight`, then record valid decisions through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only recorded license decisions through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-approval-evidence-bundle.json` to drive the next governed reviewer requests as the approval chain advances.
+For movement without human review, use `adp-ai-triage-nonproduction-progression-plan.json` to build local no-export converter smoke manifests for the `36` selected rows and remediation tasks for the `20` held rows. For production movement, collect filled license reviewer decision requests, validate them through `POST /api/conference-gyms/license-reviewer-batch-decision-preflight`, then record valid decisions through `POST /api/conference-gyms/approval-decision-receipt`.
