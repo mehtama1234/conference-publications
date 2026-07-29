@@ -87,6 +87,19 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Approval Chain Review Packet
+
+- Done: generated the ordered approval-chain review packet for `AlienKevin_SWE-ZERO-12M-trajectories`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-approval-chain-review-packet.json`
+- Implementation commit: `mystuff@e22d236e6` (`Add ADP approval chain review packet`)
+- Current packet status: `ready_for_reviewer`
+- Next review receipt: `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`
+- Next review status: `ready_for_review`
+- Approved receipt count: `0`
+- Blocked receipt count: `5`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -97,4 +110,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Begin the ordered dataset approval chain for `AlienKevin_SWE-ZERO-12M-trajectories`: license review, privacy/policy review, split integrity, hosted conversion approval, then leave training export blocked until a separate export approval exists.
+Have a reviewer decide the license receipt `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories` using the hosted-conversion candidate and verifier evidence receipts; only then preview/write that single approval override and revalidate that downstream receipts remain blocked.
