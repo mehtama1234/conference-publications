@@ -145,6 +145,23 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `actual_human_license_review_required`
 
+## License Review Queue
+
+- Done: generated the all-dataset ADP license review queue.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-review-queue.json`
+- BFF field: `adp_license_review_queue`
+- Runtime builder: `build_conference_world_adp_license_review_queue`
+- Queue status: `ready_for_license_review`
+- Dataset count: `56`
+- Ready for license reviewer: `56`
+- Approved license receipts: `0`
+- Blocked license receipts: `56`
+- Missing metadata files: `0`
+- Next license review receipt: `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
+
 ## License Reviewer Handoff Packet
 
 - Done: generated an operator handoff packet for the first ADP dataset license review.
