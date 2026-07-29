@@ -162,6 +162,26 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `actual_human_license_review_required`
 
+## License Review Decision Ledger
+
+- Done: added a read-only reconciliation ledger for ADP license reviewer decision receipts.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-review-decision-ledger.json`
+- BFF field: `adp_license_review_decision_ledger`
+- Runtime builder: `build_conference_world_adp_license_review_decision_ledger`
+- Ledger status: `blocked_pending_reviewer_decisions`
+- Dataset count: `56`
+- Decision receipts found: `0`
+- Valid decision receipts: `0`
+- Approved decision receipts: `0`
+- Pending license reviews: `56`
+- Next pending license review receipt: `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Approval entry write allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
+
 ## License Reviewer Handoff Packet
 
 - Done: generated an operator handoff packet for the first ADP dataset license review.

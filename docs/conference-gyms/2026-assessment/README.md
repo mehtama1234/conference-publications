@@ -21,6 +21,9 @@ manifest of the local source checkouts rather than vendoring every repo.
   template with dataset-level receipt entries.
 - `adp-license-review-queue.json` - all-dataset ADP license review queue with
   metadata evidence hashes for `56` datasets; approvals remain blocked.
+- `adp-license-review-decision-ledger.json` - read-only reconciliation ledger
+  for recorded ADP license reviewer decision receipts; no decisions are
+  currently recorded and all export/production gates remain blocked.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.
