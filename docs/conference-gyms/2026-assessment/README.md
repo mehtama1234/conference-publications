@@ -24,6 +24,9 @@ manifest of the local source checkouts rather than vendoring every repo.
   gates remain blocked.
 - `adp-license-review-dossier.json` - non-mutating reviewer dossier for the
   first ADP dataset license approval request.
+- `adp-license-reviewer-decision-template.json` - fillable reviewer decision
+  template for the first ADP license approval request; it records no decision
+  and keeps export/production gates blocked.
 - `LOCAL_GYM_REPO_MANIFEST.json` / `.md` - local cloned repo names, remotes,
   commits, branches, and dirty state at snapshot time.
 - `source-workspace-README.md` - README copied from the local gym workspace.

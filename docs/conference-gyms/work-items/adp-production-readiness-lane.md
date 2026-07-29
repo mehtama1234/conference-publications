@@ -126,6 +126,22 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## License Reviewer Decision Template
+
+- Done: generated a fillable, non-mutating decision template for `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-decision-template.json`
+- BFF field: `adp_license_reviewer_decision_template`
+- Runtime builder: `build_conference_world_adp_license_reviewer_decision_template`
+- Template status: `ready_for_reviewer_input`
+- Decision receipt endpoint: `POST /api/conference-gyms/approval-decision-receipt`
+- Required reviewer fields: `reviewer_ref`, `approval_authority_ref`, `decision`, `reason`, `evidence_refs`
+- Allowed reviewer decisions: `approved`, `rejected`, `needs_more_evidence`
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Approval entry write allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Reviewer Decision Receipt Path
 
 - Done: added a reviewer decision receipt path for the license approval request.
@@ -248,4 +264,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Record an actual reviewer license decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded license decision through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-approval-evidence-bundle.json` to drive the next governed reviewer requests as the approval chain advances.
+Fill the non-mutating license reviewer decision template after actual human review, then record the decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded license decision through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-approval-evidence-bundle.json` to drive the next governed reviewer requests as the approval chain advances.
