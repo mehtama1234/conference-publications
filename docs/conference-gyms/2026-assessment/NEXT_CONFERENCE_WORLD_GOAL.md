@@ -51,25 +51,42 @@ approval receipt-template set now creates the blocked receipts that each row
 must complete, and the generated override template is the file reviewers can
 edit and feed back into the CLI.
 
+The ADP lane now also has governed approval-chain artifacts for the first
+dataset, `AlienKevin_SWE-ZERO-12M-trajectories`:
+
+- hosted conversion receipt candidate
+- verifier evidence receipt
+- privacy/policy evidence candidate
+- split integrity evidence candidate
+- approval evidence bundle
+- refreshed approval-chain review packet
+- license approval request packet
+- reviewer decision receipt path
+- guarded approval decision apply path
+- next-request-after-apply preview path
+
+The current tracked implementation head for this lane is `mystuff@6a85112d4`
+(`Refresh ADP approval chain evidence refs`). The current conference tracking
+head is `conference-publications@0cec949` (`Record ADP approval chain evidence
+refresh`).
+
 ## Next Goal
 
 The next concrete goal is:
 
-> Clear dataset-level `Agent-Data-Protocol` approvals or pick the next remaining
-> inventory world to move into source-specific runtime wiring.
+> Make `Agent-Data-Protocol` the first production-grade AIDF conference gym lane
+> end to end: raw corpus assessment -> canonical AIDF gym package -> governed
+> hosted/full conversion -> deterministic verifier evidence -> real approval
+> chain -> agent benchmark run -> durable workbench/readback report.
 
-In simple words, the first phase proved that AIDF knows how to describe each
-kind of world. The next phase should make one low-infrastructure lane actually
-pass end to end, while showing that more adapter families can handle more than
-their first example. The trajectory/data family has now done that with
-`MC-Search`. The browser/GUI family has also done that with `ScaleCUA`.
-Terminal/sandbox, external loop, formal proof, and scientific simulator families
-now also have parallel second bridges with `CyberGym`, `BIRD-Interact`,
-`VERINA`, and `RealPDEBench`.
+In simple words, the inventory phase proved that AIDF can describe conference
+gym worlds. The production phase should prove that one lane can survive the
+whole operational path without fake approvals, local-only state, or benchmark
+claims that outrun evidence.
 
 ## What To Do Next
 
-### 1. Clear Dataset-Level ADP Approvals
+### 1. Drive The Real ADP Approval Chain
 
 Current observed status:
 
@@ -82,46 +99,55 @@ Current observed status:
 - blocked approval receipt templates exist for each ADP dataset
 - a generated override template exists at
   `agent-data-protocol-approval-overrides.template.json`
+- evidence bundle exists at `adp-approval-evidence-bundle.json`
+- approval-chain review packet exists at
+  `adp-approval-chain-review-packet.json`
+- next reviewer receipt is
+  `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`
+- current approved receipt count is `0`
+- current blocked receipt count is `280`
+- production, promotion, and training export remain `false`
 
-The next output should be real dataset-level approval decisions if this data
-will be used beyond local validation.
+The next output must be a real reviewer decision for the first license review.
+If the reviewer approves it, apply exactly that decision through the guarded
+apply path, then request the next receipt in the chain. If the reviewer rejects
+it or asks for more evidence, keep the source template blocked and record the
+reason as evidence.
 
-### 2. Choose The Next Inventory World To Promote
+### 2. Complete Governed Conversion And Validation
 
-Pick a remaining inventory world where source-specific wiring will teach us
-something new.
+For the selected ADP dataset, finish the non-approval engineering evidence that
+can be produced before training/export is allowed:
 
-Good candidates:
-
-- `MedAgentGym` or `CVE-Factory` for additional terminal/sandbox and security
-  world coverage.
-- `CausalGame` or `World-In-World` for richer scientific/interactive
-  simulator coverage.
-- `RedTeamCUA`, `Vision2Web`, or `MiniAppBench` for more GUI/browser variants.
-- `AstaBench` for scientific research-agent tools, cost, and scoring.
-
-### 3. Keep Heavy Claims Blocked Until Receipts Exist
-
-For any real run, require:
-
-- source/license/privacy review
-- runtime setup receipt
-- reset receipt
-- initial observation
-- action trace
-- verifier result
-- final state or failure receipt
-- cleanup receipt
+- full hosted conversion manifest or an explicit blocked-hosting receipt
+- deterministic schema validation receipt
+- provenance and source hash receipt
+- sample-to-full split integrity receipt
+- verifier execution receipt for converted traces
 - replay/determinism evidence where applicable
-- training-export decision
+- quality assessment for task diversity, trace validity, and failure modes
+
+These receipts may support review, but they must not flip production,
+promotion, or training export by themselves.
+
+### 3. Run The First Agent Benchmark Only After Gates Clear
+
+The first benchmark claim should be narrow and auditable:
+
+- one approved ADP dataset
+- one fixed agent configuration
+- one reproducible run command
+- trace export
+- verifier result
+- quality assessment summary
+- failure-mode summary
+- explicit claim boundary that separates benchmark execution from production
+  promotion
 
 ## Recommended First Move
 
-Continue with `Agent-Data-Protocol` if the next move is approvals: dataset
-license review, privacy review, split manifest, hosted conversion receipt, and
-training-export approval.
-
-In parallel or immediately after, either clear those ADP approvals or promote
-the next remaining inventory world. The best pragmatic options are `MedAgentGym`,
-`CVE-Factory`, `AstaBench`, `CausalGame`, `World-In-World`, `RedTeamCUA`,
-`Vision2Web`, or `MiniAppBench`.
+Do not switch lanes yet. Continue with `Agent-Data-Protocol` until one dataset
+has real license, privacy/policy, split-integrity, hosted-conversion, and
+training-export decisions recorded or explicitly rejected. The immediate blocker
+is the real reviewer decision for
+`dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`.
