@@ -164,6 +164,22 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Split Integrity Evidence Candidate
+
+- Done: added local sample split integrity evidence for `split_integrity_manifest:AlienKevin_SWE-ZERO-12M-trajectories`.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-split-integrity-evidence-candidate.json`
+- Implementation commit: `mystuff@ca068e813` (`Add ADP split integrity evidence candidate`)
+- BFF field: `adp_split_integrity_evidence_candidate`
+- Runtime builder: `build_agent_data_protocol_split_integrity_evidence_candidate`
+- Sample row counts: raw `3`, ATIF `3`, STD `3`
+- Sample row counts match: `true`
+- Sample trace integrity: `passed`
+- Full dataset split executed: `false`
+- Current receipt status: `blocked`
+- Split integrity approval recorded: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -174,4 +190,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Record an actual reviewer license decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded license decision through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-privacy-policy-evidence-candidate.json` to prepare the next `privacy_or_policy_review_approval` request.
+Record an actual reviewer license decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded license decision through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-privacy-policy-evidence-candidate.json` and `adp-split-integrity-evidence-candidate.json` as the next governed evidence packets as the approval chain advances.
