@@ -193,6 +193,18 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `actual_human_license_review_required`
 
+## License Reviewer Brief
+
+- Done: generated a human-readable brief for the first ADP dataset license reviewer.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-brief.md`
+- Source manifest: `docs/conference-gyms/2026-assessment/adp-license-reviewer-evidence-manifest.json`
+- Includes: dataset target, decision options, evidence hashes, reviewer checks, and closed gate state.
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
+
 ## Reviewer Decision Receipt Path
 
 - Done: added a reviewer decision receipt path for the license approval request.

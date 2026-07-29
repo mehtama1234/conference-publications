@@ -35,6 +35,9 @@ manifest of the local source checkouts rather than vendoring every repo.
   approval receipt.
 - `adp-license-reviewer-evidence-manifest.json` - hash manifest for the first
   ADP license reviewer handoff evidence set; all referenced files are present.
+- `adp-license-reviewer-brief.md` - human-readable license reviewer brief for
+  the first ADP dataset; summarizes decision options, evidence hashes, and
+  closed gates.
 - `LOCAL_GYM_REPO_MANIFEST.json` / `.md` - local cloned repo names, remotes,
   commits, branches, and dirty state at snapshot time.
 - `source-workspace-README.md` - README copied from the local gym workspace.
