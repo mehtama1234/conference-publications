@@ -41,6 +41,11 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-ai-triage-nonproduction-progression-plan.json` - no-human-review
   progression plan that selects `36` AI draft-approved rows for local
   non-production, no-export dry-run planning and holds `20` rows.
+- `adp-no-export-converter-smoke-manifest.json` - local read-only converter
+  smoke command manifest for the `36` selected ADP rows.
+- `adp-no-export-converter-smoke-results.json` - local no-export smoke results:
+  `35` selected datasets passed both sample converters, while `mind2web`
+  is blocked by missing local dependency `lxml`.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.
