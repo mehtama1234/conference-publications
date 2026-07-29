@@ -184,11 +184,12 @@ Current implementation evidence:
 
 - Done: added a durable evidence bundle that maps ADP approval receipt kinds to concrete artifact refs.
 - Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-approval-evidence-bundle.json`
-- Implementation commit: `mystuff@9ec1bebca` (`Bundle ADP approval evidence refs`)
+- Implementation commit: `mystuff@ea6349748` (`Attach ADP quality evidence to training export review`)
 - BFF field: `adp_approval_evidence_bundle`
 - Runtime builder: `build_agent_data_protocol_approval_evidence_bundle`
 - Bundle status: `ready_for_approval_chain`
-- Evidence mapped for: dataset license, privacy/policy, split integrity, and hosted conversion receipts.
+- Evidence mapped for: dataset license, privacy/policy, split integrity, hosted conversion, and training export receipts.
+- Training export review evidence now includes `adp-quality-assessment-evidence-candidate.json`.
 - Approval receipts approved: `false`
 - Training export allowed: `false`
 - Production allowed: `false`
@@ -197,10 +198,11 @@ Current implementation evidence:
 
 - Done: refreshed `adp-approval-chain-review-packet.json` from `adp-approval-evidence-bundle.json`.
 - Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-approval-chain-review-packet.json`
-- Implementation/artifact commit: `mystuff@6a85112d4` (`Refresh ADP approval chain evidence refs`)
+- Implementation/artifact commit: `mystuff@ea6349748` (`Attach ADP quality evidence to training export review`)
 - Privacy/policy evidence now cites `adp-privacy-policy-evidence-candidate.json`.
 - Split integrity evidence now cites `adp-split-integrity-evidence-candidate.json`.
 - Hosted conversion evidence now also cites `adp-split-integrity-evidence-candidate.json`.
+- Training export evidence now cites hosted conversion, verifier, privacy/policy, split integrity, and quality assessment evidence.
 - Current next reviewer receipt remains `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`.
 - Training export allowed: `false`
 - Production allowed: `false`
