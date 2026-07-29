@@ -183,25 +183,42 @@ Current implementation evidence:
 - Production allowed: `false`
 - Current blocker: `actual_human_license_review_required`
 
+## License Review Evidence Index
+
+- Done: added a metadata-backed evidence index for all ADP dataset license-review handoffs.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-review-evidence-index.json`
+- BFF field: `adp_license_review_evidence_index`
+- Runtime builder: `build_conference_world_adp_license_review_evidence_index`
+- Index status: `ready`
+- Dataset count: `56`
+- Ready evidence rows: `56`
+- Blocked evidence rows: `0`
+- Reviewer decision recorded: `false`
+- Template mutation: `false`
+- Approval entry write allowed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
+
 ## License Reviewer Handoff Readiness
 
 - Done: added an all-dataset handoff readiness plan for ADP license reviewer packets.
 - Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-license-reviewer-handoff-readiness.json`
 - BFF field: `adp_license_reviewer_handoff_readiness`
 - Runtime builder: `build_conference_world_adp_license_reviewer_handoff_readiness`
-- Plan status: `blocked_missing_dataset_license_review_evidence`
+- Plan status: `ready`
 - Dataset count: `56`
-- Ready for handoff packet: `1`
-- Blocked handoff packets: `55`
-- Missing dataset license-review evidence: `55`
+- Ready for handoff packet: `56`
+- Blocked handoff packets: `0`
+- Missing dataset license-review evidence: `0`
 - Next ready handoff receipt: `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`
-- Next blocked handoff receipt: `dataset_license_review_approval:CharlieDreemur_OpenManus-RL`
+- Next blocked handoff receipt: `null`
 - Reviewer decision recorded: `false`
 - Template mutation: `false`
 - Approval entry write allowed: `false`
 - Training export allowed: `false`
 - Production allowed: `false`
-- Current blocker: `dataset_license_review_evidence_refs_missing`
+- Current blocker: `actual_human_license_review_required`
 
 ## License Reviewer Handoff Packet
 
@@ -212,7 +229,7 @@ Current implementation evidence:
 - Runtime builder: `build_conference_world_adp_license_reviewer_handoff_packet`
 - Packet status: `ready_for_human_license_review`
 - Includes: dossier ref, decision template ref, fillable decision request, evidence checks, pre-submit checks, and post-submit checks.
-- Dataset targeting: accepts a queued `dataset_name` or `receipt_id`; handoff is blocked unless license-review evidence refs are supplied or match the same dataset evidence bundle.
+- Dataset targeting: accepts a queued `dataset_name` or `receipt_id`; handoff uses supplied refs, a same-dataset evidence bundle, or the metadata-backed evidence index.
 - Reviewer decision recorded: `false`
 - Template mutation: `false`
 - Approval entry write allowed: `false`

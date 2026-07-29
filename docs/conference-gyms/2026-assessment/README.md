@@ -24,9 +24,11 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-license-review-decision-ledger.json` - read-only reconciliation ledger
   for recorded ADP license reviewer decision receipts; no decisions are
   currently recorded and all export/production gates remain blocked.
+- `adp-license-review-evidence-index.json` - metadata-backed evidence index
+  for all `56` ADP dataset license-review handoffs; it records no approval.
 - `adp-license-reviewer-handoff-readiness.json` - all-dataset handoff
-  readiness plan; `1` dataset has matching license-review evidence refs and
-  `55` still need dataset-specific evidence before reviewer handoff.
+  readiness plan; all `56` datasets now have metadata-backed evidence refs for
+  reviewer handoff while approvals remain blocked.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.
