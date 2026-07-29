@@ -1,6 +1,6 @@
 # Agent-Data-Protocol Production-Readiness Lane
 
-Status: `proposed_first_meaty_goal`
+Status: `in_progress`
 
 ## Goal
 
@@ -49,11 +49,19 @@ Training export stays fail-closed until every required dataset receipt is explic
 
 Build the durable ADP approval matrix readback:
 
-- Parse every dataset decision from `agent-data-protocol-approval-overrides.template.json`.
-- Return all `56` dataset rows through the conference-gym BFF readback, with filtering/pagination if needed.
-- Show rollups for approved, blocked, invalid, and next-blocker counts.
-- Add a write path that appends an audit row for each approval override and revalidates the full template after each write.
-- Add tests proving incomplete approvals block export and out-of-order training export approval is rejected.
+- Done: parse every dataset decision from `agent-data-protocol-approval-overrides.template.json`.
+- Done: return all `56` dataset rows through the conference-gym BFF readback.
+- Done: show rollups for approved, blocked, stage, receipt-kind, and next-blocker counts.
+- Existing: approval writes append an audit row and revalidate the full template after each write.
+- Done: tests prove incomplete approvals block export and out-of-order training export approval is rejected.
+
+Implementation commit: `mystuff@27d5ba7f7` (`Expose full ADP approval matrix readback`)
+
+Current implementation evidence:
+
+- Runtime builder: `build_conference_world_adp_approval_matrix_readback`
+- BFF field: `adp_approval_matrix`
+- Real `/gyms` template readback: `56` dataset rows, `280` approval receipt rows, `0` approved, `280` blocked, `training_export_allowed=false`
 
 ## Acceptance Gates
 
@@ -65,4 +73,4 @@ Build the durable ADP approval matrix readback:
 
 ## Next Move
 
-Implement the full `56`-dataset approval matrix readback in `mystuff`, then regenerate and copy the updated ADP lane artifacts into this conference repo snapshot.
+Create the first governed hosted/full ADP conversion receipt for one dataset, then attach schema, provenance, conversion manifest, sample trace integrity, and verifier receipts before any heavy-run readiness claim.
