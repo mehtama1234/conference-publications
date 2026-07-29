@@ -35,6 +35,9 @@ manifest of the local source checkouts rather than vendoring every repo.
 - `adp-license-reviewer-batch-decision-preflight.json` - non-mutating batch
   validator for filled reviewer decision requests; no requests are filled yet,
   so `56` decisions remain pending and all gates remain blocked.
+- `adp-ai-license-review-draft.json` - AI-generated triage draft for the `56`
+  ADP dataset license rows; it is not human approval and does not open any
+  export/production gate.
 - `adp-quality-assessment-evidence-candidate.json` - local sample quality
   assessment for the first governed ADP dataset; benchmark/export/production
   gates remain blocked.
