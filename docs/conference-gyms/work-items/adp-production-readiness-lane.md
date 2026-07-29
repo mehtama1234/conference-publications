@@ -74,6 +74,19 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Verifier Evidence Receipt
+
+- Done: executed `python3 scripts/check_sample_fixtures.py --dataset AlienKevin_SWE-ZERO-12M-trajectories` in `/home/manishmehta/ui-projects/gyms/Agent-Data-Protocol`.
+- Output: `ok AlienKevin_SWE-ZERO-12M-trajectories`
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-verifier-evidence-receipt.json`
+- Implementation commit: `mystuff@86988ba22` (`Record ADP verifier evidence receipt`)
+- Current receipt status: `passed`
+- Sample evidence: `3` raw rows, `3` ATIF rows, `3` STD rows
+- Sample trace integrity: `passed`
+- Hosted conversion completed: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -84,4 +97,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Execute the ADP verifier command for the selected dataset and attach the verifier output as reviewed evidence; then begin the ordered dataset approval chain without approving training export.
+Begin the ordered dataset approval chain for `AlienKevin_SWE-ZERO-12M-trajectories`: license review, privacy/policy review, split integrity, hosted conversion approval, then leave training export blocked until a separate export approval exists.
