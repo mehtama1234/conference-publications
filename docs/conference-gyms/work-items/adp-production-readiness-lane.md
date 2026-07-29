@@ -111,6 +111,18 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Reviewer Decision Receipt Path
+
+- Done: added a reviewer decision receipt path for the license approval request.
+- Implementation commit: `mystuff@e9dfa14d1` (`Add ADP approval decision receipt path`)
+- BFF endpoint: `POST /api/conference-gyms/approval-decision-receipt`
+- Runtime builder: `build_conference_world_adp_approval_decision_receipt`
+- Supported decisions: `approved`, `rejected`, `needs_more_evidence`
+- Template mutation: `false`
+- Approval write still requires a separate preview/write action.
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -121,4 +133,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Record an actual reviewer decision for the license receipt. If approved, run the existing approval-entry preview/write path for only `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`, then revalidate that privacy, split, hosted conversion, and training export remain blocked.
+Record an actual reviewer decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, use the generated `approval_entry_preview_request` for only `dataset_license_review_approval:AlienKevin_SWE-ZERO-12M-trajectories`, then write that single approval override and revalidate that privacy, split, hosted conversion, and training export remain blocked.
