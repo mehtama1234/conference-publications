@@ -134,6 +134,8 @@ Current implementation evidence:
 - Runtime builder: `build_conference_world_adp_license_reviewer_decision_template`
 - Template status: `ready_for_reviewer_input`
 - Decision receipt endpoint: `POST /api/conference-gyms/approval-decision-receipt`
+- Decision receipt body fields: `approval_request_packet_ref`, `output_ref`, `reviewer_ref`, `approval_authority_ref`, `decision`, `reason`, `evidence_refs`
+- Decision validation: `decision` must be one of the allowed decisions, `reason` must be non-empty, and `evidence_refs` must be a non-empty subset of the template review evidence refs.
 - Required reviewer fields: `reviewer_ref`, `approval_authority_ref`, `decision`, `reason`, `evidence_refs`
 - Allowed reviewer decisions: `approved`, `rejected`, `needs_more_evidence`
 - Reviewer decision recorded: `false`
@@ -141,6 +143,7 @@ Current implementation evidence:
 - Approval entry write allowed: `false`
 - Training export allowed: `false`
 - Production allowed: `false`
+- Current blocker: `actual_human_license_review_required`
 
 ## Reviewer Decision Receipt Path
 
