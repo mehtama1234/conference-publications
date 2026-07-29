@@ -180,6 +180,19 @@ Current implementation evidence:
 - Training export allowed: `false`
 - Production allowed: `false`
 
+## Approval Evidence Bundle
+
+- Done: added a durable evidence bundle that maps ADP approval receipt kinds to concrete artifact refs.
+- Snapshot artifact: `docs/conference-gyms/2026-assessment/adp-approval-evidence-bundle.json`
+- Implementation commit: `mystuff@9ec1bebca` (`Bundle ADP approval evidence refs`)
+- BFF field: `adp_approval_evidence_bundle`
+- Runtime builder: `build_agent_data_protocol_approval_evidence_bundle`
+- Bundle status: `ready_for_approval_chain`
+- Evidence mapped for: dataset license, privacy/policy, split integrity, and hosted conversion receipts.
+- Approval receipts approved: `false`
+- Training export allowed: `false`
+- Production allowed: `false`
+
 ## Acceptance Gates
 
 - `python3 -m json.tool docs/conference-gyms/2026-assessment/conference-world-adapter-readiness.json`
@@ -190,4 +203,4 @@ Current implementation evidence:
 
 ## Next Move
 
-Record an actual reviewer license decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded license decision through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-privacy-policy-evidence-candidate.json` and `adp-split-integrity-evidence-candidate.json` as the next governed evidence packets as the approval chain advances.
+Record an actual reviewer license decision through `POST /api/conference-gyms/approval-decision-receipt`. If approved, apply only that recorded license decision through `POST /api/conference-gyms/approval-decision-apply`, then use `adp-approval-evidence-bundle.json` to drive the next governed reviewer requests as the approval chain advances.
