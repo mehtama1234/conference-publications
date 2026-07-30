@@ -123,10 +123,13 @@ Add chain sections that show how groups of papers form one argument:
 - training as movement through geometry
 - data as distribution design
 - causality as intervention-aware representation
+- multimodal fusion as modality credit assignment
+- context compression as sufficient-state selection
+- scientific claims as testable hypotheses
 
 Current Pass 5 artifact:
 
-- `math-cross-paper-synthesis.html`: created with ten first-principles cross-paper chains covering state control, measurement instruments, distribution design, feasible sets, transport paths, update geometry, function-preserving approximation, certificates, mechanisms, and identification boundaries.
+- `math-cross-paper-synthesis.html`: expanded to 18 first-principles cross-paper chains covering state control, measurement instruments, distribution design, feasible sets, transport paths, update geometry, function-preserving approximation, certificates, mechanisms, identification boundaries, modality credit, bottlenecks, grounded verification, latent interfaces, tail pressure, spectra, curriculum paths, and testable hypotheses.
 
 ## Completion Standard
 
