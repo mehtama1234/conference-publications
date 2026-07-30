@@ -131,10 +131,12 @@ Add chain sections that show how groups of papers form one argument:
 - multimodal fusion as modality credit assignment
 - context compression as sufficient-state selection
 - scientific claims as testable hypotheses
+- assumptions and remaining failures as explicit mathematical boundaries
 
 Current Pass 5 artifact:
 
 - `math-cross-paper-synthesis.html`: expanded to 18 first-principles cross-paper chains covering state control, measurement instruments, distribution design, feasible sets, transport paths, update geometry, function-preserving approximation, certificates, mechanisms, identification boundaries, modality credit, bottlenecks, grounded verification, latent interfaces, tail pressure, spectra, curriculum paths, and testable hypotheses.
+- `math-assumptions-failure-boundaries.html`: created with 16 cross-lane boundary cards explaining the assumptions under which each mathematical object helps and the failure that remains outside those assumptions.
 
 ## Completion Standard
 
