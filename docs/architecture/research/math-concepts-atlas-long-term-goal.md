@@ -93,16 +93,16 @@ Status: in progress.
 Add enough paper cards that the page covers the major named examples from each lane, while keeping the page readable. If it becomes too long, split into child pages by lane:
 
 - `math-agents-reasoning.html`: created with second-pass paper-level detail for 40 papers
+- `math-physical-generative.html`: created with second-pass paper-level detail for 43 paper-level cards
 - `math-evaluation-safety.html`
 - `math-data-systems.html`
-- `math-physical-generative.html`
 - `math-theory-optimization.html`
 
 Next Pass 4 targets:
 
-1. `math-physical-generative.html`: deeper per-paper treatment for quotient spaces, diffusion/flows, protein hierarchy, PDE operators, and embodied action.
-2. `math-theory-optimization.html`: deeper per-paper treatment for optimizer dynamics, spectra, formal computation, scaling laws, and deployment-constrained guarantees.
-3. `math-evaluation-safety.html`: deeper per-paper treatment for measurement instruments, tail risk, adversarial games, privacy, and watermarking.
+1. `math-theory-optimization.html`: deeper per-paper treatment for optimizer dynamics, spectra, formal computation, scaling laws, and deployment-constrained guarantees.
+2. `math-evaluation-safety.html`: deeper per-paper treatment for measurement instruments, tail risk, adversarial games, privacy, and watermarking.
+3. `math-data-systems.html`: deeper per-paper treatment for curriculum timing, missingness, provenance, serving systems, compression, adaptation, and optimizer geometry.
 
 ### Pass 5: Cross-paper synthesis
 
