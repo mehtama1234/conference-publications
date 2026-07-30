@@ -136,6 +136,7 @@ Balance-pass progress:
 - `math-assumptions-failure-boundaries.html`: added paper-specific causality/scientific-discovery boundary rows for local effect identification, graph equivalence, root-cause posterior diagnosis, temporal mechanisms, rejectable hypothesis search, executable scientific workflows, and latent intervention validity.
 - `math-causality-scientific.html`: added focused identification-boundary and executable-hypothesis chains connecting local causal certificates, graph equivalence, root-cause intervention ranking, temporal mechanism recovery, randomized effect search, hypothesis-space coverage, scientific workflow execution, and proof/artifact checking.
 - `math-paper-object-index.html`: added causal-identification and scientific-hypothesis evidence examples that state what observation, intervention, stress test, execution trace, or checker output would make each mathematical object credible.
+- `math-paper-object-index.html`: added multimodal evidence-route and multimodal state/token/embodiment evidence examples for modality credit, counterfactual visual grounding, internal fusion intervention, brain/tactile measurement channels, shared latent protocols, field bases, video token sufficiency, provenance-routed memory, affordance graphs, hierarchical action, artifact verification, and expert event labels.
 
 ### Pass 5: Cross-paper synthesis
 
