@@ -117,6 +117,7 @@ Balance-pass progress:
 - `math-theorem-to-deployment.html`: created as a theory transfer page with 14 bridge cards separating mathematical, statistical, and system-level assumptions for guarantees and deployment claims.
 - `math-agents-reasoning.html`: added a focused chain connecting reasoning collapse, tool-call cost, executable verification, and verifier gaming across RAGEN-2, ParetoPO, CyberGym, and TRACE Effort.
 - `math-physical-generative.html`: added a focused native-state chain connecting quotient geometry, field/PDE operators, and embodied action across Quotient-Space Diffusion, TideGS/RadioGS, IRNO, HDFlow, MomaGraph, EgoTactile, JoSE, and RodriNet.
+- `math-physical-generative.html`: added a focused grounded-world-model chain connecting action-conditioned transition state, vector world representation, control consistency, and verifier projections across FlashWorld, VectorWorld, dWorldEval, OmniVerifier, and VideoKR.
 
 ### Pass 5: Cross-paper synthesis
 
