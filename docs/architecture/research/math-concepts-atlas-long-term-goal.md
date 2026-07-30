@@ -125,6 +125,7 @@ Balance-pass progress:
 - `math-multimodal-embodied.html`: added a focused embodied-constraint chain connecting embodied evaluation, affordance graphs, tactile contact, hierarchical action, constrained policy updates, action manifolds, kinematics, reusable behavior, simulated practice, and self-control across SAW-Bench, MomaGraph, RoboMME, HDFlow, EgoTactile, PACT, JoSE, RodriNet, BehaviorVLA, DreamDojo, and SCALE.
 - `math-multimodal-embodied.html`: added a focused unified-generation chain connecting iterative editing, shared latent protocols, native speech state, world and view consistency, field coordinates, and artifact-level reward/verification across NextStep-1, EditVerse, LatentLM, UALM, VibeVoice, TTSDS2, FlashWorld, VIST3A, TideGS/RadioGS, Omni-Reward, UniPercept, and MetamerGen.
 - `math-multimodal-embodied.html`: added a focused memory-provenance chain connecting video event state, streaming visual attribution, routed observation/reasoning memory, cross-modal hallucination repair, and weak-label reliability across VideoKR, Visual Attribution Streaming, DLMR, RFCMH, WETR, and AGREE.
+- `math-assumptions-failure-boundaries.html`: added paper-specific multimodal boundary rows for measurement channels, evidence-route interventions, token sufficiency, embodied constraints, memory provenance, and unified-generation interfaces.
 
 ### Pass 5: Cross-paper synthesis
 
