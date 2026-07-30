@@ -95,14 +95,14 @@ Add enough paper cards that the page covers the major named examples from each l
 - `math-agents-reasoning.html`: created with second-pass paper-level detail for 40 papers
 - `math-physical-generative.html`: created with second-pass paper-level detail for 43 paper-level cards
 - `math-theory-optimization.html`: created with second-pass paper-level detail for 42 papers
-- `math-evaluation-safety.html`
+- `math-evaluation-safety.html`: created with second-pass paper-level detail for 42 papers
 - `math-data-systems.html`
 
 Next Pass 4 targets:
 
-1. `math-evaluation-safety.html`: deeper per-paper treatment for measurement instruments, tail risk, adversarial games, privacy, and watermarking.
-2. `math-data-systems.html`: deeper per-paper treatment for curriculum timing, missingness, provenance, serving systems, compression, adaptation, and optimizer geometry.
-3. Cross-paper synthesis chains for state control, sample-path control, feasible-set design, measurement economics, and identification boundaries.
+1. `math-data-systems.html`: deeper per-paper treatment for curriculum timing, missingness, provenance, serving systems, compression, adaptation, and optimizer geometry.
+2. Cross-paper synthesis chains for state control, sample-path control, feasible-set design, measurement economics, and identification boundaries.
+3. Optional child pages for causality/scientific discovery and multimodal/embodied if the parent atlas remains too dense.
 
 ### Pass 5: Cross-paper synthesis
 
