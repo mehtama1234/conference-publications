@@ -122,6 +122,7 @@ Balance-pass progress:
 - `math-multimodal-embodied.html`: added a focused measurement-channel chain connecting fMRI, speech prosody, tactile contact, missing modalities, clinical labels, and video knowledge across Mind-Omni, PRISM, Hibiki-Zero, EgoTactile, LIMSSR, Seizure-Semiology-Suite, and VideoKR.
 - `math-multimodal-embodied.html`: added a focused evidence-route intervention chain connecting route credit, visual counterfactuals, hidden-state patching, streaming attribution, and routed memory across MoCA, VGS, VISUALSWAP, Causal Route Gating, MINT, Visual Attribution Streaming, and DLMR.
 - `math-multimodal-embodied.html`: added a focused token-sufficiency chain connecting spatiotemporal merging, information-value token allocation, modality context budgets, online filtering, low-dimensional adaptation, and structure-preserving embeddings across FlashVID, InfoTok, VideoFlexTok, OmniFit, LST, COMPACT, LiME, MetaEmbed, and TACO.
+- `math-multimodal-embodied.html`: added a focused embodied-constraint chain connecting embodied evaluation, affordance graphs, tactile contact, hierarchical action, constrained policy updates, action manifolds, kinematics, reusable behavior, simulated practice, and self-control across SAW-Bench, MomaGraph, RoboMME, HDFlow, EgoTactile, PACT, JoSE, RodriNet, BehaviorVLA, DreamDojo, and SCALE.
 
 ### Pass 5: Cross-paper synthesis
 
