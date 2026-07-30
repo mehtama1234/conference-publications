@@ -110,6 +110,10 @@ Optional child-page progress:
 - `math-multimodal-embodied.html`: created with 54 paper-level cards across modality credit assignment, token bottlenecks, unified generation, non-text human signals, embodied action, memory and world state, grounded verification, and latent interfaces.
 - `math-paper-object-index.html`: created as a paper-first lookup layer with 96 entries across 16 mathematical object groups, linking named papers to their core object, short first-principles read, and relevant deep page.
 
+Balance-pass progress:
+
+- `math-concepts.html`: added a route-finder section that tells readers which atlas layer to use when starting from a paper name, theme, mathematical object, or big-picture question.
+
 ### Pass 5: Cross-paper synthesis
 
 Status: in progress.
