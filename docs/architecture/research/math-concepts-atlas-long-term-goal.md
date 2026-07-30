@@ -65,22 +65,23 @@ Expand each theme family into 10-15 richer entries:
 - data and systems: first expansion complete
 - physical and generative modeling: first expansion complete
 - theory and optimization: first expansion complete
-- causality and scientific discovery
+- causality and scientific discovery: first expansion complete
 - multimodal and embodied AI
 
 Each entry should include problem, object, approach, why it works, and connection.
 
 Next Pass 3 targets:
 
-1. Causality and scientific discovery: interventions, identifiability, counterfactual structure, environment shifts, mechanism invariance, experimental design.
-2. Multimodal and embodied AI: modality credit assignment, geometry, memory routing, action constraints, tactile/contact evidence, human-signal structure.
-3. Per-paper child page split if `math-concepts.html` becomes too dense for readable navigation.
+1. Multimodal and embodied AI: modality credit assignment, geometry, memory routing, action constraints, tactile/contact evidence, human-signal structure.
+2. Per-paper child page split if `math-concepts.html` becomes too dense for readable navigation.
+3. Second-pass per-paper detail for the densest lanes: agents/reasoning, physical/generative, and theory/optimization.
 
 Recent Pass 3 additions:
 
 - Data and systems now has a theme expansion covering curriculum timing, data value, missingness and provenance, serving as information movement, compression as function preservation, adaptation, continual updates, and optimizer geometry.
 - Physical and generative modeling now has a theme expansion covering spatial grounding, coherent worlds and video, diffusion/flow/energy sampling, chemistry and proteins, PDEs and scientific operators, embodied action, and human/multimodal signals.
 - Theory and optimization now has a theme expansion covering optimizer dynamics, spectra and representation geometry, architecture as computation, scaling and learnability limits, games and mechanisms, sampling and transport, deployment-constrained guarantees, and constraints inside models.
+- Causality and scientific discovery now has a theme expansion covering local effects, CI-test structure learning, Bayesian root cause under graph uncertainty, temporal and stochastic mechanisms, scientific hypothesis search, executable scientific workflows, counterfactual constraints, and identification boundaries.
 
 ### Pass 4: Per-paper coverage
 
