@@ -66,15 +66,17 @@ Expand each theme family into 10-15 richer entries:
 - physical and generative modeling: first expansion complete
 - theory and optimization: first expansion complete
 - causality and scientific discovery: first expansion complete
-- multimodal and embodied AI
+- multimodal and embodied AI: first expansion complete
 
 Each entry should include problem, object, approach, why it works, and connection.
 
-Next Pass 3 targets:
+Pass 3 first-expansion sweep is complete across the listed theme families.
 
-1. Multimodal and embodied AI: modality credit assignment, geometry, memory routing, action constraints, tactile/contact evidence, human-signal structure.
-2. Per-paper child page split if `math-concepts.html` becomes too dense for readable navigation.
-3. Second-pass per-paper detail for the densest lanes: agents/reasoning, physical/generative, and theory/optimization.
+Next targets:
+
+1. Per-paper child page split if `math-concepts.html` becomes too dense for readable navigation.
+2. Second-pass per-paper detail for the densest lanes: agents/reasoning, physical/generative, and theory/optimization.
+3. Cross-paper synthesis chains for modality credit assignment, state control, sample-path control, and identification boundaries.
 
 Recent Pass 3 additions:
 
@@ -82,6 +84,7 @@ Recent Pass 3 additions:
 - Physical and generative modeling now has a theme expansion covering spatial grounding, coherent worlds and video, diffusion/flow/energy sampling, chemistry and proteins, PDEs and scientific operators, embodied action, and human/multimodal signals.
 - Theory and optimization now has a theme expansion covering optimizer dynamics, spectra and representation geometry, architecture as computation, scaling and learnability limits, games and mechanisms, sampling and transport, deployment-constrained guarantees, and constraints inside models.
 - Causality and scientific discovery now has a theme expansion covering local effects, CI-test structure learning, Bayesian root cause under graph uncertainty, temporal and stochastic mechanisms, scientific hypothesis search, executable scientific workflows, counterfactual constraints, and identification boundaries.
+- Multimodal and embodied AI now has a theme expansion covering coordinate state, world-model transitions, action geometry, modality credit assignment, token information bottlenecks, unified generation, non-text human signals, and outcome-level evaluation.
 
 ### Pass 4: Per-paper coverage
 
