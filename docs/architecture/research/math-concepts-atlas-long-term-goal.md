@@ -133,6 +133,7 @@ Balance-pass progress:
 - `math-evaluation-safety.html`: added focused measurement-validity and tail-pressure safety chains connecting benchmark instruments, domain judges, finite-sample ranking, rare-event estimation, adaptive attacks, feasible boundaries, and verifier-noise training dynamics.
 - `math-assumptions-failure-boundaries.html`: added paper-specific data/systems boundary rows for training-time plasticity, conditional data value, provenance and incentives, missingness and synthetic coverage, serving-state preservation, compression error, and adaptation subspaces.
 - `math-data-systems.html`: added focused training-path value and serving-state preservation chains connecting data timing, marginal utility, update geometry, reasoning-trace supervision, memory layouts, KV retention, agent workflow state, and compression dynamics.
+- `math-assumptions-failure-boundaries.html`: added paper-specific causality/scientific-discovery boundary rows for local effect identification, graph equivalence, root-cause posterior diagnosis, temporal mechanisms, rejectable hypothesis search, executable scientific workflows, and latent intervention validity.
 
 ### Pass 5: Cross-paper synthesis
 
