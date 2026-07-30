@@ -134,6 +134,7 @@ Balance-pass progress:
 - `math-assumptions-failure-boundaries.html`: added paper-specific data/systems boundary rows for training-time plasticity, conditional data value, provenance and incentives, missingness and synthetic coverage, serving-state preservation, compression error, and adaptation subspaces.
 - `math-data-systems.html`: added focused training-path value and serving-state preservation chains connecting data timing, marginal utility, update geometry, reasoning-trace supervision, memory layouts, KV retention, agent workflow state, and compression dynamics.
 - `math-assumptions-failure-boundaries.html`: added paper-specific causality/scientific-discovery boundary rows for local effect identification, graph equivalence, root-cause posterior diagnosis, temporal mechanisms, rejectable hypothesis search, executable scientific workflows, and latent intervention validity.
+- `math-causality-scientific.html`: added focused identification-boundary and executable-hypothesis chains connecting local causal certificates, graph equivalence, root-cause intervention ranking, temporal mechanism recovery, randomized effect search, hypothesis-space coverage, scientific workflow execution, and proof/artifact checking.
 
 ### Pass 5: Cross-paper synthesis
 
