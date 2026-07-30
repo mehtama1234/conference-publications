@@ -62,8 +62,8 @@ Expand each theme family into 10-15 richer entries:
 - agents and reasoning: first expansion complete
 - evaluation and diagnostics: first expansion complete
 - safety and governance: first expansion complete through the evaluation/safety lane
-- data and systems
-- physical and generative modeling
+- data and systems: first expansion complete
+- physical and generative modeling: first expansion complete
 - theory and optimization
 - causality and scientific discovery
 - multimodal and embodied AI
@@ -72,9 +72,14 @@ Each entry should include problem, object, approach, why it works, and connectio
 
 Next Pass 3 targets:
 
-1. Data and systems: data as distribution design, compression as function-preserving approximation, systems as information movement, adaptation as constrained update.
-2. Physical and generative modeling: sample spaces, quotient geometry, flows, hierarchy, physical dynamics, scientific likelihoods.
-3. Theory and optimization: spectra, low-rank geometry, games, equilibria, formal computation, sample complexity, optimization path geometry.
+1. Theory and optimization: spectra, low-rank geometry, games, equilibria, formal computation, sample complexity, optimization path geometry.
+2. Causality and scientific discovery: interventions, identifiability, counterfactual structure, environment shifts, mechanism invariance, experimental design.
+3. Multimodal and embodied AI: modality credit assignment, geometry, memory routing, action constraints, tactile/contact evidence, human-signal structure.
+
+Recent Pass 3 additions:
+
+- Data and systems now has a theme expansion covering curriculum timing, data value, missingness and provenance, serving as information movement, compression as function preservation, adaptation, continual updates, and optimizer geometry.
+- Physical and generative modeling now has a theme expansion covering spatial grounding, coherent worlds and video, diffusion/flow/energy sampling, chemistry and proteins, PDEs and scientific operators, embodied action, and human/multimodal signals.
 
 ### Pass 4: Per-paper coverage
 
