@@ -115,6 +115,7 @@ Balance-pass progress:
 - `math-concepts.html`: added a route-finder section that tells readers which atlas layer to use when starting from a paper name, theme, mathematical object, or big-picture question.
 - `math-coverage-matrix.html`: created as a working audit page showing per-lane paper-level depth, object coverage, cross-paper links, assumptions/failure-boundary coverage, and next expansion targets.
 - `math-theorem-to-deployment.html`: created as a theory transfer page with 14 bridge cards separating mathematical, statistical, and system-level assumptions for guarantees and deployment claims.
+- `math-agents-reasoning.html`: added a focused chain connecting reasoning collapse, tool-call cost, executable verification, and verifier gaming across RAGEN-2, ParetoPO, CyberGym, and TRACE Effort.
 
 ### Pass 5: Cross-paper synthesis
 
