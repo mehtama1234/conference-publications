@@ -106,6 +106,8 @@ Next Pass 4 targets:
 
 ### Pass 5: Cross-paper synthesis
 
+Status: in progress.
+
 Add chain sections that show how groups of papers form one argument:
 
 - reasoning traces as information channels
@@ -116,6 +118,10 @@ Add chain sections that show how groups of papers form one argument:
 - training as movement through geometry
 - data as distribution design
 - causality as intervention-aware representation
+
+Current Pass 5 artifact:
+
+- `math-cross-paper-synthesis.html`: created with ten first-principles cross-paper chains covering state control, measurement instruments, distribution design, feasible sets, transport paths, update geometry, function-preserving approximation, certificates, mechanisms, and identification boundaries.
 
 ## Completion Standard
 
