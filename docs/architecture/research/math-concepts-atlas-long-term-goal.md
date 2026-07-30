@@ -129,6 +129,7 @@ Balance-pass progress:
 - `math-assumptions-failure-boundaries.html`: added paper-specific physical/generative boundary rows for quotient identity, molecule-design feasibility, tail-sensitive sampling, guided probability paths, scientific field bases, action-conditioned world models, and native verifier projections.
 - `math-assumptions-failure-boundaries.html`: added paper-specific theory/optimization boundary rows translating theorem assumptions into evidence checks for optimizer geometry, low-rank adaptation, spectra, expressivity, finite tests, unlearning/privacy, watermarking, and finite arithmetic.
 - `math-agents-reasoning.html`: added a focused multi-agent mechanism chain connecting disagreement as information, collaboration graph search, value of information, latent roles, cost frontiers, strategic response, and aggregation across Value of Variance, OMAC, Rational Agents, MASPOB/LatentMAS, ParetoPO, Accuracy Auctions, and AdvGame.
+- `math-assumptions-failure-boundaries.html`: added paper-specific evaluation/safety boundary rows separating measurement validity, domain observation channels, tail-pressure safety, adaptive boundary pressure, executable certificates, distinguishability tests, and governance aggregation rules.
 
 ### Pass 5: Cross-paper synthesis
 
