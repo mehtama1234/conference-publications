@@ -118,6 +118,7 @@ Balance-pass progress:
 - `math-agents-reasoning.html`: added a focused chain connecting reasoning collapse, tool-call cost, executable verification, and verifier gaming across RAGEN-2, ParetoPO, CyberGym, and TRACE Effort.
 - `math-physical-generative.html`: added a focused native-state chain connecting quotient geometry, field/PDE operators, and embodied action across Quotient-Space Diffusion, TideGS/RadioGS, IRNO, HDFlow, MomaGraph, EgoTactile, JoSE, and RodriNet.
 - `math-physical-generative.html`: added a focused grounded-world-model chain connecting action-conditioned transition state, vector world representation, control consistency, and verifier projections across FlashWorld, VectorWorld, dWorldEval, OmniVerifier, and VideoKR.
+- `math-physical-generative.html`: added a focused tail-sensitive sampling chain connecting rare-mode estimation, safety boundaries, heavy-tailed corruption, tractable density, and Best-of-N selection across SRMC, Safety-Guided Flow, Cauchy-Driven Diffusion Bridges, FALCON, and FIDIA.
 
 ### Pass 5: Cross-paper synthesis
 
