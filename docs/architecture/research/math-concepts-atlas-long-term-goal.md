@@ -148,6 +148,7 @@ Balance-pass progress:
 - `math-verifier-gaming.html`: added six cross-lane failure chains showing when a score, reward, judge, verifier, certificate, or aggregation rule stops identifying the real target: proxy objective gap, process shortcut, instrument drift, adaptive pressure, certificate mismatch, and aggregation failure.
 - `math-icml-iclr-differences.html`: added eight object-level comparison sections across reasoning, agents, safety, generation, data, systems, theory, and measurement, pairing ICML control-surface examples with ICLR system-form examples and explaining why each habit works mathematically.
 - `math-evaluation-safety.html`: added a paper-specific formula/evidence box section for ATLAS, FRABench/UFEval, Micro-Benchmarking Reliability, Rare Event Analysis/Tail Risks, CSPO/SecFid/SandboxEscapeBench, RLVepsR/Weak-Strong Verification, Gaussian Certified Unlearning, Catch-22/Watermarking, VALUEFLOW/SafeDPO, and Omni-Reward/VISUALSWAP/FlowGuard, stating the compact mathematical condition and evidence check for each.
+- `math-theory-optimization.html`: added a paper-specific formula/evidence box section for Adam Degeneracy, DiReCT, LoRA theory, Alignment-Sensitive Minimax Rates, Single-Head Attention, Transformer Circuits, Language Generation in the Limit, FTRL lower bounds, Fair Optimal Transport, Mamba Markov ICL, Finite Test Certification, and Certified Unlearning/Privacy Bounds, tying each method to its mathematical object, working condition, and evidence check.
 
 ### Pass 5: Cross-paper synthesis
 
