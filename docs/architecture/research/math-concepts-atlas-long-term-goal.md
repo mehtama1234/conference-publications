@@ -114,6 +114,7 @@ Balance-pass progress:
 
 - `math-concepts.html`: added a route-finder section that tells readers which atlas layer to use when starting from a paper name, theme, mathematical object, or big-picture question.
 - `math-coverage-matrix.html`: created as a working audit page showing per-lane paper-level depth, object coverage, cross-paper links, assumptions/failure-boundary coverage, and next expansion targets.
+- `math-theorem-to-deployment.html`: created as a theory transfer page with 14 bridge cards separating mathematical, statistical, and system-level assumptions for guarantees and deployment claims.
 
 ### Pass 5: Cross-paper synthesis
 
