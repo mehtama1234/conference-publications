@@ -104,6 +104,10 @@ Next Pass 4 targets:
 2. Optional child pages for causality/scientific discovery and multimodal/embodied if the parent atlas remains too dense.
 3. A final balance pass to remove overlap among parent atlas cards and child-page links once the cross-paper chains are stronger.
 
+Optional child-page progress:
+
+- `math-causality-scientific.html`: created with 31 paper-level cards across local effects, graph evidence, root-cause diagnosis, temporal mechanisms, hypothesis search, executable workflows, counterfactual policy, and latent interventions.
+
 ### Pass 5: Cross-paper synthesis
 
 Status: in progress.
