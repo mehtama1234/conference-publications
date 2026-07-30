@@ -55,11 +55,13 @@ Each object should be tied to multiple papers and explained in plain language.
 
 ### Pass 3: Theme-by-theme expansion
 
+Status: in progress.
+
 Expand each theme family into 10-15 richer entries:
 
-- agents and reasoning
-- evaluation and diagnostics
-- safety and governance
+- agents and reasoning: first expansion complete
+- evaluation and diagnostics: first expansion complete
+- safety and governance: first expansion complete through the evaluation/safety lane
 - data and systems
 - physical and generative modeling
 - theory and optimization
@@ -67,6 +69,12 @@ Expand each theme family into 10-15 richer entries:
 - multimodal and embodied AI
 
 Each entry should include problem, object, approach, why it works, and connection.
+
+Next Pass 3 targets:
+
+1. Data and systems: data as distribution design, compression as function-preserving approximation, systems as information movement, adaptation as constrained update.
+2. Physical and generative modeling: sample spaces, quotient geometry, flows, hierarchy, physical dynamics, scientific likelihoods.
+3. Theory and optimization: spectra, low-rank geometry, games, equilibria, formal computation, sample complexity, optimization path geometry.
 
 ### Pass 4: Per-paper coverage
 
