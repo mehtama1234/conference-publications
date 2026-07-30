@@ -101,12 +101,13 @@ Add enough paper cards that the page covers the major named examples from each l
 Next Pass 4 targets:
 
 1. Cross-paper synthesis chains for state control, sample-path control, feasible-set design, measurement economics, and identification boundaries.
-2. Optional child pages for causality/scientific discovery and multimodal/embodied if the parent atlas remains too dense.
+2. Optional follow-up child pages for any remaining over-dense lanes after the first child-page sweep.
 3. A final balance pass to remove overlap among parent atlas cards and child-page links once the cross-paper chains are stronger.
 
 Optional child-page progress:
 
 - `math-causality-scientific.html`: created with 31 paper-level cards across local effects, graph evidence, root-cause diagnosis, temporal mechanisms, hypothesis search, executable workflows, counterfactual policy, and latent interventions.
+- `math-multimodal-embodied.html`: created with 54 paper-level cards across modality credit assignment, token bottlenecks, unified generation, non-text human signals, embodied action, memory and world state, grounded verification, and latent interfaces.
 
 ### Pass 5: Cross-paper synthesis
 
