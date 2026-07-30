@@ -102,12 +102,13 @@ Next Pass 4 targets:
 
 1. Cross-paper synthesis chains for state control, sample-path control, feasible-set design, measurement economics, and identification boundaries.
 2. Optional follow-up child pages for any remaining over-dense lanes after the first child-page sweep.
-3. A final balance pass to remove overlap among parent atlas cards and child-page links once the cross-paper chains are stronger.
+3. A final balance pass to remove overlap among parent atlas cards and child-page links now that the cross-paper chains and paper-first index are stronger.
 
 Optional child-page progress:
 
 - `math-causality-scientific.html`: created with 31 paper-level cards across local effects, graph evidence, root-cause diagnosis, temporal mechanisms, hypothesis search, executable workflows, counterfactual policy, and latent interventions.
 - `math-multimodal-embodied.html`: created with 54 paper-level cards across modality credit assignment, token bottlenecks, unified generation, non-text human signals, embodied action, memory and world state, grounded verification, and latent interfaces.
+- `math-paper-object-index.html`: created as a paper-first lookup layer with 96 entries across 16 mathematical object groups, linking named papers to their core object, short first-principles read, and relevant deep page.
 
 ### Pass 5: Cross-paper synthesis
 
