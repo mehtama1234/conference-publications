@@ -113,6 +113,7 @@ Optional child-page progress:
 Balance-pass progress:
 
 - `math-concepts.html`: added a route-finder section that tells readers which atlas layer to use when starting from a paper name, theme, mathematical object, or big-picture question.
+- `math-coverage-matrix.html`: created as a working audit page showing per-lane paper-level depth, object coverage, cross-paper links, assumptions/failure-boundary coverage, and next expansion targets.
 
 ### Pass 5: Cross-paper synthesis
 
