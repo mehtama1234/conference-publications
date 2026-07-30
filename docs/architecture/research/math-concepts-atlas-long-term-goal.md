@@ -120,6 +120,7 @@ Balance-pass progress:
 - `math-physical-generative.html`: added a focused grounded-world-model chain connecting action-conditioned transition state, vector world representation, control consistency, and verifier projections across FlashWorld, VectorWorld, dWorldEval, OmniVerifier, and VideoKR.
 - `math-physical-generative.html`: added a focused tail-sensitive sampling chain connecting rare-mode estimation, safety boundaries, heavy-tailed corruption, tractable density, and Best-of-N selection across SRMC, Safety-Guided Flow, Cauchy-Driven Diffusion Bridges, FALCON, and FIDIA.
 - `math-multimodal-embodied.html`: added a focused measurement-channel chain connecting fMRI, speech prosody, tactile contact, missing modalities, clinical labels, and video knowledge across Mind-Omni, PRISM, Hibiki-Zero, EgoTactile, LIMSSR, Seizure-Semiology-Suite, and VideoKR.
+- `math-multimodal-embodied.html`: added a focused evidence-route intervention chain connecting route credit, visual counterfactuals, hidden-state patching, streaming attribution, and routed memory across MoCA, VGS, VISUALSWAP, Causal Route Gating, MINT, Visual Attribution Streaming, and DLMR.
 
 ### Pass 5: Cross-paper synthesis
 
