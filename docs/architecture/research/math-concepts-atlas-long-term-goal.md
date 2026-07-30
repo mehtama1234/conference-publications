@@ -116,6 +116,7 @@ Balance-pass progress:
 - `math-coverage-matrix.html`: created as a working audit page showing per-lane paper-level depth, object coverage, cross-paper links, assumptions/failure-boundary coverage, and next expansion targets.
 - `math-theorem-to-deployment.html`: created as a theory transfer page with 14 bridge cards separating mathematical, statistical, and system-level assumptions for guarantees and deployment claims.
 - `math-agents-reasoning.html`: added a focused chain connecting reasoning collapse, tool-call cost, executable verification, and verifier gaming across RAGEN-2, ParetoPO, CyberGym, and TRACE Effort.
+- `math-physical-generative.html`: added a focused native-state chain connecting quotient geometry, field/PDE operators, and embodied action across Quotient-Space Diffusion, TideGS/RadioGS, IRNO, HDFlow, MomaGraph, EgoTactile, JoSE, and RodriNet.
 
 ### Pass 5: Cross-paper synthesis
 
