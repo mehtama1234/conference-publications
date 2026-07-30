@@ -119,6 +119,7 @@ Balance-pass progress:
 - `math-physical-generative.html`: added a focused native-state chain connecting quotient geometry, field/PDE operators, and embodied action across Quotient-Space Diffusion, TideGS/RadioGS, IRNO, HDFlow, MomaGraph, EgoTactile, JoSE, and RodriNet.
 - `math-physical-generative.html`: added a focused grounded-world-model chain connecting action-conditioned transition state, vector world representation, control consistency, and verifier projections across FlashWorld, VectorWorld, dWorldEval, OmniVerifier, and VideoKR.
 - `math-physical-generative.html`: added a focused tail-sensitive sampling chain connecting rare-mode estimation, safety boundaries, heavy-tailed corruption, tractable density, and Best-of-N selection across SRMC, Safety-Guided Flow, Cauchy-Driven Diffusion Bridges, FALCON, and FIDIA.
+- `math-multimodal-embodied.html`: added a focused measurement-channel chain connecting fMRI, speech prosody, tactile contact, missing modalities, clinical labels, and video knowledge across Mind-Omni, PRISM, Hibiki-Zero, EgoTactile, LIMSSR, Seizure-Semiology-Suite, and VideoKR.
 
 ### Pass 5: Cross-paper synthesis
 
