@@ -127,6 +127,7 @@ Balance-pass progress:
 - `math-multimodal-embodied.html`: added a focused memory-provenance chain connecting video event state, streaming visual attribution, routed observation/reasoning memory, cross-modal hallucination repair, and weak-label reliability across VideoKR, Visual Attribution Streaming, DLMR, RFCMH, WETR, and AGREE.
 - `math-assumptions-failure-boundaries.html`: added paper-specific multimodal boundary rows for measurement channels, evidence-route interventions, token sufficiency, embodied constraints, memory provenance, and unified-generation interfaces.
 - `math-assumptions-failure-boundaries.html`: added paper-specific physical/generative boundary rows for quotient identity, molecule-design feasibility, tail-sensitive sampling, guided probability paths, scientific field bases, action-conditioned world models, and native verifier projections.
+- `math-assumptions-failure-boundaries.html`: added paper-specific theory/optimization boundary rows translating theorem assumptions into evidence checks for optimizer geometry, low-rank adaptation, spectra, expressivity, finite tests, unlearning/privacy, watermarking, and finite arithmetic.
 
 ### Pass 5: Cross-paper synthesis
 
