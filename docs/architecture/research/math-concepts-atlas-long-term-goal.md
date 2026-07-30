@@ -96,13 +96,13 @@ Add enough paper cards that the page covers the major named examples from each l
 - `math-physical-generative.html`: created with second-pass paper-level detail for 43 paper-level cards
 - `math-theory-optimization.html`: created with second-pass paper-level detail for 42 papers
 - `math-evaluation-safety.html`: created with second-pass paper-level detail for 42 papers
-- `math-data-systems.html`
+- `math-data-systems.html`: created with second-pass paper-level detail for 48 paper-level cards
 
 Next Pass 4 targets:
 
-1. `math-data-systems.html`: deeper per-paper treatment for curriculum timing, missingness, provenance, serving systems, compression, adaptation, and optimizer geometry.
-2. Cross-paper synthesis chains for state control, sample-path control, feasible-set design, measurement economics, and identification boundaries.
-3. Optional child pages for causality/scientific discovery and multimodal/embodied if the parent atlas remains too dense.
+1. Cross-paper synthesis chains for state control, sample-path control, feasible-set design, measurement economics, and identification boundaries.
+2. Optional child pages for causality/scientific discovery and multimodal/embodied if the parent atlas remains too dense.
+3. A final balance pass to remove overlap among parent atlas cards and child-page links once the cross-paper chains are stronger.
 
 ### Pass 5: Cross-paper synthesis
 
