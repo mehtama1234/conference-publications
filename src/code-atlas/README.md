@@ -35,3 +35,17 @@ Every demo should keep this shape:
 These are not full paper reproductions. They are first-principles executable
 examples that make the claim testable before later work adds original-author
 code adapters or deeper reproductions.
+
+## Production Reuse
+
+The browser page is the workshop layer. The reusable source layer is:
+
+- `client-demo-kit.js`: shared scoring and evidence helpers.
+- `CLIENT-DEMO-GUIDE.md`: the path from toy demo to client adapter.
+- `themes/.../README.md`: per-theme source folders where client fixtures,
+  original-author adapters, or deeper reproductions can be added.
+
+A production client demo should not ask the client to trust the paper label.
+It should show a familiar failure, name what must stay true, change one
+controlled thing, and produce an evidence packet that supports or falsifies the
+claim.
