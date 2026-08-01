@@ -457,6 +457,58 @@ const demos = [
 ];
 
 const clamp = n => Math.max(0, Math.min(100, Math.round(n)));
+const clientPatterns = {
+  trace: {
+    challenge: "A client wants to know whether an assistant is actually using case facts or writing a convincing process story after the fact.",
+    reuse: "Use this as a trace-audit demo: feed two near-identical tasks with one important changed fact, then measure whether the intermediate work changes at the fact that should matter.",
+    replace: "Replace the toy knobs with real task pairs, trace diffs, answer diffs, and a checker that marks whether the changed fact was used."
+  },
+  "tool-cost": {
+    challenge: "A client has agents calling search, databases, code runners, or human review too often, but still needs the calls when uncertainty is high.",
+    reuse: "Use this as a tool-budget demo: show the menu of possible policies and the point where another call stops paying for itself.",
+    replace: "Replace the toy cost with latency, API cost, failure rate, and measured answer lift from client logs."
+  },
+  artifact: {
+    challenge: "A client is evaluating generated websites, reports, code, or proofs with text review, while the real artifact can fail in execution.",
+    reuse: "Use this as an artifact-check demo: compare a prose judge with a checker that opens, runs, cites, or verifies the artifact.",
+    replace: "Replace the toy cases with real broken links, failing tests, citation mismatches, proof-checker failures, or UI state bugs."
+  },
+  proxy: {
+    challenge: "A client optimizes a score such as helpfulness, call resolution, risk score, or user satisfaction and worries the system is learning the score instead of the goal.",
+    reuse: "Use this as a score-drift demo: show pre-training correlation, post-training divergence, and an independent audit target.",
+    replace: "Replace the toy score with the client's metric, real outcome labels, audit samples, and examples where the metric can be gamed."
+  },
+  "rare-risk": {
+    challenge: "A client's average tests look safe, but the business risk is concentrated in unusual users, prompts, workflows, or edge conditions.",
+    reuse: "Use this as a rare-risk demo: show why random testing misses the bad region and how stress sampling makes it measurable.",
+    replace: "Replace the toy rarity with incident rates, adversarial prompts, boundary workflows, or high-impact low-frequency cases."
+  },
+  context: {
+    challenge: "A client is compressing long conversations, documents, tickets, or video history and needs to keep the fact that matters later.",
+    reuse: "Use this as a memory-retention demo: compare full-history answers with compressed-memory answers on delayed facts.",
+    replace: "Replace the toy clue with real long-context records, retained snippets, dropped snippets, and downstream answer agreement."
+  },
+  numeric: {
+    challenge: "A client wants cheaper model serving but cannot afford behavior drift on important rare cases or long outputs.",
+    reuse: "Use this as a deployment-compression demo: show average score, fragile-case score, and the cost saved by lower precision.",
+    replace: "Replace the toy precision with real quantization settings, hardware traces, latency, memory, and regression tests."
+  },
+  path: {
+    challenge: "A client uses a generator or simulator that produces good-looking samples but may lose rare valid outputs or biased regions.",
+    reuse: "Use this as a sample-coverage demo: show quality and coverage together so better-looking outputs do not hide lost variety.",
+    replace: "Replace the toy coverage with domain-specific modes, independent validity checks, sample weights, and rare-region recall."
+  },
+  ruler: {
+    challenge: "A client is fine-tuning or adapting a model and needs to know whether updates improve the target while preserving existing behavior.",
+    reuse: "Use this as an update-safety demo: show that raw update size is not enough; fragile directions need a behavior-aware ruler.",
+    replace: "Replace the toy step with real training checkpoints, regression suites, update norms, and damage measurements."
+  },
+  cause: {
+    challenge: "A client wants to make a cause claim from observational records, but several cause stories may still explain the same data.",
+    reuse: "Use this as a causal-claim demo: show when background facts or interventions separate rival explanations, and when they do not.",
+    replace: "Replace the toy assumptions with treatment, outcome, selected background facts, overlap checks, and sensitivity analysis."
+  }
+};
 const state = {};
 
 function initState(demo) {
@@ -506,6 +558,14 @@ function renderDemo(id) {
         <h3>How the demo proves the point</h3>
         <p>${demo.demoPoint}</p>
       </section>
+    </div>
+    <div class="client-card">
+      <h3>Reusable client-demo shape</h3>
+      <div class="client-grid">
+        <div><b>Client challenge</b><p>${clientPatterns[demo.id].challenge}</p></div>
+        <div><b>Reusable proof artifact</b><p>${clientPatterns[demo.id].reuse}</p></div>
+        <div><b>Replace with client data</b><p>${clientPatterns[demo.id].replace}</p></div>
+      </div>
     </div>
     <div class="contract">
       <div><b>Promise</b>${demo.promise}</div>
