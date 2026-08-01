@@ -10,6 +10,9 @@ const demos = [
     knob: "Change task difference and template pressure.",
     failure: "The trace stays polished but ignores the task.",
     proof: "Task-specific trace change predicts answer change.",
+    concept: "Everyday idea: if a student solved two different word problems, the scratch work should change where the story changed. If the scratch work looks the same both times, it may be decoration, not evidence.",
+    themePoint: "The theme claim is that an agent's visible reasoning is meaningful only when the middle work is tied to the task facts. The demo tests whether the trace is driven by the problem or by a fixed writing pattern.",
+    demoPoint: "Raise task difference and the trace should become more task-dependent. Raise template pressure and it can still look polished while becoming less connected to the task. That gap is the point the paper family is trying to expose.",
     controls: [
       { id: "taskShift", label: "Task difference", min: 0, max: 100, value: 62 },
       { id: "template", label: "Template pressure", min: 0, max: 100, value: 35 },
@@ -47,6 +50,9 @@ const demos = [
     knob: "Change doubt, tool cost, and failure risk.",
     failure: "Accuracy rises but cost rises faster.",
     proof: "The chosen point sits on the useful cost-correctness menu.",
+    concept: "Everyday idea: calling a mechanic before buying a used car is worth it when the car is uncertain and expensive to get wrong. It is not worth it for every tiny choice.",
+    themePoint: "The theme claim is that agent actions need a value test. A tool call is good only when the answer improves enough to justify the extra time, money, and ways the tool itself can fail.",
+    demoPoint: "Raise doubt and the tool becomes more useful. Raise cost or tool risk and the same call can stop being worth it. The demo proves the point by separating answer gain from total value.",
     controls: [
       { id: "doubt", label: "Doubt before tool", min: 0, max: 100, value: 70 },
       { id: "cost", label: "Tool cost", min: 0, max: 100, value: 38 },
@@ -84,6 +90,9 @@ const demos = [
     knob: "Choose the artifact defect.",
     failure: "The explanation sounds right while the page or code fails.",
     proof: "The checker runs, renders, or inspects the artifact directly.",
+    concept: "Everyday idea: reading a restaurant's menu is not the same as tasting the food. A page can be described well and still have a broken button.",
+    themePoint: "The theme claim is that evaluation must inspect the thing the user actually gets. For web pages, code, proofs, or documents, the failure often lives inside the artifact, not inside the written explanation.",
+    demoPoint: "Switch the artifact case from clean to broken. The text-only judge still scores the story highly, while the artifact checker drops because it checks the working object. That mismatch is the proof.",
     controls: [
       { id: "caseType", label: "Artifact case", type: "select", options: [
         ["clean", "Clean artifact"],
@@ -128,6 +137,9 @@ const demos = [
     knob: "Change training pressure and loophole size.",
     failure: "The score rises while the real target falls.",
     proof: "Post-training checks show the score still tracks the real target.",
+    concept: "Everyday idea: a student can learn to get points from a grading rubric without understanding the subject. The grade rises, but the skill may not.",
+    themePoint: "The theme claim is that a stand-in score is dangerous after training pressure is applied to it. Once the model learns the scoring habit, the score may stop measuring the human target.",
+    demoPoint: "Raise training pressure and loophole size. The stand-in score climbs, but the real target can fall. Stronger audits pull the demo back toward the thing people actually wanted.",
     controls: [
       { id: "pressure", label: "Training pressure", min: 0, max: 100, value: 72 },
       { id: "loophole", label: "Score loophole", min: 0, max: 100, value: 58 },
@@ -165,6 +177,9 @@ const demos = [
     knob: "Change event rarity and stress sampling.",
     failure: "The benchmark reports safety without visiting danger.",
     proof: "The sampler reaches the bad region often enough to estimate risk.",
+    concept: "Everyday idea: if a bridge fails only in a rare wind pattern, testing it on calm days does not prove it is safe.",
+    themePoint: "The theme claim is that average tests can hide rare harms. Safety work must deliberately visit the unusual cases that ordinary sampling almost never sees.",
+    demoPoint: "Make the bad case rarer and ordinary testing loses sight of it. Increase stress sampling and the bad region becomes visible often enough to measure. That is why rare-risk papers change how examples are chosen.",
     controls: [
       { id: "rarity", label: "Bad-case rarity", min: 1, max: 100, value: 86 },
       { id: "stress", label: "Stress sampling", min: 0, max: 100, value: 35 },
@@ -203,6 +218,9 @@ const demos = [
     knob: "Change clue rarity, memory budget, and selection rule.",
     failure: "The summary keeps common notes and drops the decisive clue.",
     proof: "Full-context and short-memory decisions agree on delayed evidence.",
+    concept: "Everyday idea: when summarizing a detective notebook, keeping ten common details is useless if the one unusual clue identifies the culprit.",
+    themePoint: "The theme claim is that compression is not just making text shorter. It must preserve the facts that can change the later decision.",
+    demoPoint: "Lower the memory budget and common-note selection drops the rare clue. Switch to decision-changing selection and the short memory agrees better with the full context. That agreement is the proof.",
     controls: [
       { id: "rarity", label: "Rare clue importance", min: 0, max: 100, value: 80 },
       { id: "budget", label: "Memory budget", min: 5, max: 100, value: 35 },
@@ -244,6 +262,9 @@ const demos = [
     knob: "Change precision and fragile behavior share.",
     failure: "Headline score survives while rare behavior breaks.",
     proof: "Rare, repeated, and deployment-specific tests still pass.",
+    concept: "Everyday idea: rounding money to whole dollars may be fine for a rough budget, but it breaks payroll if cents matter repeatedly.",
+    themePoint: "The theme claim is that cheaper numbers are acceptable only when behavior stays the same where users care. A high average score is not enough.",
+    demoPoint: "Lower precision and increase fragile behavior. The average can remain decent while rare behavior breaks. Repair helps only if it protects those fragile cases, which is the real evidence.",
     controls: [
       { id: "bits", label: "Precision budget", min: 2, max: 16, value: 6 },
       { id: "fragile", label: "Fragile behavior share", min: 0, max: 100, value: 65 },
@@ -281,6 +302,9 @@ const demos = [
     knob: "Change guidance strength and rare-mode weight.",
     failure: "Guidance improves score but collapses variety.",
     proof: "Rare valid modes remain reachable with honest weights.",
+    concept: "Everyday idea: a recipe shortcut can make most cookies prettier while making one legitimate style impossible to bake.",
+    themePoint: "The theme claim is that the route used to make samples matters. A generator must improve quality without erasing valid kinds of output.",
+    demoPoint: "Raise guidance and sample quality improves. If rare coverage falls, the path is biased because it made one valid region hard to reach. Weight correction is the attempt to keep that region alive.",
     controls: [
       { id: "guidance", label: "Guidance strength", min: 0, max: 100, value: 68 },
       { id: "rareMode", label: "Rare valid output weight", min: 0, max: 100, value: 28 },
@@ -317,6 +341,9 @@ const demos = [
     knob: "Change raw step, fragile steepness, and ruler awareness.",
     failure: "A small-looking update crosses a fragile behavior direction.",
     proof: "Damage is predicted by the behavior-aware ruler.",
+    concept: "Everyday idea: moving one inch on flat ground is harmless, but one inch near the edge of a shelf can knock something over. Raw distance is not the whole story.",
+    themePoint: "The theme claim is that training updates need the right ruler. The same step size can be safe in one direction and damaging in another.",
+    demoPoint: "Increase raw step and fragile steepness. Damage rises when the step points through fragile behavior. Ruler awareness lowers damage by judging movement by what it can break, not by raw size alone.",
     controls: [
       { id: "step", label: "Raw update size", min: 0, max: 100, value: 44 },
       { id: "steep", label: "Fragile steepness", min: 0, max: 100, value: 72 },
@@ -354,6 +381,9 @@ const demos = [
     knob: "Change whether a background fact is held fixed.",
     failure: "The method picks one story when several still fit.",
     proof: "All still-possible stories agree before making the claim.",
+    concept: "Everyday idea: ice cream sales and sunburn can rise together because hot weather drives both. The shared pattern alone does not prove ice cream causes sunburn.",
+    themePoint: "The theme claim is that cause claims need more than matching observations. If several cause stories explain the same records, the honest answer must keep that uncertainty.",
+    demoPoint: "Hold more background facts fixed or add a stronger assumption, and rival stories separate. With noisy observations and no extra assumption, several stories still fit. The demo proves why the method must avoid overclaiming.",
     controls: [
       { id: "heldFixed", label: "Background facts held fixed", min: 0, max: 100, value: 30 },
       { id: "noise", label: "Observation noise", min: 0, max: 100, value: 35 },
@@ -422,6 +452,20 @@ function renderDemo(id) {
       <div class="meta">${demo.theme} / ${demo.subtheme} / ${demo.paper}</div>
       <h2>${demo.title}</h2>
       <p class="summary">${demo.summary}</p>
+    </div>
+    <div class="explain">
+      <section>
+        <h3>Concept in plain words</h3>
+        <p>${demo.concept}</p>
+      </section>
+      <section>
+        <h3>Why this matches the paper/theme</h3>
+        <p>${demo.themePoint}</p>
+      </section>
+      <section>
+        <h3>How the demo proves the point</h3>
+        <p>${demo.demoPoint}</p>
+      </section>
     </div>
     <div class="contract">
       <div><b>Promise</b>${demo.promise}</div>
