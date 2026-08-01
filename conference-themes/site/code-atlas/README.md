@@ -41,6 +41,8 @@ code adapters or deeper reproductions.
 The browser page is the workshop layer. The reusable source layer is:
 
 - `client-demo-kit.js`: shared scoring and evidence helpers.
+- `fixtures/client-shaped-fixtures.json`: small example records that show the
+  data shape each demo expects.
 - `CLIENT-DEMO-GUIDE.md`: the path from toy demo to client adapter.
 - `themes/.../README.md`: per-theme source folders where client fixtures,
   original-author adapters, or deeper reproductions can be added.
@@ -49,3 +51,14 @@ A production client demo should not ask the client to trust the paper label.
 It should show a familiar failure, name what must stay true, change one
 controlled thing, and produce an evidence packet that supports or falsifies the
 claim.
+
+## Fixture Rule
+
+Every demo needs at least two records:
+
+- one record where the method should hold,
+- one record where the hidden failure appears.
+
+The point is not to make the method look good. The point is to make the
+failure visible enough that a client can recognize whether the method applies
+to their system.
