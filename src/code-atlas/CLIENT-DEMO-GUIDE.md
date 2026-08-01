@@ -57,6 +57,15 @@ The client should see the same story in every demo:
 4. Here is the failure case the paper is designed to catch.
 5. Here is the measured evidence that would prove the method helped.
 
+The starter fixture file is `fixtures/client-shaped-fixtures.json`. Keep the
+same shape and replace the rows with client records. Each row should be plain
+enough for a non-specialist stakeholder to inspect:
+
+- input: the record, prompt, artifact, or case being tested.
+- method: what the system did or what comparison was run.
+- evidence: the concrete observation that supports or weakens the claim.
+- result: the decision the evidence allows.
+
 ## Depth Bar
 
 Do not call a demo production-ready until it passes these checks:

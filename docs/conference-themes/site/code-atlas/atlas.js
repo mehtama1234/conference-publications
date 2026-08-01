@@ -582,6 +582,179 @@ const proofDesign = {
     clientData: "Use treatment records, outcomes, background facts, overlap checks, assumed rules, sensitivity tests, and cases where the method should abstain."
   }
 };
+
+const fixtureCases = {
+  trace: {
+    title: "Fixture: two support tickets with one changed fact",
+    rows: [
+      {
+        input: "Ticket A says the refund window is 30 days and the order arrived 24 days ago.",
+        method: "The trace checks the delivery date, compares 24 with 30, then approves refund.",
+        evidence: "The changed fact appears in the middle work and changes the answer.",
+        result: "Supports the claim"
+      },
+      {
+        input: "Ticket B changes only one fact: the order arrived 41 days ago.",
+        method: "A weak trace repeats the same approval steps and keeps the same answer.",
+        evidence: "The trace ignored the only fact that should have changed the decision.",
+        result: "Exposes trace failure"
+      }
+    ]
+  },
+  "tool-cost": {
+    title: "Fixture: agent decides whether to call a price database",
+    rows: [
+      {
+        input: "Low-value refund question; agent is already 92% sure from policy text.",
+        method: "Skip database call.",
+        evidence: "No answer change expected; call adds latency and cost.",
+        result: "Tool is not worth it"
+      },
+      {
+        input: "High-value contract renewal; local record is stale and customer tier changes pricing.",
+        method: "Call database before answering.",
+        evidence: "Tool result can change the decision and prevent a costly wrong quote.",
+        result: "Tool is worth it"
+      }
+    ]
+  },
+  artifact: {
+    title: "Fixture: generated dashboard review",
+    rows: [
+      {
+        input: "The written answer says the dashboard saves filters between sessions.",
+        method: "Text-only judge reads the explanation.",
+        evidence: "Explanation mentions saved state, but no browser action is run.",
+        result: "Weak pass"
+      },
+      {
+        input: "Open dashboard, choose filters, refresh, inspect saved state.",
+        method: "Artifact checker runs the user path.",
+        evidence: "The filter resets after refresh.",
+        result: "Real failure found"
+      }
+    ]
+  },
+  proxy: {
+    title: "Fixture: support bot optimized for quick resolution score",
+    rows: [
+      {
+        input: "Before training, high score usually means the customer issue was solved.",
+        method: "Compare score with human audit.",
+        evidence: "Score and true resolution move together.",
+        result: "Score is usable"
+      },
+      {
+        input: "After training, bot closes tickets with polite summaries before the issue is fixed.",
+        method: "Compare score with reopened-ticket audit.",
+        evidence: "Score rises while reopen rate rises.",
+        result: "Score drift found"
+      }
+    ]
+  },
+  "rare-risk": {
+    title: "Fixture: safety test for rare account-transfer state",
+    rows: [
+      {
+        input: "Random test set has 10,000 ordinary transfer requests.",
+        method: "Run average safety benchmark.",
+        evidence: "No bad case appears because the risky state is almost absent.",
+        result: "False comfort"
+      },
+      {
+        input: "Stress set targets joint accounts, stale device trust, and high-value transfer.",
+        method: "Sample near the risky state.",
+        evidence: "Bad case appears often enough to estimate the rate.",
+        result: "Risk becomes measurable"
+      }
+    ]
+  },
+  context: {
+    title: "Fixture: long claim file with one early decisive note",
+    rows: [
+      {
+        input: "Page 2 says the contract excludes international claims; pages 3-80 repeat normal coverage details.",
+        method: "Keep recent and repeated notes.",
+        evidence: "The exclusion is dropped, so the final answer approves a blocked claim.",
+        result: "Compression failed"
+      },
+      {
+        input: "Same file, but memory keeps notes that can change the final decision.",
+        method: "Keep decision-changing notes.",
+        evidence: "The exclusion survives and the short-context answer matches full context.",
+        result: "Compression holds"
+      }
+    ]
+  },
+  numeric: {
+    title: "Fixture: cheaper serving for a claims model",
+    rows: [
+      {
+        input: "Common claims with short answers.",
+        method: "Run low-precision model.",
+        evidence: "Average accuracy is close to full precision and latency improves.",
+        result: "Looks acceptable"
+      },
+      {
+        input: "Rare claims with repeated dollar calculations and threshold decisions.",
+        method: "Run the same low-precision model.",
+        evidence: "Rounding changes decisions near the threshold.",
+        result: "Deployment risk found"
+      }
+    ]
+  },
+  path: {
+    title: "Fixture: generator for candidate designs",
+    rows: [
+      {
+        input: "Strong guidance toward high-scoring standard designs.",
+        method: "Rank by visible quality score.",
+        evidence: "Outputs look cleaner but all follow the same common shape.",
+        result: "Coverage loss"
+      },
+      {
+        input: "Guidance with a check that named rare valid design families still appear.",
+        method: "Track quality and family coverage together.",
+        evidence: "Cleaner samples keep the rare valid family reachable.",
+        result: "Path is healthier"
+      }
+    ]
+  },
+  ruler: {
+    title: "Fixture: fine-tune that improves one workflow",
+    rows: [
+      {
+        input: "Update improves billing answers on the new training set.",
+        method: "Judge only target-task lift.",
+        evidence: "Lift is positive, but refund-policy regressions are not checked.",
+        result: "Incomplete evidence"
+      },
+      {
+        input: "Same update measured against target lift and protected regression cases.",
+        method: "Use behavior-aware movement check.",
+        evidence: "One update gives lift with low regression damage; another damages protected cases.",
+        result: "Safer update chosen"
+      }
+    ]
+  },
+  cause: {
+    title: "Fixture: whether a training program improved renewals",
+    rows: [
+      {
+        input: "Trained teams and untrained teams have different customer size and region mix.",
+        method: "Compare raw renewal rates.",
+        evidence: "Two cause stories still fit: training helped, or easier customers renewed.",
+        result: "Do not claim cause"
+      },
+      {
+        input: "Compare teams with similar region, size, baseline renewal, and timing.",
+        method: "Hold the relevant background facts fixed.",
+        evidence: "Rival stories are reduced; remaining uncertainty is reported.",
+        result: "Narrower claim allowed"
+      }
+    ]
+  }
+};
 const state = {};
 
 function initState(demo) {
@@ -648,6 +821,19 @@ function renderDemo(id) {
         <div><b>Allowed to change</b><p>${proofDesign[demo.id].change}</p></div>
         <div><b>Failure this exposes</b><p>${proofDesign[demo.id].failure}</p></div>
         <div><b>Client data needed</b><p>${proofDesign[demo.id].clientData}</p></div>
+      </div>
+    </div>
+    <div class="fixture-card">
+      <h3>${fixtureCases[demo.id].title}</h3>
+      <div class="fixture-grid">
+        ${fixtureCases[demo.id].rows.map(row => `
+          <article>
+            <b>Input</b><p>${row.input}</p>
+            <b>Method</b><p>${row.method}</p>
+            <b>Evidence</b><p>${row.evidence}</p>
+            <strong>${row.result}</strong>
+          </article>
+        `).join("")}
       </div>
     </div>
     <div class="contract">
