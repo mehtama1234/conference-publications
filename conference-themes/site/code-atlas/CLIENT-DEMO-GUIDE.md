@@ -10,6 +10,15 @@ Each production-grade client demo needs five parts:
 - Evidence packet: the measured result that supports or falsifies the claim.
 - Adapter boundary: the place where toy data is replaced by client logs, artifacts, tests, or model outputs.
 
+The important rule is that the demo must not merely visualize a paper keyword.
+It must create a small falsifiable test. A client should be able to say:
+
+- "This is the object in my system."
+- "This is the thing I cannot allow to change."
+- "This is the thing I am willing to change."
+- "This is the failure I am worried about."
+- "This evidence would convince me or tell me the method failed."
+
 ## Demo Tiers
 
 Tier 1 is the current public demo: browser-only, first-principles, safe to show in a workshop.
@@ -47,6 +56,17 @@ The client should see the same story in every demo:
 3. Here is what we are allowed to change.
 4. Here is the failure case the paper is designed to catch.
 5. Here is the measured evidence that would prove the method helped.
+
+## Depth Bar
+
+Do not call a demo production-ready until it passes these checks:
+
+- The demo names a concrete object, not an abstract field.
+- The protected thing is measurable before and after the method.
+- The allowed change is small enough that a user understands the comparison.
+- The failure case can actually happen in the client's workflow.
+- The evidence uses client-shaped data, not only hand-picked examples.
+- The result can be wrong. A demo that always says the method works is not proof.
 
 ## First Ten Client Adaptations
 
