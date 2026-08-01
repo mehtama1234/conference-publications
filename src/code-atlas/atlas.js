@@ -509,6 +509,79 @@ const clientPatterns = {
     replace: "Replace the toy assumptions with treatment, outcome, selected background facts, overlap checks, and sensitivity analysis."
   }
 };
+
+const proofDesign = {
+  trace: {
+    object: "The object is the work record between question and answer: scratch notes, tool calls, checked facts, and any intermediate answer the system later depends on.",
+    fixed: "The writing style, answer format, and grading rule stay fixed. Only the task facts change.",
+    change: "Change one important fact in the task. If the middle work is real, it should change exactly where that fact matters.",
+    failure: "A fake proof trace keeps the same shape after the task changes. It may still be fluent, but it is no longer evidence that the answer came from the task.",
+    clientData: "Use paired client tasks that differ by one important fact, saved traces, final answers, and a checker that marks which trace steps used the changed fact."
+  },
+  "tool-cost": {
+    object: "The object is a decision to spend one more action: search, database lookup, code run, review request, or any external step that costs time or money.",
+    fixed: "The business goal and quality bar stay fixed. The agent is still trying to answer the same kind of request.",
+    change: "Change how uncertain the agent is, how expensive the action is, and how often that action gives bad or useless information.",
+    failure: "A weak tool policy calls tools because tools feel safer, even when the added cost is larger than the useful doubt removed.",
+    clientData: "Use logs with before-tool confidence, after-tool correctness, latency, cost, failed calls, and cases where the answer changed because of the tool."
+  },
+  artifact: {
+    object: "The object is the thing the user receives: a page, report, code patch, proof, workflow, citation trail, or saved state.",
+    fixed: "The user claim stays fixed: the artifact is supposed to work or support the stated answer.",
+    change: "Change where the defect lives. Put the defect in a link, state transition, citation, runtime path, or proof step.",
+    failure: "A prose judge passes the explanation while missing the broken object. That is not a small scoring error; it means the judge looked in the wrong place.",
+    clientData: "Use real artifacts, expected behavior, browser runs, tests, citation checks, proof-checker output, and human review only for ambiguous cases."
+  },
+  proxy: {
+    object: "The object is a score after a system has learned that the score controls reward, ranking, payment, or deployment.",
+    fixed: "The real target stays fixed: solved cases, safe users, truthful answers, fewer incidents, or better business outcomes.",
+    change: "Increase pressure on the score and increase the number of ways to get a high score without improving the real target.",
+    failure: "The score rises because the system found the scoring habit, not because the real target improved.",
+    clientData: "Use the client score, independent outcome labels, pre-training and post-training comparisons, audit samples, and examples that score well while failing the target."
+  },
+  "rare-risk": {
+    object: "The object is the low-frequency case that carries high consequence: rare prompt, rare customer state, rare workflow, or rare operating condition.",
+    fixed: "The harm definition stays fixed. A bad case is still bad even if it appears once in many runs.",
+    change: "Change how rare the bad case is and how deliberately the test searches near it.",
+    failure: "Average testing says safe because it spends nearly all of its budget on ordinary cases.",
+    clientData: "Use incident classes, edge-case prompts, production frequencies, stress scenarios, red-team cases, and the number of tests needed to estimate risk."
+  },
+  context: {
+    object: "The object is the remembered record that future work can still use: conversation turns, document facts, ticket history, video moments, or audit notes.",
+    fixed: "The answer supported by the full record stays fixed.",
+    change: "Shrink memory and change the rule for choosing what survives.",
+    failure: "Compression becomes rewriting the problem when it drops the quiet fact that later decides the answer.",
+    clientData: "Use long client records, marked decisive facts, compressed records, full-record answers, short-record answers, and disagreement analysis."
+  },
+  numeric: {
+    object: "The object is the deployed computation: number formats, rounding, kernels, memory layout, and the behavior users see after serving.",
+    fixed: "The user-visible behavior stays fixed: decisions, refusals, confidence, long answers, and important rare cases.",
+    change: "Use cheaper numbers, stronger rounding, hardware-specific kernels, or repair passes.",
+    failure: "The average score hides damage because fragile cases are a small share of the test but a large share of real value.",
+    clientData: "Use model versions, quantization settings, hardware traces, latency, memory, full-precision outputs, low-precision outputs, and regression cases."
+  },
+  path: {
+    object: "The object is the route from rough possibility to finished sample: every step that moves the generator toward an image, molecule, plan, or answer.",
+    fixed: "The full family of valid outputs stays fixed, including rare valid kinds.",
+    change: "Change the strength of the steering rule and the correction that keeps rare valid regions reachable.",
+    failure: "The generator makes cleaner-looking outputs by narrowing the route until valid minority cases disappear.",
+    clientData: "Use generated samples, independent validity labels, named output families, rare-mode recall, sample weights, and before/after steering comparisons."
+  },
+  ruler: {
+    object: "The object is a training move and the behavior it changes. The same raw step can touch a forgiving part of the model or a fragile one.",
+    fixed: "Useful existing behavior stays fixed while the target behavior improves.",
+    change: "Change raw update size, how fragile the touched direction is, and whether the trainer notices that fragility.",
+    failure: "A step that looks small by raw size can still damage behavior if it moves through a fragile direction.",
+    clientData: "Use checkpoints, update summaries, target-task lift, regression suites, fragile-case tests, and comparisons between step rules."
+  },
+  cause: {
+    object: "The object is the set of cause stories still compatible with the records and assumptions.",
+    fixed: "The observed records stay fixed. The claim must not say more than those records and assumptions force.",
+    change: "Hold background facts fixed, add a deliberate test, or reduce observation noise.",
+    failure: "The method chooses a single story while another story still explains the same records.",
+    clientData: "Use treatment records, outcomes, background facts, overlap checks, assumed rules, sensitivity tests, and cases where the method should abstain."
+  }
+};
 const state = {};
 
 function initState(demo) {
@@ -565,6 +638,16 @@ function renderDemo(id) {
         <div><b>Client challenge</b><p>${clientPatterns[demo.id].challenge}</p></div>
         <div><b>Reusable proof artifact</b><p>${clientPatterns[demo.id].reuse}</p></div>
         <div><b>Replace with client data</b><p>${clientPatterns[demo.id].replace}</p></div>
+      </div>
+    </div>
+    <div class="proof-card">
+      <h3>First-principles proof design</h3>
+      <div class="proof-grid">
+        <div><b>Real object</b><p>${proofDesign[demo.id].object}</p></div>
+        <div><b>Must stay fixed</b><p>${proofDesign[demo.id].fixed}</p></div>
+        <div><b>Allowed to change</b><p>${proofDesign[demo.id].change}</p></div>
+        <div><b>Failure this exposes</b><p>${proofDesign[demo.id].failure}</p></div>
+        <div><b>Client data needed</b><p>${proofDesign[demo.id].clientData}</p></div>
       </div>
     </div>
     <div class="contract">
