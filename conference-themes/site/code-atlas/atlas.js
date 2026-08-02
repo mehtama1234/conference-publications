@@ -457,6 +457,16 @@ const demos = [
 ];
 
 const clamp = n => Math.max(0, Math.min(100, Math.round(n)));
+
+const courseFrame = {
+  title: "The bigger idea in plain words",
+  body: [
+    "The whole course is about one habit: before trusting a method, ask what real thing it is trying to protect. A model answer, a score, a shorter memory, a cheaper computation, a generated sample, a training update, or a cause claim is not good just because it looks clean. It is good only if the thing people care about still holds when pressure is added.",
+    "That is why every topic is written as a small test. First name the object. Then name what must stay the same. Then change one thing on purpose. Then look for the failure that would fool a shallow check. This avoids slogans. It turns the paper idea into a question a person can inspect.",
+    "The same habit shows up outside AI. In topology, people care about what stays unchanged when a shape is bent or stretched. A coffee mug and a donut are treated as the same kind of shape because each has one hole. The exact distances can change, but the hole count stays. That is the same kind of thinking used here: separate surface change from protected structure. In medicine, the protected thing may be patient outcome. In finance, it may be loss under rare stress. In software, it may be the user path still working. In science, it may be a cause claim that does not say more than the evidence allows."
+  ]
+};
+
 const clientPatterns = {
   trace: {
     challenge: "A client wants to know whether an assistant is actually using case facts or writing a convincing process story after the fact.",
@@ -580,6 +590,49 @@ const proofDesign = {
     change: "Hold background facts fixed, add a deliberate test, or reduce observation noise.",
     failure: "The method chooses a single story while another story still explains the same records.",
     clientData: "Use treatment records, outcomes, background facts, overlap checks, assumed rules, sensitivity tests, and cases where the method should abstain."
+  }
+};
+
+const topicEssays = {
+  trace: {
+    why: "The central question is simple: did the answer come from the case, or did the system write a nice-looking story after it already knew what to say? Middle work matters only when it carries facts forward. If one fact changes and the work does not change where that fact should matter, the work is not evidence. It is only decoration.",
+    applications: "This matters in customer support, legal review, medical triage, homework help, code repair, and any workflow where a person needs to trust the path, not only the final sentence. In topology the matching idea is an invariant: if a shape is bent, the important structure should be tracked. If the claimed structure does not react when the shape's real connection changes, the description is not faithful."
+  },
+  "tool-cost": {
+    why: "The question is not whether tools are impressive. The question is whether one more action removes enough doubt to be worth the time, money, delay, and added ways to fail. A tool call is like asking for a second opinion. Sometimes it saves you from a costly mistake. Sometimes it wastes the user's time while making the system look careful.",
+    applications: "This matters in search agents, database agents, code agents, research assistants, call-center systems, and approval workflows. In finance it is the same as paying for another check before a trade or quote. In medicine it is the same as ordering a test only when the result can change care. In topology and geometry pipelines, it is like deciding whether to run a more expensive shape check only when a cheap check leaves real doubt."
+  },
+  artifact: {
+    why: "The real object is the thing the user receives. If the user receives a page, then the page must be opened. If the user receives code, then the code must run. If the user receives a citation trail, then the cited text must support the claim. Reading a good explanation is not the same as checking the object.",
+    applications: "This matters for generated websites, dashboards, reports, spreadsheets, proofs, data pipelines, notebooks, and contracts. In software, a button that looks right but does nothing is a failure. In topology software, a mesh or shape summary may look plausible while the actual connected pieces, holes, or boundaries are wrong. The checker has to inspect the object at the level where failure can live."
+  },
+  proxy: {
+    why: "A score is a stand-in. It is not the thing itself. The danger begins when a system learns that the stand-in controls reward, ranking, payment, or release. Then the system may learn how to raise the number without improving the real outcome. The number can keep rising while the thing people wanted gets worse.",
+    applications: "This matters in support resolution scores, safety scores, user ratings, sales targets, school grades, hiring screens, search ranking, and health quality measures. In topology, a simple shape score may reward smoothness while destroying a meaningful hole or boundary. In science, a convenient measurement can become harmful if it replaces the actual question."
+  },
+  "rare-risk": {
+    why: "Average testing spends most of its attention on ordinary cases. That is useful for common failures, but it can hide the case that matters most. If harm is rare and costly, the test has to search near the rare case on purpose. Otherwise the system can look safe because the test never visited danger.",
+    applications: "This matters in fraud, medical emergencies, security, high-value transfers, self-driving edge cases, disaster planning, and moderation. In topology, rare cases often live at boundaries: a tiny bridge between regions, a small hole, a near-touching surface, or a shape that almost tears. A good test must include those boundary cases because they decide whether the method really understands the structure."
+  },
+  context: {
+    why: "Compression is not just making a record shorter. It is choosing what future work is allowed to know. A summary is good only if it keeps the fact that can change the later answer. If it drops the quiet decisive fact, it has changed the problem while pretending it only saved space.",
+    applications: "This matters in long chats, claim files, patient records, meeting notes, legal discovery, video review, research notebooks, and audit logs. In topology and geometry, a compressed shape description must keep the features that decide the answer, such as holes, connected parts, boundary points, and crossings. A small summary is useful only when it preserves the structure needed later."
+  },
+  numeric: {
+    why: "Cheaper numbers are not automatically bad, and precise numbers are not automatically necessary. The real question is whether the cheaper computation keeps the behavior users rely on. Average accuracy can hide damage because rare fragile cases may be a small share of the test but a large share of real value.",
+    applications: "This matters in model serving, embedded devices, robotics, medical scoring, billing calculations, long reasoning, search ranking, and scientific computing. In topology and geometry, rounding can close a tiny gap, open a false hole, merge two nearby parts, or flip an inside/outside decision. The protected thing is not the number format. It is the decision that depends on the numbers."
+  },
+  path: {
+    why: "A generator is not judged only by the final examples that look best. The route used to make those examples matters because it can silently remove valid kinds of output. A method can make samples cleaner by narrowing the road until only the common kind remains.",
+    applications: "This matters in image generation, molecule design, 3D shape design, architecture, manufacturing, robotics plans, and scientific simulation. In topology, this is especially direct: a generator can favor smooth common shapes while losing shapes with rare holes, handles, branches, or disconnected parts. A good method must keep valid families reachable, not only make the easiest family look good."
+  },
+  ruler: {
+    why: "A training update is movement. Raw distance does not tell you whether the movement is safe. One small step can be harmless in a flat area and damaging near a fragile edge. The right ruler measures what the step can break, not only how large the step looks on paper.",
+    applications: "This matters in fine-tuning, reinforcement learning, personalization, model merging, continual learning, and any system that must improve one behavior without losing another. In topology, a small geometric move can change nothing important, or it can create or remove a hole if it crosses the wrong boundary. The useful question is what structure changes, not just how far something moved."
+  },
+  cause: {
+    why: "A cause claim should say only what the evidence forces. If two different stories still explain the same records, choosing one is not insight. It is overclaiming. The honest move is to hold more background facts fixed, run a deliberate test, reduce noise, or admit that the record does not decide.",
+    applications: "This matters in medicine, policy, education, marketing, product changes, training programs, and scientific discovery. In topology, one visible shape can often be produced by different histories of stretching, cutting, gluing, or projection. Seeing the final object is not always enough to know the path that made it. Across fields, the discipline is the same: do not confuse a story that fits with a story that has been forced by evidence."
   }
 };
 
@@ -791,6 +844,10 @@ function renderDemo(id) {
       <h2>${demo.title}</h2>
       <p class="summary">${demo.summary}</p>
     </div>
+    <section class="course-frame">
+      <h3>${courseFrame.title}</h3>
+      ${courseFrame.body.map(paragraph => `<p>${paragraph}</p>`).join("")}
+    </section>
     <div class="explain">
       <section>
         <h3>Concept in plain words</h3>
@@ -805,6 +862,12 @@ function renderDemo(id) {
         <p>${demo.demoPoint}</p>
       </section>
     </div>
+    <section class="topic-essay">
+      <h3>Why this matters in the real world</h3>
+      <p>${topicEssays[demo.id].why}</p>
+      <h3>Where the same idea appears</h3>
+      <p>${topicEssays[demo.id].applications}</p>
+    </section>
     <div class="client-card">
       <h3>Reusable client-demo shape</h3>
       <div class="client-grid">

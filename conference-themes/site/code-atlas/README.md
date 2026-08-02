@@ -4,6 +4,21 @@ This folder contains small end-user-friendly demos that mirror the math atlas.
 Each demo is intentionally tiny: it shows the promise, the user-controlled
 knob, the failure case, and the evidence that would prove the idea.
 
+The writing standard is plain and concrete. Each topic should explain:
+
+- the real object being tested,
+- what must stay true,
+- what is allowed to change,
+- what failure a shallow check would miss,
+- why the same idea matters in other fields.
+
+Do not rely on labels such as "robustness," "alignment," "optimization,"
+"topology," or "causality" to carry the explanation. Use everyday words first.
+For topology, say what stays unchanged when a shape is bent or stretched: a
+hole, a connection, a boundary, or an inside-outside relationship. For AI
+systems, say what must stay unchanged when the system is compressed, scored,
+sampled, trained, or asked to use tools.
+
 Open the browser UI:
 
 ```bash
