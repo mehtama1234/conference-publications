@@ -10,7 +10,8 @@ const courseFiles = [
   ["sample-making-paths", "chapters/sample-making-paths.md"],
   ["movement-rulers", "chapters/movement-rulers.md"],
   ["same-evidence-cause-stories", "chapters/same-evidence-cause-stories.md"],
-  ["workbook", "WORKBOOK.md"]
+  ["workbook", "WORKBOOK.md"],
+  ["proof-packets", "PROOF-PACKETS.md"]
 ];
 
 function escapeHtml(text) {
@@ -29,6 +30,7 @@ function inlineMarkdown(text) {
 function courseHref(href) {
   if (href === "COURSE-MAP.md") return "course.html#course-map";
   if (href === "WORKBOOK.md") return "course.html#workbook";
+  if (href === "PROOF-PACKETS.md") return "course.html#proof-packets";
   const chapter = href.match(/^chapters\/([^#]+)\.md(#.*)?$/);
   if (chapter) return `course.html#${chapter[1]}${chapter[2] || ""}`;
   return href;

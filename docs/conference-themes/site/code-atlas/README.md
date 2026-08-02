@@ -37,12 +37,19 @@ Open the workbook section:
 xdg-open src/code-atlas/course.html#workbook
 ```
 
+Open the proof-packet examples:
+
+```bash
+xdg-open src/code-atlas/course.html#proof-packets
+```
+
 No package install is required. The first batch covers ten subthemes:
 
 Start with [`course.html`](course.html) if you want the end-to-end reading
 path. It renders the course map and ten chapters as a single readable course.
 `COURSE-MAP.md` and `chapters/*.md` are the editable source files behind that
-reader. The workbook section is backed by `WORKBOOK.md`.
+reader. The workbook section is backed by `WORKBOOK.md`; the reusable evidence
+examples are backed by `PROOF-PACKETS.md`.
 
 - `agents-reasoning/trace-information/ragen2-style-trace-dependence`
 - `agents-reasoning/tool-cost-tradeoffs/paretopo-style-tool-value`
@@ -77,6 +84,8 @@ The browser page is the workshop layer. The reusable source layer is:
   the map and chapters.
 - `WORKBOOK.md`: the practical worksheet for applying the same proof shape to
   a new paper, client workflow, or system failure.
+- `PROOF-PACKETS.md`: the client-facing proof-packet template and completed
+  examples for all ten topics.
 - `client-demo-kit.js`: shared scoring and evidence helpers.
 - `fixtures/client-shaped-fixtures.json`: small example records that show the
   data shape each demo expects.
