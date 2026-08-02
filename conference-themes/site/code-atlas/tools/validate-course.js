@@ -159,6 +159,7 @@ function checkSourcePublicParity() {
     "course.js",
     "fixtures/client-shaped-fixtures.json",
     "index.html",
+    "package.json",
     "styles.css",
     ...topics.map(topic => topic.chapter)
   ];

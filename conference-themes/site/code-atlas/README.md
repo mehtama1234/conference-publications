@@ -55,6 +55,12 @@ Validate the course package:
 node src/code-atlas/tools/validate-course.js
 ```
 
+Or from the code-atlas folder:
+
+```bash
+npm run validate --prefix src/code-atlas
+```
+
 No package install is required. The first batch covers ten subthemes:
 
 Start with [`course.html`](course.html) if you want the end-to-end reading
@@ -103,6 +109,7 @@ The browser page is the workshop layer. The reusable source layer is:
   course package.
 - `course-manifest.json`: machine-readable topic and artifact contract for
   tooling.
+- `package.json`: local validation script entry.
 - `tools/validate-course.js`: validation gate for chapters, fixtures, workbook,
   proof packets, links, and source/docs sync.
 - `client-demo-kit.js`: shared scoring and evidence helpers.
