@@ -27,6 +27,10 @@ xdg-open src/code-atlas/index.html
 
 No package install is required. The first batch covers ten subthemes:
 
+Start with [`COURSE-MAP.md`](COURSE-MAP.md) if you want the end-to-end reading
+path. It explains the shared habit behind the demos and links the ten course
+chapters in order.
+
 - `agents-reasoning/trace-information/ragen2-style-trace-dependence`
 - `agents-reasoning/tool-cost-tradeoffs/paretopo-style-tool-value`
 - `evaluation-safety/artifact-native-judging/webdevjudge-style-artifact-check`
@@ -55,6 +59,7 @@ code adapters or deeper reproductions.
 
 The browser page is the workshop layer. The reusable source layer is:
 
+- `COURSE-MAP.md`: the end-to-end learning path across the ten topics.
 - `client-demo-kit.js`: shared scoring and evidence helpers.
 - `fixtures/client-shaped-fixtures.json`: small example records that show the
   data shape each demo expects.
