@@ -7,6 +7,9 @@ reading order, the shared proof shape, and the simple mastery test for the ten
 topics. Keep `COURSE-MAP.md` and `chapters/*.md` as the editable source files
 behind that reader.
 
+Use `WORKBOOK.md` when turning a topic into a client proof. It gives the
+one-page worksheet, worked examples, topic prompts, and adapter checklist.
+
 ## Course-Wide Plain-English Standard
 
 The course should not sound like a list of paper keywords. It should teach one
