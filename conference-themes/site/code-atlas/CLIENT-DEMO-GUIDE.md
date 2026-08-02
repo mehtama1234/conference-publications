@@ -2,9 +2,10 @@
 
 The demos should be reusable proof tools, not one-off visual explainers.
 
-Start with `COURSE-MAP.md` when reviewing the course as a whole. It gives the
+Start with `course.html` when reviewing the course as a whole. It renders the
 reading order, the shared proof shape, and the simple mastery test for the ten
-topics.
+topics. Keep `COURSE-MAP.md` and `chapters/*.md` as the editable source files
+behind that reader.
 
 ## Course-Wide Plain-English Standard
 
