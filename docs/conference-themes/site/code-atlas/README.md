@@ -25,11 +25,18 @@ Open the browser UI:
 xdg-open src/code-atlas/index.html
 ```
 
+Open the readable course page:
+
+```bash
+xdg-open src/code-atlas/course.html
+```
+
 No package install is required. The first batch covers ten subthemes:
 
-Start with [`COURSE-MAP.md`](COURSE-MAP.md) if you want the end-to-end reading
-path. It explains the shared habit behind the demos and links the ten course
-chapters in order.
+Start with [`course.html`](course.html) if you want the end-to-end reading
+path. It renders the course map and ten chapters as a single readable course.
+`COURSE-MAP.md` and `chapters/*.md` are the editable source files behind that
+reader.
 
 - `agents-reasoning/trace-information/ragen2-style-trace-dependence`
 - `agents-reasoning/tool-cost-tradeoffs/paretopo-style-tool-value`
@@ -60,6 +67,8 @@ code adapters or deeper reproductions.
 The browser page is the workshop layer. The reusable source layer is:
 
 - `COURSE-MAP.md`: the end-to-end learning path across the ten topics.
+- `course.html` and `course.js`: the readable public course layer that renders
+  the map and chapters.
 - `client-demo-kit.js`: shared scoring and evidence helpers.
 - `fixtures/client-shaped-fixtures.json`: small example records that show the
   data shape each demo expects.

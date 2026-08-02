@@ -14,7 +14,7 @@ const demos = [
     themePoint: "The theme claim is that an agent's visible reasoning is meaningful only when the middle work is tied to the task facts. The demo tests whether the trace is driven by the problem or by a fixed writing pattern.",
     demoPoint: "Raise task difference and the trace should become more task-dependent. Raise template pressure and it can still look polished while becoming less connected to the task. That gap is the point the paper family is trying to expose.",
     links: [
-      ["Plain-English chapter", "chapters/trace-information.md"],
+      ["Plain-English chapter", "course.html#trace-information"],
       ["Detailed exemplar", "../math-paper-exemplars.html#traceeffort"],
       ["Theme overview", "../math-agents-reasoning.html"]
     ],
@@ -59,7 +59,7 @@ const demos = [
     themePoint: "The theme claim is that agent actions need a value test. A tool call is good only when the answer improves enough to justify the extra time, money, and ways the tool itself can fail.",
     demoPoint: "Raise doubt and the tool becomes more useful. Raise cost or tool risk and the same call can stop being worth it. The demo proves the point by separating answer gain from total value.",
     links: [
-      ["Plain-English chapter", "chapters/tool-cost-tradeoffs.md"],
+      ["Plain-English chapter", "course.html#tool-cost-tradeoffs"],
       ["Detailed exemplar", "../math-paper-exemplars.html#pareto"],
       ["Theme overview", "../math-agents-reasoning.html"]
     ],
@@ -104,7 +104,7 @@ const demos = [
     themePoint: "The theme claim is that evaluation must inspect the thing the user actually gets. For web pages, code, proofs, or documents, the failure often lives inside the artifact, not inside the written explanation.",
     demoPoint: "Switch the artifact case from clean to broken. The text-only judge still scores the story highly, while the artifact checker drops because it checks the working object. That mismatch is the proof.",
     links: [
-      ["Plain-English chapter", "chapters/artifact-native-judging.md"],
+      ["Plain-English chapter", "course.html#artifact-native-judging"],
       ["Detailed exemplar", "../math-paper-exemplars.html#artifact"],
       ["Theme overview", "../math-evaluation-safety.html"]
     ],
@@ -156,7 +156,7 @@ const demos = [
     themePoint: "The theme claim is that a stand-in score is dangerous after training pressure is applied to it. Once the model learns the scoring habit, the score may stop measuring the human target.",
     demoPoint: "Raise training pressure and loophole size. The stand-in score climbs, but the real target can fall. Stronger audits pull the demo back toward the thing people actually wanted.",
     links: [
-      ["Plain-English chapter", "chapters/stand-in-score-drift.md"],
+      ["Plain-English chapter", "course.html#stand-in-score-drift"],
       ["Detailed exemplar", "../math-paper-exemplars.html#proxyoptimization"],
       ["RLVepsR writeup", "../math-paper-exemplars.html#verifier"]
     ],
@@ -201,7 +201,7 @@ const demos = [
     themePoint: "The theme claim is that average tests can hide rare harms. Safety work must deliberately visit the unusual cases that ordinary sampling almost never sees.",
     demoPoint: "Make the bad case rarer and ordinary testing loses sight of it. Increase stress sampling and the bad region becomes visible often enough to measure. That is why rare-risk papers change how examples are chosen.",
     links: [
-      ["Plain-English chapter", "chapters/rare-risk-sampling.md"],
+      ["Plain-English chapter", "course.html#rare-risk-sampling"],
       ["Detailed exemplar", "../math-paper-exemplars.html#rare"],
       ["Theme overview", "../math-evaluation-safety.html"]
     ],
@@ -247,7 +247,7 @@ const demos = [
     themePoint: "The theme claim is that compression is not just making text shorter. It must preserve the facts that can change the later decision.",
     demoPoint: "Lower the memory budget and common-note selection drops the rare clue. Switch to decision-changing selection and the short memory agrees better with the full context. That agreement is the proof.",
     links: [
-      ["Plain-English chapter", "chapters/context-compression.md"],
+      ["Plain-English chapter", "course.html#context-compression"],
       ["Detailed exemplar", "../math-paper-exemplars.html#cache"],
       ["Theme overview", "../math-data-systems.html"]
     ],
@@ -296,7 +296,7 @@ const demos = [
     themePoint: "The theme claim is that cheaper numbers are acceptable only when behavior stays the same where users care. A high average score is not enough.",
     demoPoint: "Lower precision and increase fragile behavior. The average can remain decent while rare behavior breaks. Repair helps only if it protects those fragile cases, which is the real evidence.",
     links: [
-      ["Plain-English chapter", "chapters/numerical-compression.md"],
+      ["Plain-English chapter", "course.html#numerical-compression"],
       ["Detailed exemplar", "../math-paper-exemplars.html#lowbit"],
       ["Theme overview", "../math-data-systems.html"]
     ],
@@ -341,7 +341,7 @@ const demos = [
     themePoint: "The theme claim is that the route used to make samples matters. A generator must improve quality without erasing valid kinds of output.",
     demoPoint: "Raise guidance and sample quality improves. If rare coverage falls, the path is biased because it made one valid region hard to reach. Weight correction is the attempt to keep that region alive.",
     links: [
-      ["Plain-English chapter", "chapters/sample-making-paths.md"],
+      ["Plain-English chapter", "course.html#sample-making-paths"],
       ["Detailed exemplar", "../math-paper-exemplars.html#samplingfunctionals"],
       ["Sample-path overview", "../math-physical-generative.html#samplers"]
     ],
@@ -385,7 +385,7 @@ const demos = [
     themePoint: "The theme claim is that training updates need the right ruler. The same step size can be safe in one direction and damaging in another.",
     demoPoint: "Increase raw step and fragile steepness. Damage rises when the step points through fragile behavior. Ruler awareness lowers damage by judging movement by what it can break, not by raw size alone.",
     links: [
-      ["Plain-English chapter", "chapters/movement-rulers.md"],
+      ["Plain-English chapter", "course.html#movement-rulers"],
       ["Detailed exemplar", "../math-paper-exemplars.html#optimizer"],
       ["Theme overview", "../math-theory-optimization.html#updates"]
     ],
@@ -430,7 +430,7 @@ const demos = [
     themePoint: "The theme claim is that cause claims need more than matching observations. If several cause stories explain the same records, the honest answer must keep that uncertainty.",
     demoPoint: "Hold more background facts fixed or add a stronger assumption, and rival stories separate. With noisy observations and no extra assumption, several stories still fit. The demo proves why the method must avoid overclaiming.",
     links: [
-      ["Plain-English chapter", "chapters/same-evidence-cause-stories.md"],
+      ["Plain-English chapter", "course.html#same-evidence-cause-stories"],
       ["Detailed exemplar", "../math-paper-exemplars.html#distributional"],
       ["Theme overview", "../math-causality-scientific.html"]
     ],
