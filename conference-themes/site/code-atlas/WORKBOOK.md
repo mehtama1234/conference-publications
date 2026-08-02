@@ -6,6 +6,10 @@ Use it after reading the course map and one chapter. The goal is not to repeat
 paper words. The goal is to write a small proof plan for a real workflow in
 plain language.
 
+After filling out the worksheet, turn it into a proof packet using
+[PROOF-PACKETS.md](PROOF-PACKETS.md). The packet is the client-facing evidence
+artifact.
+
 ## The One-Page Proof Worksheet
 
 Fill this out before building a demo or client adapter.
