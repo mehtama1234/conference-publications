@@ -43,6 +43,12 @@ Open the proof-packet examples:
 xdg-open src/code-atlas/course.html#proof-packets
 ```
 
+Validate the course package:
+
+```bash
+node src/code-atlas/tools/validate-course.js
+```
+
 No package install is required. The first batch covers ten subthemes:
 
 Start with [`course.html`](course.html) if you want the end-to-end reading
@@ -86,6 +92,8 @@ The browser page is the workshop layer. The reusable source layer is:
   a new paper, client workflow, or system failure.
 - `PROOF-PACKETS.md`: the client-facing proof-packet template and completed
   examples for all ten topics.
+- `tools/validate-course.js`: validation gate for chapters, fixtures, workbook,
+  proof packets, links, and source/docs sync.
 - `client-demo-kit.js`: shared scoring and evidence helpers.
 - `fixtures/client-shaped-fixtures.json`: small example records that show the
   data shape each demo expects.
@@ -119,3 +127,9 @@ software, medicine, finance, robotics, science, or geometry.
 
 The chapter is the course layer. The browser demo is the workshop layer. The
 fixture file is the client-adapter layer.
+
+## Validation Rule
+
+Run `node src/code-atlas/tools/validate-course.js` before publishing. The
+validator checks that every topic has a chapter, fixture records, proof packet,
+course-reader entry, and matching published-docs copy.

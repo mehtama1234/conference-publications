@@ -76,7 +76,7 @@ changes the answer.
 Next client replacement:
 Use real paired tasks, trace logs, answer diffs, and policy labels.
 
-## Tool-Cost Packet
+## Tool-Cost Tradeoffs Packet
 
 Topic:
 Tool-cost tradeoffs.
@@ -186,7 +186,7 @@ Rejects the score if it rises while the real target falls.
 Next client replacement:
 Use the client metric, independent outcome labels, audits, and gaming examples.
 
-## Rare-Risk Packet
+## Rare-Risk Sampling Packet
 
 Topic:
 Rare-risk sampling.

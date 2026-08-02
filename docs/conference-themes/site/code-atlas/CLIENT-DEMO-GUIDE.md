@@ -11,6 +11,8 @@ Use `WORKBOOK.md` when turning a topic into a client proof. It gives the
 one-page worksheet, worked examples, topic prompts, and adapter checklist.
 Use `PROOF-PACKETS.md` for the final evidence artifact: the template plus ten
 completed examples.
+Run `node src/code-atlas/tools/validate-course.js` before publishing changes to
+make sure the course, fixtures, workbook, packets, and public copy still match.
 
 ## Course-Wide Plain-English Standard
 
