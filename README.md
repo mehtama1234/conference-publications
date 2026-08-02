@@ -14,6 +14,8 @@ Local working area for downloading and analyzing ICML 2026 and ICLR 2026 publica
 - `analysis/per-paper/`: cross-linked per-paper analysis drafts.
 - `analysis/themes/`: theme and subtheme indexes.
 - `analysis/syntheses/`: higher-level synthesis documents.
+- `docs/conference-themes/site/course.html`: plain first-principles course spine
+  across ICML / ICLR themes, including topology and cross-field applications.
 - `scripts/`: resumable acquisition and processing scripts.
 - `logs/`: run logs.
 
