@@ -31,12 +31,18 @@ Open the readable course page:
 xdg-open src/code-atlas/course.html
 ```
 
+Open the workbook section:
+
+```bash
+xdg-open src/code-atlas/course.html#workbook
+```
+
 No package install is required. The first batch covers ten subthemes:
 
 Start with [`course.html`](course.html) if you want the end-to-end reading
 path. It renders the course map and ten chapters as a single readable course.
 `COURSE-MAP.md` and `chapters/*.md` are the editable source files behind that
-reader.
+reader. The workbook section is backed by `WORKBOOK.md`.
 
 - `agents-reasoning/trace-information/ragen2-style-trace-dependence`
 - `agents-reasoning/tool-cost-tradeoffs/paretopo-style-tool-value`
@@ -69,6 +75,8 @@ The browser page is the workshop layer. The reusable source layer is:
 - `COURSE-MAP.md`: the end-to-end learning path across the ten topics.
 - `course.html` and `course.js`: the readable public course layer that renders
   the map and chapters.
+- `WORKBOOK.md`: the practical worksheet for applying the same proof shape to
+  a new paper, client workflow, or system failure.
 - `client-demo-kit.js`: shared scoring and evidence helpers.
 - `fixtures/client-shaped-fixtures.json`: small example records that show the
   data shape each demo expects.
