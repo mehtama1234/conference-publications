@@ -14,6 +14,7 @@ completed examples.
 Use `COURSE-QUALITY-AUDIT.md` to check whether the course still satisfies the
 plain-English, topology, fixture, practice, proof-packet, and publishing
 requirements.
+Use `course-manifest.json` as the topic and artifact list for tools.
 Run `node src/code-atlas/tools/validate-course.js` before publishing changes to
 make sure the course, fixtures, workbook, packets, and public copy still match.
 

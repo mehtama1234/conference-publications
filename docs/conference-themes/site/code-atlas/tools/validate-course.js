@@ -4,19 +4,9 @@ const path = require("path");
 
 const root = path.resolve(__dirname, "..");
 const publicRoot = path.resolve(root, "../../docs/conference-themes/site/code-atlas");
+const manifest = JSON.parse(fs.readFileSync(path.join(root, "course-manifest.json"), "utf8"));
 
-const topics = [
-  ["trace", "trace-information", "Trace Information"],
-  ["tool-cost", "tool-cost-tradeoffs", "Tool-Cost Tradeoffs"],
-  ["artifact", "artifact-native-judging", "Artifact-Native Judging"],
-  ["proxy", "stand-in-score-drift", "Stand-In Score Drift"],
-  ["rare-risk", "rare-risk-sampling", "Rare-Risk Sampling"],
-  ["context", "context-compression", "Context Compression"],
-  ["numeric", "numerical-compression", "Numerical Compression"],
-  ["path", "sample-making-paths", "Sample-Making Paths"],
-  ["ruler", "movement-rulers", "Movement Rulers"],
-  ["cause", "same-evidence-cause-stories", "Same-Evidence Cause Stories"]
-];
+const topics = manifest.topics;
 
 const requiredChapterSections = [
   "## The Big Idea",
@@ -58,8 +48,8 @@ function countMatches(text, pattern) {
 }
 
 function checkChapters() {
-  for (const [, slug, title] of topics) {
-    const file = `chapters/${slug}.md`;
+  for (const topic of topics) {
+    const { chapter: file, title } = topic;
     assert(exists(file), `missing chapter ${file}`);
     if (!exists(file)) continue;
     const text = read(file);
@@ -85,10 +75,10 @@ function checkCourseMapAndRenderer() {
   assert(courseHtml.includes('href="#workbook"'), "course.html missing workbook link");
   assert(courseHtml.includes('href="#proof-packets"'), "course.html missing proof-packets link");
   assert(courseHtml.includes('href="#quality-audit"'), "course.html missing quality-audit link");
-  for (const [, slug] of topics) {
-    assert(map.includes(`chapters/${slug}.md`), `COURSE-MAP missing ${slug}`);
-    assert(course.includes(`["${slug}", "chapters/${slug}.md"]`), `course.js missing ${slug}`);
-    assert(courseHtml.includes(`href="#${slug}"`), `course.html missing nav ${slug}`);
+  for (const topic of topics) {
+    assert(map.includes(topic.chapter), `COURSE-MAP missing ${topic.slug}`);
+    assert(course.includes(`["${topic.slug}", "${topic.chapter}"]`), `course.js missing ${topic.slug}`);
+    assert(courseHtml.includes(`href="#${topic.slug}"`), `course.html missing nav ${topic.slug}`);
   }
 }
 
@@ -103,8 +93,8 @@ function checkWorkbookAndPackets() {
   for (const field of packetFields) {
     assert(packets.includes(field), `PROOF-PACKETS missing field ${field}`);
   }
-  for (const [, , title] of topics) {
-    const heading = `## ${title} Packet`;
+  for (const topic of topics) {
+    const heading = `## ${topic.packet_heading}`;
     assert(packets.includes(heading), `PROOF-PACKETS missing ${heading}`);
   }
   assert(countMatches(packets, /^## .* Packet$/gm) === 10, "PROOF-PACKETS should have 10 completed packets");
@@ -116,14 +106,14 @@ function checkWorkbookAndPackets() {
 function checkFixtures() {
   const fixturePath = path.join(root, "fixtures/client-shaped-fixtures.json");
   const fixtures = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
-  for (const [id] of topics) {
-    assert(Boolean(fixtures[id]), `fixtures missing ${id}`);
-    if (!fixtures[id]) continue;
-    assert(Array.isArray(fixtures[id].records), `fixtures ${id} missing records`);
-    assert(fixtures[id].records.length >= 2, `fixtures ${id} needs at least two records`);
-    for (const [index, record] of fixtures[id].records.entries()) {
+  for (const topic of topics) {
+    assert(Boolean(fixtures[topic.id]), `fixtures missing ${topic.id}`);
+    if (!fixtures[topic.id]) continue;
+    assert(Array.isArray(fixtures[topic.id].records), `fixtures ${topic.id} missing records`);
+    assert(fixtures[topic.id].records.length >= 2, `fixtures ${topic.id} needs at least two records`);
+    for (const [index, record] of fixtures[topic.id].records.entries()) {
       for (const field of ["input", "method", "evidence", "result"]) {
-        assert(Boolean(record[field]), `fixtures ${id} record ${index} missing ${field}`);
+        assert(Boolean(record[field]), `fixtures ${topic.id} record ${index} missing ${field}`);
       }
     }
   }
@@ -131,12 +121,28 @@ function checkFixtures() {
 
 function checkAtlasLinks() {
   const atlas = read("atlas.js");
-  for (const [, slug] of topics) {
-    assert(atlas.includes(`course.html#${slug}`), `atlas.js missing course link for ${slug}`);
+  for (const topic of topics) {
+    assert(atlas.includes(topic.course_anchor), `atlas.js missing course link for ${topic.slug}`);
   }
   assert(read("index.html").includes("course.html#proof-packets"), "index.html missing proof packet link");
   assert(read("README.md").includes("PROOF-PACKETS.md"), "README missing proof packets");
   assert(read("CLIENT-DEMO-GUIDE.md").includes("PROOF-PACKETS.md"), "guide missing proof packets");
+}
+
+function checkManifest() {
+  assert(manifest.version === 1, "manifest version must be 1");
+  assert(manifest.course.reader === "course.html", "manifest reader should be course.html");
+  assert(manifest.course.demo === "index.html", "manifest demo should be index.html");
+  assert(manifest.course.validation === "tools/validate-course.js", "manifest validation path mismatch");
+  assert(topics.length === 10, "manifest should list 10 topics");
+  for (const artifact of Object.values(manifest.artifacts)) {
+    assert(exists(artifact), `manifest artifact missing ${artifact}`);
+  }
+  for (const topic of topics) {
+    assert(topic.course_anchor === `course.html#${topic.slug}`, `manifest anchor mismatch for ${topic.id}`);
+    assert(topic.chapter === `chapters/${topic.slug}.md`, `manifest chapter mismatch for ${topic.id}`);
+    assert(exists(topic.chapter), `manifest chapter missing ${topic.chapter}`);
+  }
 }
 
 function checkSourcePublicParity() {
@@ -148,12 +154,13 @@ function checkSourcePublicParity() {
     "README.md",
     "WORKBOOK.md",
     "atlas.js",
+    "course-manifest.json",
     "course.html",
     "course.js",
     "fixtures/client-shaped-fixtures.json",
     "index.html",
     "styles.css",
-    ...topics.map(([, slug]) => `chapters/${slug}.md`)
+    ...topics.map(topic => topic.chapter)
   ];
   for (const file of files) {
     const source = path.join(root, file);
@@ -165,6 +172,7 @@ function checkSourcePublicParity() {
   }
 }
 
+checkManifest();
 checkChapters();
 checkCourseMapAndRenderer();
 checkWorkbookAndPackets();

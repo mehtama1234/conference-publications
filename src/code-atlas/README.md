@@ -101,6 +101,8 @@ The browser page is the workshop layer. The reusable source layer is:
   examples for all ten topics.
 - `COURSE-QUALITY-AUDIT.md`: requirement-by-requirement quality audit for the
   course package.
+- `course-manifest.json`: machine-readable topic and artifact contract for
+  tooling.
 - `tools/validate-course.js`: validation gate for chapters, fixtures, workbook,
   proof packets, links, and source/docs sync.
 - `client-demo-kit.js`: shared scoring and evidence helpers.
@@ -141,4 +143,4 @@ fixture file is the client-adapter layer.
 
 Run `node src/code-atlas/tools/validate-course.js` before publishing. The
 validator checks that every topic has a chapter, fixture records, proof packet,
-course-reader entry, and matching published-docs copy.
+course-reader entry, manifest entry, and matching published-docs copy.
