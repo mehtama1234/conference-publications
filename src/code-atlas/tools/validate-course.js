@@ -81,8 +81,10 @@ function checkCourseMapAndRenderer() {
   assert(course.includes('["course-map", "COURSE-MAP.md"]'), "course.js missing course map");
   assert(course.includes('["workbook", "WORKBOOK.md"]'), "course.js missing workbook");
   assert(course.includes('["proof-packets", "PROOF-PACKETS.md"]'), "course.js missing proof packets");
+  assert(course.includes('["quality-audit", "COURSE-QUALITY-AUDIT.md"]'), "course.js missing quality audit");
   assert(courseHtml.includes('href="#workbook"'), "course.html missing workbook link");
   assert(courseHtml.includes('href="#proof-packets"'), "course.html missing proof-packets link");
+  assert(courseHtml.includes('href="#quality-audit"'), "course.html missing quality-audit link");
   for (const [, slug] of topics) {
     assert(map.includes(`chapters/${slug}.md`), `COURSE-MAP missing ${slug}`);
     assert(course.includes(`["${slug}", "chapters/${slug}.md"]`), `course.js missing ${slug}`);
@@ -93,6 +95,7 @@ function checkCourseMapAndRenderer() {
 function checkWorkbookAndPackets() {
   const workbook = read("WORKBOOK.md");
   const packets = read("PROOF-PACKETS.md");
+  const audit = read("COURSE-QUALITY-AUDIT.md");
   assert(workbook.includes("## The One-Page Proof Worksheet"), "WORKBOOK missing worksheet");
   assert(workbook.includes("## Client Adapter Checklist"), "WORKBOOK missing adapter checklist");
   assert(workbook.includes("[PROOF-PACKETS.md](PROOF-PACKETS.md)"), "WORKBOOK missing proof packet link");
@@ -105,6 +108,9 @@ function checkWorkbookAndPackets() {
     assert(packets.includes(heading), `PROOF-PACKETS missing ${heading}`);
   }
   assert(countMatches(packets, /^## .* Packet$/gm) === 10, "PROOF-PACKETS should have 10 completed packets");
+  assert(audit.includes("## Requirement 1"), "quality audit missing requirements");
+  assert(audit.includes("## Known Boundary"), "quality audit missing known boundary");
+  assert(countMatches(audit, /^## Requirement \d+:/gm) >= 10, "quality audit should cover at least 10 requirements");
 }
 
 function checkFixtures() {
@@ -136,6 +142,7 @@ function checkAtlasLinks() {
 function checkSourcePublicParity() {
   const files = [
     "CLIENT-DEMO-GUIDE.md",
+    "COURSE-QUALITY-AUDIT.md",
     "COURSE-MAP.md",
     "PROOF-PACKETS.md",
     "README.md",
