@@ -2,6 +2,10 @@
 
 The demos should be reusable proof tools, not one-off visual explainers.
 
+Start with `COURSE-MAP.md` when reviewing the course as a whole. It gives the
+reading order, the shared proof shape, and the simple mastery test for the ten
+topics.
+
 ## Course-Wide Plain-English Standard
 
 The course should not sound like a list of paper keywords. It should teach one
