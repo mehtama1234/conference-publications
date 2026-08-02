@@ -118,6 +118,16 @@ The client should see the same story in every demo:
 4. Here is the failure case the paper is designed to catch.
 5. Here is the measured evidence that would prove the method helped.
 
+The course chapter for each topic lives in `chapters/*.md`. Keep those chapters
+plain enough to read without the browser demo. They should answer:
+
+- Why would a normal person care about this failure?
+- What object is being protected?
+- What surface details are allowed to move?
+- What shallow test would miss the failure?
+- Where does the same pattern appear outside AI, including topology or
+  geometry when the idea is about preserved structure?
+
 The starter fixture file is `fixtures/client-shaped-fixtures.json`. Keep the
 same shape and replace the rows with client records. Each row should be plain
 enough for a non-specialist stakeholder to inspect:

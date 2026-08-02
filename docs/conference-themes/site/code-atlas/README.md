@@ -58,6 +58,7 @@ The browser page is the workshop layer. The reusable source layer is:
 - `client-demo-kit.js`: shared scoring and evidence helpers.
 - `fixtures/client-shaped-fixtures.json`: small example records that show the
   data shape each demo expects.
+- `chapters/*.md`: plain-English course chapters for each topic.
 - `CLIENT-DEMO-GUIDE.md`: the path from toy demo to client adapter.
 - `themes/.../README.md`: per-theme source folders where client fixtures,
   original-author adapters, or deeper reproductions can be added.
@@ -77,3 +78,13 @@ Every demo needs at least two records:
 The point is not to make the method look good. The point is to make the
 failure visible enough that a client can recognize whether the method applies
 to their system.
+
+## Chapter Rule
+
+Every topic should have a chapter that can stand without the slider demo. The
+chapter should explain the everyday problem, the protected thing, the hidden
+failure, the evidence needed, and where the same idea appears in topology,
+software, medicine, finance, robotics, science, or geometry.
+
+The chapter is the course layer. The browser demo is the workshop layer. The
+fixture file is the client-adapter layer.
