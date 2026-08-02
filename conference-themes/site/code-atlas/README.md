@@ -43,6 +43,12 @@ Open the proof-packet examples:
 xdg-open src/code-atlas/course.html#proof-packets
 ```
 
+Open the quality audit:
+
+```bash
+xdg-open src/code-atlas/course.html#quality-audit
+```
+
 Validate the course package:
 
 ```bash
@@ -55,7 +61,8 @@ Start with [`course.html`](course.html) if you want the end-to-end reading
 path. It renders the course map and ten chapters as a single readable course.
 `COURSE-MAP.md` and `chapters/*.md` are the editable source files behind that
 reader. The workbook section is backed by `WORKBOOK.md`; the reusable evidence
-examples are backed by `PROOF-PACKETS.md`.
+examples are backed by `PROOF-PACKETS.md`; the acceptance checklist is backed
+by `COURSE-QUALITY-AUDIT.md`.
 
 - `agents-reasoning/trace-information/ragen2-style-trace-dependence`
 - `agents-reasoning/tool-cost-tradeoffs/paretopo-style-tool-value`
@@ -92,6 +99,8 @@ The browser page is the workshop layer. The reusable source layer is:
   a new paper, client workflow, or system failure.
 - `PROOF-PACKETS.md`: the client-facing proof-packet template and completed
   examples for all ten topics.
+- `COURSE-QUALITY-AUDIT.md`: requirement-by-requirement quality audit for the
+  course package.
 - `tools/validate-course.js`: validation gate for chapters, fixtures, workbook,
   proof packets, links, and source/docs sync.
 - `client-demo-kit.js`: shared scoring and evidence helpers.
