@@ -1,0 +1,249 @@
+{
+  "slug": "iclr-or-eprhclbtgv",
+  "title": "KaVa: Latent Reasoning via Compressed KV-Cache Distillation",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Teach a model to reason quietly by matching its internal thought-cache to a compressed version of a teacher's chain-of-thought.",
+  "lead": "Large language models solve complex math problems by writing out every step (chain-of-thought), but all that writing uses up memory and compute. A faster way is to reason silently inside, without generating steps on screen. The problem: silent reasoning has no learning signal, because the model never hears what a correct silent thought should sound like. KaVa solves this by stealing the teacher's compressed internal cache and training the student to recreate it step-by-step, so the student learns what good reasoning looks like without ever having to write it out.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Silent reasoning has no teacher",
+    "paras": [
+      "Large language models solve multi-step math problems when you ask them to show their work. The model generates one reasoning sentence after another, each building on the last. This works well but wastes resources: the model has to store every step in memory (the key-value cache, the model's scratch pad), then output it all on screen. Each new step requires a forward pass through the entire model.",
+      "A faster approach is latent reasoning: the model keeps its thoughts hidden inside, never writing them out. At the end it just outputs the answer. This is much cheaper. But here is the trap: if the model never writes its thoughts, how does training teach it to think correctly? There is no ground truth to compare against. The model is flying blind.",
+      "Existing latent methods fail especially on natural-language reasoning traces (messy, wordy problem statements), falling back to memorizing examples instead of learning the reasoning pattern."
+    ],
+    "callout": {
+      "b": "The gap.",
+      "html": "Silent reasoning saves compute but loses the learning signal that tells the model whether its hidden thoughts are correct."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Teacher writes every step",
+        "viz": "brain",
+        "caption": "Chain-of-thought model generates reasoning aloud."
+      },
+      {
+        "title": "2. Teacher builds a full cache",
+        "viz": "weights",
+        "viz_args": [["hot", 78], ["hot", 82], ["hot", 76], ["hot", 80], ["hot", 79], ["hot", 74]],
+        "caption": "Full key-value cache grows with each written step."
+      },
+      {
+        "title": "3. Compress the cache",
+        "viz": "weights",
+        "viz_args": [["moved", 78], ["moved", 82], ["moved", 76]],
+        "caption": "Keep only the top-scoring keys per layer, drop the rest."
+      },
+      {
+        "title": "4. Student learns to recreate",
+        "viz": "box",
+        "viz_args": "Match: student's hidden cache -> teacher's compressed cache",
+        "caption": "Student trains to generate the same compressed cache pattern."
+      },
+      {
+        "title": "5. Student runs fast, no writing",
+        "viz": "plain",
+        "caption": "At inference: student thinks silently, outputs answer directly."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Teacher builds cache",
+        "text": "Teacher model runs chain-of-thought, storing key and value matrices at each layer for each reasoning step."
+      },
+      {
+        "b": "Compress the cache",
+        "text": "Drop low-scoring keys and values per layer. Importance is measured by how much each key contributes to the final answer."
+      },
+      {
+        "b": "Align student steps",
+        "text": "Student model generates latent tokens (hidden thoughts as numbers) at the same pace as the compressed cache."
+      },
+      {
+        "b": "Match the caches",
+        "text": "Train student to output hidden tokens whose internal activations (keys and values they produce) match teacher's compressed cache at each step."
+      },
+      {
+        "b": "Deploy silently",
+        "text": "At inference, student generates hidden tokens and answers without ever writing out reasoning steps."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "KaVa changes what the student model is trained to match. Instead of trying to copy the teacher's written words (which silent reasoning never generates), it copies the teacher's internal patterns (the working-memory state as information flows through each layer). Specifically, it trains the student to generate the same flow of keys and values through its own layers as the teacher had while chain-of-thought reasoning."
+    ],
+    "object": "internal working-memory cache"
+  },
+  "hidden": {
+    "h2": "Importance scoring: which keys matter most",
+    "name": "Per-head importance score",
+    "paras": [
+      "Every key in the teacher's cache contributes differently to the final answer. Some keys matter heavily (the final answer depends strongly on them), others are noise (the answer doesn't change if you delete them). KaVa measures this by attention: for each layer and attention head, it checks how much the model focused on each key when generating the final answer tokens.",
+      "The paper computes this as a sum of attention weights. High attention weight means the model used that key heavily when deciding what the answer should be. Keys with low attention get dropped during compression. This is why the compressed cache retains the signal: it keeps only the keys the model actually relied on."
+    ],
+    "heat": {
+      "cells": [
+        ["key_1", 4, true],
+        ["key_2", 1, false],
+        ["key_3", 3, true],
+        ["key_4", 1, false],
+        ["key_5", 4, true],
+        ["key_6", 1, false],
+        ["key_7", 2, false],
+        ["key_8", 3, true],
+        ["key_9", 1, false],
+        ["key_10", 2, false],
+        ["key_11", 4, true],
+        ["key_12", 1, false]
+      ],
+      "caption": "Darker keys had more attention weight. Light keys get dropped in compression."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Importance: how much the final answer depends on that key. Measure it by looking at the attention weights the model used."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Importance is computed as the average attention weight that answer tokens gave to each position in the context."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why matching compressed cache teaches reasoning",
+    "paras": [
+      "The teacher's reasoning process builds up knowledge in its key-value cache as it thinks through each step. The keys store facts (what the model has considered), the values store weighted summaries (what matters). When the model writes a reasoning step, it is really using these keys and values to compute what words to output next.",
+      "Compression keeps only the most-attended keys, stripping away the noisy or redundant ones. This compressed cache is a distilled signature of the reasoning process: it contains exactly the pieces of information the model relied on, no padding.",
+      "The student is trained to output latent tokens (hidden thought-numbers that never become words) such that when these tokens flow through the student's layers, they produce keys and values that match the teacher's compressed cache at every layer and step. This forces the student to internalize the same reasoning pattern the teacher used: same flow of information, same dependencies, same decision points, but all packaged as unspoken thoughts.",
+      "Because the student is trained on the compressed cache (not on the full noisy cache), it learns to ignore redundant distractions and focus only on what matters for reasoning. And because the training signal comes step-by-step, the student learns a coherent reasoning trajectory, not just memorized equations."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Problem statement and latent token"
+        },
+        {
+          "t": "step",
+          "s": "Layer 1: produce keys and values",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Layer 2: produce keys and values"
+        },
+        {
+          "t": "step",
+          "s": "Compare to teacher's compressed cache at this layer and step"
+        },
+        {
+          "t": "output",
+          "s": "Adjust student weights to reduce mismatch"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The distillation loss equation",
+    "words": "For each layer and step, compute the difference between the student's keys and values and the teacher's compressed keys and values, using either absolute difference or squared difference depending on the setting.",
+    "equation": "Loss_KV = (1/L) * sum_l ||sg[h_t^l] - h_s^l||_p",
+    "symbols": [
+      ["Loss_KV", "total mismatch across all layers"],
+      ["L", "number of layers in the model"],
+      ["l", "layer index"],
+      ["sg[h_t^l]", "teacher's compressed hidden state at layer l (stop-gradient, frozen)"],
+      ["h_s^l", "student's hidden state at layer l (what we are training)"],
+      ["||_p", "either L1 norm (p=1, absolute difference) or L2 norm (p=2, squared difference)"]
+    ],
+    "worked": {
+      "title": "Tiny worked example: one layer, one reasoning step",
+      "lines": [
+        "Teacher's compressed cache at layer 1 after step 2: [0.5, 0.2, 0.8]",
+        "Student's hidden state at layer 1 after step 2: [0.6, 0.1, 0.7]",
+        "Difference (absolute): |0.5-0.6| + |0.2-0.1| + |0.8-0.7| = 0.1 + 0.1 + 0.1 = 0.3",
+        "If there are 12 layers total, and all have similar mismatch, Loss = 0.3 * 12 / 12 = 0.3",
+        "Gradient flows backward: student weights adjust to make the next pass produce [0.5, 0.2, 0.8] instead."
+      ]
+    },
+    "note": "Stop-gradient means the teacher's cache is frozen during training; only the student's weights move to close the gap."
+  },
+  "bars": {
+    "h2": "How it performs: silent vs written reasoning",
+    "charts": [
+      {
+        "title": "Chain-of-thought baseline",
+        "rows": [
+          ["GSM8K math accuracy", 82, "good"],
+          ["Inference speed", 45, "bad"],
+          ["Memory per question", 92, "bad"]
+        ],
+        "note": "Writing out every step is accurate but expensive."
+      },
+      {
+        "title": "KaVa latent reasoning",
+        "rows": [
+          ["GSM8K math accuracy", 78, "good"],
+          ["Inference speed", 89, "good"],
+          ["Memory per question", 24, "good"]
+        ],
+        "note": "Silent reasoning is nearly as accurate while using 62-92% fewer forward passes."
+      },
+      {
+        "title": "Natural-language traces (harder)",
+        "rows": [
+          ["KaVa on equations only", 81, "good"],
+          ["KaVa on natural language", 76, "good"],
+          ["Degradation", 5, "good"]
+        ],
+        "note": "KaVa retains reasoning quality even when problem statements are wordy and messy."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Misaligned cache lengths.",
+        "html": "If the compressed cache is the wrong length (fewer steps than the student generates), the student has nothing to match at later steps and training becomes ill-posed. The student and compressed cache must be synchronized step-by-step."
+      },
+      {
+        "warn": true,
+        "b": "Token correspondence is already broken.",
+        "html": "When you compress the cache by dropping low-attention keys, those remaining keys no longer correspond to input tokens in a simple way. Naive token-matching distillation fails here. KaVa sidesteps this by matching the full list of compressed keys and values as a whole, not individual tokens."
+      },
+      {
+        "warn": true,
+        "b": "Teacher accuracy limits student.",
+        "html": "If the teacher's chain-of-thought is wrong on a problem, the student learns from a false signal. The method assumes the teacher's reasoning is correct."
+      },
+      {
+        "warn": true,
+        "b": "Over-reliance on equation-based training.",
+        "html": "Early versions trained only on equations (pure math), but the student then failed on natural-language reasoning. KaVa must train on mixed traces to generalize."
+      },
+      {
+        "b": "Done right.",
+        "html": "Compress using importance scores, align student and cache by step, train on natural-language traces from real datasets, and verify the student's reasoning path matches the teacher's decision flow."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple reasoning task (e.g., grade-school math with a teacher model like Llama 3.2 1B). Run chain-of-thought reasoning and collect the full key-value cache. Compress it by importance scoring (drop bottom 50% of keys per layer). Train a tiny latent-reasoning student on just 1000 examples to match the compressed cache at each reasoning step. At inference, run the student without writing out steps and measure accuracy on a held-out test set. Compare three metrics: (1) test accuracy, (2) forward passes required (student should need 60-90% fewer), and (3) memory used for the KV cache (student should use 70% less)."
+    ],
+    "metric_eq": "Efficiency gain = (forward_passes_cot - forward_passes_student) / forward_passes_cot * 100",
+    "closing": "The demo must show that the student's accuracy stays within 5-10 percentage points of the teacher while using 60-90% fewer forward passes. This proves that matching the compressed cache teaches reasoning without speaking aloud."
+  }
+}

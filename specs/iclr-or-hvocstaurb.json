@@ -1,0 +1,236 @@
+{
+  "slug": "iclr-or-hvocstaurb",
+  "title": "dParallel: Learnable Parallel Decoding for dLLMs",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Speed up diffusion language models by training them to figure out token answers with high certainty in parallel, instead of waiting for sequential refinement steps.",
+  "lead": "Diffusion language models generate tokens (small pieces like words or subwords) by starting with masks and gradually replacing them with guesses that get more confident over many steps. Today they still need nearly as many steps as the sequence length, even though the model could predict all tokens at once. dParallel trains the model to converge to confident predictions much faster, in parallel across all tokens, cutting decoding steps from 256 to 30 and speeding up inference (when the finished model answers a new prompt) 8.5 times on math problems.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Diffusion models waste time on sequential certainty",
+    "paras": [
+      "A diffusion language model works backwards from chaos: it starts with every position masked (hidden), then gradually unmasks each one by predicting what token should go there. On each step, it can predict all masked positions in parallel, but there is a catch: early predictions are wild guesses. The model needs many steps for those guesses to get more and more certain, like someone squinting at a blurry photo and refocusing until the answer snaps into place.",
+      "The naive approach: just let the model keep refining until it is confident everywhere. On a 256-token sequence, this takes 256 (or close to it) decoding steps, even though the model could announce all answers at once. The time for all 256 steps adds up: 8 seconds instead of 1, because each step runs the full neural net."
+    ],
+    "callout": {
+      "b": "The bottleneck",
+      "html": "Tokens converge to certainty one after another. Speed up that convergence and run it in parallel."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Masked start",
+        "viz": "brain",
+        "caption": "All positions hidden at step 1. Model must uncover all."
+      },
+      {
+        "title": "2. Uncertain guesses",
+        "viz": "weights",
+        "viz_args": [["free", 15], ["free", 12], ["free", 18], ["free", 10], ["free", 14], ["free", 11], ["free", 16], ["free", 13], ["free", 12], ["free", 15], ["free", 11], ["free", 14]],
+        "caption": "Early step: guesses are vague, not committed to any token."
+      },
+      {
+        "title": "3. Old way: slow convergence",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["warm", 32], ["warm", 38], ["free", 18], ["free", 16], ["free", 20], ["free", 14], ["free", 12], ["free", 15], ["free", 13], ["free", 14], ["free", 16]],
+        "caption": "After many steps, a few tokens are certain. Others still guessing."
+      },
+      {
+        "title": "4. New way: forced certainty",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["hot", 68], ["hot", 72], ["hot", 65], ["hot", 70], ["warm", 45], ["warm", 42], ["warm", 48], ["warm", 38], ["warm", 44], ["warm", 40], ["warm", 46]],
+        "caption": "Training pushes all tokens to certainty fast. Fewer steps needed."
+      },
+      {
+        "title": "5. Result: 8 times faster",
+        "viz": "box",
+        "viz_args": "256 steps -> 30 steps, same answers",
+        "caption": "Model learns to commit to answers in parallel."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Mask tokens randomly",
+        "text": "During training, cover up half the tokens and ask the model to predict them from the other half."
+      },
+      {
+        "b": "Measure entropy",
+        "text": "After each prediction, measure how unsure the model is: high entropy means the prediction is wishy-washy, low entropy means it is committed."
+      },
+      {
+        "b": "Force low entropy",
+        "text": "Add a penalty for high entropy: push the model to make confident guesses, not vague ones."
+      },
+      {
+        "b": "Keep matching the teacher",
+        "text": "At the same time, make sure predictions still match what the original untrained model would have produced (copy its trajectory)."
+      },
+      {
+        "b": "At test time, stop early",
+        "text": "When predictions hit your certainty threshold, stop refining and use those answers. Dramatically fewer steps."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": [
+      "The paper changes the prediction entropy (how confident the model is about each token). During standard training, the model just tries to guess the masked tokens. Here, it trains specifically to make high-confidence guesses early, so tokens can be committed without waiting for many refinement steps."
+    ],
+    "object": "prediction entropy"
+  },
+  "hidden": {
+    "h2": "Token entropy: measuring how unsure the model is",
+    "name": "Average entropy of masked token predictions",
+    "paras": [
+      "Entropy is a number between 0 and infinity that measures how vague a prediction is. If the model is 100 percent sure a token is the word banana, entropy is 0. If it is equally unsure between 1000 tokens, entropy is very high. The model predicts a probability for each possible token; entropy sums those probabilities with logarithms to give a single number: higher means fuzzier.",
+      "The paper uses entropy as a training signal: it measures the average entropy across all masked positions, then penalizes the model for high entropy. The goal is to make the model produce predictions where the probability is sharply peaked on one or two answers, not spread out over many."
+    ],
+    "heat": {
+      "cells": [
+        ["step1", 4, false],
+        ["step2", 4, false],
+        ["step3", 3, false],
+        ["step4", 2, false],
+        ["step5", 1, true],
+        ["step6", 1, true],
+        ["step7", 1, true],
+        ["step8", 1, true],
+        ["step9", 1, false],
+        ["step10", 1, false],
+        ["step11", 2, false],
+        ["step12", 3, false]
+      ],
+      "caption": "Dark means low entropy, sharp predictions. Steps 5-8 reach commitment fast."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Entropy is how spread out the model's guess is. Peaked means one answer dominates. Flat means many answers tie."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Certainty-forcing loss is the average entropy across masked positions at the current step. Minimize this to make tokens commit."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why forcing certainty speeds up decoding",
+    "paras": [
+      "Here is the causal chain: diffusion models unmask tokens step by step. Each step, every masked position gets a new prediction. If the model is uncertain (high entropy), that position stays masked for the next step. If it is confident (low entropy), mark it unmasked. Under normal training, certainty spreads slowly: a few tokens converge per step, and the tail tokens take many steps to commit. That is why 256 tokens need 256 decoding steps.",
+      "dParallel breaks this by training the model to produce high-certainty predictions right away. The training loss has two parts: (1) stay consistent with the original model (copy its learning trajectory), and (2) minimize entropy (force sharp predictions). After training, when you run the model at test time with an entropy threshold, all tokens hit certainty much faster. Some tokens converge at step 5, others at step 25; by step 30, almost all are committed. No more waiting for token 250 to finally decide."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Partially masked sequence"
+        },
+        {
+          "t": "step",
+          "s": "Model predicts all masked positions",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Measure entropy of predictions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compare against threshold: commit or remask",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Tokens above threshold are done, others loop"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training formula",
+    "words": "Total loss equals consistency loss plus beta times certainty loss. Consistency loss is how differently the student model predicts from the teacher. Certainty loss is the average entropy (fuzziness) of the predictions on masked tokens.",
+    "equation": "L_total = L_consistency + beta * L_certainty, where L_certainty = mean_entropy(predictions for masked tokens)",
+    "symbols": [
+      ["L_total", "the overall training loss to minimize"],
+      ["L_consistency", "how well the student mimics the teacher model"],
+      ["L_certainty", "average entropy across masked positions"],
+      ["beta", "weight between consistency and certainty (hyperparameter)"],
+      ["entropy", "measure of prediction fuzziness (0 = certain, high = vague)"]
+    ],
+    "worked": {
+      "title": "Tiny example: two tokens",
+      "lines": [
+        "Suppose we mask two tokens and the model predicts: token A has prob 0.8 (word banana) and 0.2 (word apple); token B has prob 0.5 (word cat), 0.3 (dog), 0.2 (bird).",
+        "Entropy of token A: roughly -0.8*log(0.8) - 0.2*log(0.2) = 0.72 bits (fairly certain).",
+        "Entropy of token B: -0.5*log(0.5) - 0.3*log(0.3) - 0.2*log(0.2) = 1.49 bits (very vague, tied between three options).",
+        "Average certainty loss: (0.72 + 1.49) / 2 = 1.1. Training penalizes this by subtracting from total loss.",
+        "If consistency loss was 2.0 and beta is 0.5, then total loss = 2.0 + 0.5 * 1.1 = 2.55. Lower entropy next time means lower total loss."
+      ]
+    },
+    "note": "The model learns to concentrate its probability on one or two answers early, so that entropy threshold at test time stops refinement faster."
+  },
+  "bars": {
+    "h2": "Step reduction and speedup",
+    "charts": [
+      {
+        "title": "Baseline diffusion model",
+        "rows": [
+          ["Math task accuracy", 76, "good"],
+          ["Code task accuracy", 39, "good"],
+          ["Decoding steps needed", 256, "bad"],
+          ["Wall-clock time", 8.0, "bad"]
+        ],
+        "note": "Standard dLLM needs nearly 256 steps to reach high certainty across all tokens."
+      },
+      {
+        "title": "dParallel trained model",
+        "rows": [
+          ["Math task accuracy", 76, "good"],
+          ["Code task accuracy", 40, "good"],
+          ["Decoding steps needed", 30, "good"],
+          ["Wall-clock time", 1.0, "good"]
+        ],
+        "note": "After training with certainty-forcing loss, same accuracy in just 30 steps. Entropy threshold stops refinement early."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Entropy threshold too low.",
+        "html": "If you demand certainty too high (entropy below 0.4), some tokens stop refining before they are correct. Accuracy drops. Need to balance: you want high certainty, but not fake certainty."
+      },
+      {
+        "warn": true,
+        "b": "Weak consistency loss.",
+        "html": "If you do not penalize deviation from the teacher model enough, the student learns to make certain guesses that are wrong. Certainty without accuracy is useless."
+      },
+      {
+        "warn": true,
+        "b": "Only certainty loss, no consistency.",
+        "html": "If you remove the consistency loss and only force high entropy to be low, the model just learns to always predict the same frequent token. No parallelism gain from the ablation study: steps did not drop."
+      },
+      {
+        "b": "Done right.",
+        "html": "Tune beta to balance how much you care about entropy versus trajectory: roughly 0.5 to 1.0. Validate on held-out data. Check that accuracy stays flat while steps drop."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple diffusion language model (or start with a pretrained one). Train it on a held-out math dataset (like GSM8K examples, about 1000 prompts) using the certainty-forcing loss: combine a consistency loss (divergence from the teacher) with an entropy penalty on masked positions. At test time, set an entropy threshold of 0.45 and run inference with early stopping: once each token hits that threshold, do not refine it further. Measure two things: (1) how many decoding steps does the model need on average, (2) what is the accuracy on a test set of problems."
+    ],
+    "metric_eq": "Speedup = original_steps / new_steps; Accuracy = problems_solved_correctly / total_problems",
+    "closing": "The demo must show that speedup is real (3x to 10x fewer steps) without sacrificing accuracy. If accuracy drops by more than 5 percent, tune beta or the entropy threshold."
+  }
+}
