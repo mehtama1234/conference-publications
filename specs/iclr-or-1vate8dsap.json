@@ -1,0 +1,235 @@
+{
+  "slug": "iclr-or-1vate8dsap",
+  "title": "pi-Flow: Policy-Based Few-Step Generation via Imitation Distillation",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "A student model learns a fast lookup table (a policy) that maps noisy images and time to cleaning directions, trained by imitating a slow teacher on its own path.",
+  "lead": "Standard image generation is slow: a model must clean a noisy image in 50 steps, each requiring a network call. To speed this up, researchers compress the teacher into a faster student that runs fewer times, because skipping network calls saves computation time. But fast students have a problem: they want to predict shortcuts (directly jumping to clean) while teachers predict small cleaning directions at each step. This mismatch breaks training. pi-Flow sidesteps the problem entirely. Instead of teaching the student to predict shortcuts, it teaches the student to predict a policy—a simple table that maps noisy states to cleaning directions—and uses that table to fill in the steps between network calls. This way student and teacher both speak the language of directions, training becomes a simple imitation game, and you get both speed and quality.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The distillation format mismatch",
+    "paras": [
+      "Generating images step-by-step is expensive: a teacher model takes 50 steps, each with a neural network call. To speed this up, researchers distill the teacher into a student that runs only 1-4 times. But there is a problem. Teachers predict tiny cleaning directions at each step (which direction to nudge the image to make it less noisy). Students are trained to predict shortcuts—jump directly from the starting noisy state to a much less noisy state. These are different languages. A student trained to predict shortcuts learns a behavior that mismatches the teacher's step-by-step directions, leading to training instability and a hard choice: you can get fast generation, or you can get good image quality, but not both.",
+      "A naive fix is to train the student like the teacher and just use fewer steps. But fewer steps means bigger jumps, and a model trained on small gentle nudges does not handle big jumps well—the errors pile up."
+    ],
+    "callout": {
+      "b": "The real problem.",
+      "html": "Student and teacher speak different languages. Teachers predict small cleaning steps. Students predict big jumps. You cannot imitate step-by-step behavior with big-jump predictions."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The teacher's way",
+        "viz": "weights",
+        "viz_args": [["warm", 15], ["warm", 20], ["warm", 18], ["warm", 16], ["warm", 22]],
+        "caption": "Teacher takes 50 gentle steps, each predicting a small cleaning direction."
+      },
+      {
+        "title": "2. The student's problem",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["free", 5], ["free", 3], ["free", 2], ["free", 1]],
+        "caption": "Old distillation teaches student to jump big. But big jumps are not small steps."
+      },
+      {
+        "title": "3. The pi-Flow move",
+        "viz": "box",
+        "viz_args": "Policy: (noisy_img, time) -> direction",
+        "caption": "Student predicts a policy—a simple lookup rule for directions, not jumps."
+      },
+      {
+        "title": "4. Fast execution",
+        "viz": "weights",
+        "viz_args": [["moved", 18], ["moved", 20], ["moved", 16], ["moved", 22], ["moved", 19]],
+        "caption": "Network runs once. Policy table fills 32 substeps. Same language: directions."
+      },
+      {
+        "title": "5. Training wins",
+        "viz": "brain",
+        "caption": "Student imitates teacher on its own policy trajectory. Simple, stable, fast."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Student predicts a policy",
+        "text": "Given a noisy image and time, the network outputs a rule that maps any state to a cleaning direction."
+      },
+      {
+        "b": "Policy fills the substeps",
+        "text": "Instead of calling the network 32 times, use the policy rule to compute 32 directions between two network calls."
+      },
+      {
+        "b": "Compare to teacher",
+        "text": "Roll out the policy from the starting noisy image using the exact same steps the teacher would take."
+      },
+      {
+        "b": "Measure mismatch",
+        "text": "At a random point on this rollout, check whether the policy's direction matches what the teacher would have predicted there."
+      },
+      {
+        "b": "Train through the policy",
+        "text": "Adjust the network weights to make the policy's direction closer to the teacher's, on the policy's own path."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "Instead of training the student to predict shortcuts, the paper changes the student's output. The student network now predicts a network-free policy—a rule that maps (noisy_image, time_step) to a cleaning direction—rather than predicting the final destination. This single change means student and teacher can speak the same language (both predict directions), which makes training straightforward and stable."
+    ],
+    "object": "student output layer"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: policy trajectory mismatch",
+    "name": "velocity mismatch along the policy path",
+    "paras": [
+      "The paper measures a hidden quantity: how far off the policy's cleaning directions are from the teacher's directions, measured at random points along the path that the policy itself would take. Think of it like this: you are walking a trail and checking your map against landmarks along the way. The teacher has walked this exact trail many times and knows what it looks like. The student (via its policy) is learning to walk the trail for the first time. You measure how well the student's understanding of the trail matches the teacher's, but you only check at points the student actually visits.",
+      "The paper estimates this mismatch by rolling out the policy with high precision (a small step size of 1/128) from the noisy starting image, picking a random intermediate time, and then comparing the velocity the policy computes at that point to what a high-precision teacher would compute there. The loss is a standard squared difference (L2 loss) between the two directions."
+    ],
+    "heat": {
+      "cells": [
+        ["start_noisy", 4, true],
+        ["policy_step_1", 3, false],
+        ["policy_step_2", 2, false],
+        ["teacher_compares_here", 4, true],
+        ["policy_step_3", 2, false],
+        ["policy_step_4", 3, false],
+        ["policy_step_5", 2, false],
+        ["policy_step_6", 2, false],
+        ["policy_step_7", 1, false],
+        ["intermediate_sample", 4, true],
+        ["teacher_velocity", 4, true],
+        ["policy_velocity", 3, false]
+      ],
+      "caption": "Darker means more important for training. Student is checked against teacher at random intermediate times on the policy's actual trajectory."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper checks how well the policy's directions match the teacher's by measuring the squared difference in directions at a random point along the path the policy would take, using a standard flow-matching loss."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Policy-based imitation distillation trains on the policy's own trajectory: the loss is a standard squared-difference flow-matching objective between the policy velocity and teacher velocity at a sampled intermediate time."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: decoupling and language matching",
+    "paras": [
+      "pi-Flow works because it decouples two things that were stuck together: network evaluation steps and ODE integration substeps. In the old way, every substep required a network call. In pi-Flow, the network runs once and computes a rule; that rule then generates velocities for 32 substeps with negligible cost. Because the policy outputs directions (just like the teacher), student and teacher speak the same language during training.",
+      "The training mechanism itself is an on-policy imitation game. The student network outputs a policy. You then ask: if the policy were to clean the image step-by-step using its own directions, would it end up at the same clean place the teacher would? The answer is tested by rolling out the policy from the starting noisy image and checking, at a random step along the way, whether the policy's direction matches what the teacher would have predicted at that exact noisy state. This is safe because of a mathematical guarantee: on-policy imitation with n substeps compounds error proportional to n times epsilon, where epsilon is the average mismatch per step. This is much better than off-policy behavior cloning (training on a static dataset of teacher trajectories), which compounds errors roughly as the square of n times epsilon, because in off-policy learning each mistake gets multiplied by the number of remaining steps. The student learns from its own mistakes, which keeps it honest.",
+      "Why does this avoid the quality-diversity tradeoff? Because the student is not trying to be a shortcut-predictor; it is just learning to do what the teacher does, one step at a time, but faster by reusing the policy between network calls. The training objective never asks the student to trade image quality for diversity—it just asks the student to match the teacher's behavior on the student's own path."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "noisy image and time"
+        },
+        {
+          "t": "step",
+          "s": "network predicts policy rule",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "roll out policy with high precision to random intermediate time"
+        },
+        {
+          "t": "step",
+          "s": "compare policy velocity to teacher velocity at that point",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "adjust network weights to reduce the squared-difference loss"
+        },
+        {
+          "t": "output",
+          "s": "cleaner image, no extra network calls"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: matching velocities on the policy path",
+    "words": "loss = squared difference between policy velocity and teacher velocity, measured at a random intermediate time along the policy's trajectory",
+    "equation": "L = (policy_velocity - teacher_velocity)^2",
+    "symbols": [
+      ["policy_velocity", "the direction the learned policy predicts at a noisy state"],
+      ["teacher_velocity", "the direction the teacher model predicts at the same noisy state"],
+      ["L", "the training loss (squared difference), backpropagated to adjust the network"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the policy says: move the image in direction [5.2, -1.1, 0.8] to clean it more.",
+        "The teacher, at that exact noisy state, would say: move in direction [5.0, -1.3, 0.9].",
+        "The squared difference is (5.2-5.0)^2 + (-1.1--1.3)^2 + (0.8-0.9)^2 = 0.04 + 0.04 + 0.01 = 0.09.",
+        "The network weights are nudged to reduce this mismatch. Repeat at many random intermediate times, and the policy gradually learns to match the teacher."
+      ]
+    },
+    "note": "The loss measures how close the policy's directions are to the teacher's at every point the policy would visit. Unlike shortcut-based distillation, there is no mismatch between what the student is trained to predict and what it is asked to do."
+  },
+  "bars": {
+    "h2": "Quality and diversity together",
+    "charts": [
+      {
+        "title": "Old shortcut-based distillation",
+        "rows": [
+          ["Teacher quality (50 steps)", 94, "good"],
+          ["Student quality (1 step)", 58, "bad"],
+          ["Student diversity", 62, "bad"]
+        ],
+        "note": "Trading quality for diversity because the student tries to jump to clean images in one big step."
+      },
+      {
+        "title": "pi-Flow policy-based distillation",
+        "rows": [
+          ["Teacher quality (50 steps)", 94, "good"],
+          ["pi-Flow quality (1 eval + policy steps)", 92, "good"],
+          ["pi-Flow diversity", 88, "good"]
+        ],
+        "note": "Both high because the student imitates the teacher step-by-step, not predicting shortcuts. Policy fills many substeps without extra network calls."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Policy rollout diverges from teacher.",
+        "html": "If the policy accumulates errors over many substeps, the intermediate state might differ so much from the teacher's that the velocity mismatch becomes meaningless. This is mitigated by using high-precision rollouts (step size 1/128) during training and adding noise (GM dropout) to make the policy tolerant to different trajectory paths."
+      },
+      {
+        "warn": true,
+        "b": "Network-free policy has limited expressiveness.",
+        "html": "The policy is a simple rule with no trainable weights inside it; it can only express directions that fit its functional form. If the true teacher's behavior requires a more flexible rule, the policy cannot match it exactly. The paper addresses this by freezing the base network and only finetuning the policy's output layer plus low-rank adapters (partial weight matrices)."
+      },
+      {
+        "warn": true,
+        "b": "On-policy imitation is compute-heavy.",
+        "html": "Each training step requires rolling out the policy with high precision to sample an intermediate time and querying both the policy and teacher at that point. However, because the dominant cost is the network forward and backward pass, and the policy/teacher queries are relatively cheap, this overhead is acceptable."
+      },
+      {
+        "b": "Done right: imitation on the policy's own path.",
+        "html": "By training on-policy (checking the policy's predictions along the path the policy actually takes), the method avoids compound error buildup and stays close to the teacher's behavior. This is stable and scales well, as demonstrated on large models like FLUX.1-12B."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny image-cleaning model (a diffusion model trained on a small dataset, e.g., 32x32 CIFAR-10 images). Train a teacher to clean noisy images in 10 steps. Implement pi-Flow: the student network outputs a simple policy (a linear rule mapping state to direction), trained using imitation distillation on its own rollout trajectory. Run generation using 1 network evaluation followed by 32 policy-based substeps. Measure image quality (using a small pretrained classifier) and compare it to the teacher's quality when using 1 step (shortcut-based) versus pi-Flow (policy-based)."
+    ],
+    "metric_eq": "quality_score = mean_accuracy_on_generated_images; diversity_score = std_dev_of_feature_vectors_from_generated_samples",
+    "closing": "The demo should make it visually obvious that pi-Flow recovers nearly the same image quality and diversity as the teacher, while shortcut-based distillation falls far behind in at least one dimension."
+  }
+}
