@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-e7jzkzcofa",
+  "title": "Sat3DGen: Street-level 3D from Satellite Images",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "To build realistic street-level 3D scenes from satellite photos, first fix the 3D shapes using gravity constraints and multiple viewpoints, then add textures.",
+  "lead": "Imagine trying to build a toy model city from an aerial photograph. The photo shows rooftops and roads from directly above, but you need to build what people see walking the streets. This viewpoint switch is extreme, the satellite data is sparse, and earlier methods either make crisp buildings but miss details like trees, or generate soft detailed scenes with distorted 3D shapes. Sat3DGen solves this by starting with 3D shapes first and using two concrete tricks: a gravity rule that keeps things standing upright, and training on simulated street views as well as satellite views.",
+  "nav": [["theme-generative-models-diffusion.html","Generative Models & Diffusion"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "The extreme viewpoint gap and sparse data",
+    "paras": [
+      "Current methods face a harsh trade-off. Shape-first pipelines—predict 3D building shapes, then colorize them—create crisp, clean buildings but ignore trees, poles, cars, and ground details. Feed-forward image-to-3D models—process the satellite photo directly into shapes and texture at once—generate rich, diverse scenes but the 3D shapes are soft, distorted, and full of floating fragments. Both fail because satellite images show the world from 1000 meters up (looking straight down), but street-level scenes are what humans see from 2 meters up (looking sideways). This extreme switch in viewpoint, combined with sparse and inconsistent training labels, breaks the 3D shapes.",
+      "A beginner might try: train a neural net on satellite-street pairs and hope it learns the viewpoint transformation. But the model gets confused by the sparse labels (is that blob a building or a shadow?), learns to paint soft, uncertain 3D shapes rather than commit to crisp structures, and produces floating artifacts where the supervision is weakest."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Satellite data is extreme viewpoint away from street photos, sparse in what it supervises, and models trained naively on both views at once output soft, distorted 3D shapes with floating pieces."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The extreme viewpoint gap",
+        "viz": "box",
+        "viz_args": "Satellite straight down; street photos sideways—180 degrees apart",
+        "caption": "Same city, same building, but satellite sees roof, street sees walls."
+      },
+      {
+        "title": "2. Naive method confuses shapes",
+        "viz": "weights",
+        "viz_args": [["soft",12],["uncertain",15],["floating",8],["soft",14],["floating",9],["soft",11],["floating",7],["soft",13],["soft",12],["uncertain",10],["floating",8],["soft",14]],
+        "caption": "Without guidance, neural net paints vague, hovering blobs instead of solid shapes."
+      },
+      {
+        "title": "3. Gravity loss pushes down",
+        "viz": "weights",
+        "viz_args": [["moved",12],["solid",15],["grounded",8],["moved",14],["grounded",9],["solid",11],["grounded",7],["moved",13],["solid",12],["grounded",10],["grounded",8],["moved",14]],
+        "caption": "Gravity rule penalizes density high up, forces shapes to sit on ground."
+      },
+      {
+        "title": "4. Perspective training adds street views",
+        "viz": "box",
+        "viz_args": "Train on both: satellite above + synthetic street panoramas",
+        "caption": "Practice predicting from two angles teaches the model better 3D shape awareness."
+      },
+      {
+        "title": "5. Result: crisp buildings and rich details",
+        "viz": "weights",
+        "viz_args": [["crisp",18],["detail",16],["tree",12],["building",19],["road",14],["crisp",17],["tree",15],["detail",16],["building",18],["crisp",13],["road",14],["detail",17]],
+        "caption": "3D shapes come first and solid; then colors fill in trees, poles, signs accurately."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode the satellite image",
+        "text": "A pretrained visual encoder reads the satellite photo and creates a compact grid of vectors (each vector is just a list of numbers)."
+      },
+      {
+        "b": "Build a 3D feature field",
+        "text": "Expand that grid into a full 3D space of features using tri-plane representation."
+      },
+      {
+        "b": "Apply gravity penalty",
+        "text": "Penalize the model whenever density (opacity) is high far above ground—this enforces upright structures."
+      },
+      {
+        "b": "Render from both viewpoints",
+        "text": "Synthesize panorama images as if standing on the street, and also render as if viewing from satellite angle."
+      },
+      {
+        "b": "Train on both views together",
+        "text": "Compare predicted images to real satellite photos and real street views, guiding the 3D shapes with both angles."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper does not change the overall architecture—it still uses a frozen encoder, tri-plane feature field, and volumetric rendering. Instead, it changes where training looks: not just satellite-to-panorama rendering, but also satellite-to-perspective street views and a new geometric penalty."
+    ],
+    "object": "training objectives and rendering targets"
+  },
+  "hidden": {
+    "h2": "Density distribution: how far above ground",
+    "name": "vertical density profile",
+    "paras": [
+      "The hidden quantity is the vertical density profile—how much opacity (solid stuff) the model puts at each height above ground. In a naive model trained only on satellite images, density spreads randomly throughout space: high in the air, low on the ground, scattered fragments everywhere. In the real world, buildings sit on the ground, vegetation clusters around mid-level, and the sky is empty.",
+      "The paper does not measure this quantity directly in a benchmark, but uses it inside the loss function. The Gravity-based Density Variation Loss compares the computed vertical density profile to a physically plausible profile—heavier near the ground, lighter higher up—and penalizes deviations. This internal measurement steers the model."
+    ],
+    "heat": {
+      "cells": [
+        ["Sky",1,false],
+        ["High",1,false],
+        ["Mid",3,true],
+        ["Buildings",4,true],
+        ["Ground",4,true],
+        ["Below",1,false],
+        ["Air",1,false],
+        ["Trees",3,true],
+        ["Buildings",4,true],
+        ["Streets",2,false],
+        ["Ground",4,true],
+        ["Below",1,false]
+      ],
+      "caption": "Darker shades show where opacity should concentrate. Real scenes are dense at ground and building level, sparse high up."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model learns how much solid stuff to put at each height by being penalized whenever it tries to paint density floating in the air or leaving ground empty."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The Gravity-based Density Variation Loss integrates the predicted density field vertically at each ground position and compares it to an expected distribution that favors structures sitting on ground, enforcing plausible vertical structure."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why 3D-shape-first plus gravity plus perspective training works",
+    "paras": [
+      "Start with the core problem: a neural net trained only on satellite-to-panorama rendering sees the world from one angle only. When the training data is sparse and noisy, it learns soft, uncertain 3D shapes instead of committing to clear structures. Floating artifacts appear where supervision is weakest (high in the air, far from obvious ground targets).",
+      "The paper adds two mechanisms. First, gravity. Every time the model places density (opacity) high above ground, the Gravity-based Density Variation Loss penalizes it hard. This is not a magic constraint—it is a learned preference: the model can place high-altitude density if the rendered image absolutely demands it to match a satellite photo, but there is a strong cost. In practice, buildings naturally sit low, trees cluster mid-height, and artifacts disappear because the cost is too high.",
+      "Second, perspective training. Instead of only asking the model to render a panorama from ground height (a 360-degree street-level photo), the paper also renders narrow perspective views at street angle—what you see looking down a corridor. These perspective views have higher supervision quality: each pixel directly maps to a specific 3D location in the scene (street corners, building edges are unambiguous). Training on both angles means the model sees the 3D shapes from two fundamentally different viewpoints, which forces it to learn a consistent, plausible structure rather than a viewpoint-specific artifact.",
+      "Together, these two changes create a positive feedback loop: 3D shapes improve, rendering accuracy climbs, and the model commits harder to crisp structures because soft, uncertain shapes no longer pass the multi-view test."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Satellite image from 1000m directly above"
+        },
+        {
+          "t": "step",
+          "s": "Encode to 3D feature grid",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Render panorama at street height",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Render narrow perspective street views",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply gravity loss: penalize high-altitude density",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "3D scene: solid buildings, trees, details, no floaters"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The gravity loss formula",
+    "words": "Total training loss equals pixel-matching loss plus perceptual loss plus adversarial loss plus gravity loss plus depth loss, with gravity loss penalizing density at heights far from ground.",
+    "equation": "L_total = L_RGB + lambda_lpips * L_LPIPS + lambda_GAN * L_GAN + lambda_grav * L_grav + lambda_depth * L_depth",
+    "symbols": [
+      ["L_RGB","pixel-by-pixel difference between rendered and real images"],
+      ["L_LPIPS","perceptual loss measuring how human-like the difference is"],
+      ["L_GAN","adversarial loss making rendered images look real"],
+      ["L_grav","gravity loss penalizing density far above ground"],
+      ["L_depth","loss on depth map accuracy"],
+      ["lambda_grav","weight controlling how strong gravity constraint is"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose at ground level, the model renders 50 units of density, and at 20 meters up, it renders 8 units.",
+        "The Gravity loss would penalize that 8 units high up. If lambda_grav = 3.5 and the penalty per unit is proportional to height, that is 3.5 × 8 × (20/10) = 56 units of loss added.",
+        "If the same 8 units were at ground level, penalty would be 3.5 × 8 × 0 = 0.",
+        "Training learns: putting density at ground is free, putting it high costs. So models move density down to ground and building sides, not sky."
+      ]
+    },
+    "note": "The gravity loss acts like a weight pushing down—density wants to sit on ground because that is where the penalty is zero."
+  },
+  "bars": {
+    "h2": "Before and after: 3D shape accuracy and photorealism",
+    "charts": [
+      {
+        "title": "3D shape accuracy (lower RMSE is better)",
+        "rows": [
+          ["Sat2Density++ (prior best)","6.76","bad"],
+          ["Sat3DGen without perspective training","5.80","okay"],
+          ["Sat3DGen full method","5.20","good"]
+        ],
+        "note": "Adding gravity and perspective views reduces 3D shape error by 23%. 3D shapes improve in steps as each mechanism activates: gravity alone cuts 14% error, and adding perspective training cuts another 10%, because each acts on different error sources (gravity suppresses artifacts high up, perspective forces multi-view consistency)."
+      },
+      {
+        "title": "Photorealism (lower FID is better)",
+        "rows": [
+          ["Sat2Density++ (prior best)","40","bad"],
+          ["Sat3DGen without gravity loss","26","okay"],
+          ["Sat3DGen full method","19","good"]
+        ],
+        "note": "Better 3D shapes automatically produce better realism because once the model stops spending computation power on floating artifacts and soft compromises, it can invest that capacity in painting fine detail. Clean 3D shapes also form a more stable foundation for color rendering, reducing the perceptual errors that the FID metric catches."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Gravity weight too high.",
+        "html": "If the penalty for high density is too strong, the model crushes everything to the ground and loses tall trees, power lines, and second-story details. The weight lambda_grav must balance structural plausibility against real diversity."
+      },
+      {
+        "warn": true,
+        "b": "Perspective views poorly rendered.",
+        "html": "If the synthetic street-level views are misaligned to the satellite image, they teach the model bad 3D shapes. The training pipeline must ensure panoramas and perspectives are consistently registered."
+      },
+      {
+        "warn": true,
+        "b": "Satellite data with shadows and cloud.",
+        "html": "Shadows under trees and clouds over buildings look like missing structure to the model. Sparse, noisy satellite images can still confuse the process of predicting 3D shapes even with gravity loss, especially in dense urban forests."
+      },
+      {
+        "b": "Done right.",
+        "html": "When both losses are balanced and training data is clean, the model produces crisp, plausible 3D shapes with detailed trees, poles, and ground features—no floating artifacts and no crushed vegetation."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple 3D scene generator from satellite-street pairs. Train one version with only the panorama view loss (standard approach), and a second with both panorama and perspective losses plus the gravity penalty. For a test satellite image, render the predicted 3D shapes in perspective view—looking down a street at a row of buildings. Measure the vertical distribution of opacity at different heights (ground level, mid-level, high). In the baseline, show spiky random density at all heights with floating fragments. In the full model, show density concentrated at building and ground level, sparse high up, and clean street-level appearance."
+    ],
+    "metric_eq": "floating_artifact_score = density_above_5m_height / total_density; lower is better",
+    "closing": "The demo must make it impossible to miss: perspective training forces the model to learn consistent 3D shapes, and gravity loss keeps that structure grounded. Without both, the model cheats and scatters density everywhere."
+  }
+}
