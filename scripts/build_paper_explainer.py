@@ -58,13 +58,13 @@ def render_comic(c):
         f'<div class="panel"><b>{e(p["title"])}</b>{viz(p.get("viz",""),p.get("viz_args"))}'
         f'<p class="caption">{p["caption"]}</p></div>' for p in c["panels"])
     return (f'<section id="visual-story"><div class="eyebrow">Visual story</div>'
-            f'<h2>{e(c["h2"])}</h2><div class="comic">{panels}</div></section>')
+            f'<h2>{e(c.get("h2",""))}</h2><div class="comic">{panels}</div></section>')
 
 def render_flow(f):
     if not f: return ""
     steps = "".join(f'<div class="step"><b>{e(s["b"])}</b><p>{s["text"]}</p></div>' for s in f["steps"])
     return (f'<section class="visual"><div class="eyebrow">The algorithm as a flow</div>'
-            f'<h2>{e(f["h2"])}</h2><div class="flow">{steps}</div></section>')
+            f'<h2>{e(f.get("h2",""))}</h2><div class="flow">{steps}</div></section>')
 
 def render_heat(h):
     if not h: return ""
@@ -78,7 +78,7 @@ def render_hidden(h):
     reads = "".join(f'<div class="callout"><b>{e(r["b"])}</b> {r["html"]}</div>' for r in h.get("reads",[]))
     reads = f'<div class="grid2">{reads}</div>' if reads else ""
     return (f'<section id="hidden" class="deep"><div class="eyebrow">The hidden quantity</div>'
-            f'<h2>{e(h["h2"])}</h2>'
+            f'<h2>{e(h.get("h2",""))}</h2>'
             f'<div class="box">measured quantity &nbsp;=&nbsp; {e(h["name"])}</div>'
             f'{paras(h.get("paras"))}{render_heat(h.get("heat"))}{reads}</section>')
 
@@ -98,7 +98,7 @@ def render_mechanism(m):
                          for s in v.get("stages",[]))
         vis = f'<div class="pipeline">{stages}</div>'
     return (f'<section id="mechanism" class="visual"><div class="eyebrow">Why it works</div>'
-            f'<h2>{e(m["h2"])}</h2>{paras(m.get("paras"))}{vis}</section>')
+            f'<h2>{e(m.get("h2",""))}</h2>{paras(m.get("paras"))}{vis}</section>')
 
 def render_math(m):
     if not m: return ""
@@ -110,7 +110,7 @@ def render_math(m):
         worked = f'<div class="worked"><b>{e(m["worked"]["title"])}</b>{wl}</div>'
     note = f'<p>{m["note"]}</p>' if m.get("note") else ""
     return (f'<section id="math" class="deep"><div class="eyebrow">Math after the picture</div>'
-            f'<h2>{e(m["h2"])}</h2><p>First in words:</p><div class="equation">{e(m["words"])}</div>'
+            f'<h2>{e(m.get("h2",""))}</h2><p>First in words:</p><div class="equation">{e(m["words"])}</div>'
             f'<p>Then the compact form:</p><div class="equation">{e(m["equation"])}</div>'
             f'<p>Every symbol:</p>{syms}{worked}{note}</section>')
 
@@ -124,21 +124,21 @@ def render_bars(b):
         note = f'<p class="small">{c["note"]}</p>' if c.get("note") else ""
         charts += f'<div class="chart"><h3>{e(c["title"])}</h3>{rows}{note}</div>'
     return (f'<section class="visual"><div class="eyebrow">What the result should look like</div>'
-            f'<h2>{e(b["h2"])}</h2><div class="bars">{charts}</div></section>')
+            f'<h2>{e(b.get("h2",""))}</h2><div class="bars">{charts}</div></section>')
 
 def render_failures(f):
     if not f: return ""
     items = "".join(f'<div class="callout {"warn" if i.get("warn") else ""}"><b>{e(i["b"])}</b> {i["html"]}</div>'
                     for i in f["items"])
     return (f'<section id="failures" class="deep"><div class="eyebrow">What can go wrong</div>'
-            f'<h2>{e(f["h2"])}</h2><div class="grid2">{items}</div></section>')
+            f'<h2>{e(f.get("h2",""))}</h2><div class="grid2">{items}</div></section>')
 
 def render_demo(d):
     if not d: return ""
     eq = f'<div class="equation">{e(d["metric_eq"])}</div>' if d.get("metric_eq") else ""
     close = f'<p>{d["closing"]}</p>' if d.get("closing") else ""
     return (f'<section id="demo" class="deep"><div class="eyebrow">What a runnable demo should prove</div>'
-            f'<h2>{e(d["h2"])}</h2>{paras(d.get("paras"))}{eq}{close}</section>')
+            f'<h2>{e(d.get("h2",""))}</h2>{paras(d.get("paras"))}{eq}{close}</section>')
 
 def render(spec):
     nav = "".join(f'<a href="{e(h)}">{e(l)}</a>' for h,l in spec.get("nav",[]))
@@ -146,12 +146,12 @@ def render(spec):
     prob = spec["problem"]
     cal = f'<div class="callout"><b>{e(prob["callout"]["b"])}</b> {prob["callout"]["html"]}</div>' if prob.get("callout") else ""
     problem = (f'<section id="zero" class="deep"><div class="eyebrow">Zero assumption version</div>'
-               f'<h2>{e(prob["h2"])}</h2>{paras(prob.get("paras"))}{cal}</section>')
+               f'<h2>{e(prob.get("h2",""))}</h2>{paras(prob.get("paras"))}{cal}</section>')
     obj = ""
     if spec.get("object"):
         o = spec["object"]
         obj = (f'<section id="object" class="card"><div class="eyebrow">What the paper changes</div>'
-               f'<h2>{e(o["h2"])}</h2>{paras(o.get("paras"))}'
+               f'<h2>{e(o.get("h2",""))}</h2>{paras(o.get("paras"))}'
                + (f'<div class="box">the object it moves &nbsp;=&nbsp; {e(o["object"])}</div>' if o.get("object") else "") + '</section>')
     body = "".join([problem, render_comic(spec.get("comic")), render_flow(spec.get("flow")), obj,
                     render_hidden(spec.get("hidden")), render_mechanism(spec.get("mechanism")),
