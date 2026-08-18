@@ -21,32 +21,34 @@
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. The starting point",
-        "viz": "brain",
-        "caption": "Jobs arrive with unknown server speeds. You must pick now."
-      },
-      {
-        "title": "2. Naive scheduler sends jobs wrong",
+        "title": "1. Jobs arrive with unknown speeds",
         "viz": "weights",
-        "viz_args": [["wait", 45], ["wait", 62], ["done", 20], ["wait", 55], ["wait", 48]],
-        "caption": "Long queue because you guessed server speeds badly."
+        "viz_args": [["free", 35], ["free", 40], ["free", 38], ["free", 42], ["free", 36]],
+        "caption": "Five jobs waiting. No idea which server is fast or slow."
       },
       {
-        "title": "3. Oracle sends same jobs right",
+        "title": "2. Bad guess: jobs pick wrong servers",
         "viz": "weights",
-        "viz_args": [["done", 18], ["done", 25], ["done", 22], ["done", 28], ["done", 20]],
-        "caption": "Short queue because oracle knows actual speeds."
+        "viz_args": [["wait", 68], ["wait", 72], ["wait", 65], ["wait", 70], ["wait", 68]],
+        "caption": "Your queue swells to 68+ units waiting. You guessed wrong."
       },
       {
-        "title": "4. Queue state misalignment",
+        "title": "3. Oracle picks the right pairs",
+        "viz": "weights",
+        "viz_args": [["done", 12], ["done", 15], ["done", 13], ["done", 14], ["done", 12]],
+        "caption": "Oracle queue stays at 12 units. Perfect knowledge wins."
+      },
+      {
+        "title": "4. The queues have different jobs now",
         "viz": "box",
-        "viz_args": "Your queues have different jobs than oracle queues",
-        "caption": "Comparing them directly is unfair. Need a coupling trick."
+        "viz_args": "Yours has [A,C,E]. Oracle has [B,D,F]. Can't compare.",
+        "caption": "Your early mistakes changed which jobs sit in the queue."
       },
       {
-        "title": "5. Policy-switching queue",
-        "viz": "plain",
-        "caption": "Imagine a fake queue that runs your policy first, then switches to oracle. Now you can compare apples to apples."
+        "title": "5. Switch to oracle partway",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 48], ["done", 10], ["done", 12], ["done", 11]],
+        "caption": "Bridge queue: your rules then switch to oracle. Now fair."
       }
     ]
   },
@@ -55,30 +57,30 @@
     "steps": [
       {
         "b": "Phase 1: Pure exploration",
-        "text": "Pick each server in round-robin order to measure its speed under each job type."
+        "text": "Try each server with different job types in round-robin to measure its true speed."
       },
       {
         "b": "Phase 2: Epsilon-greedy learning",
-        "text": "Pick the server that looks fastest for each job type, with occasional random picks to keep learning."
+        "text": "Pick the server that looks fastest plus occasional random picks to keep gathering hints."
       },
       {
-        "b": "Measure speed using logistic model",
-        "text": "The true speed follows a logistic curve determined by job features and a hidden number unique to each server."
+        "b": "Model speed with a sigmoid curve",
+        "text": "Service speed is not linear: a hidden server preference combines with job features via a sigmoid (S-curve) to set the probability a job finishes in one time step."
       },
       {
-        "b": "Track confidence bounds",
-        "text": "Keep upper and lower confidence bands on each server's speed; pick the server with highest optimistic upper bound."
+        "b": "Track confidence bands on estimates",
+        "text": "Keep upper and lower confidence bounds on each server's hidden preference; pick the pair with the highest optimistic upper bound."
       },
       {
-        "b": "Compare via policy-switching queues",
-        "text": "Imagine a fake queue running your policy then switching to oracle; measure how much longer it is than the oracle queue alone."
+        "b": "Compare using policy-switching queues",
+        "text": "Measure regret using a fake queue: run your policy for T steps, then imagine switching to the oracle. Compare queue lengths between your full path and the oracle full path."
       }
     ]
   },
   "object": {
     "h2": "What changes",
     "paras": [
-      "The paper changes how you pick the next job-server pair. Instead of just guessing which server is fastest, you combine observed data (which pairs actually succeeded fast) with a learned model of how job features affect speed."
+      "The paper changes which job-server pair you pick next. Instead of guessing, you combine observed data (which pairs finished fast) with a learned model of how job features affect each server's speed."
     ],
     "object": "job-server pair selection rule"
   },
@@ -86,8 +88,8 @@
     "h2": "The hidden quantity: server speed under each job type",
     "name": "Logistic service rate per job-server pair",
     "paras": [
-      "The hidden unknown is: how fast does server k actually finish a job with a certain set of traits? The paper models speed as a logistic curve (an S-shaped probability curve) that depends on how well the job traits match a hidden preference stored by each server. In plain words: imagine each server has a hidden preference list for job traits, and a job is fast or slow depending on whether its traits align with that preference.",
-      "The algorithm estimates this hidden preference by watching which job-server pairs succeed (finish in one time step) and which fail (stay in queue). Each success or failure gives a noisy hint about the true preference. The algorithm combines all hints to narrow its guess about the true preference, then uses the optimistic upper guess to make picks."
+      "The unknown is: how fast does server k finish a job with certain traits? The paper models speed using a sigmoid curve (an S-shaped probability curve). Imagine each server has a hidden preference list (a list of numbers, one for each job trait dimension). A job is fast if its trait list aligns with that preference. The alignment score goes through the sigmoid to give the probability the job finishes in one time step.",
+      "The algorithm learns each server's hidden preference by watching: when a job-server pair finishes (success) or stays in queue (failure). Each outcome is a noisy measurement. The algorithm accumulates many measurements, narrows its guess, and then uses an optimistic upper guess to pick the next pair."
     ],
     "heat": {
       "cells": [
@@ -104,74 +106,76 @@
         ["server-4-job-B", 3, false],
         ["server-4-job-C", 2, false]
       ],
-      "caption": "Darker means faster service rate. Marked pairs are the algorithm's next picks."
+      "caption": "Darker means faster service. Marked pairs are the top candidates this round."
     },
     "reads": [
       {
         "b": "Plain reading.",
-        "html": "You learn how fast each server is by trying job-server pairs and watching what happens. Each success gives you a clue about the server's true preference."
+        "html": "You learn how fast each server is by trying job-server pairs and watching what happens. Each success or failure gives you a clue."
       },
       {
         "b": "Paper reading.",
-        "html": "The service rate is a logistic function applied to the dot product of job features and server preference. The algorithm estimates the preference using likelihood-based learning with confidence bounds."
+        "html": "The service rate is sigmoid applied to the dot product of job features and server preference. The algorithm estimates the preference using likelihood-based confidence bounds."
       }
     ]
   },
   "mechanism": {
     "h2": "Why the method works: coupling and regret decomposition",
     "paras": [
-      "The decisive move is the policy-switching queue. You cannot compare your queue directly to the oracle queue at any single moment, because they hold different jobs (you picked differently earlier). Instead, imagine a fake queue that runs your policy for some number of steps, then switches to the oracle for the rest. This fake queue is a bridge between your queue and the oracle queue.",
-      "Using this bridge, you break regret into two parts: short-term (picking the wrong pair now makes one extra job wait) and long-term (that mistake changes which jobs sit in the queue later). The algorithm keeps the gap between your service rate estimates and the oracle's narrowing over time (once you learn a server is slow, you learn it is slow for all job types). The exploration phases ensure you gather enough information on each server before committing to picks that look best so far.",
-      "The regret decays as one over the fourth root of T because your confidence estimates shrink as you accumulate observations, so after the initial pure-exploration phase, your picks get better and better, and new mistakes become rarer."
+      "The decisive move is the policy-switching queue. You cannot compare your queue directly to the oracle queue at any single moment, because they hold different jobs (you picked differently earlier). Instead, imagine a fake queue that runs your policy for T time steps, then imagine a second fake queue running the oracle for T time steps. The queue-length regret is the difference. This coupling idea unlocks a fair comparison.",
+      "Using this bridge, you split regret into two parts: immediate (picking the wrong pair now makes one job wait longer) and delayed (that mistake changes which jobs sit in the queue later, affecting future picks). The algorithm keeps its learned estimates of each server's speed converging toward the truth. As your estimates improve, mistakes become rarer. The pure-exploration phase ensures you gather enough information on each server before you commit to picks that look best so far.",
+      "The regret decays as one over the fourth root of T in the random-context case because your confidence estimates shrink as you accumulate observations, so after the initial phase, your picks improve continuously. In the adversarial-context case, regret grows as the square of the log of T because an adversary can force you to revisit bad beliefs."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
         {
           "t": "input",
-          "s": "Job arrives with traits and current queue state"
+          "s": "New job arrives with trait list (its numbers); read current queue state"
         },
         {
           "t": "step",
-          "s": "Estimate service speed for each server using learned preferences",
+          "s": "For each server, estimate the sigmoid speed using learned preference",
           "hl": true
         },
         {
           "t": "step",
-          "s": "Add optimism bonus to balance exploration and exploitation"
+          "s": "Add optimism bonus to upper confidence bound for exploration"
         },
         {
           "t": "step",
-          "s": "Pick the job-server pair with highest estimated speed"
+          "s": "Pick the job-server pair with highest optimistic speed score"
         },
         {
           "t": "output",
-          "s": "Observe if job finishes; update preference estimates"
+          "s": "Observe result: did job finish? Update server preference estimates"
         }
       ]
     }
   },
   "math": {
     "h2": "The regret equation",
-    "words": "Queue length regret equals the expected difference between your queue length at time T and the oracle queue length at time T. The oracle knows the true service rates and picks optimally. Your regret is bounded by a sum of exploration cost (how many wrong picks you make while learning) plus the gap between your estimated service rates and the truth, weighted by how long jobs stay in the queue.",
-    "equation": "Regret_T = E[ Q(T) - Q*(T) ], where Q(T) is queue length at time T under your policy and Q*(T) is queue length under the oracle policy",
+    "words": "Queue length regret equals the expected difference between your queue length at time T and the oracle queue length at time T. The oracle knows the true service rates and picks optimally. Your regret is bounded by a sum of exploration cost (how many suboptimal picks you make while learning) plus the gap between your estimated service rates and the truth, weighted by how long jobs stay in the queue.",
+    "equation": "Regret_T = E[ Q(T) - Q*(T) ], bounded by O(T^(-1/4)) for random contexts or O(log^2 T) for adversarial",
     "symbols": [
-      ["Regret_T", "cumulative queue length difference over all time steps"],
-      ["Q(T)", "queue length at the end under your learning algorithm"],
-      ["Q*(T)", "queue length at the end under the oracle with known speeds"],
-      ["E[...]", "average over all randomness (exploration, job arrivals, service outcomes)"]
+      ["Regret_T", "cumulative queue-length difference over all time steps"],
+      ["Q(T)", "queue length at time T under your learning algorithm"],
+      ["Q*(T)", "queue length at time T under the oracle with known speeds"],
+      ["E[...]", "average over all randomness"],
+      ["T^(-1/4)", "the rate at which regret shrinks as T grows (random contexts)"],
+      ["log^2 T", "the bound for adversarial contexts (slower decay)"]
     ],
     "worked": {
-      "title": "Worked example with two servers and four jobs",
+      "title": "Worked example: comparing queue lengths",
       "lines": [
-        "Suppose at time T=5 your queue has 12 jobs waiting. The oracle queue has 4 jobs waiting.",
-        "Your regret is 12 - 4 = 8 job-steps of excess wait.",
-        "The algorithm guarantees this regret grows at most like log squared of T (for adversarial contexts) or T to the minus one-fourth (for random contexts).",
-        "For T=10000 rounds: log-squared bound is about log(10000)^2 = 160. The power-law bound is about 10000^(-0.25) = 5.6.",
-        "So for random contexts, the queue barely grows; for adversarial, it grows but logarithmically, not linearly."
+        "At time T=100, your queue has 25 jobs waiting. The oracle has 4 jobs.",
+        "Your queue-length regret so far: 25 - 4 = 21 job-steps of excess wait.",
+        "For random contexts, regret is bounded by about 100^(-0.25) ≈ 0.316 (after scaling by problem settings).",
+        "For adversarial contexts, the bound is log(100)^2 = 9.2^2 ≈ 85 (before scaling).",
+        "The random bound shrinks fast. The adversarial bound grows slowly even under worst-case picks."
       ]
     },
-    "note": "The regret measures the total accumulated penalty from not knowing speeds up front. The bounds shrink over time because your learned estimates get more accurate, so you make fewer mistakes."
+    "note": "The regret measures total accumulated penalty from not knowing speeds up front. Bounds shrink over time because your learned estimates get more accurate, so you make fewer mistakes."
   },
   "bars": {
     "h2": "Queue length under different policies",
@@ -179,20 +183,20 @@
       {
         "title": "Random policy (baseline)",
         "rows": [
-          ["Queue length at T", 145, "bad"],
-          ["Average service time per job", 8.2, "bad"],
+          ["Queue length at round 100", 145, "bad"],
+          ["Average wait time per job", 8.2, "bad"],
           ["Total regret accumulated", 680, "bad"]
         ],
-        "note": "Picking servers at random means many jobs go to slow servers and wait in queue."
+        "note": "Picking servers at random means many jobs go to slow servers and pile up in queue."
       },
       {
         "title": "This paper's algorithm (CQB)",
         "rows": [
-          ["Queue length at T", 28, "good"],
-          ["Average service time per job", 3.1, "good"],
+          ["Queue length at round 100", 28, "good"],
+          ["Average wait time per job", 3.1, "good"],
           ["Total regret accumulated", 84, "good"]
         ],
-        "note": "Learning service rates and using optimism reduces queue length by 81 percent. The overhead is the initial exploration phase."
+        "note": "Learning service rates and using optimism reduces queue length by 81 percent. The overhead is the initial exploration phase, which pays off quickly."
       }
     ]
   },
@@ -202,7 +206,7 @@
       {
         "warn": true,
         "b": "Exploration cost is unavoidable.",
-        "html": "You must try each server on different job types to learn, which means some early jobs go to slow servers. The initial regret cannot be avoided, only managed."
+        "html": "You must try each server on different job types to learn, which means some early jobs go to slow servers. The initial regret cannot be avoided, only managed by keeping the exploration phase short."
       },
       {
         "warn": true,
@@ -211,8 +215,8 @@
       },
       {
         "warn": true,
-        "b": "The logistic model assumption can be wrong.",
-        "html": "If the true service rate does not follow a logistic curve (e.g., if server k is slow for job trait A but fast for job trait A plus a shift), the estimated preferences will be biased and the algorithm will keep picking suboptimally."
+        "b": "The sigmoid model assumption can be wrong.",
+        "html": "If the true service rate does not follow a sigmoid curve (for example, if server k is slow for job trait A but fast for job trait A plus an extra feature), the estimated preferences will be biased and the algorithm keeps picking suboptimally."
       },
       {
         "b": "Done right: the policy-switching queue idea generalizes.",
@@ -223,7 +227,7 @@
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Write a simple simulator with K servers, T time steps, and 20 synthetic job features. For each job, sample a server-specific hidden parameter theta for each server (say, 5-dimensional). The service rate is logistic(x dot theta). Simulate three policies: random picks, a greedy oracle with known theta, and the CQB algorithm. Plot queue length over time for each. The demo must show CQB's queue length tracking the oracle queue closely (not the random queue), especially after the pure-exploration phase ends."
+      "Write a simple simulator with 4 servers, 5000 time steps, and job features (lists of 20 numbers each). For each server, sample a hidden preference list (20 numbers) randomly. The service rate for a job on a server is sigmoid applied to the dot product (sum of element-wise multiplications) of job features and server preference. Simulate three policies: random picks, the oracle with known preferences, and the CQB algorithm. Plot queue length over time for each. The demo must show CQB's queue length staying close to the oracle queue after the pure-exploration phase ends, not close to the random queue."
     ],
     "metric_eq": "Regret_demo = sum over t=1 to T of (queue_length_CQB(t) - queue_length_oracle(t))",
     "closing": "The demo proves that learning service rates while scheduling keeps your queue almost as short as if you knew the rates up front. The regret should decay or stay bounded, not grow linearly over time."
