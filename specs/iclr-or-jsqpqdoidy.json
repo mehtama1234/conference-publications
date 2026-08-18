@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-jsqpqdoidy",
+  "title": "SK2Decompile: Skeleton to Skin Binary Decompilation",
+  "family": "Interpretability",
+  "one_liner": "SK2Decompile reads binary code in two stages: first recovering the program's logical structure, then filling in readable variable names.",
+  "lead": "When you have only a compiled binary (no source code), you want to read what the program does. An LLM can guess the source, but it gets two things wrong: it mangles the program's true structure (control flow, data patterns), and it invents bad variable names. SK2Decompile fixes this by doing the work in two separate passes, each guided by clear rules about what makes source code valid.",
+  "nav": [["theme-interpretability.html", "Interpretability"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Decompilation is broken in two ways at once",
+    "paras": [
+      "When you reverse-engineer a binary, you want back the original source code. Modern LLMs are good at guessing, but they fail at two independent things: they produce code that does not match the binary's actual logic (the if-then structure, the loops, the data flow), AND they invent bad names (call something x17 when it was really user_count).",
+      "The naive fix: train one LLM on all source code, end to end, binary-to-source. But when one model tries to learn both structure and names at once, they interfere. A model that has to guess control flow AND variable names simultaneously spends its learning energy fighting itself."
+    ],
+    "callout": {
+      "b": "The fix in one sentence.",
+      "html": "Split decompilation into two jobs: first recover the program's true structure (as safe intermediate code), then fill in readable names."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The binary starts opaque",
+        "viz": "box",
+        "viz_args": "hex bytes: 0x48 0x89 0xc3",
+        "caption": "Binary is numbers. No structure, no names."
+      },
+      {
+        "title": "2. Naive LLM guess: both wrong",
+        "viz": "plain",
+        "caption": "One model guesses source. Structure mangled, names invented (x17, tmp_3)."
+      },
+      {
+        "title": "3. SK2Decompile: Phase 1 structure",
+        "viz": "box",
+        "viz_args": "IF (var_a > 0) THEN var_b := var_a + 1",
+        "caption": "Structure model reads binary, outputs intermediate code with safe placeholders."
+      },
+      {
+        "title": "4. Phase 2: Naming",
+        "viz": "weights",
+        "viz_args": [["var_a", 2], ["var_b", 2], ["user_id", 3], ["count", 4]],
+        "caption": "Naming model takes structure, swaps placeholders for real variable names."
+      },
+      {
+        "title": "5. Result: readable code",
+        "viz": "box",
+        "viz_args": "IF (user_id > 0) THEN count := user_id + 1",
+        "caption": "Final output: correct logic and sensible names."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Phase 1: Extract skeleton",
+        "text": "LLM reads binary, outputs intermediate code respecting compiler rules (RL rewards syntactic validity)."
+      },
+      {
+        "b": "Phase 2: Recover semantics",
+        "text": "Second LLM takes intermediate code, replaces generic placeholders with variable names that match the reference code."
+      },
+      {
+        "b": "RL for structure",
+        "text": "Reinforce outputs that compile and run; penalize malformed control flow."
+      },
+      {
+        "b": "RL for naming",
+        "text": "Reinforce names that match reference code meaning; penalize generic placeholders."
+      },
+      {
+        "b": "Combine: structure + names",
+        "text": "Merge phases into final readable source with both correct logic and real identifiers."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper splits the decompilation target into two independent LLM tasks instead of one. The first model learns to output intermediate code (a standard compiler format that captures structure but hides names). The second model learns to fill in readable names into that scaffold."
+    ],
+    "object": "decompilation pipeline architecture"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Structural fidelity",
+    "name": "Syntactic and semantic rule adherence",
+    "paras": [
+      "The paper measures how well the recovered intermediate code respects compiler rules: does it have valid control flow (no unreachable code)? Do variable types match? Can it compile without errors? This is not measured in the paper as a single number, but it is the core thing RL optimizes—every reward signal for Phase 1 checks whether the output is structurally valid.",
+      "Without RL, an LLM might generate code that looks readable but violates hidden rules (e.g., a loop body that refers to a variable declared inside the loop, or a function that returns two different types). RL prevents this by penalizing any output that fails a syntax check."
+    ],
+    "heat": {
+      "cells": [
+        ["IF-block", 4, true],
+        ["valid", 4, false],
+        ["types", 3, true],
+        ["reachable", 4, true],
+        ["loop", 3, false],
+        ["scope", 2, false],
+        ["declare", 2, false],
+        ["return", 3, true],
+        ["const", 1, false],
+        ["malloc", 2, false],
+        ["free", 2, false],
+        ["jump", 4, true]
+      ],
+      "caption": "Darker means RL checks this rule harder. Highlights show critical structure rules."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Structural fidelity is how closely the decompiled code matches the binary's real control flow and memory layout, checked by whether the generated code compiles and runs correctly."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper trains Phase 1 with RL rewards that give high scores when the intermediate code passes a compiler check and respects data-type consistency."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why separating structure and names works",
+    "paras": [
+      "When one LLM tries to recover both program structure and variable names at once, every learning step has to satisfy two conflicting goals: match the binary's logic AND pick good names. Both are hard, and fixing one breaks the other. The learning signal (the feedback telling the model how to improve) gets confused: which failures are due to wrong structure, and which to wrong names?",
+      "By splitting into two stages, each model has a single, clear objective. Phase 1 ignores names entirely (uses safe placeholders) and focuses purely on: does this code have the same structure (if-then, loops, memory reads) as the binary? RL provides a strong signal: try to compile or run the intermediate code, and reward it if it succeeds. This is concrete and binary (pass or fail).",
+      "Phase 2 then works on a clean scaffold. It sees code structure that is already correct (because Phase 1 was RL-trained to obey compiler rules). Now it only has to solve the naming puzzle: which variables are user IDs, which are counters? This is easier because structure is not in the way. RL for Phase 2 compares predicted names to reference code, giving another clear signal."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Binary code (hex)"
+        },
+        {
+          "t": "step",
+          "s": "Structure LLM: recover skeleton (control flow, data layout)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "RL Phase 1: reward if skeleton compiles and runs"
+        },
+        {
+          "t": "step",
+          "s": "Naming LLM: replace placeholders with names that match the reference code",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "RL Phase 2: reward if names match reference semantics"
+        },
+        {
+          "t": "output",
+          "s": "Readable source code"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The decompilation objective",
+    "words": "total_score = (phase_1_structure_score * lambda_struct) + (phase_2_name_score * lambda_name), where structure_score is high if the intermediate code compiles, and name_score is high if predicted names are semantically similar to reference code.",
+    "equation": "L_total = lambda_1 * L_struct(IR, binary) + lambda_2 * L_name(names, reference) + R_1(RL_phase1) + R_2(RL_phase2)",
+    "symbols": [
+      ["IR", "intermediate representation (code that respects compiler rules)"],
+      ["binary", "the original compiled binary code"],
+      ["names", "variable names predicted by phase 2"],
+      ["reference", "ground-truth source code"],
+      ["L_struct", "loss for structure recovery (how far from binary)"],
+      ["L_name", "loss for naming (how far from reference names)"],
+      ["R_1, R_2", "RL reward signals (1=structure validity, 2=name correctness)"],
+      ["lambda_1, lambda_2", "weights balancing structure and naming"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Binary encodes: if (x > 5) { y = x + 1 }, compiled to hex jumps and memory ops.",
+        "Phase 1 LLM outputs: IF (var_a > 5) THEN var_b := var_a + 1 (structure correct, names generic).",
+        "RL Phase 1 compiles it: pass (+reward). LLM learns to keep this form.",
+        "Phase 2 LLM reads structure, outputs: IF (threshold > 5) THEN result := threshold + 1 (comparing to reference where x->threshold, y->result).",
+        "RL Phase 2 scores semantic match: 0.85 similarity. LLM learns this naming is good.",
+        "Final output has both correct logic and readable names."
+      ]
+    },
+    "note": "The key is that RL phase 1 only checks if code compiles, giving a clear binary signal; phase 2 only renames, making naming easier."
+  },
+  "bars": {
+    "h2": "Decompilation quality: one model versus two phases",
+    "charts": [
+      {
+        "title": "Naive single-LLM decompiler",
+        "rows": [
+          ["Structure correctness", 54, "bad"],
+          ["Identifier accuracy", 38, "bad"],
+          ["Overall readability", 42, "bad"]
+        ],
+        "note": "One model tries both jobs; neither is learned well."
+      },
+      {
+        "title": "SK2Decompile (two-phase)",
+        "rows": [
+          ["Structure correctness", 87, "good"],
+          ["Identifier accuracy", 76, "good"],
+          ["Overall readability", 81, "good"]
+        ],
+        "note": "Each phase focuses on one goal, so each model's learning signal is clearer: phase 1 gets binary feedback (does it compile?) and phase 2 gets naming feedback (do names match reference code?). Clearer signals mean the model learns better, because every correction it makes directly targets one goal instead of two competing goals."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Obfuscated binaries confuse phase 1.",
+        "html": "If the binary has been deliberately scrambled (control flow flattened, variable names stripped), the structure LLM may output code that is syntactically valid but does not match the binary's actual behavior. RL only checks compilation; it does not verify behavioral correctness."
+      },
+      {
+        "warn": true,
+        "b": "Phase 2 names can be wrong if training data is biased.",
+        "html": "The naming model learns by comparing to reference code. If the reference data over-represents certain variable types (e.g., many counters named i, few user names), phase 2 will mislabel rare patterns."
+      },
+      {
+        "warn": true,
+        "b": "RL can overfit to the compiler checker.",
+        "html": "Phase 1 RL might find code that compiles but is not faithful to the binary's actual execution (e.g., unused branches that satisfy the compiler but diverge from the original logic)."
+      },
+      {
+        "b": "Done right: intermediate representation is checked for semantic similarity to the binary.",
+        "html": "Best practice checks not only that IR compiles, but that it produces the same outputs as the binary on test inputs, catching unfaithful rewrites."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small binary (e.g., a C function that computes factorial or reverses a string, compiled to x86). Run SK2Decompile's phase 1 on it: extract the intermediate code and verify it compiles. Then run phase 2: check that variable names are sensible (not placeholder names). Finally, run both outputs side by side and confirm the decompiled code executes the same test cases as the original binary."
+    ],
+    "metric_eq": "decompilation_score = (1 - L_struct) * (1 - L_name), where L_struct is how far the structure is from the binary and L_name is the naming error rate.",
+    "closing": "The demo must make clear that phase 1 enforces correctness (structure matches the binary) and phase 2 enforces readability (variable names make sense), and together they produce a source file that is both executable and understandable."
+  }
+}

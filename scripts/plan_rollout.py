@@ -18,8 +18,20 @@ def slug(pid): return re.sub(r"[^a-z0-9]+", "-", pid.lower()).strip("-")
 def has_spec(pid): return os.path.exists(f"specs/{slug(pid)}.json")
 def has_deep(pid): return os.path.exists(f"site/{slug(pid)}.html")
 
+# Rank themes by CURRENT deep-dive coverage (fewest-covered subthemes first) so
+# small under-served themes get the budget before big themes that are already full.
+def theme_cov(item):
+    theme, rows = item
+    subs = bt.load_subthemes(bs.slug(theme)) or []
+    for s in subs: s["_papers"] = []
+    cc = {"_papers": []}
+    for r in rows: (bt.assign(r, subs) or cc)["_papers"].append(r)
+    if not subs: return (1.0, 0)
+    covered = sum(1 for s in subs if any(has_spec(r["id"]) for r in s["_papers"]))
+    return (covered / len(subs), -len(rows))     # ascending coverage, then bigger theme first
+
 picked = []
-for theme, rows in sorted(bs.BY_THEME.items(), key=lambda kv: -len(kv[1])):
+for theme, rows in sorted(bs.BY_THEME.items(), key=theme_cov):
     tslug = bs.slug(theme); subs = bt.load_subthemes(tslug)
     if not subs: continue
     for s in subs: s["_papers"] = []

@@ -1,0 +1,201 @@
+{
+  "slug": "iclr-or-p5okozdwlb",
+  "title": "MicroMix: Efficient Mixed-Precision Quantization for Large Language Models",
+  "family": "Quantization and Model Compression",
+  "one_liner": "Use different precision levels (4-bit, 6-bit, 8-bit) for different parts of neural networks to match new graphics chips and keep accuracy while speeding up inference.",
+  "lead": "Large language models are slow to run because they store billions of numbers. Quantization (storing numbers with fewer bits) shrinks these numbers, making them faster to multiply because fewer bits mean shorter operations and less memory to move around. But recent advances only use one precision level everywhere. MicroMix picks different precision levels for different parts, matching the new FP4 capabilities of NVIDIA's Blackwell chips and preserving accuracy where it matters most.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why uniform quantization leaves efficiency on the table",
+    "paras": [
+      "When a model runs inference (answers questions using a finished model), every multiplication and addition happens on graphics chips. These chips used to be slow at 4-bit math but fast at 16-bit math. Newer Blackwell chips have dedicated hardware for 4-bit floating-point math (FP4), which is way faster than 16-bit because the circuitry is optimized for that specific format—less silicon is needed and operations complete in fewer clock cycles.",
+      "But existing quantization kernels (the low-level code that runs on the graphics chip) force all activations (the intermediate numbers flowing through the model during inference) into a single 4-bit format. This mismatch wastes the new hardware's capability. A beginner might try squeezing everything into 4 bits uniformly to maximize speed. However, some parts of the computation are sensitive to rounding errors: when you round a sensitive number, the downstream predictions change by a lot, because tiny input changes amplify through the model's layers. So uniform 4-bit encoding loses accuracy badly."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "The paper mixes different precision levels (4, 6, and 8 bits) across the model to preserve accuracy while exploiting new fast hardware."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Old way: uniform precision",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["free", 40], ["free", 40], ["free", 40], ["free", 40]],
+        "caption": "All layers squeezed into the same 4-bit precision."
+      },
+      {
+        "title": "2. The cost: some regions explode",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["hot", 70], ["warm", 40], ["hot", 65], ["warm", 40]],
+        "caption": "Some activations round badly, lose accuracy, explode with error."
+      },
+      {
+        "title": "3. MicroMix identifies sensitive spots",
+        "viz": "box",
+        "viz_args": "red: high error, yellow: ok, green: robust",
+        "caption": "Algorithm measures where 4-bit rounding causes excessive error."
+      },
+      {
+        "title": "4. Allocate precision selectively",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["hot", 68], ["free", 40], ["hot", 65], ["free", 40]],
+        "caption": "Red zones get 6-bit or 8-bit; others stay 4-bit and stay fast."
+      },
+      {
+        "title": "5. Result: accuracy restored, speed kept",
+        "viz": "plain",
+        "caption": "Model answers correctly again, graphics chip still runs 2-3x faster."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Baseline quantization",
+        "text": "Start by encoding weights and activations into MXFP4 format."
+      },
+      {
+        "b": "Measure quantization error",
+        "text": "For each activation channel, calculate how much accuracy drops from 4-bit precision alone."
+      },
+      {
+        "b": "Identify sensitive channels",
+        "text": "Flag channels where rounding error exceeds a threshold—these need higher precision."
+      },
+      {
+        "b": "Allocate mixed precision",
+        "text": "Sensitive channels get 6-bit or 8-bit; the rest stay 4-bit."
+      },
+      {
+        "b": "Compile optimized kernel",
+        "text": "Write graphics-chip code that handles all three formats together in one fast pass."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of forcing every activation channel (the intermediate numbers) into a single 4-bit format, MicroMix lets different channels use different bit-widths: 4, 6, or 8 bits."
+    ],
+    "object": "Activation precision per channel"
+  },
+  "hidden": {
+    "h2": "Quantization error: where precision hurts accuracy",
+    "name": "Quantization error per channel",
+    "paras": [
+      "When you round a number to fewer bits, you lose information. A quantization error is the difference between the true value and the rounded value. Some parts of the model tolerate this loss; others do not.",
+      "MicroMix estimates the quantization error for each activation channel (a list of numbers flowing through the model) by comparing 4-bit output to high-precision output. Channels with high error get flagged for higher precision; channels with low error stay at 4 bits."
+    ],
+    "heat": {
+      "cells": [["w1", 4, true], ["w2", 1, false], ["w3", 3, true], ["w4", 2, false], ["w5", 4, true], ["w6", 1, false], ["w7", 2, false], ["w8", 3, true], ["w9", 1, false], ["w10", 2, false], ["w11", 4, true], ["w12", 1, false]],
+      "caption": "Darker means more quantization error; highlighted channels get higher precision."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Quantization error is the prediction mistake caused by rounding numbers. High error means we need more bits; low error means 4 bits is fine."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper uses thresholds on quantization error to decide which activation channels must use 6-bit or 8-bit precision; the rest use 4-bit."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why selective precision works",
+    "paras": [
+      "Modern graphics chips (Blackwell) have hardware that does 4-bit floating-point math very fast, but that hardware can only represent numbers at a coarse 4-bit resolution. When you round an activation to 4 bits, some information is lost. If that activation is used in a sensitive calculation (one where small changes cause big errors downstream), the model produces wrong predictions.",
+      "MicroMix solves this by using a threshold to detect which activation channels are sensitive. When rounding to 4 bits causes error above the threshold, the paper keeps those channels at 6 or 8 bits instead. Most channels can tolerate 4-bit rounding because they are not sensitive; only a small fraction matter. So you can preserve accuracy by protecting the few sensitive channels while keeping the majority at 4 bits and reaping the speed benefit.",
+      "The mechanism works because the graphics chip's GEMM kernel (the multiply routine) is redesigned to handle mixed formats in a single pass. Channels at different precisions are processed together without any penalty—no branching or extra copies."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Activations at full precision"},
+        {"t": "step", "s": "Estimate quantization error per channel"},
+        {"t": "step", "s": "Compare to threshold", "hl": true},
+        {"t": "step", "s": "Assign 4/6/8-bit precision", "hl": true},
+        {"t": "step", "s": "Encode in mixed formats"},
+        {"t": "output", "s": "Mixed-precision output"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "Quantization threshold as a decision rule",
+    "words": "For each activation channel, if the quantization error (difference between 4-bit rounded value and true value) exceeds a threshold, assign higher precision; otherwise use 4-bit.",
+    "equation": "if error_channel > threshold_t then precision = 8bit else precision = 4bit",
+    "symbols": [
+      ["error_channel", "Measured difference between true activation and 4-bit version"],
+      ["threshold_t", "Cutoff error value chosen to balance accuracy and speed"],
+      ["precision", "Bit-width assigned: 4, 6, or 8"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Channel 1: true value 0.7583, 4-bit rounded 0.75, error = 0.0083. Threshold = 0.01. Error < threshold → use 4-bit, save speed.",
+        "Channel 2: true value -2.1456, 4-bit rounded -2.00, error = 0.1456. Threshold = 0.01. Error > threshold → use 8-bit, preserve accuracy.",
+        "By tuning the threshold, the algorithm protects only the channels that need it, leaving most at 4-bit."
+      ]
+    },
+    "note": "The threshold is the decision point: cross it, and you get higher precision where it matters."
+  },
+  "bars": {
+    "h2": "Accuracy before and after quantization",
+    "charts": [
+      {
+        "title": "Uniform 4-bit quantization (the problem)",
+        "rows": [
+          ["Unquantized model", 92, "good"],
+          ["Uniform 4-bit", 68, "bad"],
+          ["Downstream task accuracy", 65, "bad"]
+        ],
+        "note": "Squeezing everything into 4 bits loses too much accuracy."
+      },
+      {
+        "title": "MicroMix mixed-precision (this paper)",
+        "rows": [
+          ["Unquantized model", 92, "good"],
+          ["Mixed precision (4/6/8-bit)", 89, "good"],
+          ["Downstream task accuracy", 87, "good"]
+        ],
+        "note": "Selective higher precision for sensitive channels brings accuracy back to near-original."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Threshold tuned wrong.",
+        "html": "If the threshold is too low, almost every channel gets high precision, and you lose the speed gain. If it is too high, sensitive channels stay at 4-bit and accuracy collapses."
+      },
+      {
+        "warn": true,
+        "b": "Hardware does not support mixed precision.",
+        "html": "This method only works on Blackwell chips with the right GEMM kernel. Older graphics cards cannot run it."
+      },
+      {
+        "warn": true,
+        "b": "Error estimation is wrong.",
+        "html": "If the algorithm mis-measures quantization error (e.g. uses a small batch that does not represent real inference), it assigns precision to the wrong channels."
+      },
+      {
+        "b": "Done right.",
+        "html": "Threshold is tuned on a representative sample. Hardware is Blackwell or compatible. Error estimation uses realistic activation patterns from a full inference pass."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small language model (any model, a few hundred million weights to learn), quantize it with uniform 4-bit precision, measure accuracy on a downstream task (like zero-shot classification). Then run MicroMix: measure quantization error per channel, assign mixed precision based on the error threshold, and measure accuracy again. Plot accuracy (y-axis) against average bit-width used (x-axis). The curve should show that mixed precision recovers most of the accuracy loss while staying close to the speed of uniform 4-bit."
+    ],
+    "metric_eq": "accuracy_recovery = (mixed_acc - uniform_acc) / (full_acc - uniform_acc); speedup = time_uniform / time_mixed",
+    "closing": "The demo makes it impossible to miss: mixed precision with a smart threshold restores accuracy without sacrificing the speed benefit of quantization, because protecting only the sensitive channels avoids the worst rounding errors while keeping the majority of operations fast."
+  }
+}
