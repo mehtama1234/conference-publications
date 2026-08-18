@@ -1,0 +1,239 @@
+{
+  "slug": "icml-or-5ls1frqflg",
+  "title": "MIMO-LP: Multiplexing Link Prediction",
+  "family": "Graph & Geometric Learning",
+  "one_liner": "Instead of running message-passing separately for each link prediction query, MIMO-LP layers many queries into one shared computation space so they can reuse work on overlapping neighborhoods.",
+  "lead": "Link prediction means guessing which new edges (connections) will form in a graph. Subgraph methods do this accurately by looking at the local neighborhood around each pair of nodes you want to connect. But they are slow because each prediction forces a fresh round of message-passing (passing information around nearby nodes). MIMO-LP fixes this by running many predictions together in a single pass, letting them share the expensive computation.",
+  "nav": [["theme-graph-geometric-learning.html", "Graph & Geometric Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why is subgraph-based link prediction slow?",
+    "paras": [
+      "Imagine a social network. You want to predict which friendships will happen next. If you look at each node pair in isolation — checking their friends, their friends' friends, and so on — you get accurate predictions because you see the true local pattern. That is the whole appeal of subgraph-based methods.",
+      "But here is the trap: if you want to predict 1,000 friendships at once, the naive approach runs the full neighborhood lookup 1,000 times, even though many of those neighborhoods overlap. You are doing the same arithmetic many times. The computer walks through the friend-of-friend graph over and over for the same nodes. This redundancy kills speed."
+    ],
+    "callout": {
+      "b": "The bottleneck.",
+      "html": "Each prediction query gets its own subgraph and its own message-passing loop, even when many queries overlap in the same neighborhood."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The neighborhood lookup",
+        "viz": "brain",
+        "caption": "To predict a link, you extract the local subgraph around both nodes."
+      },
+      {
+        "title": "2. Separate queries, separate work",
+        "viz": "weights",
+        "viz_args": [["moved", 80], ["free", 20], ["moved", 75], ["free", 25], ["moved", 70]],
+        "caption": "Each query runs its own message-passing pass, recomputing shared neighborhoods."
+      },
+      {
+        "title": "3. The overlap problem",
+        "viz": "box",
+        "viz_args": "Same 5 nodes touched 3 times",
+        "caption": "Identical regions get reprocessed in queries 1, 2, and 3."
+      },
+      {
+        "title": "4. Multiplex queries into one space",
+        "viz": "weights",
+        "viz_args": [["hot", 95], ["warm", 50], ["warm", 55], ["hot", 90], ["warm", 48]],
+        "caption": "MIMO-LP layers queries into shared intermediate values, one forward pass."
+      },
+      {
+        "title": "5. Speedup: shared work done once",
+        "viz": "box",
+        "viz_args": "Same 5 nodes computed once",
+        "caption": "Overlapping neighborhoods are now handled in a single shared computation."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Extract subgraphs",
+        "text": "For each query node pair, pull out its local neighborhood from the full graph."
+      },
+      {
+        "b": "Stack the queries",
+        "text": "Instead of processing them one at a time, concatenate all the subgraph structures into one batch."
+      },
+      {
+        "b": "Run one message-passing pass",
+        "text": "All queries run through the neural network together, nodes exchange information once."
+      },
+      {
+        "b": "Route to shared intermediate space",
+        "text": "Each query's intermediate states are projected into a shared intermediate space to minimize interference."
+      },
+      {
+        "b": "Extract predictions",
+        "text": "Read off the link scores for all queries in parallel from the single shared representation."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how message-passing (the algorithm that exchanges information between neighboring nodes) is scheduled. Instead of doing it sequentially for each query, MIMO-LP does it once for all queries together in a shared computation."
+    ],
+    "object": "Message-passing scheduling"
+  },
+  "hidden": {
+    "h2": "Interference: how much one query scrambles another's computation",
+    "name": "Cross-query interference",
+    "paras": [
+      "When you layer multiple queries into one computation, they share intermediate values (numbers that carry information forward from one node to the next, called embeddings: just lists of numbers that summarize what the model learned about each node). If query A's computation corrupts the shared values, it will mess up query B's answer. The paper calls this interference, and it is the main risk of multiplexing.",
+      "MIMO-LP estimates interference by measuring how much each query's gradients (the learning signals that update the model) collide and cancel each other out. High interference means the queries are fighting each other. The paper uses a gating mechanism — a learned switch that can dial down any query that is interfering badly — to keep interference small even when many queries share the space."
+    ],
+    "heat": {
+      "cells": [
+        ["q1", 4, true],
+        ["q2", 3, false],
+        ["q3", 2, false],
+        ["q4", 1, false],
+        ["q5", 4, false],
+        ["q6", 2, true],
+        ["q7", 3, false],
+        ["q8", 1, false],
+        ["q9", 2, false],
+        ["q10", 4, true],
+        ["q11", 1, false],
+        ["q12", 3, false]
+      ],
+      "caption": "Darker means query A's update corrupts query B's path more. Gates suppress the hot spots."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When many predictions share one computation, they can step on each other's toes, making their answers wrong. A gate can lock down the risky connections."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Cross-query gradient magnitude and signal alignment indicate interference. Learned query-specific masks (gates) minimize it by gating the shared intermediate space per query."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why sharing the computation works without breaking answers",
+    "paras": [
+      "Most of the neighborhood — the nodes that both queries touch — does not need separate processing. It can compute its intermediate representations once, and both queries can read from that shared result. Only the unique parts of each query's subgraph need isolation.",
+      "MIMO-LP enforces this split using learned gates (binary switches on shared intermediate values that can be turned off per query). When query A reads from the shared intermediate space, it only listens to the dimensions (the positions in the number list) that are safe for it; query B listens to a different safe subset. This way, the shared computation is fast (one big forward pass handles all queries), and interference is minimal (each query hears only the signals meant for it). The gates are learned during training, so they automatically discover which connections are safe to share and which must stay private."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Batch of query node pairs and their subgraphs"
+        },
+        {
+          "t": "step",
+          "s": "Extract local neighborhoods, stack all subgraphs",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Neural network processes all queries in one forward pass",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Project to shared latent space (query embeddings)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Learned gates mask latent dimensions to prevent interference",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Link scores for all queries in parallel"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The scoring equation",
+    "words": "Each query's predicted link score is the sum of masked latent embeddings from both nodes in the pair, gated so only safe dimensions contribute.",
+    "equation": "s_q = (g_q * h_u) · (g_q * h_v)",
+    "symbols": [
+      ["s_q", "Predicted link score for query q"],
+      ["g_q", "Query-specific learned gate: which latent dimensions are safe for query q"],
+      ["h_u", "Shared latent embedding for the first node in query q"],
+      ["h_v", "Shared latent embedding for the second node in query q"],
+      ["·", "Dot product: multiply matching dimensions and sum"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Query 1: nodes A and B. Shared embedding h_A = [1.0, 0.5, 2.0, 0.3]. Gate g_1 = [1, 1, 1, 0] (last dimension is gated off for q1). Masked h_A = [1.0, 0.5, 2.0, 0]. Similarly h_B masked = [0.8, 0.4, 1.8, 0]. Dot product: 1.0*0.8 + 0.5*0.4 + 2.0*1.8 = 4.4.",
+        "Query 2: same nodes A and B. But gate g_2 = [1, 0, 1, 1] (gates off dimension 2 instead). Masked h_A = [1.0, 0, 2.0, 0.3]. Masked h_B = [0.8, 0, 1.8, 0.25]. Dot product: 1.0*0.8 + 2.0*1.8 + 0.3*0.25 = 4.275.",
+        "Same nodes, different gates, different scores. Each query only trusts the dimensions its learned gate allows, avoiding corruption."
+      ]
+    },
+    "note": "The gate acts like a binary selector: it allows each query to use only the dimensions that were learned to be safe for it, blocking the ones that carry other queries' interference. This works because during training, the gate learns which dimensions reliably predict links for each query type, and blocks the rest; by using only trusted dimensions, each query avoids reading corrupted signals."
+  },
+  "bars": {
+    "h2": "Naive approach vs. MIMO-LP",
+    "charts": [
+      {
+        "title": "Naive one-at-a-time",
+        "rows": [
+          ["Query 1 time", 120, "bad"],
+          ["Query 2 time", 115, "bad"],
+          ["Query 3 time", 118, "bad"],
+          ["Total time", 353, "bad"]
+        ],
+        "note": "Each query waits its turn. Overlapping neighborhoods are recomputed."
+      },
+      {
+        "title": "MIMO-LP",
+        "rows": [
+          ["All 3 queries together", 35, "good"],
+          ["Accuracy on query 1", 92, "good"],
+          ["Accuracy on query 2", 91, "good"],
+          ["Accuracy on query 3", 91, "good"]
+        ],
+        "note": "One forward pass handles all queries. Speed gain is 10x+ (353/35) with accuracy staying nearly the same."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Too much interference between queries.",
+        "html": "If the gate is not learned well, many queries can read from the same latent dimensions, making them corrupt each other. Accuracy drops below the one-at-a-time baseline."
+      },
+      {
+        "warn": true,
+        "b": "Overfitting the gate to the training queries.",
+        "html": "If only a few query patterns appear during training, the gates learn to handle just those. On different query patterns at test time, interference spikes and accuracy falls."
+      },
+      {
+        "warn": true,
+        "b": "Insufficient latent space size.",
+        "html": "If the shared latent embedding is too small, even with gates there is not enough room to isolate all queries' representations, forcing unwanted sharing."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train the gate on diverse query patterns, use a latent space that is large enough to hold each query's unique signal, and measure interference on a held-out test set to confirm gates are working."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny graph with 20 nodes and 50 edges. Create 10 random link prediction queries (asking does node A connect to node B). Run MIMO-LP on all 10 together in one forward pass, measuring total time. Then run the same 10 predictions one at a time using a naive baseline. Plot the time difference. Separately, compare accuracy: measure the link prediction AUC (area under the curve, a standard metric) for the batched version vs. the one-at-a-time version. Both should be similar in accuracy because the gates prevent interference, and MIMO-LP should be much faster because all queries run in a single neural network pass instead of 10 separate passes."
+    ],
+    "metric_eq": "speedup = time_naive / time_mimo; accuracy_loss = auc_naive - auc_mimo",
+    "closing": "The demo must show that multiplexing many queries into one forward pass gives a substantial speedup (at least 5x) without sacrificing the accuracy of the link predictions."
+  }
+}
