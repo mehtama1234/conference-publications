@@ -48,23 +48,27 @@ def prep():
     print(f"prep: {len(recs)} papers, {n} chunks. Fan out Haiku over chunks lacking data/analysis/ outputs.")
 
 def merge():
-    merged=[]; bad=[]
+    merged=[]; load_fail=[]; partial=[]; dropped_total=0; seen=set()
     for outp in sorted(glob.glob(f"{D}/analysis/chunk-*.json")):
         name=os.path.basename(outp)
         try:
-            ind=[x["id"] for x in json.load(open(f"{D}/chunks/{name}"))]
+            in_ids=set(x["id"] for x in json.load(open(f"{D}/chunks/{name}")))
             outd=json.load(open(outp))
         except Exception as e:
-            bad.append((name,str(e))); continue
-        if set(ind)!=set(x.get("id") for x in outd):
-            bad.append((name,"id-mismatch")); continue
+            load_fail.append((name,str(e))); continue
+        kept=0
         for r in outd:
-            if r.get("theme") not in THEMES: r["theme"]="Other"
-            merged.append(r)
+            rid=r.get("id")
+            if rid in in_ids and rid not in seen and all(k in r for k in ("problem","approach","contribution","theme","methods")):
+                if r.get("theme") not in THEMES: r["theme"]="Other"
+                merged.append(r); seen.add(rid); kept+=1
+        miss=len(in_ids)-kept
+        if miss: partial.append((name,miss)); dropped_total+=miss
     json.dump(merged, open(f"{D}/analysis_merged.json","w"), indent=0)
     th=collections.Counter(r["theme"] for r in merged)
-    print(f"merge: {len(merged)} papers from {len(glob.glob(f'{D}/analysis/chunk-*.json'))-len(bad)} clean chunks")
-    if bad: print("  RE-RUN these chunks:", [b[0] for b in bad])
+    print(f"merge: {len(merged)} papers ({dropped_total} papers dropped across {len(partial)} partial chunks)")
+    if load_fail: print("  RE-RUN (load-failed):", [b[0] for b in load_fail])
+    if partial: print("  partial chunks (a few papers each):", [f'{n}:-{m}' for n,m in partial])
     for t,n in th.most_common(): print(f"  {n:5d}  {t}")
 
 def status():
