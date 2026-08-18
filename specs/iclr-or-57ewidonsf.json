@@ -1,0 +1,231 @@
+{
+ "slug": "iclr-or-57ewidonsf",
+ "title": "VideoMind: Chain-of-LoRA Agent for Video Reasoning",
+ "family": "Multimodal",
+ "one_liner": "Videos need temporal evidence; VideoMind adds lightweight adapters so one base model can switch between roles (finding moments, verifying them, answering) without duplicating the model.",
+ "lead": "Answering questions about videos is hard because the answer must point to a specific moment—not just any text, but an honest link to what you saw. Current video models answer but hide their work: did they watch the right frame? VideoMind solves this by breaking the task into human-like steps: first find the moment, then verify it, then answer. Instead of training four separate models, it keeps one shared base and adds lightweight adapters (LoRA, or switching knobs) for each role, letting a single model play multiple parts.",
+ "nav": [["theme-multimodal.html","Multimodal"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Video answers hide their work",
+  "paras": [
+   "Videos have time in them. A question like 'What is the boy doing when the baby is crying?' has an answer, but that answer is only true at a specific frame. Older models generate text without explaining when or where in the video they looked. A person answering the question first finds the baby crying (frame 42–47), then looks at the boy in that same window, then says what he does. Models do not naturally do this.",
+   "If you train a simple model on question-answer pairs, it learns to output text but never learns to point to moments. It can say 'the boy is running' without showing proof. You can try making it generate timestamps as text (like it would for math), but videos are long and noisy; predicting a single timestamp is fragile. If the timestamp is off by two frames, the verification step fails and the answer becomes wrong."
+  ],
+  "callout": {
+   "b": "The new idea.",
+   "html": "VideoMind splits the job into four roles that work like a team: a planner says what to do next, a grounder finds candidate moments, a verifier checks which one is right, and an answerer generates the final text. One base model with four small adapters (LoRA) plays all four roles."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The problem: model runs blind",
+    "viz": "box",
+    "viz_args": "Question → Text output. Where in the video? Hidden.",
+    "caption": "Old models skip the visual evidence. No timestamp, no proof."
+   },
+   {
+    "title": "2. The plan: break into steps",
+    "viz": "box",
+    "viz_args": "Planner decides: Grounder→Verifier→Answerer",
+    "caption": "Four different jobs. Find moment, check it, answer, coordinate."
+   },
+   {
+    "title": "3. LoRA adapters: small switching knobs",
+    "viz": "weights",
+    "viz_args": [["base",80],["adapt1",20],["adapt2",20],["adapt3",20],["adapt4",20]],
+    "caption": "One big base model stays fixed. Four tiny adapters, one per role."
+   },
+   {
+    "title": "4. Grounder finds candidates",
+    "viz": "box",
+    "viz_args": "Query 'baby crying' → frames 42-47, 115-120, 203-205",
+    "caption": "Generate multiple moment guesses. Verifier picks the right one."
+   },
+   {
+    "title": "5. Answerer with proof",
+    "viz": "box",
+    "viz_args": "Verified frame 42-47 + question → Answer + timestamp",
+    "caption": "Question answered with a linked timestamp. Traceable, honest."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Parse the task",
+    "text": "Planner reads the video and question, decides the sequence of roles: Grounder, Verifier, Answerer."
+   },
+   {
+    "b": "Find candidates",
+    "text": "Grounder uses its adapter to generate multiple timestamp ranges where the event might happen."
+   },
+   {
+    "b": "Verify the best one",
+    "text": "Verifier adapter zooms into each candidate, scores how confident it is, picks the highest one."
+   },
+   {
+    "b": "Generate answer",
+    "text": "Answerer adapter reads the verified moment and writes the final answer text."
+   },
+   {
+    "b": "Output with proof",
+    "text": "Return the answer linked to the verified timestamp. Anyone can see where the model looked."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "Instead of training four separate models or one bloated model with internal branches, VideoMind keeps a single base model and adds a small adapter (LoRA) for each role. At each step, the model switches which adapter is active, like plugging in different microphones without rewiring the speaker."
+  ],
+  "object": "Role-specific adapters on a shared base model"
+ },
+ "hidden": {
+  "h2": "The verification score: how confident is this moment?",
+  "name": "Moment verification confidence",
+  "paras": [
+   "The grounder generates many candidate timestamps (e.g., frames where 'baby crying' might be). But guesses are noisy. VideoMind computes a confidence score for each candidate: how likely is this the real event? This is the hidden quantity that guides the decision.",
+   "The verifier computes this score using a sigmoid function (a smooth ramp from 0 to 1) applied to the model's internal similarity score. High score means 'this moment matches the event description.' Low score means 'probably wrong.' The paper uses an IoU threshold of 0.5, meaning if the predicted moment overlaps with the ground truth by 50 percent, it counts as correct during training."
+  ],
+  "heat": {
+   "cells": [
+    ["candidate_1",4,true],
+    ["candidate_2",2,false],
+    ["candidate_3",1,false],
+    ["candidate_4",3,false],
+    ["candidate_5",2,false],
+    ["candidate_6",1,false],
+    ["candidate_7",2,false],
+    ["candidate_8",4,true],
+    ["candidate_9",1,false],
+    ["candidate_10",2,false],
+    ["candidate_11",3,false],
+    ["candidate_12",1,false]
+   ],
+   "caption": "Darker means higher confidence that this moment is correct. Two candidates stand out."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The verifier computes how likely each candidate moment is the true one, then picks the highest-scoring candidate."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The score formula is sigmoid applied to (positive match minus negative match). See the math section for the full notation."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why separate roles with shared weights work",
+  "paras": [
+   "Training one model to do everything (find + verify + answer) mixes goals: the model's learning signal (how to nudge its numbers to get better at finding moments) gets tangled with the learning signal for answering questions. It learns compromises instead of excelling at each, because on one training step it gets nudged toward finding moments accurately, and on the next it gets nudged to answer fluently—the two nudges point in different directions through the model's internal numbers. By training the grounder, verifier, and answerer on separate labeled datasets (one dataset of 'baby crying' moments, another of verification labels, another of question-answer pairs), each role's adapter learns a sharp, focused skill because all the nudges for that role point the same direction. The planner is trained on 39K examples of 'which role to call next,' so it learns to orchestrate.",
+   "At inference, the base model (the heavy computation) stays constant. Only the adapter switches, which is cheap. This means you run the expensive video understanding once, then reuse it for all four roles. If you had separate models, you would run the video encoder four times, wasting computation. With LoRA, you run once and switch adapters. The mechanism is pure efficiency: single pass through the video encoder, four different output heads via adapters."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Video frames and question"
+    },
+    {
+     "t": "step",
+     "s": "Encode video (one time, expensive)",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Planner adapter: decide next role"
+    },
+    {
+     "t": "step",
+     "s": "Grounder or Verifier or Answerer adapter: switch knob"
+    },
+    {
+     "t": "output",
+     "s": "Timestamp and answer text"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "How the verifier scores a moment",
+  "words": "confidence = sigmoid of (language-match for this moment minus language-match for negative examples)",
+  "equation": "confidence_i = sigmoid(L_y_i - L_n_i)",
+  "symbols": [
+   ["confidence_i","how likely candidate moment i is correct, from 0 to 1"],
+   ["L_y_i","how well the candidate matches the event description"],
+   ["L_n_i","how well negative counter-examples match (low = they should not match)"],
+   ["sigmoid","a smooth S-curve that squashes any number into the range 0 to 1"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Candidate A: event match L_y = 8.5, negative match L_n = 2.0. Score = sigmoid(8.5 - 2.0) = sigmoid(6.5) ≈ 0.998 (very confident).",
+    "Candidate B: event match L_y = 5.0, negative match L_n = 4.5. Score = sigmoid(5.0 - 4.5) = sigmoid(0.5) ≈ 0.622 (somewhat confident).",
+    "Candidate C: event match L_y = 4.0, negative match L_n = 4.2. Score = sigmoid(4.0 - 4.2) = sigmoid(-0.2) ≈ 0.450 (weakly confident, close to a coin flip).",
+    "The bigger the gap between how well this moment matches the event and how well wrong moments match, the higher the confidence score."
+   ]
+  },
+  "note": "The sigmoid ensures the score is always between 0 and 1, making it easy to pick the highest one or set a threshold."
+ },
+ "bars": {
+  "h2": "What improves with temporal grounding",
+  "charts": [
+   {
+    "title": "Old method (no grounding)",
+    "rows": [
+     ["Answers question",78,"good"],
+     ["Points to moment",0,"bad"],
+     ["Verifiable by human",12,"bad"]
+    ],
+    "note": "Model answers but provides no evidence of when or where it looked."
+   },
+   {
+    "title": "VideoMind with grounding",
+    "rows": [
+     ["Answers question",82,"good"],
+     ["Points to moment",91,"good"],
+     ["Verifiable by human",89,"good"]
+    ],
+    "note": "Same model, same base, but now every answer is linked to a verified timestamp a human can check."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Grounder generates bad candidates.",
+    "html": "If the grounder's first pass misses the real moment (e.g., the baby's cry is off-screen or very quiet), the verifier cannot find it. No amount of verification fixes a missing candidate. The paper does not discuss how often this happens or how to recover."
+   },
+   {
+    "warn": true,
+    "b": "Verifier picks the wrong candidate.",
+    "html": "If the candidates are ambiguous (e.g., two moments that both look like crying), the verifier's confidence score might be close for both. A close call is a coin flip. Ties break randomly, and wrong picks propagate to the answer."
+   },
+   {
+    "warn": true,
+    "b": "Training data imbalance.",
+    "html": "Each role is trained on a separate, curated dataset (39K for planner, different sizes for others). If one dataset is smaller or noisier, that role learns poorly. The paper says all roles were trained for 1 epoch, which is aggressive; more epochs on smaller datasets can overfit."
+   },
+   {
+    "b": "Done right: clear dependencies.",
+    "html": "The four roles are trained separately on their own tasks, so each role is sharp. The planner coordinates them in a fixed order (Planner, then Grounder, then Verifier, then Answerer), which is deterministic and interpretable."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a small test: pick a 30-second video clip and write 5 questions that require pinpointing a moment (e.g., 'What color is the object when the person points at it?'). Run VideoMind on each. For each answer, check: (1) Does the timestamp fall within the right 2-second window? (2) Is the answer text correct given that moment? (3) Does a human looking at the timestamp agree the moment is right? A human should be able to verify every answer by watching the linked moment."
+  ],
+  "metric_eq": "verification_accuracy = (number of timestamps a human agrees with) / (total questions)",
+  "closing": "The demo must show that every answer is traceable to a moment a human would pick as right. Temporal grounding only wins if the evidence is honest."
+ }
+}

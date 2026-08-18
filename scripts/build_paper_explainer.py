@@ -48,7 +48,7 @@ def viz(kind, args):
     if kind == "brain": return '<div class="brain"></div>'
     if kind == "weights":
         return '<div class="weights">' + "".join(
-            f'<div class="w {c}" style="height:{h}px"></div>' for c,h in (args or [])) + '</div>'
+            f'<div class="w {c}" style="height:{h}px"></div>' for c,h in ((r[0],r[1]) for r in (args or []))) + '</div>'
     if kind == "box": return f'<div class="box">{e(args)}</div>'
     return ""
 

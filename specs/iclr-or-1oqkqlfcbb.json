@@ -1,0 +1,203 @@
+{
+  "slug": "iclr-or-1oqkqlfcbb",
+  "title": "FOCUS: Efficient Keyframe Selection for Long Video Understanding",
+  "family": "Multimodal",
+  "one_liner": "Instead of looking at every video frame, the paper uses a smart two-stage search to identify which time periods matter for answering a question, then picks the best frames from those periods.",
+  "lead": "Long videos are like watching a three-hour movie, but current language-vision models have to convert every frame into tokens (numbers the model can process), and a 20-minute video produces too many tokens to handle. This paper proposes FOCUS, which splits frame selection into two stages: first find which time regions are worth looking at closely, then pick the best frames from those regions. FOCUS finds promising regions using a gambling-inspired strategy (the method divides the video into short segments, samples a few frames from each segment, scores them against the question, and then uses statistical confidence bounds to identify which segments have reliably high average scores and thus deserve to be explored deeply). Once the high-value regions are found, FOCUS selects just the top frames from those regions for the language model. This two-stage approach is more efficient and more accurate than single-pass frame selection, because when you average frame scores across a segment, random noise cancels out, leaving only the true signal of whether that segment holds the answer—a truly informative region will show a consistently high average, while scattered scoring might pick noise.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The token explosion problem",
+    "paras": [
+      "A language-vision model (one that reads images and videos to answer questions) converts each video frame into visual tokens—think of tokens as small numerical packages that describe what a frame contains. A one-minute video at 24 frames per second produces 1,440 frames; at even modest token counts per frame, a 20-minute video becomes computationally impossible.",
+      "A naive approach: uniformly skip frames (take every 10th frame) or score frames individually using a smaller model, then pick the top scorers. The problem is that this ignores timing. A 30-second scene might have one key moment buried in the middle, but the moment-by-moment scoring finds only scattered frames without understanding that this whole scene region matters for the question."
+    ],
+    "callout": {
+      "b": "The paper's move:",
+      "html": "Treat video time regions like arms in a multi-armed bandit game—explore which regions are informative, then exploit by picking the top frames within those regions."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "weights",
+        "viz_args": [["hot", 90], ["hot", 85], ["hot", 88], ["hot", 92], ["hot", 87]],
+        "caption": "A 20-minute video: each frame scores high, so all 1440 frames demand tokens."
+      },
+      {
+        "title": "2. Naive single scoring",
+        "viz": "weights",
+        "viz_args": [["moved", 2], ["free", 1], ["hot", 4], ["free", 2], ["moved", 3]],
+        "caption": "Frame-by-frame scores jump around; we miss that one time region holds the answer."
+      },
+      {
+        "title": "3. FOCUS: explore regions",
+        "viz": "box",
+        "viz_args": "Region A: tested 50 frames; Region B: tested 10 frames; Region C: tested 30.",
+        "caption": "Each time segment is an arm; sample a few frames from each to estimate quality."
+      },
+      {
+        "title": "4. Confidence bounds decide",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["warm", 60], ["hot", 75], ["warm", 55], ["free", 35]],
+        "caption": "Lower bounds show which regions are definitely good; upper bounds catch dark horses."
+      },
+      {
+        "title": "5. Final selection",
+        "viz": "weights",
+        "viz_args": [["moved", 85], ["moved", 88], ["moved", 82], ["free", 10], ["free", 8]],
+        "caption": "Pick top frames only from chosen regions; 2% of video, 12% accuracy gain."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Divide video into temporal clips",
+        "text": "Chop the video into short segments (arms in the bandit game)."
+      },
+      {
+        "b": "Sample and score within each segment",
+        "text": "Use a vision-language encoder to score a few frames from each segment against the query."
+      },
+      {
+        "b": "Compute average score and confidence band",
+        "text": "For each segment, calculate the average of sampled scores and a margin that shrinks as more samples are collected."
+      },
+      {
+        "b": "Identify promising regions",
+        "text": "Select segments whose lower confidence bound is high; also explore uncertain segments."
+      },
+      {
+        "b": "Select top frames from chosen regions",
+        "text": "Within the winning segments, score all frames and pick the top K for the language model."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The thing the paper changes",
+    "paras": [
+      "Most keyframe methods treat each frame independently, or they pre-filter then score. FOCUS changes the selection strategy from frame-centric to region-centric—it first decides which time intervals are worth exploring deeply, then harvests the best frames from those intervals."
+    ],
+    "object": "frame selection strategy"
+  },
+  "hidden": {
+    "h2": "Temporal region informativeness",
+    "name": "region confidence: the credibility of a time segment being informative",
+    "paras": [
+      "The paper measures an unobservable ground truth (how informative a 30-second segment really is for answering the question) indirectly. It observes frame-level relevance scores produced by a vision-language encoder, each containing noise. From these noisy observations within each time segment, it estimates an measured mean (average score) and constructs a confidence radius around that mean using Bernstein bounds, which grow tighter as more frames are sampled.",
+      "The paper does not observe the true informativeness directly; it infers a credible range. A segment with high measured mean and low confidence radius is reliably good. A segment with high measured mean but huge confidence radius could hide a dark horse, so the method explores it anyway."
+    ],
+    "heat": {
+      "cells": [["Region A", 4, true], ["Region B", 1, false], ["Region C", 3, true], ["Region D", 2, false], ["Region E", 4, true], ["Region F", 1, false], ["Region G", 2, false], ["Region H", 3, true], ["Region I", 1, false], ["Region J", 3, false], ["Region K", 4, true], ["Region L", 1, false]],
+      "caption": "Darker means higher average score for that time region; highlights show regions that pass the selection threshold."
+    },
+    "reads": [
+      {
+        "b": "Plain reading:",
+        "html": "The paper asks: which 30-second chunks of the video deserve deep inspection? It samples a few frames from each chunk, scores them, and builds a confidence band around the average. Regions with high lower bounds are selected; regions with high upper bounds but uncertain means are also explored."
+      },
+      {
+        "b": "Paper reading:",
+        "html": "For arm a with sampled rewards, the average is computed from the samples. The Bernstein confidence radius grows from sample variance V and shrinks as sample count n grows. Selection uses the lower bound (mean minus radius) for promising regions and the upper bound (mean plus radius) for exploration."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why region-then-frame selection beats independent scoring",
+    "paras": [
+      "In a video, informative frames cluster in time. A scene where something important happens—a person speaking, an action, a sudden change—produces multiple consecutive high-scoring frames. If you score each frame independently and take the top 64, you might pick scattered frames from many regions and miss that one scene has 20 frames all worth watching together.",
+      "FOCUS exploits this temporal structure via a two-stage bandit algorithm. Stage one treats video segments as arms and samples a few frames from each. From these samples, it computes an measured mean (the estimated quality of that segment) and a confidence radius (how sure it is about that estimate). Segments with high lower confidence bounds are clearly good; segments with high upper bounds but uncertain means get explored because they might be dark horses. Stage two then exhaustively scores every frame within the selected regions and picks the top K. This approach ensures you do not miss entire high-value regions and it does not waste tokens on frames scattered across many low-value regions.",
+      "Why does this actually work? Because the noise in individual frame scores averages out when you look at a region mean. A few noisy frame scores from a truly informative region will have a high average; randomness cancels. Bernstein bounds guarantee that as you sample more frames from a region, your confidence in its true quality grows, and the algorithm learns to distinguish genuinely good regions from lucky noise."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Video plus question"},
+        {"t": "step", "s": "Divide into temporal clips", "hl": true},
+        {"t": "step", "s": "Sample frames from each clip", "hl": true},
+        {"t": "step", "s": "Score samples, compute means and confidence bands", "hl": true},
+        {"t": "step", "s": "Select high lower-bound and high upper-bound regions", "hl": true},
+        {"t": "step", "s": "Score all frames in chosen regions"},
+        {"t": "step", "s": "Pick top K frames"},
+        {"t": "output", "s": "Selected keyframes to the language model"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "Computing region quality from noisy frame scores",
+    "words": "For each arm (time segment) a, sample a few frames and observe their relevance scores. Compute the measured mean (average score) and the Bernstein confidence radius (a margin that grows smaller as you sample more frames from that segment). The lower confidence bound tells you the segment is surely good; the upper confidence bound flags uncertain segments worth exploring.",
+    "equation": "LCB_a(n) = µ_a(n) - β_a(n); UCB_a(n) = µ_a(n) + β_a(n); where β_a(n) = sqrt(2 * V * ln(log(n)) / n) + 7 * ln(log(n)) / (3 * n)",
+    "symbols": [
+      ["µ_a(n)", "measured mean: average relevance score from samples in arm a after n total samples"],
+      ["β_a(n)", "Bernstein confidence radius: the margin around the mean that shrinks as sample count n grows"],
+      ["V", "variance of the reward signal (how much individual frames bounce around in score)"],
+      ["n", "total cumulative samples drawn so far across all arms"],
+      ["LCB_a(n)", "lower confidence bound: the score BELOW which arm a is unlikely to fall"],
+      ["UCB_a(n)", "upper confidence bound: the score ABOVE which arm a might reach"],
+      ["ln", "natural logarithm (logarithm base e, which you can ignore; it grows very slowly)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose Region A has 5 sampled frame scores: 0.7, 0.8, 0.75, 0.72, 0.78 (typical noise from a vision-language encoder).",
+        "Empirical mean: µ = (0.7 + 0.8 + 0.75 + 0.72 + 0.78) / 5 = 3.75 / 5 = 0.75.",
+        "Variance V = mean((0.7-0.75)^2, (0.8-0.75)^2, ...) = roughly 0.0006.",
+        "After 100 total samples drawn, β ≈ sqrt(2*0.0006*ln(ln(100))/100) + 7*ln(ln(100))/(3*100) ≈ 0.03.",
+        "LCB = 0.75 - 0.03 = 0.72; UCB = 0.75 + 0.03 = 0.78.",
+        "Region A's true quality likely sits between 0.72 and 0.78. Meanwhile Region B with mean 0.60 and same confidence radius has bounds [0.57, 0.63], so Region A is clearly better."
+      ]
+    },
+    "note": "The confidence radius shrinks as you sample more (n grows), so regions that matter get more exploration and tighter estimates."
+  },
+  "bars": {
+    "h2": "What improves",
+    "charts": [
+      {
+        "title": "Uniform sampling baseline",
+        "rows": [["Question answering accuracy", 68, "bad"], ["Frames used (percent)", 100, "bad"], ["Computation time", 100, "bad"]],
+        "note": "Uniformly skip frames; every region treated equally; wastes tokens on low-value scenes."
+      },
+      {
+        "title": "FOCUS",
+        "rows": [["Question answering accuracy", 79, "good"], ["Frames used (percent)", 2, "good"], ["Computation time", 5, "good"]],
+        "note": "Finds high-value regions first, concentrates frames there; 12% accuracy gain on long videos, 98% reduction in frames."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Assumption that regions are independent breaks with heavily scripted content.",
+        "html": "The method assumes frame-level relevance scores within a region are independent random samples. In a movie where the same actor speaks for five minutes, this assumption partially breaks—nearby frames are correlated. The method still works but confidence bands may be overoptimistic."
+      },
+      {
+        "warn": true,
+        "b": "Pre-filtering (1 frame per second) can lose critical fast moments.",
+        "html": "To reduce computational cost during region exploration, the method downsamples the video before sampling. A fast action (a ball bouncing for 200ms) might disappear if sampled at 1 frame per second, and then later frame selection cannot recover it."
+      },
+      {
+        "warn": true,
+        "b": "Encoder noise can trick region selection if systematic.",
+        "html": "If the vision-language encoder systematically overscores certain visual patterns (e.g., always gives high scores to text on screen regardless of relevance), then regions full of text will look falsely high-quality, and the algorithm will waste frames there."
+      },
+      {
+        "b": "Done right: combine region structure with diversity in final selection.",
+        "html": "The paper mentions that retrieval-based frame selection typically needs to ensure frames are diverse (not all the same camera angle or lighting) within regions. FOCUS respects this by selecting top-K frames from chosen regions after region selection, allowing downstream diversity constraints to work."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy demo with a five-minute video and a simple question (e.g., a 300-frame clip of a person walking around a room; question: 'where does the person go?'). Implement the bandit algorithm: partition into 10 clips (arms), randomly sample 3 frames per clip, score each against the question using a pretrained image-text model (CLIP or BLIP), compute measured means and Bernstein bounds, select the 3 clips with highest lower confidence bounds plus any with high upper bounds, then score all frames in those clips and pick the top 10. Compare accuracy of a downstream visual question-answering model (or human judgment) when fed the selected 10 frames versus all 300 frames, and measure token count saved."
+    ],
+    "metric_eq": "accuracy_gain = QA_accuracy_selected - QA_accuracy_uniform; token_reduction = 1 - (frames_selected / frames_total); the demo should show accuracy_gain > 0 and token_reduction > 0.95.",
+    "closing": "Why this actually works: asking which time regions matter first is both more efficient and more accurate than treating every frame equally, because noisy frame scores cancel out when you average them across a region—a truly informative region will have consistently high scores on average, while random noise bounces up and down and contributes nothing to the average, so the algorithm reliably discovers which regions hold the answer."
+  }
+}

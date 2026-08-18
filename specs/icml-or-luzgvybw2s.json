@@ -1,0 +1,239 @@
+{
+  "slug": "icml-or-luzgvybw2s",
+  "title": "VideoTrace-R1: Catching Fake Temporal Reasoning in Long Videos",
+  "family": "Multimodal",
+  "one_liner": "Instead of rewarding only the final answer, reward each step of the reasoning if it matches what actually happened in the video.",
+  "lead": "Video language models struggle with long videos because they can give the right final answer through fake reasoning—a model invents a plausible-sounding story about what happened even when it makes things up. VideoTrace-R1 fixes this by building an index of what actually happened frame by frame, then rewarding the model only when each of its reasoning steps correctly points to those real events.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why models fake their reasoning about videos",
+    "paras": [
+      "A video language model watches a long video and then answers a question like 'who was in the room at time 10 seconds?' The model has to think step by step: first identifying people in the video, then tracking when they arrive or leave, then checking at the exact time asked. A typical reward system only checks: did you get the final answer right? If yes, +1. If no, 0.",
+      "Here is the trap. A model could give the correct final answer by pure luck or by memorizing a plausible-sounding story that feels right but never actually happened. For example, the model might claim 'Alice arrived at 5 seconds' (wrong) and 'Bob left at 7 seconds' (wrong), but the math works out and Bob is still in the room at 10 seconds, so the final answer is right. A naive reward system sees only the final answer, so it rewards this completely fabricated reasoning chain just as much as it rewards honest reasoning."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Reward systems that only check the final answer can't tell real reasoning from made-up stories that happen to reach the right conclusion."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old way",
+        "viz": "box",
+        "viz_args": "Question: Who was there at t=10s?",
+        "caption": "A video language model answers questions about long videos."
+      },
+      {
+        "title": "2. The problem",
+        "viz": "plain",
+        "caption": "Model invents fake timeline (Alice at 5s, Bob at 7s) but gets final answer right."
+      },
+      {
+        "title": "3. The video has ground truth",
+        "viz": "weights",
+        "viz_args": [["true", 80], ["true", 60], ["true", 75], ["false", 20], ["true", 85]],
+        "caption": "VideoTrace builds an index: what actually happened, moment by moment."
+      },
+      {
+        "title": "4. New reward matches the trace",
+        "viz": "weights",
+        "viz_args": [["matched", 90], ["fake", 10], ["matched", 85], ["fake", 5], ["matched", 88]],
+        "caption": "Each reasoning step is rewarded only if it aligns with the real event trace."
+      },
+      {
+        "title": "5. Payoff",
+        "viz": "box",
+        "viz_args": "Model learns honest reasoning, not shortcuts.",
+        "caption": "Model learns to reason through actual events, not fabrications."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Extract the real timeline",
+        "text": "VideoTrace watches the video and builds a structured index of events in order: who arrives, when, who leaves."
+      },
+      {
+        "b": "Step 2: Model generates reasoning",
+        "text": "The language model writes out its reasoning: 'Alice was there at time 5 seconds, Bob at 7 seconds, so at 10 seconds Bob remains.'"
+      },
+      {
+        "b": "Step 3: Break reasoning into blocks",
+        "text": "Each claim in the reasoning (Alice at 5s, Bob at 7s, etc.) becomes a typed block—a separate piece to check."
+      },
+      {
+        "b": "Step 4: Query each block against the trace",
+        "text": "For each block, a TRT primitive (a simple check) asks: does this step match the real video? Return yes or no."
+      },
+      {
+        "b": "Step 5: Decomposed reward",
+        "text": "Sum the rewards: one point for each reasoning block that matched the real trace, zero for fabrications. This signal trains the model."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes: the reward signal",
+    "paras": [
+      "The paper changes how the model is trained. Instead of a single reward for the final answer, the reward is now a sum of small rewards, one for each claim in the reasoning chain. Each piece of reasoning is rewarded only if it corresponds to something that actually happened in the video, verified step by step."
+    ],
+    "object": "the per-step reward structure"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: temporal alignment",
+    "name": "temporal alignment score",
+    "paras": [
+      "The paper introduces and measures temporal alignment: for each claim a model makes about when an event happened, how closely does it match the actual video? This is the core hidden quantity the method tracks. It is not a guess or a prediction—it is a concrete match between what the model said and what the video shows.",
+      "The paper estimates temporal alignment by building Temporal Reasoning Traces (TRT), a structured index of the video that acts like a queryable filing system. When the model says 'Alice was at the door at 3 seconds,' a TRT primitive looks up that time window in the index and verifies: did Alice actually appear there? Yes or no. The alignment score for that claim is then used to compute the reward for that reasoning block."
+    ],
+    "heat": {
+      "cells": [
+        ["Claim: Alice at 5s", 4, true],
+        ["Claim: Bob at 7s", 1, false],
+        ["Claim: Carol at 2s", 3, true],
+        ["Claim: David at 9s", 2, false],
+        ["Claim: Alice exits 11s", 4, true],
+        ["Claim: Bob still there", 3, true],
+        ["Claim: Carol moves left", 2, false],
+        ["Claim: Check at 10s", 4, true],
+        ["Claim: Alice gone", 1, false],
+        ["Claim: Bob at 10s", 4, true],
+        ["Claim: Carol at 10s", 2, false],
+        ["Claim: Answer: Bob only", 4, true]
+      ],
+      "caption": "Darker means the reasoning claim aligns closely with verified events in the video. Lighter means it is fabricated or uncertain."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Temporal alignment is how well a model's timeline of what happened matches the real timeline recorded in the video."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The Temporal Reasoning Trace (TRT) structure exposes deterministic verification primitives—simple yes/no checks against recorded events—that enable per-block reward computation without neural networks guessing. This makes alignment fully symbolic and queryable because every check is deterministic: either a claim matches a recorded event or it does not."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: matching two traces",
+    "paras": [
+      "A video has a temporal trace: a sequence of events unfolding in real time. A model's reasoning also builds a temporal trace: a sequence of claims about when things happened, leading to a conclusion. If the model's trace mirrors the video's trace claim by claim, the reasoning is grounded. If the model makes up events, its trace diverges from reality.",
+      "The paper acts on this match by decomposing the training signal. Traditional training gives a single reward for the final answer. VideoTrace-R1 instead asks: for each block of reasoning the model writes, does that block reflect something real in the video? If yes, that block gets reward. If no, it gets zero. This per-block reward ensures the model learns to reason truthfully step by step, because only honest intermediate steps collect reward. Fabricated claims that lead to the right answer by accident now fail the step-by-step check because each block is independently verified against the video, so the model stops learning to make them up—the accidental success brings only partial reward, not full reward.",
+      "The mechanism works because the training signal now penalizes dishonest shortcuts. A model trying to solve the task can no longer coast on a lucky final answer—it must earn reward at each step by grounding its claims in the actual video. Over many training episodes, this selective pressure pushes the model toward real reasoning."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Long video with events in real time"
+        },
+        {
+          "t": "step",
+          "s": "VideoTrace extracts structured event index",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Model generates reasoning step by step"
+        },
+        {
+          "t": "step",
+          "s": "Each reasoning block checked against trace",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Per-block rewards summed"
+        },
+        {
+          "t": "output",
+          "s": "Model learns honest temporal reasoning"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: decomposed reward",
+    "words": "total reward equals the sum of rewards for each reasoning block, where each block reward is computed by a TRT primitive checking alignment between that block and the video",
+    "equation": "R_total = sum_i R_i(block_i, TRT), where R_i = TRT_verify(claim_i) and TRT_verify returns 1 if claim_i matches video events, 0 otherwise",
+    "symbols": [
+      ["R_total", "total reward for this reasoning chain"],
+      ["R_i", "reward for the i-th reasoning block"],
+      ["block_i", "the i-th claim in the model's reasoning sequence"],
+      ["TRT", "Temporal Reasoning Trace, the video's ground-truth event index"],
+      ["TRT_verify", "a primitive that checks if a claim matches an indexed event, returns 1 or 0"],
+      ["i", "index over reasoning blocks, from 1 to number of claims"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Video has real events: Alice enters at 5s, Bob enters at 8s, Alice exits at 12s.",
+        "Model's reasoning has 4 blocks: (1) Alice at 5s, (2) Bob at 8s, (3) Carol at 6s, (4) At 10s, Alice and Bob present.",
+        "TRT checks each block: (1) Alice at 5s -> yes, match -> R_1 = 1. (2) Bob at 8s -> yes -> R_2 = 1. (3) Carol at 6s -> no, Carol never in video -> R_3 = 0. (4) Alice and Bob at 10s -> yes -> R_4 = 1.",
+        "Total reward: R_total = 1 + 1 + 0 + 1 = 3 out of 4 blocks correct.",
+        "With old system (only final answer): if the model's final answer was correct, it would get reward 1 even with 1 fabrication. With VideoTrace, that fabrication cost the model 0.25 (1/4) of reward, so it learns not to invent claims."
+      ]
+    },
+    "note": "The reward is fully symbolic: no neural network decides correctness, only deterministic queries to the ground-truth trace, so no fabrication can hide behind a correct final answer."
+  },
+  "bars": {
+    "h2": "Why the old method fails and this one wins",
+    "charts": [
+      {
+        "title": "Old method: final-answer reward only",
+        "rows": [
+          ["Video: Alice at 5s, Bob at 8s, check at 10s: Bob present", 100, "good"],
+          ["Model gets it right but invents Carol at 6s", 95, "bad"],
+          ["Reward given for correct final answer", 100, "good"]
+        ],
+        "note": "The model is rewarded for the right answer even though its reasoning was half-fabricated."
+      },
+      {
+        "title": "VideoTrace-R1: per-block reward",
+        "rows": [
+          ["Video: Alice at 5s, Bob at 8s, check at 10s: Bob present", 100, "good"],
+          ["Model reasoning: Alice at 5s (match), Bob at 8s (match), Carol at 6s (lie), conclusion (match)", 95, "good"],
+          ["Reward: 3 out of 4 blocks true, so 75%, not 100%", 75, "good"]
+        ],
+        "note": "The fabrication is caught and penalized at the step level. Over training, this guides the model away from shortcuts toward real reasoning."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The event index is incomplete.",
+        "html": "If VideoTrace misses some real events (e.g., a person briefly off-camera), then honest reasoning might fail the TRT check even though it is correct. The model gets penalized for accuracy it has no way to achieve."
+      },
+      {
+        "warn": true,
+        "b": "The query primitives are too strict or too loose.",
+        "html": "If a TRT primitive demands pixel-perfect timing but the model approximates (Alice at 5.2s when she was at 5.0s), honest reasoning still gets zero reward. Conversely, if primitives are lenient, fabrications can slip through."
+      },
+      {
+        "warn": true,
+        "b": "The reasoning format does not align with the trace structure.",
+        "html": "If the model's reasoning blocks do not cleanly map to queryable events in the trace (e.g., model thinks in object relationships while trace only tracks raw events), rewards become noisy and the signal breaks."
+      },
+      {
+        "b": "Done right.",
+        "html": "The video is fully annotated with ground-truth events, the model's reasoning is parsed into queryable blocks, and the TRT primitives are calibrated to match the reasoning granularity. Then step-by-step correctness is both measurable and learnable."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a synthetic video with a clear sequence of events: three people entering and leaving a room at specific times. Write a question: 'Who was in the room at minute 2?' Train two models in parallel: one with traditional final-answer reward, one with VideoTrace-R1's per-block reward. After training, evaluate both on a held-out set of questions about the video. Look for two signals: (1) Does VideoTrace-R1 achieve higher accuracy on out-of-distribution questions (e.g., new people, new times)? It should, because it learned to ground each step in actual events, so it generalizes better to unseen scenarios rather than relying on memorized patterns. (2) If you manually inspect the reasoning both models generate, does the VideoTrace-R1 model produce more honest intermediate claims, even on cases where both models get the final answer right? It should, because the per-block reward penalizes even lucky fabrications. Hypothesis: Yes on both counts. The demo must make clear that the per-block signal forced the model to learn real reasoning, not shortcuts."
+    ],
+    "metric_eq": "out_of_distribution_accuracy = correct_answers_on_new_scenarios / total_new_scenarios; reasoning_honesty = fraction_of_intermediate_claims_matching_ground_truth",
+    "closing": "The demo succeeds when out-of-distribution accuracy is higher for VideoTrace-R1 and its intermediate reasoning contains fewer fabrications even in cases where both models get the final answer right."
+  }
+}
