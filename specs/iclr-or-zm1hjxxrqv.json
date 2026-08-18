@@ -1,0 +1,246 @@
+{
+  "slug": "iclr-or-zm1hjxxrqv",
+  "title": "SplitLoRA: Balancing Stability and Plasticity",
+  "family": "Continual Learning",
+  "one_liner": "When learning new tasks, shrink the scratch space for each layer just enough to protect old knowledge without blocking new learning.",
+  "lead": "A model learning many tasks in a row faces a hard choice: update too much and you forget what you learned before (broken stability); update too little and you can't learn the new task well (broken plasticity). SplitLoRA solves this by computing the best trade-off separately for each layer, rather than using one rule for all of them.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The old-task-new-task trap",
+    "paras": [
+      "Imagine a model that learned to recognize dogs in a training phase. Now you show it photos of cats and ask it to learn those too. If the model updates its weight values (the numbers inside it) a lot while learning cats, it will stop recognizing dogs. If it barely updates at all, it will learn cats poorly. This is the stability-plasticity dilemma: you need to move the weights to absorb new knowledge, but moving them erases old knowledge.",
+      "Orthogonal projection (an existing method) tries to solve this by splitting the weight-update space into two regions: a frozen region (off limits because it holds old knowledge) and a free region (where learning new tasks is allowed). But here is the catch: previous methods use the same rule to decide the size of the free region for every layer in the model. A layer that stores only a few task memories might get a huge free region (wasteful) while a layer storing many task memories might get a tiny free region (suffocating new learning)."
+    ],
+    "callout": {
+      "b": "The old way:",
+      "html": "Pick one split size for all layers using a fixed threshold on how much of the weight-update directions pass through. Different layers learn different things, but they all receive the same split rule."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. First task learned",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["hot", 70], ["warm", 45], ["hot", 60], ["warm", 40]],
+        "caption": "Model learns dogs. Some weights matter a lot; some barely move."
+      },
+      {
+        "title": "2. Naive update for cats",
+        "viz": "weights",
+        "viz_args": [["moved", 65], ["moved", 70], ["moved", 45], ["moved", 60], ["moved", 40]],
+        "caption": "Update all weights equally to learn cats. Dog knowledge gets wiped."
+      },
+      {
+        "title": "3. One rule for all layers",
+        "viz": "box",
+        "viz_args": "Layer A free=30% | Layer B free=30% | Layer C free=30%",
+        "caption": "Old method: same split rule for each layer regardless of its role."
+      },
+      {
+        "title": "4. SplitLoRA: custom split per layer",
+        "viz": "box",
+        "viz_args": "Layer A free=50% | Layer B free=20% | Layer C free=35%",
+        "caption": "Compute the right split for each layer by weighing stability vs plasticity."
+      },
+      {
+        "title": "5. Both tasks remembered",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["hot", 70], ["warm", 45], ["hot", 60], ["warm", 40]],
+        "caption": "Dogs stay learned. Cats learned in the right-sized free region."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Inspect update directions from old tasks",
+        "text": "Collect which ways to nudge weights caused the old knowledge to form."
+      },
+      {
+        "b": "Inspect update directions from new tasks",
+        "text": "See which ways the new task wants to nudge the weights."
+      },
+      {
+        "b": "Measure the clash",
+        "text": "Calculate how much the new update direction contradicts the old update directions at each layer."
+      },
+      {
+        "b": "Compute the balance point",
+        "text": "Find the layer-specific split size that minimizes total damage (old forgotten plus new unlearned)."
+      },
+      {
+        "b": "Lock the protected zone",
+        "text": "Freeze the protected region; train only in the newly-sized free region for the new task."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "SplitLoRA changes one specific thing: the size of the free region (called rank k in LoRA, a method that adds small matrices to existing weights) for each layer during continual learning. Instead of using a global threshold, it computes k separately for each layer based on how much old knowledge that layer holds and how much room the new task needs."
+    ],
+    "object": "LoRA rank k per layer"
+  },
+  "hidden": {
+    "h2": "The weight-update space split",
+    "name": "Stability and plasticity loss balance",
+    "paras": [
+      "Buried in the math is a hidden quantity: how much of the weight update lands in the old-task-protecting zone versus the new-task-learning zone. This split is not directly visible in the weights; you see it only when you analyze which update directions are blocked versus allowed.",
+      "The paper measures this by computing two loss terms: stability loss (how much the new update would damage old knowledge if it were unconstrained) and plasticity loss (how much the constraint limits the new task's learning power). By analyzing both at the same time for each layer, the method finds the split size that balances them."
+    ],
+    "heat": {
+      "cells": [
+        ["Layer 1 old-task directions", 4, true],
+        ["Layer 1 new-task directions", 2, false],
+        ["Layer 2 old-task directions", 2, false],
+        ["Layer 2 new-task directions", 4, true],
+        ["Layer 3 old-task directions", 3, true],
+        ["Layer 3 new-task directions", 3, false],
+        ["Layer 4 old-task directions", 1, false],
+        ["Layer 4 new-task directions", 4, true],
+        ["Layer 5 old-task directions", 4, true],
+        ["Layer 5 new-task directions", 1, false],
+        ["Layer 6 old-task directions", 2, false],
+        ["Layer 6 new-task directions", 3, false]
+      ],
+      "caption": "Darker means more gradient signal. Each layer has a different ratio of old-knowledge (must protect) to new-learning (must allow)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The gradient (the direction to nudge weights to learn something) from new tasks often pushes in directions that contradict old-task gradients. Partitioning the gradient space means drawing a line: old-task directions are forbidden zones, new-task directions are allowed. The question is where to draw that line for each layer."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper analytically models how the subspace partition affects the upper bound on combined loss: stability loss (proportional to alignment between update and old-task gradient average) and plasticity loss (proportional to how much the update is blocked from the new-task gradient direction). The error function epsilon(k) quantifies the proportion of minor directions, and the paper solves for optimal k per layer."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "How the layer-specific split is chosen",
+    "paras": [
+      "The mechanism has two parts. First, the paper uses math to prove that you can write down the damage caused by learning a new task as a sum of two ingredients: stability loss (old knowledge erased by the new update) and plasticity loss (new learning blocked by the old-knowledge zone). Stability loss is big when the new update direction aligns with old-task gradients; plasticity loss is big when the constraint zone is too restrictive.",
+      "Second, the method looks at each layer individually and measures which ingredient dominates. A layer deep in the model that funneled gradients for many old tasks should have a larger protected zone (small free region), because stability loss would be high. A layer that was weakly used by old tasks but strongly needed by the new task should have a smaller protected zone (large free region), because plasticity loss dominates. By balancing the two losses per layer, the method computes the optimal k for each layer separately instead of using one global rule."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Old task gradients. New task gradients."
+        },
+        {
+          "t": "step",
+          "s": "For each layer, measure alignment between new and old gradients.",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Estimate stability loss (old knowledge destroyed) if split is size k."
+        },
+        {
+          "t": "step",
+          "s": "Estimate plasticity loss (new learning blocked) if split is size k."
+        },
+        {
+          "t": "step",
+          "s": "Find k that minimizes both losses at this layer.",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "LoRA rank k for each layer independently."
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The balance equation",
+    "words": "Total damage = (proportion of old gradients in the free zone) times (old gradient magnitude) plus (proportion of new gradient blocked by protected zone) times (new gradient magnitude) plus a smoothness penalty on the update size",
+    "equation": "Total_Loss = -alpha * <update, average_old_gradient> - <update, new_gradient> + (L/2) * ||update||^2",
+    "symbols": [
+      ["alpha", "how much we weight stability loss versus plasticity loss"],
+      ["update", "the change to weights in the new-task learning step"],
+      ["average_old_gradient", "the mean gradient direction from all previous tasks"],
+      ["new_gradient", "the gradient direction from the new task"],
+      ["L", "how curved the loss surface is (smoothness constant)"],
+      ["||update||^2", "the squared size of the weight change"]
+    ],
+    "worked": {
+      "title": "A concrete example with two layers",
+      "lines": [
+        "Suppose Layer 1 (early layer, stores early features) has old-gradient magnitude 0.8 and new-gradient magnitude 0.3. The alignment between them is 0.6. If we choose k=50% (medium split), stability loss = -0.8 * 0.6 * 0.5 = -0.24, plasticity loss = -0.3 * 0.5 = -0.15, total = -0.39.",
+        "Suppose Layer 2 (late layer, stores task-specific features) has old-gradient magnitude 0.2 and new-gradient magnitude 0.9. The alignment between them is 0.4. If we choose k=80% (large free region), stability loss = -0.2 * 0.4 * 0.2 = -0.016, plasticity loss = -0.9 * 0.2 = -0.18, total = -0.196.",
+        "Layer 2 can tolerate a much larger free region because its old knowledge is weak, so plasticity loss does not punish it. Layer 1 is better protected. The algorithm computes both and picks the k for each layer that minimizes its total damage independently."
+      ]
+    },
+    "note": "The key difference is that stability and plasticity losses have different sizes at each layer. A layer that held many old memories needs more protection; a layer that held few needs less. So the best split size is not a one-size-fits-all rule; it must be chosen per layer."
+  },
+  "bars": {
+    "h2": "How performance improves",
+    "charts": [
+      {
+        "title": "Naive learning (no protection)",
+        "rows": [
+          ["Old task before", 96, "good"],
+          ["Old task after new task", 28, "bad"],
+          ["New task after", 92, "good"]
+        ],
+        "note": "No constraint on the free region. New learning works well but destroys old knowledge."
+      },
+      {
+        "title": "One fixed split for all layers",
+        "rows": [
+          ["Old task before", 96, "good"],
+          ["Old task after new task", 72, "good"],
+          ["New task after", 78, "good"]
+        ],
+        "note": "Uniform split. Both tasks survive but new learning is limited on layers that do not need much protection."
+      },
+      {
+        "title": "SplitLoRA (layer-specific splits)",
+        "rows": [
+          ["Old task before", 96, "good"],
+          ["Old task after new task", 84, "good"],
+          ["New task after", 88, "good"]
+        ],
+        "note": "Custom split per layer. Each layer gets protection proportional to its old-knowledge content. Both tasks learned well."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "One LoRA transformation (the protected zone) must stay frozen.",
+        "html": "SplitLoRA depends on the protected zone being actually protected. If the transformation that defines the protected zone gets updated during training, the protected region shifts and the guarantees fall apart. The paper requires that one transformation (called A) stay frozen and only the free-zone transformation (called B) gets trained."
+      },
+      {
+        "warn": true,
+        "b": "Imbalance in old versus new task importance.",
+        "html": "If the old tasks were very easy and the new task is very hard (or vice versa), the balance point computed by minimizing total loss might overprotect or underprotect. The method does assume a reasonable mix of task difficulties."
+      },
+      {
+        "warn": true,
+        "b": "A tuning dial controls stability versus plasticity weight.",
+        "html": "The method introduces a number (alpha) that controls whether the calculation favors protecting old knowledge or enabling new learning. If this dial is too high, new tasks are strangled by overprotection; if too low, old tasks are forgotten. The paper shows results stay reasonable across a range of dial settings, but it is still a choice the user makes."
+      },
+      {
+        "b": "Done right.",
+        "html": "When you compute k per layer by measuring which update directions each layer actually needs, and keep the protected zone frozen, the split sizes become adjusted to each layer. A layer holding many old memories gets a larger protected zone, while a layer holding few gets a smaller protected zone. This layer-wise adjustment reduces both overprotection (where new learning is strangled unnecessarily) and underprotection (where old knowledge is erased). On standard benchmarks, the paper measured that this approach scores 2 to 5 percent higher than a one-rule-for-all split."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple continual learning loop: load a pre-trained vision model, give it task 1 (recognize 10 classes), measure accuracy on task 1. Then add task 2 (recognize a different 10 classes), train on task 2 using SplitLoRA with layer-specific k values computed by the balance formula. Measure accuracy on both task 1 and task 2 at the end. Repeat the measurement using a one-split-for-all baseline (existing orthogonal projection method). When k is set per layer instead of globally, each layer is protected in proportion to what it learned before: a layer that coded many old memories gets more protection because its old-knowledge cost is high; a layer that coded few gets less protection because its new-learning cost is high. Because the split is now tailored to each layer, the layers that matter most for old memory are truly safe, and the layers that need room for new learning have it. So both old and new task accuracies should measure higher than with a one-size-fits-all split."
+    ],
+    "metric_eq": "Average forgetting = (Task1_acc_before_task2 - Task1_acc_after_task2) + (Task2_acc_after_learning - Task2_min_acc_during_learning)",
+    "closing": "The one undeniable number: the model with per-layer split sizes forgets less while learning the new task than the model with a global split."
+  }
+}

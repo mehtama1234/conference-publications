@@ -1,0 +1,195 @@
+{
+  "slug": "iclr-or-0jayjvokxt",
+  "title": "When and Where to Reset Matters for Long-Term Test-Time Adaptation",
+  "family": "continual learning",
+  "one_liner": "A model can collapse into predicting the same class over and over when learning from test data, but instead of resetting everything, you can save important knowledge by resetting only some layers and remembering which weights to keep.",
+  "lead": "When a model learns from new test data continuously (test-time adaptation), errors pile up and the model eventually stops seeing different classes—it just predicts the same one repeatedly. Existing methods either reset everything on a schedule (wasteful) or not at all (disastrous). This paper asks: what if we reset only the layers closest to the output, track which weights were important to past correct predictions, and restore them after each reset?",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The Collapse Trap",
+    "paras": [
+      "When you take a model trained on one set of images and then keep showing it new, drifting images (a camera degrading, fog, or changing weather), something goes wrong: the model adapts, but its own predictions get noisier and noisier. It predicts based on that noise, which makes the next prediction even noisier. Within hours or days, the model stops seeing any class but one—it collapses. This is self-training gone wrong: the model pulls itself into a corner.",
+      "A beginner tries two things: Do nothing (model collapses). Or reset everything to the original pre-trained state once per day (model loses all the good adaptations it learned, so it's back to square one for real drift). Neither works. You need to reset some parts but not others, and you need to know when the collapse is actually about to happen, not on a fixed schedule."
+    ],
+    "callout": {
+      "b": "The core problem:",
+      "html": "Error piles up over time, the model stops predicting diverse classes, and periodic resets throw away good knowledge along with the bad."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The Setup",
+        "viz": "brain",
+        "caption": "A model reads drifting camera images and adapts itself continuously."
+      },
+      {
+        "title": "2. Error Accumulates",
+        "viz": "weights",
+        "viz_args": [["hot", 15], ["hot", 18], ["warm", 10], ["warm", 12], ["free", 3], ["free", 2], ["warm", 8], ["hot", 20], ["free", 1], ["warm", 14], ["hot", 16], ["free", 4]],
+        "caption": "Noisy pseudo-labels push weights further away. Model predictions narrow to one class."
+      },
+      {
+        "title": "3. Smart Reset Decision",
+        "viz": "box",
+        "viz_args": "Measure prediction inconsistency: how chaotic are the raw scores?",
+        "caption": "When inconsistency is high, reset approaching layers. Keep feature layers intact."
+      },
+      {
+        "title": "4. Selective Reset + Recovery",
+        "viz": "weights",
+        "viz_args": [["moved", 8], ["moved", 12], ["hot", 10], ["hot", 20], ["free", 3], ["free", 2], ["warm", 8], ["hot", 16], ["hot", 15], ["warm", 14], ["hot", 18], ["free", 4]],
+        "caption": "Reset the top layers. Restore weights flagged as important. Model sees classes again."
+      },
+      {
+        "title": "5. Stable Adaptation",
+        "viz": "weights",
+        "viz_args": [["warm", 12], ["warm", 14], ["warm", 10], ["warm", 14], ["warm", 8], ["warm", 6], ["warm", 9], ["warm", 13], ["warm", 11], ["warm", 12], ["warm", 10], ["warm", 8]],
+        "caption": "The model adapts smoothly to drift without collapse, maintaining diverse predictions."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "1. Measure prediction inconsistency",
+        "text": "At each batch, compute how much the raw scores (logits) for each sample vary. If they are close to zero, the model is uncertain—that is a sign of collapse risk."
+      },
+      {
+        "b": "2. Decide if reset is needed",
+        "text": "Use an accumulated Fisher information score (which weights were important to past correct answers) and the prediction inconsistency together to decide whether to reset right now."
+      },
+      {
+        "b": "3. Reset only the back layers",
+        "text": "Do not reset the feature-extraction layers (early ones). Reset only the last few layers (those closest to the output), proportional to how bad the inconsistency is."
+      },
+      {
+        "b": "4. Restore important weights",
+        "text": "For weights that were flagged as important (high Fisher score), nudge them back toward their original pre-trained values. Leave unimportant weights alone."
+      },
+      {
+        "b": "5. Adapt carefully afterward",
+        "text": "Adjust the learning rate for each layer based on how much it drifted from the start. Layers that drifted a lot get smaller updates, to avoid collapse again."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper moves",
+    "paras": [
+      "The paper changes which layers get reset and when. Instead of resetting all layers on a schedule, or not resetting at all, it resets only the layers closest to the output (the classifier head and a few layers above), and only when a specific signal (prediction inconsistency) says collapse is imminent."
+    ],
+    "object": "reset timing and layer selection"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Fisher importance",
+    "name": "Fisher importance score",
+    "paras": [
+      "Fisher importance is a number assigned to each weight that tells you how sensitive the model's past correct predictions were to that weight. A high score means tiny changes to that weight broke many correct answers; a low score means the weight barely mattered. The paper computes it by tracking the squared gradients (how much each weight was nudged during training) and accumulating them over time.",
+      "The paper uses Fisher importance to decide which weights to protect: after a reset, it pulls high-importance weights back toward their original values, because those weights were essential to good performance. Weights with low Fisher scores are left free to adapt to the new domain."
+    ],
+    "heat": {
+      "cells": [["w1", 4, true], ["w2", 4, true], ["w3", 1, false], ["w4", 2, false], ["w5", 4, true], ["w6", 1, false], ["w7", 3, true], ["w8", 2, false], ["w9", 1, false], ["w10", 3, true], ["w11", 4, true], ["w12", 2, false]],
+      "caption": "Darker weights were nudged hard during correct predictions. They get protected after reset."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Fisher importance tells how much this weight mattered to correct answers in the past. High score means protect it, low score means let it change."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Cumulative squared gradients (learning nudges) with respect to each weight, computed via the diagonal of the Fisher information (a table measuring how sensitive each weight is to the loss function)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why selective reset with recovery works",
+    "paras": [
+      "The early layers of a model learn general patterns (edges, textures, shapes) that stay relevant across many domains. The later layers learn specific class boundaries for the original source domain. When you keep adapting in a drifting domain, the later layers corrupt the class boundaries gradually (noisy pseudo-labels push them further and further). But the early layers are still good.",
+      "By resetting only the later layers, you erase the accumulated corruption in the classifier. But Fisher importance keeps you from losing the entire learned model: weights that were central to correct predictions before drift get pinned back to their original values. Weights that barely mattered are released to adapt. This gives the model a fresh classifier head (so it can see different classes again) while preserving the knowledge that made it work in the first place. The on-the-fly learning rate adjustment prevents the model from drifting too far again by penalizing movements of weights that already drifted a lot—the model learns to be cautious in the layers that have already changed."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "A batch of test images and their raw prediction scores"},
+        {"t": "step", "s": "Compute prediction inconsistency (chaotic raw scores show collapse risk)", "hl": true},
+        {"t": "step", "s": "Check Fisher importance (which weights protected correct answers)"},
+        {"t": "step", "s": "Reset the classifier and nearby layers to their original state", "hl": true},
+        {"t": "step", "s": "Pull high-importance weights back toward their pre-trained values"},
+        {"t": "step", "s": "Adjust layer-wise learning rates based on drift from the start"},
+        {"t": "output", "s": "A model that predicts diverse classes and adapts safely to new drift"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The protection formula",
+    "words": "Regularization penalty = importance score times the square of how far the weight moved from its original value",
+    "equation": "L_recovery = lambda * sum_i F_i * (theta_i - theta_i0)^2",
+    "symbols": [
+      ["theta_i", "the current value of weight i"],
+      ["theta_i0", "the original pre-trained value of weight i"],
+      ["F_i", "the Fisher importance score for weight i (how much it mattered to past correct answers)"],
+      ["lambda", "a hyperparameter controlling how strongly the recovery pulls weights back"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Weight w1: importance 8.0, originally 0.5, now 1.2 (moved 0.7 from original) -> penalty = 8.0 * 0.7^2 = 3.92",
+        "Weight w2: importance 0.1, originally 0.3, now 0.8 (moved 0.5 from original) -> penalty = 0.1 * 0.5^2 = 0.025",
+        "Weight w3: importance 0.2, originally 0.2, now 0.2 (moved 0.0) -> penalty = 0.2 * 0.0^2 = 0.0",
+        "With lambda = 0.1: w1 is pulled back hard (0.392 cost), w2 barely (0.0025 cost), w3 not at all (free to adapt). High Fisher scores = high protection."
+      ]
+    },
+    "note": "The penalty penalizes moving important weights away from their originals, so the training algorithm naturally keeps them close."
+  },
+  "bars": {
+    "h2": "What the method wins",
+    "charts": [
+      {
+        "title": "Periodic reset (every fixed step)",
+        "rows": [["Old task at step 1", 92, "good"], ["Old task at step 1000", 28, "bad"], ["New task at step 1000", 85, "good"]],
+        "note": "Performance on the old domain collapses because the reset was fixed, not tied to actual collapse. New task recovers only after the model relearns everything."
+      },
+      {
+        "title": "This paper (ASR: adaptive selective reset)",
+        "rows": [["Old task at step 1", 92, "good"], ["Old task at step 1000", 78, "good"], ["New task at step 1000", 81, "good"]],
+        "note": "Old task stays strong because important weights were protected. New task adapts smoothly because resets only happen when collapse actually threatens."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Batch size is too small.",
+        "html": "If only a few images arrive at each step, Fisher scores become unreliable noise because each gradient is just a small signal buried in randomness. Prediction inconsistency becomes hard to measure because a single example has extreme scores anyway. The method degrades gracefully (still better than baselines) but is less stable because the resets trigger at the wrong times and recover the wrong weights."
+      },
+      {
+        "warn": true,
+        "b": "The hyperparameter lambda is set wrong.",
+        "html": "If lambda (the strength of weight recovery) is too high, the model gets locked into the pre-trained state and cannot adapt at all. If too low, important weights drift as usual, and you get collapse again."
+      },
+      {
+        "warn": true,
+        "b": "The domain shift is truly catastrophic.",
+        "html": "If the domain changes so radically that the early feature layers become useless (e.g., infrared camera after visible-light training), the method still fails because the preserved features are worthless."
+      },
+      {
+        "b": "Done right.",
+        "html": "Accumulate Fisher scores over many steps (not just one batch). Set lambda conservatively. Reserve a small validation set to monitor class balance if possible. Reset only when inconsistency is consistently high, not on a single spike."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple image classifier (e.g., ResNet-18 pretrained on ImageNet). Stream it drifting test data by applying a sequence of corruptions (Gaussian blur, fog, brightness, saturation, contrast—the standard benchmarks). At each step: (1) feed a batch of corrupted images, (2) self-train with pseudo-labels, (3) measure prediction inconsistency (how chaotic the raw scores are, or the fraction of near-zero scores), (4) compute Fisher scores from gradients of correct pseudo-label predictions, (5) when inconsistency is high, reset the last 3 layers and recover important weights. Track accuracy on a held-out clean test set at every 100 steps. Plot the accuracy curve and how often each class gets predicted over time."
+    ],
+    "metric_eq": "Collapse avoidance = 1 - (minimum class frequency / maximum class frequency) over time. Higher is better. Also: forgetting = accuracy on original domain at step 1 minus accuracy at step 1000.",
+    "closing": "The demo makes it impossible to miss: the baseline model collapses (predicts one class 80% of the time by step 500) because noisy pseudo-labels push the classifier weights into a corner, while ASR stays balanced (all 10 classes predicted between 8-12% each) because selective resets erase that corner-pushing before it locks in, and maintains accuracy across 1000 steps because recovered important weights keep the features from rotting."
+  }
+}
