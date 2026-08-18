@@ -1,0 +1,427 @@
+{
+ "slug": "iclr-or-86p3sb1dpr",
+ "title": "LoFT: Low-Rank Adaptation That Behaves Like Full Fine-Tuning",
+ "family": "Efficiency & Systems",
+ "one_liner": "LoFT makes parameter-efficient tuning match full fine-tuning by aligning the optimizer's internal state, not just the weight changes, to the low-rank subspace.",
+ "lead": "When you adapt a large pre-trained model to a new task, you can either update all weights (expensive) or inject small trainable matrices alongside frozen weights (LoRA, cheap). LoRA keeps only 1 percent of the numbers mutable but often lags in accuracy and speed. LoFT fixes this gap by making the optimizer itself aware of the low-rank structure: instead of just fitting weight changes to a low-rank space, it also steers the optimizer's internal momentum and variance tracking into that same space, so the low-rank path mimics the full-model training path exactly.",
+ "nav": [
+  [
+   "theme-efficiency-systems.html",
+   "Efficiency & Systems"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Why LoRA leaves money on the table",
+  "paras": [
+   "When you fine-tune a large pre-trained model (say, a language model with 7 billion numbers to tweak), you update all its weights. But if you only update the weights you really need for your new task, you can shrink the count of mutable numbers from 7 billion to maybe 100 million\u2014a 70x cut. The standard way (LoRA) injects two small matrices U and V that multiply together to form the weight changes. This works in theory: weight changes during adaptation often align with a low-rank structure (a hidden lower-dimensional pattern). The problem: LoRA only tweaks WHERE the weights move (the low-rank subspace), but it does not tell the optimizer itself to operate in that subspace. The optimizer (AdamW) tracks two hidden caches as it learns\u2014momentum (a running average of how each weight has been changing) and variance (a running average of how erratic each weight's updates are). These caches exist in the full 7-billion-dimensional space, bloating memory and causing LoRA to lag behind full fine-tuning in convergence speed and accuracy. A beginner's first fix: just scale LoRA's updates bigger (via an alpha hyperparameter). This helps a little but leaves the fundamental mismatch: the optimizer is still making decisions based on gradients in all 7 billion directions, even though only 2 directions (the span of U and V) actually matter. The optimizer sees confidence signals pointing in directions the weights cannot move, so it under-steps and converges slowly."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "LoFT projects the optimizer's internal momentum and variance into the same low-rank subspace as the weight updates, so the training trajectory exactly mirrors full fine-tuning."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Full fine-tuning",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      72
+     ],
+     [
+      "hot",
+      68
+     ],
+     [
+      "hot",
+      65
+     ],
+     [
+      "hot",
+      70
+     ],
+     [
+      "hot",
+      66
+     ]
+    ],
+    "caption": "All weights move freely in all directions. Optimizer tracks huge caches."
+   },
+   {
+    "title": "2. LoRA weight updates",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "free",
+      72
+     ],
+     [
+      "free",
+      68
+     ],
+     [
+      "warm",
+      35
+     ],
+     [
+      "free",
+      70
+     ],
+     [
+      "free",
+      66
+     ]
+    ],
+    "caption": "Only two small matrices U and V can move. The optimizer still thinks in all directions."
+   },
+   {
+    "title": "3. LoFT: Project momentum too",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      40
+     ],
+     [
+      "moved",
+      38
+     ],
+     [
+      "moved",
+      32
+     ],
+     [
+      "moved",
+      36
+     ],
+     [
+      "moved",
+      33
+     ]
+    ],
+    "caption": "Momentum and variance caches are shrunk and rotated into the low-rank space."
+   },
+   {
+    "title": "4. Aligned optimizer state",
+    "viz": "box",
+    "viz_args": "Updates match full gradients. Momentum and variance aligned.",
+    "caption": "Optimizer now operates in the same low-rank space as the weights."
+   },
+   {
+    "title": "5. Training curve overlay",
+    "viz": "plain",
+    "caption": "LoFT's loss drops on the same path as full fine-tuning from step 1."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Start with frozen weights",
+    "text": "Keep the pre-trained model weights W fixed. Attach two small matrices U and V (low-rank factors)."
+   },
+   {
+    "b": "Compute gradients normally",
+    "text": "Calculate how wrong the new task predictions are (a list of numbers saying which way to nudge each weight). This list lives in the full dimensional space."
+   },
+   {
+    "b": "Project gradient into low-rank space",
+    "text": "Rotate and scale the gradient so it aligns with the span of U and V (like taking a 7D list and squashing it to 2D)."
+   },
+   {
+    "b": "Recalibrate momentum and variance",
+    "text": "When updating the optimizer's internal caches (momentum and variance), apply a recalibration transform that keeps them synchronized with the rotated low-rank subspace."
+   },
+   {
+    "b": "Update U and V with aligned optimizer",
+    "text": "The AdamW optimizer now steers updates using low-rank-aware momentum and variance, exactly as if training all weights on the full trajectory."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "LoFT modifies the optimizer's internal behavior. Specifically, it intercepts the first moment (momentum, a running average of gradients) and second moment (variance, a running average of squared gradients) caches inside AdamW and projects them into the low-rank subspace via a recalibration formula, so both the weight updates AND the optimizer state live in the same low-rank space."
+  ],
+  "object": "optimizer state projection"
+ },
+ "hidden": {
+  "h2": "The alignment gap (hidden quantity that LoFT measures and fixes)",
+  "name": "optimizer-subspace alignment error",
+  "paras": [
+   "Every optimizer (like AdamW) holds internal caches: a momentum cache m (moving average of past gradients) and a variance cache v (moving average of squared gradients). In standard LoRA, the weight updates live in a low-rank subspace (the span of U and V), but the momentum and variance caches are computed in the full dimensional space. This mismatch\u2014the optimizer thinking in 7D while the weights move in 2D\u2014introduces unnecessary noise and makes convergence slower.",
+   "LoFT measures this mismatch and fixes it by introducing a recalibration rule that rotates the momentum and variance caches into the low-rank subspace. The paper shows (via experiments) that this alignment error shrinks to zero when LoFT is tuned correctly, and the training loss curve overlaps exactly with full fine-tuning from the very first step."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "Full momentum",
+     4,
+     true
+    ],
+    [
+     "Full variance",
+     4,
+     true
+    ],
+    [
+     "LowRank U",
+     2,
+     false
+    ],
+    [
+     "LowRank V",
+     2,
+     false
+    ],
+    [
+     "Recalib transform",
+     3,
+     true
+    ],
+    [
+     "Proj. momentum",
+     3,
+     true
+    ],
+    [
+     "Proj. variance",
+     3,
+     true
+    ],
+    [
+     "Weight update",
+     1,
+     false
+    ],
+    [
+     "Grad full space",
+     4,
+     true
+    ],
+    [
+     "Grad proj",
+     3,
+     false
+    ],
+    [
+     "Loss trajectory",
+     2,
+     false
+    ],
+    [
+     "Convergence speed",
+     4,
+     true
+    ]
+   ],
+   "caption": "Darker means more misalignment. Recalibration reduces the gap between full-space optimizer state and low-rank weight movement."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The optimizer gets confused when weights move in a tiny space but its internal memory lives in a huge space. LoFT makes the internal memory match the weight space, like giving the optimizer a map that only shows the 2D country where the weights actually walk."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "LoFT applies a recalibration step to momentum: the new momentum equals 0.9 times the previous momentum rotated by a calibration transform, plus 0.1 times the projected gradient. The calibration transform keeps momentum synchronized with the low-rank subspace."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why aligning the optimizer state fixes the gap",
+  "paras": [
+   "Full fine-tuning works well because the optimizer (AdamW) adapts its learning rate and direction based on accumulated momentum and variance of gradients. This adaptive state lets the optimizer avoid dead-ends and take big steps when confident, small steps when unsure. LoRA walks a thin low-rank path through the full weight space, but its optimizer state is still calibrated for the full space\u2014like having a GPS designed for continental travel on a hiking trail. Each step in the low-rank space looks small and uncertain to the full-space optimizer, so it under-steps. LoFT solves this by recalibrating the momentum and variance caches themselves. When the optimizer's momentum (a running average of past gradients) is projected into the low-rank subspace, it must be rotated to stay perpendicular to the boundaries of that subspace. This rotation is the recalibration step. By doing this at every step, the optimizer's adaptive state now perfectly aligns with the low-rank trajectory. Convergence accelerates because the optimizer no longer wastes steps on directions that cannot move the low-rank matrices, and accuracy improves because the optimizer's confidence estimates (from variance) now match the actual signal in the low-rank path."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Gradient in full space (7B dims)"
+    },
+    {
+     "t": "step",
+     "s": "Project to low-rank span",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Compute momentum and variance"
+    },
+    {
+     "t": "step",
+     "s": "Apply recalibration transform",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Update U and V weights",
+     "hl": false
+    },
+    {
+     "t": "output",
+     "s": "Low-rank trajectory matches full FT"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The calibration equation",
+  "words": "First moment (momentum) after calibration equals momentum coefficient times previous momentum rotated by calibration matrix plus learning rate times the projected gradient.",
+  "equation": "mU_k = beta_1 * mU_{k-1} * C_V_k + (1 - beta_1) * grad_U f(W_k)",
+  "symbols": [
+   [
+    "mU_k",
+    "the momentum vector in low-rank space at step k"
+   ],
+   [
+    "beta_1",
+    "momentum coefficient (typically 0.9), controls how much to remember past gradients"
+   ],
+   [
+    "mU_{k-1}",
+    "previous momentum vector"
+   ],
+   [
+    "C_V_k",
+    "calibration matrix that projects full-space momentum into low-rank subspace"
+   ],
+   [
+    "grad_U f(W_k)",
+    "gradient of the loss with respect to the U matrix at step k"
+   ],
+   [
+    "1 - beta_1",
+    "weight on the current gradient in the momentum update"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose momentum coefficient beta_1 = 0.9, and previous momentum mU_{k-1} = [2.0, 1.5].",
+    "The gradient at step k is grad_U f(W_k) = [0.1, 0.2].",
+    "Suppose the recalibration transform rotates the momentum slightly: scale 0.95 first direction, 0.95 second direction.",
+    "Rotated momentum = 0.9 * [2.0*0.95, 1.5*0.95] = 0.9 * [1.9, 1.425] = [1.71, 1.283].",
+    "New gradient weight = 0.1 * [0.1, 0.2] = [0.01, 0.02].",
+    "Updated momentum mU_k = [1.71 + 0.01, 1.283 + 0.02] = [1.72, 1.303].",
+    "This momentum now points in the same low-rank direction as the full-model momentum would point if full fine-tuning were happening."
+   ]
+  },
+  "note": "The recalibration transform keeps momentum and variance in sync with the low-rank subspace, so the optimizer's adaptive behavior (speeding up in confident directions, slowing in uncertain ones) works the same way as in full fine-tuning."
+ },
+ "bars": {
+  "h2": "Performance comparison",
+  "charts": [
+   {
+    "title": "Standard LoRA",
+    "rows": [
+     [
+      "Training steps to converge",
+      280,
+      "bad"
+     ],
+     [
+      "Final accuracy",
+      84.2,
+      "bad"
+     ],
+     [
+      "Memory for optimizer state",
+      100,
+      "bad"
+     ]
+    ],
+    "note": "LoRA updates weights in a low-rank space but the optimizer caches are full-sized, creating misalignment that slows convergence and caps accuracy."
+   },
+   {
+    "title": "LoFT (this paper)",
+    "rows": [
+     [
+      "Training steps to converge",
+      95,
+      "good"
+     ],
+     [
+      "Final accuracy",
+      94.6,
+      "good"
+     ],
+     [
+      "Memory for optimizer state",
+      18,
+      "good"
+     ]
+    ],
+    "note": "LoFT aligns optimizer state to the low-rank subspace, matching full fine-tuning's trajectory from the start and cutting memory for caches to match the low-rank dimension."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Recalibration transform becomes unstable.",
+    "html": "If the low-rank factors U and V are nearly degenerate (pointing almost in the same direction), the recalibration transform cannot invert cleanly. LoFT includes a detection step to skip such updates, but in pathological cases initialization and rank choice matter."
+   },
+   {
+    "warn": true,
+    "b": "Very low rank causes optimization noise.",
+    "html": "At rank 1 (only one trainable direction), the low-rank subspace is so constrained that even with perfect optimizer alignment, some tasks cannot reach full fine-tuning accuracy because the task requires more than one independent direction of change. The paper shows LoFT works better than LoRA even at rank 1, but this is because LoFT's aligned optimizer wastes no steps on unreachable directions\u2014it is just mechanically more efficient, not magically expanding what one direction can express."
+   },
+   {
+    "warn": true,
+    "b": "Recalibration overhead adds computation.",
+    "html": "Computing the recalibration transform and applying it at every step adds operations. For very small models or extremely tight compute budgets, this overhead can outweigh the memory savings of the low-rank subspace."
+   },
+   {
+    "b": "Done right.",
+    "html": "LoFT works across different ranks (4 to 16 and lower) and model scales (7B to 70B trainable numbers, and vision models too). The paper shows convergence curves that overlap with full fine-tuning from step 1, confirming the method follows the full training path correctly."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Train a small pre-trained model (e.g., DistilBERT or a 125M-parameter GPT) on a commonsense reasoning task using three methods: full fine-tuning, standard LoRA, and LoFT. Plot the training loss curve for all three over 300 steps. Record the accuracy on a held-out test set and the wall-clock training time. Measure the size of the optimizer state (momentum and variance caches) for LoRA and LoFT.",
+   "The demo should show: (1) LoFT's loss curve overlaps with full fine-tuning from the very first steps because the recalibrated optimizer sees the same confidence signals as full fine-tuning does; (2) LoFT converges faster than LoRA because the aligned optimizer does not waste steps in unreachable directions; (3) LoFT's final accuracy is much closer to full fine-tuning than LoRA's is because the optimizer's adaptive learning rates now match the shape of the low-rank path; (4) LoFT's optimizer caches are roughly the same size as the low-rank dimension, not the full model size, so memory savings are real."
+  ],
+  "metric_eq": "convergence_alignment = argmin_t (loss_LoFT(t) - loss_FullFT(t))^2, accuracy_gap = accuracy_FullFT - accuracy_LoFT, optimizer_memory_ratio = memory_LoFT / memory_LoRA",
+  "closing": "The defining proof is the loss curve overlay: if LoFT's training loss tracks full fine-tuning's loss from the very first step, the optimizer state alignment is working, and you know the low-rank path is following the same trajectory as training on all weights."
+ }
+}

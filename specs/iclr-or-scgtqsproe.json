@@ -1,0 +1,502 @@
+{
+ "slug": "iclr-or-scgtqsproe",
+ "title": "Logit-KL Flow Matching: Noise-Free Text Generation All at Once",
+ "family": "Generative Models & Diffusion",
+ "one_liner": "Instead of predicting one word at a time (slow), this paper generates all words at once by learning smooth paths through word-choice space, grounded in how probability actually changes.",
+ "lead": "Normally, language models output one word at a time in sequence, which is slow on modern computers. This paper flips that: generate ALL words at once, all the way from pure randomness to real text, by learning to smooth out the chaos in one clean path rather than many rough jumps.",
+ "nav": [
+  [
+   "theme-generative-models-diffusion.html",
+   "Generative Models & Diffusion"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Why one-at-a-time generation is slow",
+  "paras": [
+   "Today's language models work like this: they look at what has been written so far, then predict the next word. Once you have that word, you feed it back in and predict the next one. For a sentence of 20 words, you do this loop 20 times. On a graphics card, each pass through the network takes real time, even if it is fast\u201420 loops add up.",
+   "A beginner might think: why not predict all 20 words at once? The problem is chaos. If you randomly initialize 20 slots for 20 words, the model sees pure nonsense\u2014no structure to learn from. Gradients (the nudges that training uses to adjust the numbers) point every which way and cancel out. The model cannot reason backward from nonsense to signal."
+  ],
+  "callout": {
+   "b": "The method in one sentence.",
+   "html": "Build a smooth gradient-friendly path from random gibberish to real text, then learn to walk that path backward from noise to sense, generating all words together."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The bottleneck",
+    "viz": "box",
+    "viz_args": "Word 1 \u2192 Word 2 \u2192 Word 3 \u2192 ... (slow loop)",
+    "caption": "Today: one word per step. 20 words takes 20 forward passes."
+   },
+   {
+    "title": "2. Naive parallel attempt",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "free",
+      12
+     ],
+     [
+      "free",
+      8
+     ],
+     [
+      "free",
+      15
+     ],
+     [
+      "free",
+      10
+     ],
+     [
+      "free",
+      9
+     ],
+     [
+      "free",
+      14
+     ],
+     [
+      "free",
+      11
+     ],
+     [
+      "free",
+      7
+     ],
+     [
+      "free",
+      13
+     ],
+     [
+      "free",
+      6
+     ],
+     [
+      "free",
+      10
+     ],
+     [
+      "free",
+      8
+     ]
+    ],
+    "caption": "Generate all at once: random chaos, gradients cancel, training stalls."
+   },
+   {
+    "title": "3. KL-geodesic path",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "warm",
+      4
+     ],
+     [
+      "warm",
+      6
+     ],
+     [
+      "warm",
+      8
+     ],
+     [
+      "warm",
+      10
+     ],
+     [
+      "warm",
+      12
+     ],
+     [
+      "warm",
+      11
+     ],
+     [
+      "warm",
+      9
+     ],
+     [
+      "warm",
+      7
+     ],
+     [
+      "warm",
+      5
+     ],
+     [
+      "warm",
+      3
+     ],
+     [
+      "warm",
+      2
+     ],
+     [
+      "warm",
+      1
+     ]
+    ],
+    "caption": "Smooth interpolation from random (all weights equal) to real probabilities."
+   },
+   {
+    "title": "4. Flow denoiser learns",
+    "viz": "box",
+    "viz_args": "Denoiser: guess clean text from noisy version at every step",
+    "caption": "Network predicts: given messy words, what was the real sentence before noise?"
+   },
+   {
+    "title": "5. Inference: walk backward",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      2
+     ],
+     [
+      "hot",
+      3
+     ],
+     [
+      "hot",
+      5
+     ],
+     [
+      "hot",
+      7
+     ],
+     [
+      "hot",
+      9
+     ],
+     [
+      "hot",
+      11
+     ],
+     [
+      "hot",
+      12
+     ],
+     [
+      "hot",
+      10
+     ],
+     [
+      "hot",
+      8
+     ],
+     [
+      "hot",
+      6
+     ],
+     [
+      "hot",
+      4
+     ],
+     [
+      "hot",
+      1
+     ]
+    ],
+    "caption": "Start at random, follow denoiser steps, converge to crisp real words all at once."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Training: build the interpolation path",
+    "text": "For each real sentence, create smooth intermediate versions that blend pure randomness (all words equally likely) into actual words. This path must follow KL-geodesics (the most honest route through probability-land)."
+   },
+   {
+    "b": "Training: teach a denoiser",
+    "text": "The network learns to predict: given a messy in-between sentence, guess the original clean sentence. Maximize the probability it assigns to the true next word at every noise level."
+   },
+   {
+    "b": "Inference: set up the ODE solver",
+    "text": "The denoiser's predictions encode a vector field (a direction and speed at each point). Use that to solve an ordinary differential equation (ODE) backward from pure noise to real words."
+   },
+   {
+    "b": "Inference: sample-hybrid acceleration",
+    "text": "For speed: instead of only following the ODE, alternate between ODE steps and sampling. At each noise level, sample a candidate next sentence, then re-noise it slightly. Repeat until convergence."
+   },
+   {
+    "b": "Result: all words appear together",
+    "text": "Every word emerges in parallel from noise to sense, in one forward pass. No loop, no sequential dependency. Graphics card computes once; out comes a full sentence."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper swaps out the interpolation path. Old methods (Linear, Fisher-Rao geodesics) blend randomness into sense too quickly, making the early-stage noise look almost like signal and confusing the denoiser. KL-geodesics (linear interpolation in logit space\u2014the raw score space before converting to probabilities) decay much more slowly, keeping honest uncertainty all the way through the schedule."
+  ],
+  "object": "Interpolation path"
+ },
+ "hidden": {
+  "h2": "The KL-divergence decay: the hidden clock",
+  "name": "KL-divergence at time t",
+  "paras": [
+   "KL-divergence (a score measuring how different two sets of word-probabilities are) starts very high when you are at pure noise and should reach zero when you are at the true sentence. KL-geodesics make this decay evenly, like a clock ticking uniformly.",
+   "The paper measures this decay and discovers that Linear and Fisher-Rao paths collapse the divergence too fast (they hit zero before t=1), wasting the learning signal. KL-paths keep divergence high until the very end, so every step of training sees useful error to correct."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "t=0 (noise)",
+     4,
+     true
+    ],
+    [
+     "t=0.1",
+     4,
+     false
+    ],
+    [
+     "t=0.2",
+     4,
+     false
+    ],
+    [
+     "t=0.3",
+     3,
+     false
+    ],
+    [
+     "t=0.5",
+     2,
+     false
+    ],
+    [
+     "t=0.7",
+     2,
+     true
+    ],
+    [
+     "t=0.8",
+     1,
+     false
+    ],
+    [
+     "t=0.9",
+     1,
+     false
+    ],
+    [
+     "Linear KL",
+     2,
+     false
+    ],
+    [
+     "Fisher-Rao KL",
+     2,
+     false
+    ],
+    [
+     "KL-geodesic",
+     4,
+     true
+    ],
+    [
+     "t=1 (real)",
+     1,
+     false
+    ]
+   ],
+   "caption": "Darker means higher KL-divergence remaining. KL-geodesic (highlighted) decays slowly and evenly."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The KL-divergence is how confused the model would be if it guessed randomly instead of learning the path. A slow decay means the model has something real to learn at every step."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The paper trains by maximizing the model's probability of guessing the true sentence given a noisy version. It proves that this training goal exactly recovers the flow-matching direction field in logit space (the raw score space)."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why learning a smooth path works",
+  "paras": [
+   "Here is the core idea: if you have a truly smooth path from noise to signal, gradients at every point along it can guide you. You train a network (the denoiser) to answer one question: given a sentence halfway between random and real, what was the original real sentence? This is easier than guessing from pure chaos, because there is still some structure to detect.",
+   "During inference, you use the denoiser's answers to build a vector field\u2014a map of directions that point you toward the real sentence at every stage of denoisification. You follow those arrows from start to finish, one step at a time (via ODE solving). This works because the path is smooth: small nudges in the right direction accumulate to a coherent sentence.",
+   "The sampling-hybrid trick accelerates inference because it combines two strategies: the ODE solver takes smooth steps along the learned direction field, while sampling fills in candidate words from the denoiser's probability estimates and re-noises them slightly. This zigzag approach exploits both the shape of the smooth path (ODE) and the statistics (sampling) of the path, so the model converges faster by making bigger, more certain steps earlier and refining details later, rather than taking many tiny ODE steps."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Random bag of word-probabilities"
+    },
+    {
+     "t": "step",
+     "s": "Denoiser estimates clean text",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "ODE solver takes step toward estimate"
+    },
+    {
+     "t": "step",
+     "s": "Sample-hybrid: alternate with sampling"
+    },
+    {
+     "t": "output",
+     "s": "Converged real sentence, all words at once"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The core equation",
+  "words": "Loss = average squared difference between the network's predicted direction field and the true direction field that the geometry tells us should exist",
+  "equation": "L_CFM(\u03b8) = E_{t,x0,x1} [ ||v_\u03b8(\u03b3_t(x0,x1), t) - v(\u03b3_t(x0,x1), t | x0,x1)||^2 ]",
+  "symbols": [
+   [
+    "v_\u03b8(...)",
+    "The direction-and-speed prediction the network learns"
+   ],
+   [
+    "v(...)",
+    "The true optimal direction-and-speed (derived from probability theory)"
+   ],
+   [
+    "\u03b3_t(x0,x1)",
+    "The interpolated sentence at time t between noise x0 and real x1"
+   ],
+   [
+    "t",
+    "Time index from 0 (noise) to 1 (real text)"
+   ],
+   [
+    "E",
+    "Average over all training examples and time steps"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example with one word changing",
+   "lines": [
+    "Suppose one word-slot has logit score l_0=0 (random, prob \u2248 50%) and true logit l_1=4 (real, prob \u2248 98%).",
+    "At t=0.5 (halfway), the interpolated logit is l_t = 0 + 0.5\u00d7(4-0) = 2.",
+    "The true velocity (slope) is (l_1 - l_t) / (1 - t) = (4 - 2) / 0.5 = 4.",
+    "Training forces v_\u03b8 to predict 4 at t=0.5. If v_\u03b8 predicts 4, loss is 0.",
+    "If v_\u03b8 predicts 2 (wrong), loss is (4-2)^2 = 4. Large error, strong learning signal."
+   ]
+  },
+  "note": "The network learns a smooth vector field by matching slopes along the KL-geodesic path, so inference can integrate these slopes to get from noise to sense."
+ },
+ "bars": {
+  "h2": "Perplexity: path choice matters",
+  "charts": [
+   {
+    "title": "Linear or Fisher-Rao path",
+    "rows": [
+     [
+      "Perplexity score (lower means fewer wrong guesses)",
+      180,
+      "bad"
+     ],
+     [
+      "Reason: uncertainty collapses too fast, wasting training steps",
+      0,
+      "bad"
+     ],
+     [
+      "Gradients weak mid-schedule when they should be strong",
+      0,
+      "bad"
+     ]
+    ],
+    "note": "Old path geometries waste the learning time by collapsing the information signal (KL-divergence) before half the training is over."
+   },
+   {
+    "title": "KL-geodesic path (this paper)",
+    "rows": [
+     [
+      "Perplexity score (lower means fewer wrong guesses)",
+      92,
+      "good"
+     ],
+     [
+      "Uncertainty decays evenly from start to finish",
+      0,
+      "good"
+     ],
+     [
+      "Every step of training sees real error to reduce",
+      0,
+      "good"
+     ]
+    ],
+    "note": "Uniform decay keeps the denoiser engaged throughout: at early steps, big coarse adjustments; at late steps, fine corrections. Every training step has real learning work to do."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Training assumes a smooth path exists.",
+    "html": "If the interpolation path is not truly smooth (e.g., steps are not proportional to time), gradients become noisy and the denoiser overfits to rough spots. Always validate that the path decays uniformly."
+   },
+   {
+    "warn": true,
+    "b": "Denoiser confusion at mid-noise.",
+    "html": "When the interpolated sentence is halfway between gibberish and sense, the denoiser may flip between two competing clean versions. Bidirectional attention helps (since the model sees the full noisy context), but conflicts still occur in ambiguous cases."
+   },
+   {
+    "warn": true,
+    "b": "Sampling-hybrid can diverge with too many steps.",
+    "html": "The hybrid scheme (alternating ODE and resampling) can accumulate error if the re-noise step is too aggressive or if it alternates too many times without convergence check."
+   },
+   {
+    "b": "Done right: careful tuning.",
+    "html": "Monitor divergence decay during training, use bidirectional attention to reduce mid-stage confusion, and set the sample-hybrid budget (number of steps and noise levels) based on a held-out validation set."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Write a toy language model on 100 short sentences (e.g., product reviews, movie titles). Implement the KL-geodesic path in logit space. Train a denoiser to predict the clean sentence given a noisy intermediate one. At inference, generate new sentences by starting from random logits, then run the ODE solver (Euler method, 10\u201320 steps) backward using the denoiser as the vector field. Measure final perplexity (the average number of wrong guesses the model makes on a held-out test set; lower is better) and compare it to a Linear-geodesic baseline trained on the same data. The KL-geodesic should win because its uniform uncertainty decay lets the denoiser learn steadier, more confident predictions at every noise level."
+  ],
+  "metric_eq": "improvement = perplexity_linear - perplexity_kl",
+  "closing": "The demo must show that KL-geodesic perplexity is measurably lower (cleaner, fewer wrong guesses) because the divergence decay is honest throughout training, not collapsed early."
+ }
+}

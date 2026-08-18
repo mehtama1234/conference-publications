@@ -1,0 +1,240 @@
+{
+  "slug": "iclr-or-psie9mmf7a",
+  "title": "Auditing Black-Box LLM APIs with a Rank-Based Uniformity Test",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "When you call an LLM through an API, the company might secretly swap in a cheaper model; this paper detects that swap by testing whether the API's answers fit the expected pattern.",
+  "lead": "When you use an LLM API, the company serves you answers through a hidden box—you cannot see the weights, and you usually cannot even see the confidence scores. If the company wants to save money, it might swap the real model for a cheaper, quantized (rounded-number) version, because serving a large model is expensive and quantized versions cost much less to run. Malicious actors might also swap it to add jailbreaks or harmful behavior. This paper gives you a test to catch that swap, using only the final answers.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The API provider's secret substitution",
+    "paras": [
+      "When you call an LLM through an API, you get only the final answers. You cannot see the model's internal weights, and often not even the confidence scores. This opacity is intentional—it protects the company's intellectual property. But it creates a loophole: the company could swap the real model for a cheaper fake (a quantized version with rounded numbers, or a fine-tuned variant designed to jailbreak) because serving that fake model costs much less than serving the real one, and users would never know. You would just see answers that seem similar enough.",
+      "A naive detector would compare benchmark performance: if the API still solves 95% of math problems, maybe it is the real model. But this breaks because quantized models are often trained carefully to preserve accuracy, and because the company might serve different variants to different users or reroute once it detects testing. The real test needs to work with very few queries, and it needs to be invisible to the company."
+    ],
+    "callout": {
+      "b": "The paper's move in one sentence.",
+      "html": "Instead of testing performance, test whether the API's answers come from the same <em>distribution</em> (the pattern of all possible answers) as the real model, by checking whether each API answer ranks unusually high or low in a reference sample from the real model."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The honest exchange",
+        "viz": "brain",
+        "caption": "You send a prompt to an API. The company claims it is running the real model."
+      },
+      {
+        "title": "2. The secret swap",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["warm", 40], ["free", 20], ["hot", 65], ["moved", 30]],
+        "caption": "But the company swaps in a fake quantized model to save money. You get answers but they come from a different source."
+      },
+      {
+        "title": "3. Collecting samples from both",
+        "viz": "box",
+        "viz_args": "local model: 100 answers | API: 1 answer",
+        "caption": "You run 100 prompts on the real model (local copy). You send one prompt to the API. Compare them."
+      },
+      {
+        "title": "4. Ranking the API answer",
+        "viz": "weights",
+        "viz_args": [["free", 15], ["free", 22], ["free", 25], ["warm", 45], ["hot", 68]],
+        "caption": "Sort the 100 local answers by some score. Where does the API answer rank? High, middle, or low?"
+      },
+      {
+        "title": "5. The statistical test",
+        "viz": "plain",
+        "caption": "If the API is the real model, its answer should rank in the middle (uniform random position). If it is fake, it ranks oddly. Repeat across many prompts—the pattern becomes detectable."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Choose a score function",
+        "text": "Pick a way to score each answer (e.g., how long, how confident, how fluent). This score turns each answer into a single number."
+      },
+      {
+        "b": "Step 2: Sample from the reference model",
+        "text": "For each test prompt, run the real model many times to collect a distribution of possible answers and their scores."
+      },
+      {
+        "b": "Step 3: Query the API once",
+        "text": "Send the same prompt to the black-box API and score its answer using the same function. Only one query per prompt—cheap and hard to detect."
+      },
+      {
+        "b": "Step 4: Compute the rank",
+        "text": "Rank the API answer's score against the reference distribution. If it is the real model, it ranks uniformly (sometimes high, sometimes low, sometimes middle)."
+      },
+      {
+        "b": "Step 5: Run the statistical test",
+        "text": "Collect many ranks and test whether they are uniform or skewed. A skewed pattern proves the API is serving something different."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper measures and compares the <em>rank distribution</em> of API answers within the reference model's output space. Instead of directly comparing answers (which is noisy), it asks: when you sort the reference model's answers by some quality metric, where does the API answer rank? The central idea is that if the API serves the same model, its answer should rank in a random, uniform position. If it serves a different model, its rank will be systematically skewed (always high, always low, or clustered)."
+    ],
+    "object": "rank distribution of answers"
+  },
+  "hidden": {
+    "h2": "The rank percentile: where does the API answer sit?",
+    "name": "rank percentile (position in the reference distribution)",
+    "paras": [
+      "The <em>rank percentile</em> is a single number that says: if we sort 100 answers from the real model by quality, at what position does the API answer land? If it lands at position 50, it is dead center. If it lands at position 95, it is in the top 5%. The paper measures this percentile for many prompts and tests whether the percentiles are uniformly scattered or clumped.",
+      "The paper estimates this by: (1) running the reference model N times on a prompt to get N answers and scores, (2) sending one query to the API, (3) scoring the API answer the same way, (4) counting how many reference answers scored lower than the API answer, and (5) dividing by N to get a percentile. This percentile is the hidden quantity—it reveals whether the API's distribution has shifted."
+    ],
+    "heat": {
+      "cells": [
+        ["api-rank-low", 1, false],
+        ["api-rank-q1", 2, false],
+        ["api-rank-median", 3, true],
+        ["api-rank-q3", 3, false],
+        ["api-rank-high", 2, false],
+        ["real-model-rank-low", 2, false],
+        ["real-model-rank-q1", 4, true],
+        ["real-model-rank-median", 4, true],
+        ["real-model-rank-q3", 3, false],
+        ["real-model-rank-high", 1, false],
+        ["substituted-rank-low", 4, true],
+        ["substituted-rank-high", 1, false]
+      ],
+      "caption": "Darker means rank appears more often. Real model (middle) spreads evenly. API fake (bottom) skews toward high rank."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "If I ask the real model the same question 100 times, I get 100 different answers with different levels of quality. If I ask the API the same question once, its answer will be somewhere in that list of 100—maybe it is the worst answer, maybe the best, maybe in the middle. The paper counts: how many of the 100 real-model answers are worse than the API answer? That count, divided by 100, is the rank percentile."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "For each prompt, the paper samples many responses from the reference model and computes their scores. It then gets one API response and scores it the same way. The rank percentile is the fraction of reference responses scoring lower than the API response. If the two models are identical, this percentile should scatter uniformly (sometimes high, sometimes low) across many prompts. If the API serves a different model, the percentiles will cluster (always high if the fake model is more confident, or always low if it is less capable)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the test detects model swaps: the core intuition",
+    "paras": [
+      "The mechanism rests on a simple principle: if two language models are truly identical, they produce the same distribution of outputs. This means if you ask both the same question, the API's answer should be a random draw from that distribution—it could land anywhere. But if the company swapped in a quantized or fine-tuned variant, that fake model produces a <em>different</em> distribution. Its answers are systematically different: maybe more conservative (always ranking low), or more overconfident (always ranking high), or biased toward certain answer lengths.",
+      "By comparing the API answer's rank percentile against a large sample from the real model, you are indirectly comparing the two distributions. If the ranks look uniform (scattered all over the place), the distributions are likely the same. If the ranks clump (always toward the high end, or always toward the low end), the distributions have shifted, and the company is serving a fake model. The test resists adversarial evasion because it avoids obvious query patterns: each prompt is normal user text, only one API query per prompt, and no suspicious probing—the company would have to detect the pattern after receiving results, not while testing happens. This timing advantage makes the test hard to fool."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "prompt + reference model 100x + API 1x"
+        },
+        {
+          "t": "step",
+          "s": "score each answer (length, confidence, fluency, etc.)"
+        },
+        {
+          "t": "step",
+          "s": "rank API answer in the 100 reference scores",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "collect many ranks and test for uniformity"
+        },
+        {
+          "t": "output",
+          "s": "uniform means real model, skewed means fake model"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The statistical test: Cramer-von Mises for uniformity",
+    "words": "For each prompt, compute the rank percentile (the fraction of reference answers that score lower than the API answer). Collect these percentiles across K prompts. Test whether they follow a uniform distribution using the Cramer-von Mises (CvM) statistic: the average squared distance between the measured distribution of ranks and the ideal flat line.",
+    "equation": "omega_2 = integral from 0 to 1 of (empirical_CDF(u) - u)^2 du",
+    "symbols": [
+      [
+        "empirical_CDF(u)",
+        "the fraction of rank percentiles that fall at or below u"
+      ],
+      ["u", "rank percentile (0 to 1)"],
+      ["omega_2", "CvM test statistic (smaller = more uniform)"],
+      [
+        "integral",
+        "sum over all possible rank positions, weighted by how much the measured CDF deviates from the ideal flat line"
+      ]
+    ],
+    "worked": {
+      "title": "Tiny worked example with 5 prompts",
+      "lines": [
+        "Prompt 1: API answer ranks at 0.6 (60th percentile among 100 reference answers)",
+        "Prompt 2: API answer ranks at 0.55 (55th percentile)",
+        "Prompt 3: API answer ranks at 0.9 (90th percentile)",
+        "Prompt 4: API answer ranks at 0.2 (20th percentile)",
+        "Prompt 5: API answer ranks at 0.7 (70th percentile)",
+        "Ranks = [0.6, 0.55, 0.9, 0.2, 0.7]. This is roughly spread across the range 0–1 (uniform).",
+        "CvM statistic ≈ 0.08 (small = good uniformity). Now imagine a fake model always inflates answers:",
+        "Fake ranks = [0.1, 0.05, 0.15, 0.08, 0.12]. All clustered near the bottom (fake model ranks low because it is less fluent).",
+        "CvM statistic ≈ 0.25 (large = non-uniform). The test rejects the hypothesis that this fake model is real with high confidence."
+      ]
+    },
+    "note": "If the API serves the real model, rank percentiles scatter uniformly. If it serves a fake, they cluster, and the CvM statistic grows—catching the swap."
+  },
+  "bars": {
+    "h2": "Detection performance on substitution attacks",
+    "charts": [
+      {
+        "title": "Quantized model substitution",
+        "rows": [
+          ["Honest API (real model)", 96, "good"],
+          ["API with quantized swap (no detection)", 92, "bad"],
+          ["RUT detection (this paper)", 88, "good"]
+        ],
+        "note": "RUT (bottom bar) correctly identifies that the API was swapped to a cheaper quantized version, even though benchmark accuracy dropped only 4 points. Older methods fail because they rely on benchmark accuracy alone, which is not diagnostic—quantized models are often trained to preserve accuracy on standard tests while the internal distribution shifts."
+      },
+      {
+        "title": "Harmful fine-tuning detection",
+        "rows": [
+          ["Reference model before fine-tuning", 94, "good"],
+          ["API with malicious fine-tuning (hidden)", 94, "bad"],
+          ["RUT detection (this paper)", 84, "good"]
+        ],
+        "note": "RUT detects that the API was fine-tuned for jailbreak or harmful purposes, even though it still scores well on benign tasks. The distribution has shifted even if the accuracy metric has not."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The score function matters.",
+        "html": "If you choose a score that both models agree on, the test fails. For example, if you score by count of words (tokens are just words in this context) alone, quantized and real models might have identical length distributions. The paper empirically evaluates many score functions (length, likelihood, perplexity, semantic similarity) and picks the one with the highest detection power for each threat."
+      },
+      {
+        "warn": true,
+        "b": "Adversarial mixing: the company serves a probabilistic blend.",
+        "html": "If the company is clever, it might serve the real model 90% of the time and the fake model 10% of the time. This creates a blend that is hard to detect. The ranks scatter somewhat randomly instead of clumping cleanly. The test can still detect it if the query budget is large enough, but the detection power degrades."
+      },
+      {
+        "warn": true,
+        "b": "Limited query budget under severe constraints.",
+        "html": "If you can only afford 10 total API queries, the statistical power drops. The Cramer-von Mises test needs enough samples to establish that the distribution is skewed, not just random noise. The paper shows the method remains practical under realistic query budgets (hundreds of queries), but it is not magical with very few queries."
+      },
+      {
+        "b": "Done right: choose multiple uncorrelated score functions, use sufficient queries, and combine results.",
+        "html": "The paper's approach avoids these pitfalls by evaluating multiple score metrics simultaneously (length, semantic score, likelihood score where available) and averaging the detection results. This works because if one score function misses a shift (e.g., token length stays the same), another score function (e.g., semantic similarity) will catch it. By combining many scores, the test catches shifts that any single score would miss, and it breaks through adversarial mixing because the company cannot engineer a fake model that matches all score distributions simultaneously."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a script that: (1) instantiates a real language model locally (e.g., a small open-source LLM like Llama 2 7B), (2) fine-tunes or quantizes it to create a fake variant (e.g., 4-bit quantization, or a 10-step jailbreak fine-tune), (3) simulates an API that sometimes serves the real model and sometimes the fake, (4) runs RUT with 50 test prompts, scoring each answer by three metrics (response length, a semantic similarity score using embeddings, and a fluency heuristic), (5) computes the rank percentiles for the real model run versus the API run, and (6) applies the Cramer-von Mises test to measure uniformity. The demo's key metric is: what is the detection AUROC (area under the receiver operating characteristic curve)?"
+    ],
+    "metric_eq": "detection_AUROC = area_under_curve(false_positive_rate, true_positive_rate) across different CvM thresholds; higher is better (1.0 = perfect detection, 0.5 = random guessing)",
+    "closing": "The demo must show that when you run RUT on the fake-model case, the AUROC climbs above 0.85, proving the test caught the swap with high confidence, while a naive accuracy-based detector would fail because the quantized model still solves most problems correctly."
+  }
+}

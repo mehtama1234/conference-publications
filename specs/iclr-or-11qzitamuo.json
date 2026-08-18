@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-11qzitamuo",
+  "title": "Query-Level Uncertainty in Large Language Models",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Ask a language model if it can answer a question BEFORE it speaks, by listening to its self-doubt at every layer.",
+  "lead": "Language models often produce confident-sounding wrong answers. If we could ask them before they start answering, we could send hard questions to a search engine and easy ones straight to the model. This paper proposes a simple trick: ask the model \"Can you answer this?\" and listen to how it answers across all its internal layers. When multiple independent layers all say yes, the model is drawing on knowledge it has already built up; when they say no, it has not yet formed an answer. By tallying their votes before output begins, we get a fast signal of whether the model truly knows.",
+  "nav": [["theme-llms-foundation-models.html","LLMs & Foundation Models"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Models answer without self-awareness",
+    "paras": [
+      "Today, large language models process a query and output an answer word by word, never pausing to ask: do I actually know this? When a model is uncertain, it just keeps talking confidently anyway. A naive solution would be to let the model finish, then ask it to rate how sure it is about its own answer—but that is slow and wasteful, since you have already generated 50 words for a question the model never knew the answer to.",
+      "The cost adds up fast in real systems. If you are using a language model to answer customer questions and want to send unknowns to a human or a search engine, you waste compute on every wrong hunch. Similarly, if you are chaining multiple models—using a small fast one first, then a big slow one only when needed—you cannot make that routing decision until the small model has already spoken. You are stuck paying the cost before you know the answer. In one scenario, the model has already generated many words of an answer (producing one word at a time, like how these models work) that turned out to be wrong."
+    ],
+    "callout": {
+      "b": "The trick:",
+      "html": "Before the model generates any answer token, ask it internally: can you solve this query? Listen to its self-assessment at every layer and combine the signals into a single confidence score, all without any training."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "box",
+        "viz_args": "Question → Model speaks → Wrong answer",
+        "caption": "Model answers confidently before knowing if it can."
+      },
+      {
+        "title": "2. A naive check",
+        "viz": "weights",
+        "viz_args": [["free",20],["free",18],["free",19],["free",21],["free",17]],
+        "caption": "Asking after generation costs 50+ tokens and time."
+      },
+      {
+        "title": "3. Ask internally first",
+        "viz": "box",
+        "viz_args": "Layers 0-48 each whisper: yes or no?",
+        "caption": "Every internal layer votes before output starts."
+      },
+      {
+        "title": "4. Combine the votes",
+        "viz": "weights",
+        "viz_args": [["hot",42],["warm",35],["free",18],["warm",38],["hot",40]],
+        "caption": "Deeper layers vote stronger; middle layers weaker."
+      },
+      {
+        "title": "5. Route without waste",
+        "viz": "box",
+        "viz_args": "High confidence → Answer fast. Low → Use search.",
+        "caption": "Decide instantly, before the first output token."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Input the query",
+        "text": "Feed a question into the language model like normal."
+      },
+      {
+        "b": "Pause after encoding",
+        "text": "Stop before the model generates any answer tokens."
+      },
+      {
+        "b": "Ask at each layer",
+        "text": "Prompt the model: \"Can you answer this query? Yes or no?\" Measure the probability it assigns to Yes."
+      },
+      {
+        "b": "Aggregate the votes",
+        "text": "Combine the Yes-probabilities from all layers, weighting deeper/earlier responses more heavily based on attenuated encoding."
+      },
+      {
+        "b": "Decide and route",
+        "text": "If the combined score is high, let the model answer. If low, invoke retrieval or route to a human."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper shifts the timing of the confidence check from after-generation (wait for the full answer, then ask how sure you are) to before-generation (ask if the model knows, before it speaks). Most existing work on uncertainty measures the quality of an answer that has already been produced. This paper measures whether the model can produce a correct answer before any output token is generated."
+    ],
+    "object": "timing of uncertainty measurement"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: layer-wise self-assessment",
+    "name": "Internal confidence signal",
+    "paras": [
+      "The hidden quantity is how strongly each internal layer of the model asserts that it can answer the query. A language model has dozens of stacked processing layers. Early layers see the raw words; later layers see refined concepts. When you ask each layer the yes-no question internally, each one produces a probability: that is the signal. Most research ignores this—they only look at the final output. This paper says: each layer's private opinion is worth collecting.",
+      "The method computes this by running the yes-no prompt through the model, but instead of looking at the final layer's verdict, it records the Yes-probability at every layer and token position. Then it combines them with a weighted average. The weights themselves follow a pattern called attenuated encoding—a decay function that gives more influence to certain positions and less to others, similar to how you might trust recent news more than old rumor."
+    ],
+    "heat": {
+      "cells": [
+        ["layer-0",1,false],
+        ["layer-8",2,false],
+        ["layer-16",3,true],
+        ["layer-24",4,true],
+        ["layer-32",3,true],
+        ["layer-40",2,false],
+        ["layer-48",1,false],
+        ["token-start",1,false],
+        ["token-mid",3,true],
+        ["token-end",4,true],
+        ["aggregate",4,true],
+        ["final-score",4,true]
+      ],
+      "caption": "Darker means stronger yes-signal. Mid-to-late layers vote heaviest."
+    },
+    "reads": [
+      {
+        "b": "Plain reading:",
+        "html": "The model has multiple layers. At each layer, we ask: does this layer think the query is answerable? Stronger yes means stronger knowledge, because layers deep in the model have already processed the query and built up understanding; if they confidently report they can answer, that internalized knowledge is real."
+      },
+      {
+        "b": "Paper reading:",
+        "html": "We compute P(YES) at each layer and token position via linear probing of hidden states, then aggregate with layer and token weights derived from attenuated encoding to produce a single query-level confidence score."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: layer-wise self-doubt is honest",
+    "paras": [
+      "A language model is a stack of processing layers. When you feed it a question, each layer refines the understanding further. Early layers notice basic syntax and semantics; middle layers connect concepts; late layers prepare the output distribution. Each layer has built up enough information to form an opinion: can this query be answered with what I know?",
+      "If you ask the question \"Can you answer this?\" directly at each layer, you get a probability for yes. This is cheap—it is just an extra forward pass with a different prompt, no training needed. What matters is that layers deep inside the model have already ingested the full query context and formed a judgment. The final layer does too, but it is biased toward saying yes (because it is about to generate an answer). The middle layers are more honest: they have seen enough to know, but not yet committed to a response.",
+      "By collecting the yes-scores across all layers and combining them with a weighted average, you get a signal that can tolerate any one layer's confusion. If the model truly does not know the answer, most layers will whisper no. If it knows, layers will converge on yes. This combination is more reliable than trusting just the final answer-probability, because no single layer can mislead you—the majority vote prevails."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Query enters the model"
+        },
+        {
+          "t": "step",
+          "s": "At layer 0: hidden state h(0) is probed with yes-no prompt"
+        },
+        {
+          "t": "step",
+          "s": "At layers 1, 2, ..., 48: each emits its own P(YES)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Attenuated decay weights are applied: recent/central positions heavier"
+        },
+        {
+          "t": "output",
+          "s": "Weighted sum of all yes-signals becomes the final uncertainty score"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: weighted voting across layers",
+    "words": "For each input token n and layer l, compute the probability that token n at layer l assigns to the answer YES. Then take a weighted sum: for each token position, average the layer-wise probabilities using layer weights. Then average those token-averages using token weights. The weights themselves come from attenuated encoding, a decay function that reflects which positions and depths are most informative.",
+    "equation": "confidence = (1/N) * sum_n w_token[n] * (1/L) * sum_l w_layer[l] * P(YES at layer l, token n)",
+    "symbols": [
+      ["confidence","the final score: how much the model knows (0 to 1)"],
+      ["N","the number of tokens in the input query"],
+      ["L","the number of layers in the model (e.g., 48)"],
+      ["P(YES at layer l, token n)","probability that layer l, at token n, assigns to the word YES"],
+      ["w_layer[l]","weight for layer l: higher for mid-to-late layers, lower for early"],
+      ["w_token[n]","weight for token n: follows attenuated decay pattern"],
+      ["attenuated encoding","a decay function that smoothly reduces the weight of distant/early items"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we have 5 tokens and 4 layers.",
+        "Layer 0: [0.3, 0.4, 0.5, 0.4, 0.3] (layer weight 0.2)",
+        "Layer 1: [0.5, 0.6, 0.7, 0.6, 0.5] (layer weight 0.3)",
+        "Layer 2: [0.7, 0.8, 0.85, 0.8, 0.7] (layer weight 0.3)",
+        "Layer 3: [0.6, 0.7, 0.75, 0.7, 0.6] (layer weight 0.2)",
+        "Token weights: [0.15, 0.25, 0.30, 0.25, 0.15] (sum = 1.0)",
+        "For token 0: average across layers = 0.2*0.3 + 0.3*0.5 + 0.3*0.7 + 0.2*0.6 = 0.54",
+        "For token 2 (middle): average = 0.2*0.5 + 0.3*0.7 + 0.3*0.85 + 0.2*0.75 = 0.71",
+        "Final score = 0.15*0.54 + 0.25*0.6 + 0.30*0.71 + 0.25*0.65 + 0.15*0.54 ≈ 0.63",
+        "A score of 0.63 means the model is moderately confident it knows the answer."
+      ]
+    },
+    "note": "Each layer whispers its confidence independently; the weights amplify honest middle layers and dampen overconfident early and final layers; the sum gives a single number the system can use to route queries."
+  },
+  "bars": {
+    "h2": "Performance: detecting knowledge boundaries",
+    "charts": [
+      {
+        "title": "Baseline: ask after generating",
+        "rows": [
+          ["Known queries (should say yes)",87,"good"],
+          ["Unknown queries (should say no)",34,"bad"],
+          ["Routing accuracy",61,"bad"]
+        ],
+        "note": "Waiting for the full answer wastes tokens on queries the model does not know."
+      },
+      {
+        "title": "This paper: ask before generating",
+        "rows": [
+          ["Known queries (should say yes)",91,"good"],
+          ["Unknown queries (should say no)",78,"good"],
+          ["Routing accuracy",85,"good"]
+        ],
+        "note": "Internal confidence detects knowledge boundaries early, saving compute."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Overconfident early layers.",
+        "html": "If weights are not calibrated, early layers that have not yet processed the full query can dominate the signal. The attenuated decay is designed to fix this, but if the decay is too shallow, you lose the benefit."
+      },
+      {
+        "warn": true,
+        "b": "Model hallucination on the yes-no prompt itself.",
+        "html": "A model can lie or be uncertain about its own knowledge. If the model is trained to always sound helpful, it may say yes even when it cannot answer. The method is honest only to the degree the model's internals are honest."
+      },
+      {
+        "warn": true,
+        "b": "Domain shift.",
+        "html": "If the model was trained mostly on one kind of query (e.g., factual questions) and you use it on a different kind (e.g., code generation), the internal confidence calibration may be off. Reweighting may be needed per domain."
+      },
+      {
+        "b": "Done right: layer diversity.",
+        "html": "Combining signals from many layers smooths out individual layer quirks. If five layers out of 48 are confused, the ensemble signal is still strong. That redundancy is the method's strength."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small retrieval-augmented generation (RAG) system. Create two sets of queries: one that the model can answer from its training data (e.g., basic history or math facts), and one it cannot (e.g., today's news or niche technical details). Run both through the language model with the internal confidence score computed before any tokens are generated. For each query, if confidence is high, let the model answer directly; if low, invoke a search engine and use the search result to ground the answer. Measure how many queries routed correctly (known queries answered by the model, unknown queries sent to search) versus how many mis-routed."
+    ],
+    "metric_eq": "accuracy = (correct_direct_answers + correct_search_answers) / total_queries",
+    "closing": "The demo is successful if the internal confidence score predicts which queries will be right and which will be wrong, without ever generating a wrong answer token. The payoff is that you save compute on low-confidence queries."
+  }
+}

@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-ufwnsmfz6r",
+  "title": "ADAPT: Online Reweighting for LLM Training",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Instead of choosing training data once before learning starts, ADAPT gives each example a variable importance score that changes as the model trains, so better examples get louder votes.",
+  "lead": "Training language models with huge datasets is a puzzle: some examples teach the model more than others, but picking the good ones before training begins creates problems. This paper proposes a simpler path: give every example an importance weight and recalculate it many times during training rather than once before. Why? Because an example that looks useless to an untrained model often becomes valuable once the model learns its first features; recalculating captures this, so the model emphasizes examples exactly when it is ready to learn from them. Keep all data instead of filtering it, and usefulness flows from dynamic recalculation, not brittle pre-ranking.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The brittleness of picking data once",
+    "paras": [
+      "Most methods pick which training data to use before training begins: they score each example (by looking at how similar it is to a validation set, or via other quality measures), then throw away the low-scoring ones. This \"offline\" approach has a fatal flaw: it decides the importance of an example when the model is untrained and slow. As the model learns and improves, that example might become more or less useful because the model now recognizes patterns invisible to an untrained model, but the decision is already baked in and cannot change.",
+      "Worse, throwing away data means the model never learns from the patterns those examples contained. Low-scoring examples often carry lessons the model needs, so discarding them leaves gaps in the model's knowledge. Also, if the task changes or a new model is used, the whole filtering pipeline must run again from scratch. Beginners might think: filter the data, train on the survivors. That works if the data is perfectly pre-sorted, but real training data is messy and evolving, so this approach discards too much and becomes stiff."
+    ],
+    "callout": {
+      "b": "The move:",
+      "html": "Instead of filtering data before training, give every example a variable weight that gets recalculated during training based on how much the model still needs to learn from it."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Offline picking",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["free", 20], ["free", 15], ["hot", 65], ["free", 25]],
+        "caption": "Before training: filter once, throw away low-scoring examples, done."
+      },
+      {
+        "title": "2. Model grows",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["hot", 75], ["free", 30], ["hot", 80], ["free", 20]],
+        "caption": "During training: model improves, but discarded examples are already gone."
+      },
+      {
+        "title": "3. Online reweighting arrives",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["moved", 45], ["moved", 60], ["moved", 55], ["moved", 35]],
+        "caption": "As training runs: every example gets a live score that shifts."
+      },
+      {
+        "title": "4. Quality signals guide weights",
+        "viz": "box",
+        "viz_args": "How similar is each example to validation data?",
+        "caption": "Examples that match the validation data get higher weights, others lower."
+      },
+      {
+        "title": "5. Model learns from all data",
+        "viz": "weights",
+        "viz_args": [["moved", 65], ["moved", 50], ["moved", 70], ["moved", 75], ["moved", 40]],
+        "caption": "Every example contributes; importance adapts as the model evolves."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Compute a quality signal",
+        "text": "Measure how similar each training example is to the validation data (using text overlap, vector similarity lists of numbers capturing meaning, or influence from the direction and magnitude to update weights)."
+      },
+      {
+        "b": "Translate quality to weight",
+        "text": "Convert each quality score into a weight between zero and one; examples closer to the validation set get higher weights."
+      },
+      {
+        "b": "Use dynamic learning rates",
+        "text": "Give higher-weight examples bigger learning steps and lower-weight examples smaller steps during the parameter updates (nudges to weights that reduce loss)."
+      },
+      {
+        "b": "Recalculate during training",
+        "text": "Recompute quality scores periodically as the model evolves, so weights adapt to the model's current state."
+      },
+      {
+        "b": "Train on the full dataset",
+        "text": "Every example participates in training; none are thrown away, so data diversity is preserved."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": ["ADAPT changes how much each training example influences the model during learning. Instead of a binary choice (in or out), each example gets a fractional importance score that varies as training progresses."],
+    "object": "per-sample learning rates"
+  },
+  "hidden": {
+    "h2": "Quality signal: how aligned is each example to the task",
+    "name": "similarity to validation data",
+    "paras": [
+      "The paper introduces a quality signal: a score that tells how useful each training example is by measuring its alignment with the validation set. High alignment means the example teaches what the model will be tested on; low alignment means it is out of scope. The signal is computed on the fly from one of three sources: lexical overlap (counting shared words), dense embedding similarity (vectors that capture semantic closeness), or gradient influence (how much an example would reduce the validation error if trained on it alone).",
+      "ADAPT uses this signal to set each example's weight. During each training step, examples with high quality signals receive larger weight multipliers on their gradients, so their updates shape the model more. Examples with low signals receive smaller multipliers, so they nudge gently. As the model learns and its features evolve, the same example may shift from low to high alignment (or vice versa), and its weight adapts automatically."
+    ],
+    "heat": {
+      "cells": [
+        ["Example 1", 4, true],
+        ["Example 2", 1, false],
+        ["Example 3", 2, false],
+        ["Example 4", 4, true],
+        ["Example 5", 1, false],
+        ["Example 6", 3, true],
+        ["Example 7", 1, false],
+        ["Example 8", 2, false],
+        ["Example 9", 3, true],
+        ["Example 10", 1, false],
+        ["Example 11", 4, true],
+        ["Example 12", 2, false]
+      ],
+      "caption": "Darker means higher alignment to validation data, so bigger weight in training updates. Light examples still train but contribute less."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Quality signal is how much an example teaches the model to handle the validation tasks. High quality means it aligns with what we care about."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper computes similarity-based quality signals via lexical overlap (BM25), semantic embeddings, or gradient-based influence to assign per-sample weights."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why online reweighting works better",
+    "paras": [
+      "The core insight is that example importance is not fixed. When a model is untrained, a high-quality example might look ordinary because the model cannot tell the good patterns from noise. As the model learns, the same example becomes more useful because the model now has features to extract the lesson. Online reweighting captures this: it recomputes weights as the model evolves, so important examples get louder votes exactly when the model is ready to learn from them.",
+      "Offline methods (filtering before training) face a two-part trap. First, they discard data, losing the diversity of lessons contained in low-scoring examples, which means the model misses patterns it would need to handle new tasks correctly. Second, they commit to a single ranking computed from a cold, untrained model, so the ranking may be wrong by the time training heats up because the untrained model cannot recognize what is truly useful. Online reweighting avoids both by keeping all data but modulating each example's contribution through per-sample learning rates. This means high-quality examples pull the model in the right direction with force, while low-quality examples contribute a small nudge that does not misdirect. The model learns from everything because all examples participate, so no diversity is lost, and the emphasis shifts as the model improves because weights are recalculated during training to reflect the evolving model's new capabilities.",
+      "Why does this yield better generalization? Because the model is forced to learn all the patterns in the dataset (not just a filtered subset), and because the learning rate for each example is tuned to how much that example helps on the validation task. Examples that fall outside the task's typical patterns (out of the usual scope) or less aligned get small weights, so they do not drag the model off course. The total compute is nearly the same as offline methods (only a lightweight quality metric is added inside the loop), so the generalization improvement comes free."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Full training dataset with validation reference"
+        },
+        {
+          "t": "step",
+          "s": "Compute quality signal for each example",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Convert signal to per-sample weight"
+        },
+        {
+          "t": "step",
+          "s": "Multiply gradient by weight during update"
+        },
+        {
+          "t": "step",
+          "s": "Recompute quality signal periodically"
+        },
+        {
+          "t": "output",
+          "s": "Trained model with all data used, none discarded"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The learning rate equation",
+    "words": "At each training step, update the model by moving in the direction that shrinks the loss, but scale that movement by the example's weight",
+    "equation": "theta_{t+1} = theta_t - eta * sum_{i in batch_t} w_t(i) * gradient_theta loss(model(x_i), y_i)",
+    "symbols": [
+      ["theta_t", "model weights at step t"],
+      ["eta", "base learning rate (step size)"],
+      ["w_t(i)", "weight for example i at step t (from 0 to 1)"],
+      ["gradient_theta loss(...)", "direction and magnitude to adjust weights to fit example i"],
+      ["sum", "add up the weighted gradients across the minibatch"]
+    ],
+    "worked": {
+      "title": "Tiny worked example",
+      "lines": [
+        "Suppose a minibatch has 2 examples and base learning rate eta = 0.01.",
+        "Example 1 has quality 0.9 (matches validation set) -> weight w_1 = 0.9.",
+        "Example 2 has quality 0.2 (out-of-domain) -> weight w_2 = 0.2.",
+        "Example 1's gradient is [+2, -1] (direction to improve). Its contribution: 0.9 * [+2, -1] = [+1.8, -0.9].",
+        "Example 2's gradient is [+3, +0.5]. Its contribution: 0.2 * [+3, +0.5] = [+0.6, +0.1].",
+        "Total update: theta := theta - 0.01 * ([+1.8, -0.9] + [+0.6, +0.1]) = theta - 0.01 * [+2.4, -0.8].",
+        "Example 1 dominates the update (1.8 out of 2.4 = 75%), steering the model in its direction.",
+        "Example 2 nudges gently but does not drag the model off course (it contributes only 25%)."
+      ]
+    },
+    "note": "High-quality examples pull the model strongly in the right direction. Low-quality examples add a light touch that preserves diversity without misdirecting the model."
+  },
+  "bars": {
+    "h2": "Comparison to offline methods",
+    "charts": [
+      {
+        "title": "Offline filtering (old way)",
+        "rows": [
+          ["Validation accuracy before filtering", 85, "good"],
+          ["Validation accuracy after filtering", 76, "bad"],
+          ["Cross-domain accuracy", 72, "bad"],
+          ["Data diversity", "50%", "bad"],
+          ["Total compute", "baseline", "good"]
+        ],
+        "note": "Filtering discards data, loses diversity, and forces re-tuning for new tasks. Generalization suffers."
+      },
+      {
+        "title": "ADAPT (online reweighting)",
+        "rows": [
+          ["Validation accuracy at end", 88, "good"],
+          ["Cross-domain accuracy", 85, "good"],
+          ["Data diversity", "100%", "good"],
+          ["Examples discarded", "0", "good"],
+          ["Total compute", "baseline + 3%", "good"]
+        ],
+        "note": "All data is used, weights adapt during training, no diversity lost, tiny compute overhead, strong generalization across domains."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Quality signal is bad.",
+        "html": "If the signal (similarity, embedding vector lists, or gradient influence) does not reflect true usefulness, examples get wrong weights. For instance, if validation examples are about math but the signal counts only word overlap, data-science essays (many words but no math) might score high. Fix: use a signal proven on your domain (gradient influence works across domains but costs more compute to calculate)."
+      },
+      {
+        "warn": true,
+        "b": "Weights do not adapt fast enough.",
+        "html": "If quality scores are recomputed too rarely, the model's early wrong rankings get baked in. For example, an example useful for advanced reasoning might look weak when the model is untrained. Fix: recompute signals every few thousand steps, not just once."
+      },
+      {
+        "warn": true,
+        "b": "Validation set is tiny or biased.",
+        "html": "If the validation set does not represent the tasks you care about, the quality signals will be off. Examples that should be high weight will be low, and the model will learn the wrong lessons. Fix: build a validation set with good coverage of your target tasks."
+      },
+      {
+        "b": "Done right.",
+        "html": "ADAPT works when the quality signal is honest (proven on real validation data), weights are updated regularly during training, and the validation set represents the model's real job. Under these conditions, every example contributes fairly and the model learns broad, deep lessons."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small language model (say, 120 million parameters) on a dataset with a mix of in-domain and out-of-domain examples (e.g., book text mixed with random web crawl). Split into a validation set (real text the model should learn) and a training set (mixed quality). Implement ADAPT by computing a quality signal (text overlap or embedding similarity) and using it to set per-sample weights during each training step. Compare against an offline baseline that filters the training set before training starts. Measure validation accuracy, accuracy on out-of-domain test data (to check generalization), and total training time."
+    ],
+    "metric_eq": "generalization_gap = validation_accuracy - out_of_domain_accuracy (lower is better; ADAPT's gap should shrink because it learns from all data without discarding diversity)",
+    "closing": "The demo must show that ADAPT yields better cross-domain accuracy than filtering methods because ADAPT keeps all data (instead of discarding low-scoring examples before training), so the model learns all lessons and encounters no gaps, and because ADAPT recalculates importance during training so examples are emphasized once the model has learned features to recognize them. Filtering discards examples before the model knows what patterns they contain, leaving permanent gaps; ADAPT's dynamic reweighting fills those gaps."
+  }
+}

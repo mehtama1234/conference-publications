@@ -1,0 +1,244 @@
+{
+  "slug": "iclr-or-vpmsar1otl",
+  "title": "Textual Bayes: Uncertainty in LLMs via Prompt Sampling",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "Instead of tuning one prompt by hand, sample many prompts from a learned belief distribution and ask the LLM with each one, so you get both a better answer and a confidence score.",
+  "lead": "Large language models today give one answer, but they often hide uncertainty. When stakes are high—medical diagnosis, financial advice, safety-critical decisions—you need to know how confident the model really is. This paper treats the prompt itself as a dial to turn: by slightly tweaking the words and watching how the answers change, you can measure the model's true uncertainty, even in closed-source systems.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "LLMs hide uncertainty behind one answer",
+    "paras": [
+      "Today's LLMs give a single response: yes or no, a number, a name. But the model may be guessing. In high-stakes domains—medicine, law, finance—a wrong guess with high confidence is dangerous. The problem is that most LLMs are black boxes: you cannot peer inside to measure how sure they are.",
+      "A beginner's first try: ask the LLM for a confidence score (e.g., rate your answer 0 to 100). This fails because the LLM will often guess a number that sounds reasonable, not admit it is lost. You need a signal that comes from changing the system itself, not just asking the model to introspect."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "One prompt, one answer, no way to see if the model is guessing or reasoning."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The naive approach",
+        "viz": "box",
+        "viz_args": "One prompt → One answer → Guess the confidence",
+        "caption": "Same words every time, same answer, no signal of doubt."
+      },
+      {
+        "title": "2. Prompt is a parameter too",
+        "viz": "weights",
+        "viz_args": [["prompt_v1", 50], ["prompt_v2", 50], ["prompt_v3", 50], ["prompt_v4", 50]],
+        "caption": "Treat the prompt like a dial with many positions to explore."
+      },
+      {
+        "title": "3. Sample prompts via MCMC",
+        "viz": "weights",
+        "viz_args": [["accepted", 60], ["rejected", 20], ["accepted", 55], ["rejected", 25], ["accepted", 65]],
+        "caption": "Walk through prompt space, keeping good ones, dropping bad ones."
+      },
+      {
+        "title": "4. Answers cluster or spread",
+        "viz": "box",
+        "viz_args": "Tight cluster → confident; Wide spread → uncertain",
+        "caption": "If different prompts keep saying yes, the model is sure."
+      },
+      {
+        "title": "5. Confidence from variation",
+        "viz": "weights",
+        "viz_args": [["same_answer", 75], ["same_answer", 76], ["different_answer", 20], ["same_answer", 74]],
+        "caption": "How often the model agrees with itself across prompt variants."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Collect a small dataset",
+        "text": "Gather a handful of examples with ground-truth answers."
+      },
+      {
+        "b": "Define initial beliefs",
+        "text": "Say what makes a good prompt in free-form text, e.g., be clear, ask for step-by-step reasoning."
+      },
+      {
+        "b": "Use MCMC to walk through prompt space",
+        "text": "Start with one prompt, tweak it slightly, ask the LLM if the tweak improves answers on the small dataset, because only tweaks that help you fit the data are worth keeping."
+      },
+      {
+        "b": "Keep good prompts, reject bad ones",
+        "text": "Build a collection of prompts that work well, weighted by how often they fit the data."
+      },
+      {
+        "b": "On a new question, sample and aggregate",
+        "text": "Ask the LLM with each prompt in the collection, count how many say the same thing."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes which prompt you use. Instead of one hand-tuned prompt, it learns a distribution over prompts: a probability that each prompt-variant is the right one. This distribution comes from fitting to your data via Bayesian statistics."
+    ],
+    "object": "prompt distribution"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: posterior uncertainty over prompts",
+    "name": "prompt importance weight",
+    "paras": [
+      "The hidden quantity is how much each prompt-variant matters. In Bayesian statistics, this is the posterior probability: after seeing your data, which prompts are most likely to be the true good prompt? A high weight means that prompt was rewarded by your data; a low weight means it was punished.",
+      "The paper estimates this by running MCMC: each accepted prompt-variant in the chain contributes to the learned distribution. The more often MCMC accepts a variant, the higher its posterior weight."
+    ],
+    "heat": {
+      "cells": [
+        ["variant_1", 4, true],
+        ["variant_2", 2, false],
+        ["variant_3", 3, true],
+        ["variant_4", 1, false],
+        ["variant_5", 4, true],
+        ["variant_6", 1, false],
+        ["variant_7", 2, false],
+        ["variant_8", 3, true],
+        ["variant_9", 1, false],
+        ["variant_10", 2, false],
+        ["variant_11", 4, true],
+        ["variant_12", 1, false]
+      ],
+      "caption": "Darker means the MCMC chain accepted that prompt variant more often; those prompts are more likely to be good."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Imagine you have five friends and you ask each to write you a text message. You collect all five versions and count how often your teacher says each one sounds good. The versions your teacher liked most are your best bet for the real thing."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "In Bayesian terms, you want the posterior distribution: the most likely prompts after seeing your training data. MCMC samples from it by proposing prompt tweaks (via TextGrad) and accepting or rejecting them based on how well they fit the data."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why sampling prompts reveals true uncertainty",
+    "paras": [
+      "Here is the real causal chain: the LLM's answer depends on the phrasing of your question. Some phrasings are better, some worse. By tweaking the phrasing and watching what changes, you force the model to show you its real knowledge, not a memorized pattern. If the answer flips when you rephrase, the model was unsure all along. If the answer stays the same no matter how you phrase it, the model is genuinely confident.",
+      "Why is MCMC the right tool? MCMC walks through all the plausible prompt-variants, not just a random handful. It spends more time in regions where prompts work well (high posterior weight) and less time in regions where they fail. This biased walk ensures you explore the most useful part of prompt-space and ignore dead ends. By collecting many samples from this walk, you get a weighted representation of what a good prompt looks like, and you can measure how stable the model's answer is across all those good phrasings."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Small training dataset with ground-truth answers"
+        },
+        {
+          "t": "step",
+          "s": "Start with a seed prompt",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Tweak the prompt using an optimizer",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Evaluate tweaked prompt on training data",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute how well each prompt fits the training data",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Apply Metropolis-Hastings acceptance rule",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Collection of high-value prompts and their weights"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The MCMC acceptance rule",
+    "words": "Accept the new prompt if a random number is below the ratio of how well each prompt fits the training data.",
+    "equation": "γ = min(1, p(D | θ_new) / p(D | θ_old))",
+    "symbols": [
+      ["γ", "acceptance probability, between 0 and 1"],
+      ["p(D | θ_new)", "how well the tweaked prompt fits all your training examples"],
+      ["p(D | θ_old)", "how well the old prompt fit those examples"],
+      ["θ_new", "the candidate prompt after tweaking"],
+      ["θ_old", "the prompt you are currently holding"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Old prompt answered 8 out of 10 training examples correctly (likelihood = 0.8).",
+        "New prompt answers 9 out of 10 correctly (likelihood = 0.9).",
+        "Acceptance ratio = 0.9 / 0.8 = 1.125. Since this exceeds 1, accept the new prompt with certainty.",
+        "Later: old prompt had 0.9, new proposal has 0.7. Ratio = 0.7 / 0.9 = 0.78. Flip a coin weighted 78% accept, 22% reject. If rejected, stay with 0.9."
+      ]
+    },
+    "note": "The algorithm always accepts improvements and sometimes accepts small decreases, which lets it escape local dead-ends and explore the full space of good prompts."
+  },
+  "bars": {
+    "h2": "Accuracy and uncertainty quality",
+    "charts": [
+      {
+        "title": "Naive one-prompt baseline",
+        "rows": [
+          ["Accuracy on test", 72, "bad"],
+          ["Confidence when right", 65, "bad"],
+          ["Confidence when wrong", 62, "bad"]
+        ],
+        "note": "One prompt, overconfident on wrong answers, does not admit uncertainty."
+      },
+      {
+        "title": "Textual Bayes (MHLP sampling)",
+        "rows": [
+          ["Accuracy on test", 76, "good"],
+          ["Confidence when right", 82, "good"],
+          ["Confidence when wrong", 35, "good"]
+        ],
+        "note": "By sampling prompts, the model learns which answers are truly solid across phrasings."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "MCMC convergence is slow.",
+        "html": "Walking through prompt-space can take hundreds or thousands of steps before the chain finds the high-value region. Each step queries the LLM, so cost grows quickly. For large datasets or very long prompts, this becomes impractical."
+      },
+      {
+        "warn": true,
+        "b": "Approximations creep in.",
+        "html": "The true posterior over prompts is intractable, so MHLP uses approximations (e.g., a finite number of MCMC steps, a truncated TextGrad optimizer). These approximations introduce bias away from the true Bayesian answer."
+      },
+      {
+        "warn": true,
+        "b": "Step size matters: tiny tweaks or large leaps both fail.",
+        "html": "MCMC only works well if the proposal (the step size of prompt tweaks) is tuned right. Tiny tweaks make the chain very slow to explore, because you explore inch by inch. Huge tweaks make the chain wasteful, because each new proposal is so different it usually fails. The paper uses TextGrad, which may not be the ideal tuning for every domain or prompt type."
+      },
+      {
+        "b": "Done right: cheap proposals.",
+        "html": "If you can use a fast open-source model to generate prompt tweaks instead of querying the expensive closed-source model for each step, cost drops by orders of magnitude."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple demo on a standard benchmark (e.g., a set of factoid questions with known answers). Implement MHLP using a free LLM (e.g., Llama-3.1). On each test question, run MCMC for a small fixed number of steps to collect a sample of prompts. Then ask your LLM with each prompt and measure: (1) the final answer's accuracy, (2) how much the answers vary across prompt-variants (big spread means low confidence, tight cluster means high confidence), (3) a calibration curve (does higher confidence rank match correctness?). Show that high-confidence answers are more often correct than low-confidence ones."
+    ],
+    "metric_eq": "calibration = correlation(model_confidence, is_correct)",
+    "closing": "The demo must show that confidence (spread across prompts) tracks correctness (is the answer right). If confident answers are no better than uncertain ones, the method fails, because then you cannot use confidence to decide when to trust the model or ask for human help."
+  }
+}

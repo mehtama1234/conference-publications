@@ -1,0 +1,239 @@
+{
+  "slug": "iclr-or-fy1eoiaazq",
+  "title": "EasyTune: Step-Aware Fine-Tuning for Motion Generation",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Fine-tune diffusion models one step at a time instead of all at once, so early steps get strong feedback and training uses far less memory.",
+  "lead": "Diffusion models generate motion by starting with pure noise and gradually denoising it over many steps. When you try to improve these models using rewards (a numeric score of how good the motion is), the standard approach is to send the improvement signal backward through the entire chain of steps, because this traces which steps led to the good outcome and lets you nudge them. But the signal shrinks as it travels through many steps—like a whisper passed down a long line of people, where each person only passes along 90% of what they heard, becomes inaudible after a hundred people. The shrinking happens because each step only partially depends on the step before it (not 100%, but say, 90%). Because the signal is weak, early steps barely improve; only the final steps get strong feedback. Also, storing every intermediate result for the whole chain fills up memory fast. EasyTune solves both problems by tuning each step separately: each step gets its own full-strength feedback signal (no chain to shrink it), and you only store one step's data at a time.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Feedback shrinks through the chain and memory explodes",
+    "paras": [
+      "A diffusion model for motion starts with random noise and refines it step by step. You have a reward model that scores the final motion—say, how well it matches the text description. If you want to improve the diffusion model using this reward, you would normally do this: run the entire denoising pipeline, score the result, then send the improvement signal backward through all the steps at once. This works in principle because you can trace back: if the final motion is good, that goodness came from how each step transformed the noise, so updating each step to increase that goodness should work. But in practice, a long chain of steps is a problem.",
+      "But here is what breaks. When you send the improvement signal backward through a hundred chained steps, each step shrinks it slightly (because each step's output depends on its input only partially—say, 90% dependent means you multiply by 0.9). Multiply many small fractions together and you get nearly zero: after 100 steps, the signal is about 0.0000027 times its original strength. By the time the signal reaches the early steps—which set the stage for everything that comes after—it has shrunk to almost nothing. The early steps barely change because the feedback is too weak. On top of that, to compute this backward signal through the whole chain, you have to store every intermediate value in memory. One hundred steps means one hundred computation graphs stored at once. That fills up your graphics card fast."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Optimizing the whole denoising chain at once shrinks early-step feedback to nearly zero and forces you to store the entire chain in memory."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Noisy motion starts the journey",
+        "viz": "weights",
+        "viz_args": [["hot", 2], ["free", 10], ["warm", 3], ["free", 5], ["free", 12]],
+        "caption": "Diffusion begins with pure noise. Each step refines it."
+      },
+      {
+        "title": "2. Old way: chain the feedback through everything",
+        "viz": "weights",
+        "viz_args": [["hot", 15], ["warm", 8], ["free", 5], ["warm", 6], ["warm", 4]],
+        "caption": "All 100 steps get one giant backward pass. Early steps fade."
+      },
+      {
+        "title": "3. Gradient shrinks, early steps untouched",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["free", 1], ["free", 1], ["warm", 8], ["hot", 14]],
+        "caption": "Feedback signal disappears by step 10. Memory explodes."
+      },
+      {
+        "title": "4. New way: tune each step separately",
+        "viz": "weights",
+        "viz_args": [["moved", 12], ["moved", 11], ["moved", 10], ["moved", 9], ["moved", 8]],
+        "caption": "Each step sees its own strong, focused feedback signal."
+      },
+      {
+        "title": "5. Every step learns. Memory stays low.",
+        "viz": "plain",
+        "caption": "Step-by-step tuning: better, cheaper, and actually works."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "At each step, prepare a tiny computation graph",
+        "text": "Only store the math for one denoising step, not all hundred. This cuts memory."
+      },
+      {
+        "b": "Score the noised-up motion using a learned scorer",
+        "text": "The reward model sees intermediate, partially-denoised motion, not the final result."
+      },
+      {
+        "b": "Send feedback backward through just this one step",
+        "text": "The feedback signal is short and cannot shrink much, so it stays strong."
+      },
+      {
+        "b": "Update the model weights for this step",
+        "text": "The weights change based on strong, direct signal. Unlike the chained method, this step gets real improvement feedback."
+      },
+      {
+        "b": "Move to the next step and repeat",
+        "text": "Every step gets the same treatment: strong signal, immediate update, independent learning."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes where and how you apply the improvement signal. Instead of waiting until the end of the whole denoising chain and then pushing feedback backward through all steps at once, you push feedback at each step as you go. This means each step has its own optimization problem, not linked to the others in a long dependency chain."
+    ],
+    "object": "Optimization timing and scope"
+  },
+  "hidden": {
+    "h2": "The vanishing-feedback effect",
+    "name": "Feedback signal strength through the chain",
+    "paras": [
+      "This is the strength of the feedback signal as it travels backward through steps. In the standard method, you compute one big chain of improvements through all steps. Each step multiplies the signal by a number slightly less than 1 (how much the step's output depends on its input—never 100%, always partial). After 100 steps of this multiplication, you are multiplying by tiny numbers again and again, so the original signal shrinks exponentially. By step 10, it might be 1/20th of its original strength.",
+      "EasyTune measures this implicitly: at each step, the method scores the motion and computes feedback for just that step, not a chain. So the feedback stays full strength—no multiplication chains that cause shrinking. The paper shows this: in the chained method, the feedback through step t involves multiplying 100 partial factors together. In the step-wise method, each step gets its own direct feedback, so each step sees a strong signal."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 1", 4, true],
+        ["Step 2", 4, false],
+        ["Step 3", 3, false],
+        ["Step 4", 2, false],
+        ["Step 5", 1, false],
+        ["Step 100 (chained)", 1, true],
+        ["Step 100 (step-wise)", 4, true],
+        ["Memory for chained", 4, false],
+        ["Memory for step-wise", 1, false],
+        ["Early-step learning (chained)", 1, false],
+        ["Early-step learning (step-wise)", 4, false],
+        ["Training speed", 2, false]
+      ],
+      "caption": "Brighter means stronger. Step-wise keeps early-step feedback full strength and cuts memory."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The feedback signal shrinks each time it passes backward through a step (because steps are only partially dependent on each other). After many steps this shrinking multiplies and the signal vanishes. The solution: give each step its own direct feedback, so no shrinking happens."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The improvement signal (technically, the partial derivative of reward with respect to step t's weights) in the chained method involves multiplying partial derivatives through steps t to T. Each multiplication by a partial factor shrinks the signal; after 100 steps it vanishes. Step-wise evaluation replaces the long chain of multiplications with a direct signal, because step t is scored directly."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why step-wise optimization wins",
+    "paras": [
+      "Here is the core: when you optimize each step separately, you break the chain. In the chained method, the reward at the end depends on step 1, which depends on step 2, which depends on step 3, and so on—one long linked dependency. The feedback has to travel backward through all of them, multiplying by factors after factors, shrinking. In EasyTune, you evaluate the reward for each intermediate, partially-denoised motion, not the final one. This means step t is no longer hidden inside a chain; it gets direct feedback. The reward model sees the noised motion at step t and scores it (6.5 out of 10, say). You compute the direction to change step t's weights that raises that score, and apply it immediately. Unlike the chained method where the signal shrinks, this direct feedback stays strong, so step t improves noticeably. Memory shrinks because you only store the computation math for one step at a time, not 100 graphs stacked up.",
+      "The second part of the method, Self-refinement Preference Learning, solves a practical problem: you usually do not have enough human-annotated examples of good vs. bad motions to train a reward model. Instead, EasyTune uses a retrieval model (a model trained to match text to the best motion from a dataset). It looks at cases where retrieval fails—it picked the wrong motion—and treats that as implicit feedback. The model learns: this text should match this motion (retrieved correctly), and should not match that motion (retrieved incorrectly). This works because training on pairs where the model got it wrong (wrong motion picked) teaches it to fix the mistake. After many such corrections, the retrieval model learns the real patterns of what makes a good motion, so it becomes a reliable scorer."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Pre-trained diffusion model and reward model"
+        },
+        {
+          "t": "step",
+          "s": "Run one denoising step, get partially-clean motion",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Reward model scores this intermediate motion"
+        },
+        {
+          "t": "step",
+          "s": "Compute improvement signal for just this step, update weights",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Move to next step, repeat"
+        },
+        {
+          "t": "output",
+          "s": "Fully fine-tuned diffusion model, strong on all steps"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The step-wise update rule",
+    "words": "Loss for step t equals negative reward, scaled by a per-step weight. Update only the parameters for this step.",
+    "equation": "loss_t = -w_t * R(x_t, c) + KL_penalty",
+    "symbols": [
+      ["loss_t", "how much to punish the weights at step t"],
+      ["w_t", "how much to emphasize this step (can vary across steps)"],
+      ["R(x_t, c)", "reward score for the noised motion x_t given text c"],
+      ["x_t", "the motion after t denoising steps (still partially noisy)"],
+      ["c", "the text description guiding generation"],
+      ["KL_penalty", "small term to avoid drifting too far from the original model"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose step 20 generates a partially-denoised motion. Text is 'person walks forward.' Reward model scores it: 6.5 out of 10 (decent, but stiff walk).",
+        "Step weight at step 20 is 1.0 (normal emphasis). Loss = -(1.0 * 6.5) + 0.01 = -6.49.",
+        "The improvement signal points to increase weights to boost that reward (make the walk smoother at this step).",
+        "Update applied immediately; memory is just this one step's math graph. Compare to chained method: same calculation, but sent backward through 20 earlier steps, each shrinking the signal by factor ~0.95, so it arrives as 6.5 * 0.95^20 ≈ 0.25—nearly lost."
+      ]
+    },
+    "note": "The key is separating each step: it gets its own small loss, its own small improvement signal, applied right away. No long chain to shrink the signal."
+  },
+  "bars": {
+    "h2": "Step-wise vs. chained fine-tuning",
+    "charts": [
+      {
+        "title": "Chained optimization (the old way)",
+        "rows": [
+          ["Memory for backward pass", 100, "bad"],
+          ["Feedback strength at step 5", 8, "bad"],
+          ["Feedback strength at step 50", 2, "bad"],
+          ["Final motion quality", 72, "good"]
+        ],
+        "note": "Ends up with decent results, but only the final steps learn well. Early steps barely improve because feedback shrinks as it travels backward through the chain."
+      },
+      {
+        "title": "Step-wise (EasyTune)",
+        "rows": [
+          ["Memory for backward pass", 31, "good"],
+          ["Feedback strength at step 5", 32, "good"],
+          ["Feedback strength at step 50", 31, "good"],
+          ["Final motion quality", 81, "good"]
+        ],
+        "note": "Uses one-third the memory. All steps learn equally well. Motion quality jumps because every step got improved, not just the last few."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "If the reward model is bad, every step gets bad feedback.",
+        "html": "Step-wise amplifies the signal—strong feedback feels great when it is right, but wrong feedback spreads everywhere. Train the reward model (SPL, the Self-refinement part) carefully, or you will teach every step the wrong thing."
+      },
+      {
+        "warn": true,
+        "b": "Early steps set the stage for later ones; misalignment here ripples.",
+        "html": "If step 10 is encouraged to make weird noise (by a bad reward), every later step has to work around that noise. The method does not prevent this directly; it just makes sure all steps learn. Watching learned motions is critical."
+      },
+      {
+        "warn": true,
+        "b": "Tuning the per-step weight multiplier matters a lot.",
+        "html": "Each step can have a different multiplier (how much to emphasize its feedback). If you weight early steps too lightly, they stay weak because the feedback signal is small. Too heavy, and the model fixates on early tweaks and later steps cannot correct them. The paper uses linear weighting schedules; pick one that fits your data and test it visually."
+      },
+      {
+        "b": "Done right: train a solid reward model first, then run EasyTune with a reasonable step-weight schedule.",
+        "html": "Validate learned motions on a held-out test set that includes edge cases (rare text descriptions, diverse motion types). If the reward model agrees but your eye does not, the model is overfitting to a proxy."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple diffusion model for motion (or use a pre-trained one). Set up a text-conditioned reward scorer (could be a retrieval model; EasyTune's SPL is not mandatory for a first demo, just helpful). For each batch of text prompts, run the diffusion model to generate motion, then: (1) in the chained baseline, optimize the whole trajectory at once and measure memory and final reward; (2) in EasyTune, optimize each step and measure the same. Compare: memory used, final reward score, and visually inspect whether early steps of the generated motion look intentional (aligned to the text) or mushy (under-trained)."
+    ],
+    "metric_eq": "improvement = (easytune_reward - chained_reward) / chained_reward, memory_reduction = (chained_mem - easytune_mem) / chained_mem",
+    "closing": "The demo must show that step-wise optimization improves motion quality while using a fraction of the memory. You should see early steps learning precise shapes (not staying noisy), and the overall motion matching the text better than chained optimization, because every step got strong feedback instead of only the final steps."
+  }
+}

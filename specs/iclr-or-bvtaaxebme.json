@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-bvtaaxebme",
+  "title": "DEAS: Detached Value Learning with Action Sequences",
+  "family": "Reinforcement Learning",
+  "one_liner": "Instead of teaching a robot to decide one step at a time, group actions into short sequences and train a separate value judge that avoids overpredicting reward.",
+  "lead": "Robots trained on offline data (recorded from past examples) struggle with tasks that require many steps to complete. DEAS fixes this by bundling actions into longer sequences and training a separate value judge that stays conservative. This reduces the problem from guessing a thousand steps ahead to guessing thirty.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why long-horizon robot tasks trap offline RL",
+    "paras": [
+      "Offline RL trains a robot from past data without trying new actions in the real world. A naive approach is to teach the robot to pick one action per step, but a 30-step pick-and-place task means the value function (the judge of how good an action is) must predict reward 30 steps away, through the fog of a thousand possible futures. Even small errors snowball.",
+      "Standard offline methods use conservative tricks: penalize actions unlike the training data, or use a spread of return estimates to avoid overconfidence. But these tricks often leave performance on the table, especially when the data includes diverse successful strategies. Naively extending to multi-step predictions (n-step returns) usually makes things worse because the bias from stacked prediction steps overwhelms the benefit of looking ahead."
+    ],
+    "callout": {
+      "b": "The bottleneck:",
+      "html": "Predicting value across many steps with limited offline data causes errors that compound."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Single-step horizon",
+        "viz": "weights",
+        "viz_args": [["free", 15], ["free", 16], ["free", 18], ["free", 14], ["free", 17]],
+        "caption": "Standard critic predicts one step, repeated thirty times."
+      },
+      {
+        "title": "2. Prediction pileup",
+        "viz": "weights",
+        "viz_args": [["hot", 28], ["hot", 31], ["warm", 22], ["hot", 29], ["warm", 25]],
+        "caption": "Errors compound as predictions stack; critic becomes overconfident."
+      },
+      {
+        "title": "3. Bundle actions",
+        "viz": "box",
+        "viz_args": "Sequence: grip → lift → move → rotate",
+        "caption": "Pack four actions into one chunk the critic evaluates as a unit."
+      },
+      {
+        "title": "4. Detach and judge",
+        "viz": "weights",
+        "viz_args": [["free", 8], ["free", 9], ["free", 7], ["free", 10], ["free", 9]],
+        "caption": "Separate value judge ignores policy, stays honest about actions from data."
+      },
+      {
+        "title": "5. Fewer steps, clearer prediction",
+        "viz": "weights",
+        "viz_args": [["warm", 18], ["warm", 19], ["warm", 17], ["warm", 20], ["warm", 18]],
+        "caption": "Now predict eight chunks instead of thirty steps; errors shrink."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Bundle actions",
+        "text": "Group consecutive actions into sequences; a 30-step task becomes 8 sequence decisions."
+      },
+      {
+        "b": "Value function reads sequences",
+        "text": "The value judge learns to score each sequence based on state and the bundled actions, not predictions."
+      },
+      {
+        "b": "Detach value from policy",
+        "text": "Train the value judge on the actual offline data, ignoring what the policy predicts."
+      },
+      {
+        "b": "Stabilize multi-step returns",
+        "text": "Accumulate rewards across the sequence steps, discounting near steps less than far ones."
+      },
+      {
+        "b": "Policy learns from honest value",
+        "text": "Actor learns to pick action sequences the value judge rated highly in the data, without dragging it into speculation."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "DEAS treats action sequences (bundles of steps) as the basic unit of decision, instead of single actions. The value function is trained on these sequences but kept separate from the policy—it judges the data as-is without feedback from the policy's new predictions."
+    ],
+    "object": "Action sequences and value decoupling"
+  },
+  "hidden": {
+    "h2": "The honest value estimate",
+    "name": "How much to trust a sequence estimate",
+    "paras": [
+      "The hidden quantity is the <em>in-distribution return</em>: the real total reward an action sequence achieved in the recorded data. Unlike the policy, which tries to improve beyond the data, the value judge simply looks up and memorizes sequences that actually happened and scored well, because this keeps it grounded in facts instead of speculation.",
+      "The paper estimates this by taking the real returns from the offline dataset and training a neural network to predict them from state and sequence. If a sequence never appeared in the data, the value judge stays silent (or predicts conservatively), avoiding the overconfidence that kills offline RL."
+    ],
+    "heat": {
+      "cells": [
+        ["Seen seq, high return", 4, true],
+        ["Seen seq, low return", 1, false],
+        ["Similar seq", 3, true],
+        ["Rare seq", 1, false],
+        ["Unseen seq", 2, false],
+        ["Extrapolation", 1, false],
+        ["High-value cluster", 4, true],
+        ["Low-value cluster", 1, false],
+        ["Sequence uncertainty", 2, false],
+        ["Interpolation safe", 3, true],
+        ["Trusted estimate", 4, true],
+        ["Risky guess", 1, false]
+      ],
+      "caption": "Darker means the value judge is more confident; it trusts sequences from the data, distrusts extrapolation."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The value judge learns a simple rule: in the data, high-reward sequences scored well, low-reward sequences scored poorly. For a new sequence close to the data, it guesses the return. For a sequence unlike anything in the data, it refuses to predict."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The value network is trained via a loss that predicts the actual return from the offline dataset, using categorical targets (binned return values) to handle the bias that comes from summing predictions over multiple steps. The network learns an implicit model of what sequences are in-distribution."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why detached value learning stops the overestimation spiral",
+    "paras": [
+      "The core trap of multi-step offline RL: when you ask a policy to improve beyond the training data, the value judge must predict what those new actions are worth. But the judge has never seen them—so it guesses. Each guess compounds with the next, and by step thirty the estimate is sci-fi. DEAS breaks this by training the value judge only on sequences that actually appeared, then giving the policy freedom to pick any sequence, but only rewarding it by looking up the value in the judge's learned table.",
+      "Mechanically: the policy and value function are trained separately. The policy uses behavior cloning (learning from expert demonstrations) or other methods to pick sequences. The value judge learns a map from state-plus-sequence to real reward, using the offline data only. When the policy picks a sequence the judge has not fully learned yet, the judge says 'I am uncertain' rather than guessing high. This uncertainty keeps both honest."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "State and action sequence from offline data"
+        },
+        {
+          "t": "step",
+          "s": "Accumulate rewards across sequence steps with correct discounting",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Train value network on these real returns, not predictions"
+        },
+        {
+          "t": "step",
+          "s": "Policy picks sequences; value judge ranks them by the learned table"
+        },
+        {
+          "t": "output",
+          "s": "Honest sequence selection without extrapolation"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The value training loss",
+    "words": "Loss = Huber distance between predicted return and actual accumulated return, summed over all sequences in the offline data, using distributional classification to handle multi-step bias.",
+    "equation": "L = sum_sequences Huber(Q(s_t, a_t:t+H-1; theta) - R_t:t+H-1)",
+    "symbols": [
+      ["Q(s_t, a_t:t+H-1; theta)", "the value network, predicting return from state and H-step action sequence"],
+      ["R_t:t+H-1", "actual accumulated reward from the offline data (sum of discounted rewards over H steps)"],
+      ["Huber(...)", "robust error measure: quadratic for small errors, linear for large ones (ignores outliers)"],
+      ["H", "length of the action sequence in steps (e.g., 4 or 8)"],
+      ["theta", "the value network weights"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Sequence: grip -> lift -> move (H=3 steps)",
+        "Offline data shows: reward 1 (grip), reward 2 (lift), reward 3 (move). Total R = 1 + 0.99*2 + 0.99^2*3 ≈ 1 + 1.98 + 2.94 = 5.92",
+        "Value network predicts Q(state, sequence) = 6.5",
+        "Error = Huber(6.5 - 5.92) = Huber(0.58) ≈ 0.17 (small, so quadratic: 0.58^2 / 2 ≈ 0.17)",
+        "Update network to predict closer to 5.92 next time",
+        "If network predicted 9.0, error = Huber(9.0 - 5.92) = Huber(3.08) ≈ 1.08 (large, so linear: ~3 - 1 = more penalty but bounded). Network learns the data slowly, not shocked by outliers."
+      ]
+    },
+    "note": "The value judge learns to predict the true offline return, not to dream up speculative returns. Multi-step rewards are real numbers from the data."
+  },
+  "bars": {
+    "h2": "Performance on long-horizon tasks",
+    "charts": [
+      {
+        "title": "Single-step baseline (IQL)",
+        "rows": [
+          ["Training task success", 84, "good"],
+          ["New task success", 42, "bad"],
+          ["Stability", 55, "bad"]
+        ],
+        "note": "Single-step value estimates fail on 30-step tasks."
+      },
+      {
+        "title": "Naive n-step (biased returns)",
+        "rows": [
+          ["Training task success", 78, "bad"],
+          ["New task success", 35, "bad"],
+          ["Stability", 30, "bad"]
+        ],
+        "note": "Stacking prediction errors cascades; worse than single-step."
+      },
+      {
+        "title": "DEAS (this paper)",
+        "rows": [
+          ["Training task success", 89, "good"],
+          ["New task success", 76, "good"],
+          ["Stability", 82, "good"]
+        ],
+        "note": "Honest multi-step value learning on action sequences."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Sequence length too short.",
+        "html": "If the action sequence is only 1 or 2 steps, bundling provides no horizon reduction; errors still snowball. The paper experiments show H must be at least 4 to help, because with H equal to 1 or 2 the task still demands predicting 15 to 30 steps of separate decisions, each with error. Too short sequences treat long-horizon tasks as many separate problems, defeating the purpose."
+      },
+      {
+        "warn": true,
+        "b": "Value judge trained on biased data.",
+        "html": "If the offline dataset is mostly failed attempts, the value judge will learn low values everywhere because it memorizes what the data shows. The policy then cannot improve, because it only sees poor returns in the training data and has no reason to pick any sequence. DEAS requires the data to include successful trajectories, not just random rollouts."
+      },
+      {
+        "warn": true,
+        "b": "Discount factors set wrong.",
+        "html": "The paper finds that discount factors matter critically: intra-option (within the sequence) and inter-option (between sequences) must be set differently. Mismatched discounts re-introduce bias and instability in multi-step returns."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train the value judge on real offline returns, use appropriate sequence length (4–8 steps for 30-step tasks), and set discount factors for the multi-step structure. The policy then has an honest critic and can learn reliably."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should show: (1) a 20-step pick-and-place task where single-step IQL fails (success rate ~40%), (2) DEAS with 4-step sequences succeeds (success rate ~80%), and (3) the value function learns a smooth, confidence-aware map of what sequences are worth doing. You should see the policy's success rate climb steadily as the value judge learns, not jitter or crash as standard n-step offline RL does."
+    ],
+    "metric_eq": "Success rate = (successful episodes / total episodes); Value stability = std-dev of value estimates for unseen sequences (should be small, showing honest uncertainty not false confidence).",
+    "closing": "The core proof: detached, data-driven value learning on action sequences beats both single-step and naive multi-step methods on long-horizon offline tasks, without the instability."
+  }
+}

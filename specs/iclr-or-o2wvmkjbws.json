@@ -1,0 +1,237 @@
+{
+  "slug": "iclr-or-o2wvmkjbws",
+  "title": "ES-dLLM: Skip tokens in early layers to speed up diffusion text generation",
+  "family": "Efficiency & Systems",
+  "one_liner": "During diffusion language model inference, skip unimportant tokens in early layers by measuring how much each token's internal state changed since the last step.",
+  "lead": "Diffusion language models generate text by repeatedly flipping masked words to real words, step by step, using bidirectional context (the model can see all words at once, not just past words). This differs from older models that generate word by word left-to-right. The problem is that when answering with the finished model (during inference—when you are using the model after training), the model processes every word at every step, even words that have already been picked and won't change. ES-dLLM notices that the internal representations of unchanged words stay nearly identical across steps, so it skips computing those words in early layers and reuses their cached states. This cuts the work by 5 to 17 times without harming quality.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Diffusion language models waste computation on unchanged words",
+    "paras": [
+      "Traditional language models generate text one word at a time, left to right. Diffusion language models take a different path: they start with all words hidden, then repeatedly pick which ones to unmask, flipping mask tokens to real words step by step. Because they can see all tokens at once (called bidirectional attention), they can pick smarter unmasking orders—not always left to right.",
+      "The catch: at each step, the model still runs a full forward pass on every token position, even the ones already unmasked that won't change again. A token that was picked in step 3 is still being computed in steps 4, 5, 6, and so on. A beginner might think every token needs fresh processing because the hidden states of other tokens changed. But measuring closely shows the hidden state of an already-picked token—its internal representation deep inside the model—barely moves across steps. It is wasted work."
+    ],
+    "callout": {
+      "b": "The method.",
+      "html": "Measure how much each token's internal state changed since the last step. Skip tokens with tiny changes in early layers, reusing their cached result from the previous step."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Diffusion model setup",
+        "viz": "box",
+        "viz_args": "Start: all tokens masked. Step 1-N: unmask tokens one by one.",
+        "caption": "Diffusion models unmask tokens step by step, not word by word left-to-right."
+      },
+      {
+        "title": "2. Current method: recompute everything",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["hot", 38], ["hot", 42], ["hot", 39], ["hot", 41]],
+        "caption": "Every step recomputes all tokens in all layers. Same token computed 5+ times."
+      },
+      {
+        "title": "3. Measure each token's change",
+        "viz": "weights",
+        "viz_args": [["moved", 20], ["free", 38], ["free", 42], ["moved", 15], ["free", 41]],
+        "caption": "Some tokens' internal states barely changed since the last step. Mark them free."
+      },
+      {
+        "title": "4. Early-skip the unchanged ones",
+        "viz": "box",
+        "viz_args": "Early layers skip low-change tokens. Reuse their cached state.",
+        "caption": "In early layers, skip tokens whose internal state barely moved."
+      },
+      {
+        "title": "5. Speed and quality both stay good",
+        "viz": "weights",
+        "viz_args": [["warm", 26], ["free", 38], ["free", 42], ["warm", 22], ["free", 41]],
+        "caption": "Later layers still compute them. No quality loss, 5-17 times faster."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "At each generation step, measure each token",
+        "text": "Compute how much each token's hidden state (its internal representation) changed from step N-1 to step N."
+      },
+      {
+        "b": "Score by change and confidence",
+        "text": "Combine two signals: how much the token's state shifted, and how confident the model is that this token is correct."
+      },
+      {
+        "b": "Mark tokens to skip",
+        "text": "Flag tokens with low importance scores in early layers of the model."
+      },
+      {
+        "b": "Skip in early layers, reuse cache",
+        "text": "Do not run the computation for marked tokens in the first few layers; use the cached result from the previous step instead."
+      },
+      {
+        "b": "Compute in later layers",
+        "text": "Let later layers always see all tokens, so final decisions stay accurate and bidirectional context is preserved."
+      }
+    ]
+  },
+  "object": {
+    "h2": "Which tokens get computed in early layers",
+    "paras": [
+      "The paper changes which tokens the model bothers to compute in the early (shallow) layers of the model during inference. Tokens with low importance scores skip those layers and reuse their cached representation from the previous step."
+    ],
+    "object": "early-layer token computation"
+  },
+  "hidden": {
+    "h2": "Token importance: how much will this token's answer change next",
+    "name": "token importance score",
+    "paras": [
+      "Token importance is a single number per token that predicts whether computing this token in the next layer will change its result much. It is not about whether the token is important to the final answer, but rather whether the token itself will evolve. High importance means the token's internal state is still shifting; low importance means it has settled.",
+      "The paper estimates this by watching two things: (1) how much the token's hidden state vector shifted between the last step and this one (the variation), and (2) the confidence score from the previous step—if the model was very sure about this token before, it is more likely to stay the same. Importance is a weighted combination of these two signals."
+    ],
+    "heat": {
+      "cells": [
+        ["token1", 4, true],
+        ["token2", 1, false],
+        ["token3", 2, false],
+        ["token4", 4, true],
+        ["token5", 1, false],
+        ["token6", 3, false],
+        ["token7", 2, false],
+        ["token8", 4, true],
+        ["token9", 1, false],
+        ["token10", 2, false],
+        ["token11", 3, true],
+        ["token12", 1, false]
+      ],
+      "caption": "Darker color means higher importance. Darker tokens need early-layer computation. Lighter tokens are safe to skip."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Think of importance like a confidence thermometer. Hot tokens are still changing and need attention. Cold tokens have settled and can reuse last step's answer."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper calls this <em>importance score</em>. Formally, it combines tensor variation (how much a token's hidden state changed) and prior confidence (the model's prediction certainty from the last step)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why skipping early layers preserves quality",
+    "paras": [
+      "Diffusion models work in layers, like a stack of filters. Early layers capture rough patterns. Later layers refine and correct. Here is what happens: if a token's internal state barely changed between step N-1 and N, running early-layer computations on it again will produce almost the same result. Reusing the cached value saves work without losing precision, because the input to those layers is nearly unchanged, so the output will be nearly unchanged too—like a light switch that is already in the on position; flipping it again produces the same state.",
+      "But skipping can only happen in early layers. Why not all layers? Because deeper layers might combine information from other tokens differently based on the full context. By the time we reach deep layers, enough cross-token communication has happened that reusing an old cache could drift from the true answer. So early layers skip, later layers always recompute, and the model keeps its ability to use bidirectional context and make good generation choices.",
+      "The importance score itself is measured from the model's own state, so it is tuned to the actual dynamics of this model on this task—not a generic heuristic. If a token's state is quiet, skip it. If it is noisy, compute it. No training needed; the framework works off the shelf."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "All tokens, some already unmasked, some still masked"
+        },
+        {
+          "t": "step",
+          "s": "Measure how much each token's hidden state changed since last step",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Score importance from tensor variation and prior confidence"
+        },
+        {
+          "t": "step",
+          "s": "Early layers: skip low-importance tokens, reuse their cached representation"
+        },
+        {
+          "t": "step",
+          "s": "Deep layers: compute all tokens to refine predictions"
+        },
+        {
+          "t": "output",
+          "s": "Next generation step. Quality stays the same because deep layers still compute all tokens; speed improves because early layers skip tokens that have not changed."
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "How to score each token's importance",
+    "words": "importance_i = confidence_i + alpha * variation_i, where confidence is the model's prediction certainty from step N-1, variation is how much the token's hidden state shifted from step N-1 to N, and alpha is a tuning constant that weights the two signals.",
+    "equation": "importance_i = conf_{i,prev} + alpha * ||H_i^{(N)} - H_i^{(N-1)}||",
+    "symbols": [
+      ["importance_i", "importance score for token i (higher means must compute)"],
+      ["conf_i,prev", "confidence score from the previous step (0 to 1, max probability)"],
+      ["H_i^(N)", "hidden state vector of token i at step N"],
+      ["H_i^(N-1)", "hidden state vector of token i at step N-1"],
+      ["||...||", "the length or magnitude of the difference (L2 norm: square root of sum of squares)"],
+      ["alpha", "weighting constant, tuned to balance confidence and variation (often around 0.5)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Token A: confidence 0.9, variation magnitude 0.3. Importance = 0.9 + 0.5 * 0.3 = 1.05.",
+        "Token B: confidence 0.2, variation magnitude 0.1. Importance = 0.2 + 0.5 * 0.1 = 0.25.",
+        "Token A is important (1.05); skip it in early layers. Token B barely moved (0.25); safe to skip."
+      ]
+    },
+    "note": "Tokens that are either high-confidence (already picked and locked) or whose internal state is still moving (still being refined) get high importance and trigger computation in early layers. Settled, low-confidence tokens are skipped and their cache is reused."
+  },
+  "bars": {
+    "h2": "Speed vs quality trade-off",
+    "charts": [
+      {
+        "title": "Vanilla inference (recompute all tokens every step)",
+        "rows": [
+          ["Throughput on H200 GPU", 15, "bad"],
+          ["Generation quality (ROUGE)", 42, "good"],
+          ["Total inference time", 100, "bad"]
+        ],
+        "note": "Every token is recomputed in every layer at every step. Slow but high-quality."
+      },
+      {
+        "title": "ES-dLLM (skip low-importance tokens in early layers)",
+        "rows": [
+          ["Throughput on H200 GPU", 226, "good"],
+          ["Generation quality (ROUGE)", 41, "good"],
+          ["Total inference time", 14, "good"]
+        ],
+        "note": "Skips computation for settled tokens in early layers. 15 times faster because early-layer work is avoided for most tokens at most steps; quality barely drops because later layers still see all tokens and deep layers combine token information to make final decisions."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Skipping too late in the network.",
+        "html": "If you skip tokens in very deep layers where cross-token mixing is strong, different token combinations could produce very different results. Reusing a cached value will miss those changes. The paper limits skipping to early layers to avoid this."
+      },
+      {
+        "warn": true,
+        "b": "Measuring importance with stale signals.",
+        "html": "If the variation measurement or confidence score is noisy or does not reflect the token's true evolution, low-importance tokens might actually need recomputation. The paper addresses this by combining two independent signals; if either is high, the token is computed."
+      },
+      {
+        "warn": true,
+        "b": "Generation order matters.",
+        "html": "Diffusion models can choose which tokens to unmask in any order. The paper's importance measure assumes the current unmasking strategy. If the generation strategy changes mid-inference, cached importance scores could become misaligned."
+      },
+      {
+        "b": "Done right.",
+        "html": "Measure importance from the actual variation of the model's own hidden states and confidence, limit skipping to early layers, and leave later layers untouched. Quality stays high because later layers always run and preserve the model's bidirectional reasoning; speed becomes 5 to 17 times better because early-layer computation, which is repeated for many tokens and many steps, is mostly skipped."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny diffusion language model on a standard dataset (like a simple story or news text, say 500 tokens max). Implement ES-dLLM by adding code to track the L2 norm of hidden state changes across steps and compute importance scores. Run generation with and without early-skipping, measuring both the throughput (tokens per second) and the similarity of outputs (ROUGE-L or exact match). Show that skipping achieves 3-5 times speedup while keeping ROUGE-L loss under 5 percent."
+    ],
+    "metric_eq": "speedup_ratio = throughput_with_ES / throughput_vanilla; quality_loss = ROUGE_vanilla - ROUGE_ES",
+    "closing": "The demo must show that most tokens in most generation steps are safe to skip in early layers—and that the model's own internal signals correctly identify which ones."
+  }
+}

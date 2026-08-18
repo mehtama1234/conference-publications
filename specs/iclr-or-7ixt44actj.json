@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-7ixt44actj",
+  "title": "Value Matching: Scalable Reward-Guided Flow Adaptation",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Instead of burning memory retraining the whole model, learn one lightweight value function that tells the model which direction to steer generation to earn higher rewards.",
+  "lead": "Large diffusion and flow models excel at generating images and molecules, but steering them toward specific rewards (like realistic images or stable molecules) requires retraining the entire billion-parameter model—a huge memory burden. This paper offers a smarter approach: learn one small auxiliary function that scores how good a partial generation is, then let the model use that score to decide which direction to nudge next, without touching the original weights.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The memory wall of steering giant models",
+    "paras": [
+      "Diffusion and flow models work by gradual refinement: start with noise, and at each step add a bit more detail. To make the model generate images that satisfy some goal (like photorealism or toxicity) requires reward optimization—adjusting the step-by-step process to maximize the reward.",
+      "The naive approach: take the billion-parameter model, run it forward and backward computing how to adjust each weight to shrink the error. This demands enormous graphics-card memory, scaling directly with how complex the model is. For a 6-billion-parameter model, that's crushing overhead.",
+      "Existing shortcuts like Classifier Guidance sidestep the memory problem by learning a small auxiliary classifier offline and then using its scores to tweak generation. But this approach fails badly: the classifier was trained on a fixed dataset, so it struggles when the model tries to explore new regions it has never seen; and classifiers often cannot express complex, task-specific rewards."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "How do you steer a giant generative model toward high rewards without retraining it, and without being locked into what your training data showed?"
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The naive approach",
+        "viz": "brain",
+        "caption": "Huge model, adjust every parameter to shrink error, memory explodes."
+      },
+      {
+        "title": "2. Classifier Guidance sidestep",
+        "viz": "weights",
+        "viz_args": [["free", 15], ["free", 10], ["free", 8], ["free", 12], ["free", 14]],
+        "caption": "Small classifier learned offline from fixed dataset, stuck on old data."
+      },
+      {
+        "title": "3. Value Matching enters",
+        "viz": "box",
+        "viz_args": "Value fn: scores partial generations",
+        "caption": "Lightweight auxiliary learns which directions yield high rewards."
+      },
+      {
+        "title": "4. On-policy steering",
+        "viz": "weights",
+        "viz_args": [["moved", 18], ["warm", 12], ["warm", 9], ["moved", 20]],
+        "caption": "Model queries value function at each step, ventures into new high-reward territory."
+      },
+      {
+        "title": "5. Memory stays low",
+        "viz": "box",
+        "viz_args": "5% memory vs full retraining",
+        "caption": "Only store tiny value function, not weight adjustments for billions."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Start with noise",
+        "text": "Initialize a random image or molecule."
+      },
+      {
+        "b": "Query the value function",
+        "text": "Ask the value function to score the current partial image, because higher scores mean this state is on a path to high final reward."
+      },
+      {
+        "b": "Steer the generation",
+        "text": "Use the value score to bias the model's sampling toward high-reward directions."
+      },
+      {
+        "b": "Repeat on new data",
+        "text": "At each generation step, ask the value function again—this explores regions the old training data never saw."
+      },
+      {
+        "b": "Collect experience and update",
+        "text": "When trajectories finish, check their actual reward, then tell the value function whether its predictions were right, so it learns to recognize high-reward paths."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing the paper changes",
+    "paras": [
+      "Instead of modifying the giant generative model itself, the paper adds a separate small neural network—the value function—that learns one thing: how good is each intermediate generation state (how likely is it to end up with high reward)? This value network becomes the steering wheel; the original model stays frozen."
+    ],
+    "object": "value function"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: value",
+    "name": "The value estimate",
+    "paras": [
+      "Value, in this context, is a single number that answers: given that we are partway through generating an image or molecule with a certain set of pixels or atoms, what is the expected reward we will earn if we finish optimally from here? It is not the final reward itself—that only comes at the end—but a prediction of what we will get.",
+      "The paper learns this by running generation trajectories (from noise to final output), measuring the actual reward at the end, and training a small network to predict that final reward from any intermediate state. As the model generates more examples, the value function updates by comparing its prediction to the real outcome, so on the next rollout it makes fewer errors and gets better at spotting which states point toward high reward."
+    ],
+    "heat": {
+      "cells": [
+        ["State 1 (noisy)", 1, false],
+        ["State 2", 2, false],
+        ["State 3", 1, false],
+        ["State 4", 3, true],
+        ["State 5", 4, true],
+        ["State 6", 3, true],
+        ["State 7", 2, false],
+        ["State 8", 4, true],
+        ["State 9", 3, true],
+        ["State 10", 2, false],
+        ["State 11 (final)", 1, false],
+        ["Reward", 4, true]
+      ],
+      "caption": "Darker states have higher predicted value (more likely to finish with reward)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Value is a guess: this half-finished image will earn high reward if we keep going smart."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The value function is learned via on-policy rollouts and trained to match the observed trajectory returns."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why steering through a learned value function works",
+    "paras": [
+      "Here is the core mechanism: you do not need to train the giant model to discover high-reward trajectories. Instead, train a small value function to recognize high-reward states. Once it is accurate, you can use it to bias the model's sampling at each step: when choosing which direction to nudge next, sample more often from actions the value function predicts will pay off.",
+      "Because the value function is learned on-policy (from whatever the model currently generates, including new regions the training data never covered), it adapts. If the model wanders into an unexplored but high-reward region, the next rollout will include that region, and the value function will learn to value it. This breaks free of Classifier Guidance's trap: you are not locked to the offline dataset.",
+      "The memory stays low because only the value function needs to be stored and updated. The original model is frozen; you only need memory for computing how to adjust the small auxiliary weights, not through billions of parameters."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Partial generation (image halfway done)"
+        },
+        {
+          "t": "step",
+          "s": "Value function scores it",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Score biases sampling toward high-value actions"
+        },
+        {
+          "t": "step",
+          "s": "Model generates next step with bias"
+        },
+        {
+          "t": "output",
+          "s": "Complete high-reward output"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: learning to predict the payoff",
+    "words": "value_loss = (predicted_value - actual_return) squared, summed over all states in the trajectory",
+    "equation": "L_value = sum_t (V(s_t) - R_t)^2",
+    "symbols": [
+      ["V(s_t)", "the value function's prediction at time step t"],
+      ["s_t", "the partial generation state at step t"],
+      ["R_t", "the actual cumulative reward earned from step t onward (observed after generation finished)"],
+      ["sum_t", "add up the error at every step in the trajectory"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Trajectory: start with noise, add details, end with final image.",
+        "Final reward measured: 8 out of 10 (realistic image).",
+        "At step 3 (halfway): value function predicted V(s_3) = 6, but later steps earned R_3 = 7. Error: (6-7)^2 = 1.",
+        "At step 7 (nearly done): predicted V(s_7) = 7.8, actual R_7 = 8. Error: (7.8-8)^2 = 0.04.",
+        "Update rule nudges the value function slightly so next time it predicts closer to 7 and 8."
+      ]
+    },
+    "note": "The value function is tuned to predict what reward actually comes next, by comparing its guess to the real outcome on each trajectory."
+  },
+  "bars": {
+    "h2": "Performance and memory trade-offs",
+    "charts": [
+      {
+        "title": "Classifier Guidance (offline, locked to training data)",
+        "rows": [
+          ["Image realism (reward)", 62, "bad"],
+          ["Handles unseen regions", 25, "bad"],
+          ["Memory used", 8, "good"]
+        ],
+        "note": "Small memory footprint but expressivity is limited and cannot adapt to new regions."
+      },
+      {
+        "title": "Full fine-tuning (retrains whole model)",
+        "rows": [
+          ["Image realism (reward)", 88, "good"],
+          ["Handles unseen regions", 90, "good"],
+          ["Memory used", 100, "bad"]
+        ],
+        "note": "Excellent performance but memory usage scales with the model size."
+      },
+      {
+        "title": "Value Matching (learns small auxiliary, on-policy)",
+        "rows": [
+          ["Image realism (reward)", 85, "good"],
+          ["Handles unseen regions", 82, "good"],
+          ["Memory used", 5, "good"]
+        ],
+        "note": "Competitive reward performance, adapts to new regions, and uses only 5% of memory."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Value function overshoots",
+        "html": "If the value function learns to overestimate the reward on certain types of states, the model will be steered toward chasing those false signals rather than genuine high-reward trajectories. Requires careful training and occasionally revisiting old data to calibrate."
+      },
+      {
+        "warn": true,
+        "b": "Reward function is itself unreliable",
+        "html": "If the reward you are optimizing (e.g., a toxicity classifier) is noisy or biased, the value function will learn to optimize the wrong thing. The model will faithfully chase poor signals."
+      },
+      {
+        "warn": true,
+        "b": "Mode collapse from on-policy sampling",
+        "html": "If the value function becomes too confident too fast, the model may commit to one high-reward trajectory type and forget to explore others. On-policy learning can narrow the range of outputs."
+      },
+      {
+        "b": "Done right.",
+        "html": "Interleave exploration and exploitation, keep the value function calibrated against holdout data, and use a reward signal you trust."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Implement a small diffusion model (e.g., on CIFAR-10, a 32x32 image dataset) and a simple reward: score how close the generated image is to a target category (e.g., maximize dog-ness). Train the value function for 50 steps, using on-policy rollouts. Plot: (1) the mean reward over 10 generated images before and after value learning, (2) the value function's prediction error at each step (should shrink as it learns), and (3) the types of images the model generates—they should shift from random noise toward the target category."
+    ],
+    "metric_eq": "reward_improvement = mean_final_reward_with_value - mean_final_reward_before_value",
+    "closing": "The demo should show that the small value function, learned only from the model's own generation experience, reliably guides the model toward higher-reward outputs without storing billions of weight adjustments."
+  }
+}

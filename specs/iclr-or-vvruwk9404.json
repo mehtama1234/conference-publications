@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-vvruwk9404",
+  "title": "CR-Net: Scaling Parameter-Efficient Training with Cross-Layer Low-Rank Structure",
+  "family": "Efficiency & Systems",
+  "one_liner": "A language model trains faster and uses less memory by letting each layer skip the hard work and just store a tiny correction to what the previous layer already computed.",
+  "lead": "Language models are enormous, with billions of numbers to adjust during training. CR-Net discovers that the difference between what one layer computes and what the next layer receives is thin and compressible, like a blurry shadow cast by the layer above. By storing only that thin shadow and reconstructing the full signal when needed, the model trains on cheaper hardware without losing quality.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The memory wall when training huge models",
+    "paras": [
+      "Training a large language model means adjusting trillions of tiny knobs called weights. Every time you feed text through the model, each layer stores intermediate results in memory—the unfinished computations that later layers will read. This is necessary because later during training, when the model tries to improve its guesses (the backward pass), it needs to look back at what each layer computed; if you throw that away, you have no record to work from. This memory blows up: for a 7-billion-weight model, storing all intermediate results across a batch of text can demand gigabytes, forcing expensive hardware.",
+      "A beginner might try to make layers smaller or force them through a bottleneck. But this breaks the model: shrink too much and the output gets blurry, the model forgets important details, and the quality crashes. Current methods that try to shrink layers by hand force compression so hard that they lose critical information."
+    ],
+    "callout": {
+      "b": "The real problem:",
+      "html": "Storing full intermediate results takes too much memory, but forcing compression loses information. You cannot shrink without sacrificing quality."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The current trap",
+        "viz": "weights",
+        "viz_args": [["hot", 95], ["hot", 88], ["hot", 92], ["hot", 91], ["hot", 87]],
+        "caption": "Each layer stores everything it computed. Memory explodes."
+      },
+      {
+        "title": "2. The discovery: differences are thin",
+        "viz": "weights",
+        "viz_args": [["moved", 85], ["moved", 12], ["moved", 8], ["moved", 11], ["moved", 9]],
+        "caption": "What this layer outputs versus what it receives from below is mostly repeats. The new parts are thin."
+      },
+      {
+        "title": "3. The CR-Net move",
+        "viz": "box",
+        "viz_args": "Previous signal + tiny correction",
+        "caption": "Store the past layer's result plus a small patch. Recompute when needed."
+      },
+      {
+        "title": "4. During training: forward pass",
+        "viz": "weights",
+        "viz_args": [["free", 8], ["free", 9], ["free", 7], ["free", 10], ["free", 8]],
+        "caption": "Low-rank corrections are cheap to compute and store. Memory shrinks."
+      },
+      {
+        "title": "5. Quality kept: full signal preserved",
+        "viz": "weights",
+        "viz_args": [["hot", 94], ["hot", 89], ["hot", 91], ["hot", 92], ["hot", 88]],
+        "caption": "The reconstruction of full signals stays high-quality. Training performance does not drop."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Previous layer outputs a result",
+        "text": "Layer N-1 sends forward its full activation (all the numbers)."
+      },
+      {
+        "b": "CR-Net computes a small correction",
+        "text": "Layer N multiplies the previous result by two tiny matrices to compute a thin patch."
+      },
+      {
+        "b": "Combine and scale",
+        "text": "A learnable number multiplies the correction and adds it to the previous result."
+      },
+      {
+        "b": "Feed to next layer",
+        "text": "The reconstructed full signal goes to layer N+1 as normal."
+      },
+      {
+        "b": "Backward: recompute cheaply",
+        "text": "During learning, activations are thrown away and recomputed on demand from the tiny weights."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "CR-Net replaces the typical approach where each layer learns a full set of weights (the tunable numbers) by connecting inputs to outputs. Instead, it computes outputs by combining two signals: the previous layer's output (unchanged) and a low-rank correction (two small matrices multiplied together). This means almost every layer has far fewer numbers to tune during training."
+    ],
+    "object": "how layers reuse the previous layer's signal instead of learning from scratch"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: the low-rank residual",
+    "name": "inter-layer activation difference",
+    "paras": [
+      "The paper measures and exploits the <em>activation residual</em>: the difference between what layer N outputs and what layer N-1 output. A beginner would guess this difference is random noise, but the paper discovers it is almost entirely low-rank—meaning it can be reconstructed from just a few underlying directions, like a blurry sketch that still captures the main shape.",
+      "The paper estimates this by looking at the patterns in real model training: it observes that feeding text through a model, the outputs change gradually from layer to layer, not wildly. The paper then designs a two-matrix factorization (a small matrix times another small matrix) to approximate this difference, and shows that this thin approximation lets you throw away the full intermediate result and recompute it later when the backward pass (the step where you figure out which numbers need to move to reduce error) needs it."
+    ],
+    "heat": {
+      "cells": [
+        ["Residual 1", 1, false],
+        ["Residual 2", 2, false],
+        ["Residual 3", 1, false],
+        ["Residual 4", 2, true],
+        ["Residual 5", 1, false],
+        ["Residual 6", 3, true],
+        ["Residual 7", 2, false],
+        ["Residual 8", 1, false],
+        ["Residual 9", 2, true],
+        ["Residual 10", 1, false],
+        ["Residual 11", 3, true],
+        ["Residual 12", 2, false]
+      ],
+      "caption": "Darker means the residual is easier to compress. Marked spots are the largest compressible differences, used as low-rank targets."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Each layer's output is almost just a copy of the layer before it, plus a thin addition. Store only the thin part; rebuild the copy when backtracking."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Inter-layer activation residuals exhibit low-rank structure. The dual-path architecture exploits this by computing activations as a scaled previous-layer output plus a low-rank transformation, enabling efficient activation recomputation."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: trading computation for memory",
+    "paras": [
+      "Traditional training stores every intermediate result so the backward pass can use it. This is expensive. CR-Net works backward (pun intended) by deleting intermediate results and recomputing them during the backward pass when the training algorithm needs to compute gradients (the directions and sizes to nudge each weight to shrink error). This is only safe if recomputing is fast. CR-Net makes it fast by building layers that recompute cheaply: instead of running a full layer with billions of weights, you run one tiny matrix multiplication (the low-rank correction) and add it to what you already have. One small matrix times another small matrix is thousands of times cheaper because the number of arithmetic operations grows with the rank (a small number like 64 or 128) times the model width, not the width squared—if the width is 2000 and the rank is 64, you do 128,000 operations instead of 4 million, a huge savings.",
+      "The key is this: the residual (what changes from layer to layer) is inherently thin. The paper discovered this by training models and measuring it. Because it is thin, a two-small-matrix factorization captures it almost perfectly. The first layer is kept full-rank to bootstrap the signal with high quality, then every layer after builds on top of it with low-rank patches. This design keeps the model output sharp and preserves all the high-rank information that makes the model smart, while shrinking memory by dropping intermediate results and letting layers recompute them using almost-free low-rank arithmetic."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Previous layer output and text batch"
+        },
+        {
+          "t": "step",
+          "s": "Small matrix A transforms previous signal",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Small matrix B refines the result"
+        },
+        {
+          "t": "step",
+          "s": "Learnable scale multiplies the correction"
+        },
+        {
+          "t": "step",
+          "s": "Add to previous layer output to rebuild full signal"
+        },
+        {
+          "t": "output",
+          "s": "Full-quality activation, computed from tiny matrices"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: low-rank reconstruction",
+    "words": "New layer output = scaled previous output + small matrix times other small matrix times input. As an equation, using learnable scale beta and factored low-rank matrices A and B:",
+    "equation": "Y_l = beta * Y_(l-1) + A * B * X",
+    "symbols": [
+      ["Y_l", "output of layer l that we want to compute"],
+      ["Y_(l-1)", "output from the previous layer (layer l-1)"],
+      ["beta", "learnable scale factor, multiplies how much of the previous layer to use"],
+      ["A", "small matrix (h rows by r columns, where r is much smaller than h)"],
+      ["B", "small matrix (r rows by input size columns)"],
+      ["X", "input to the layer (the activation from way earlier plus context)"],
+      ["r", "rank (the number of hidden directions in the low-rank factorization)"],
+      ["h", "model width (number of features in the activation)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the previous layer output is [20, 15, 18, 22] (four numbers), the input is [10, 8] (two numbers), and rank r = 2.",
+        "Matrix A is 4-by-2 (small): [[1.2, 0.3], [0.8, 1.1], [0.9, 0.7], [1.0, 0.5]].",
+        "Matrix B is 2-by-2 (small): [[2.0, 1.0], [1.0, 1.5]].",
+        "B * input = [[2.0, 1.0], [1.0, 1.5]] * [10, 8] = [20+8, 10+12] = [28, 22].",
+        "A * [28, 22] = [1.2*28 + 0.3*22, 0.8*28 + 1.1*22, ...] = [37.2, 46.2, 36.3, 33.0].",
+        "Say beta = 0.9. Then 0.9 * [20, 15, 18, 22] = [18, 13.5, 16.2, 19.8].",
+        "Final output: [18, 13.5, 16.2, 19.8] + [37.2, 46.2, 36.3, 33.0] = [55.2, 59.7, 52.5, 52.8].",
+        "The same four numbers (20, 15, 18, 22) that a full-rank layer would store are now recomputed from A, B, and beta—three tiny objects instead of a full layer."
+      ]
+    },
+    "note": "The equation shows how two small matrices and a scale factor rebuild a full-rank signal. During backward pass, you throw away the full signal and recompute it from this cheap form."
+  },
+  "bars": {
+    "h2": "Scaling performance across model sizes",
+    "charts": [
+      {
+        "title": "Old low-rank methods (e.g., LoRA with compression)",
+        "rows": [
+          ["Memory per batch (GB)", 48, "bad"],
+          ["Training quality (perplexity)", 18.7, "bad"],
+          ["Recomputation cost per step", 2.1e15, "bad"]
+        ],
+        "note": "Shrinking too aggressively hurts model accuracy. High compression saves memory but the model forgets because the low-rank approximation is too thin and drops important details that later layers need."
+      },
+      {
+        "title": "CR-Net (this paper)",
+        "rows": [
+          ["Memory per batch (GB)", 22, "good"],
+          ["Training quality (perplexity)", 17.9, "good"],
+          ["Recomputation cost per step", 0.69e15, "good"]
+        ],
+        "note": "CR-Net saves memory without sacrificing training quality. Recomputing residuals is cheaper than storing full activations because the low-rank factorization (two small matrices) is so much smaller than the full activation that you save time and space overall, even accounting for the cost of recomputing when you need it."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Rank too small.",
+        "html": "If you set the rank r way too low, the two small matrices cannot accurately approximate the residual. The reconstructed activations become blurry, training gets confused, and the model converges to worse solutions. The paper handles this with ablation experiments to find the sweet spot."
+      },
+      {
+        "warn": true,
+        "b": "First layer cannot be low-rank.",
+        "html": "The paper discovered that if you try to make the first layer low-rank too, you lose so much information that downstream layers cannot recover. The very first layer must stay full-rank. Only layers after that can use the low-rank trick."
+      },
+      {
+        "warn": true,
+        "b": "Recomputation bottleneck.",
+        "html": "If you are on a device where memory is cheap but computation is slow, the constant recomputation might hurt throughput. CR-Net assumes modern hardware where GPU bandwidth and memory are the bottleneck, not floating-point speed."
+      },
+      {
+        "b": "Done right.",
+        "html": "The paper carefully validates that the residuals are indeed low-rank in real models, uses ablations to pick safe rank values, keeps the first layer full, and shows experiments across three model sizes (60M, 350M, 7B) all win."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "To verify CR-Net works, build a small transformer (say, 350M parameters, meaning 350 million tunable numbers) that uses the CR-Net layers for positions 2 onward, and train it on a standard text benchmark (say, next-token prediction on a Wikipedia subset or The Pile). Run two versions: one where the rank r is tuned carefully (the paper uses r close to h/4 for most layers), and one where r is half that. Measure three things: (1) training memory used per batch, (2) training time per step, and (3) how wrong predictions are after a fixed number of training steps (measured as perplexity, the average penalty for incorrect predictions)."
+    ],
+    "metric_eq": "memory_saved = 1 - (memory_of_CR_Net / memory_of_full_rank), quality_intact = perplexity_of_CR_Net < perplexity_of_full_rank",
+    "closing": "If the demo is right, lowering the rank to r=h/4 should cut memory in half compared to full-rank, and validation loss should stay nearly identical or improve because the constraint of using small matrices acts like a regularizer (it gently pushes the model away from memorizing the training data by limiting how many numbers can change freely). If memory did not drop or if error jumped up, the rank was too aggressive."
+  }
+}

@@ -1,0 +1,226 @@
+{
+  "slug": "icml-or-kyvlaw4bxe",
+  "title": "VideoFlexTok: Coarse-to-Fine Video Tokens",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Represent videos as variable-length token sequences where early tokens capture motion and meaning, later tokens add details, cutting the model size and compute needed to generate video.",
+  "lead": "When you train a model to generate video, standard approaches represent each frame as a dense grid of tokens (short lists of numbers), forcing the model to learn and predict every pixel detail no matter how simple the scene. VideoFlexTok instead builds tokens in layers: first tokens capture what the video is about (motion, objects, scene), and later tokens fill in fine details. This lets smaller, faster models generate the same quality video, because the model learns that earlier tokens carry high-value information and can skip or predict fewer late tokens, needing less computation and fewer weights overall.",
+  "nav": [["theme-generative-models-diffusion.html","Generative Models & Diffusion"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Video generation is expensive because every detail matters",
+    "paras": [
+      "A standard video tokenizer (a piece of code that converts raw pixels into a compact list of numbers called tokens) treats every frame like a uniform grid. Each cell in the grid gets one token. For a 10-second video at 24 frames per second, that is 240 frames times maybe 100 tokens per frame equals 24,000 tokens. The downstream model — the one that actually generates video — has to predict each token one by one, regardless of whether the video is a simple solid color or a complex scene with motion everywhere.",
+      "A beginner might think: just predict all the tokens and call it done. But that forces the model to spend equal computation on both the interesting parts (motion, objects changing) and the boring parts (unchanging background). It is like reading every word in a book at the same speed whether it is the climax or describing wallpaper."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "VideoFlexTok makes tokens in layers: early tokens capture high-level video content (what is moving, what the scene is), and later tokens fill in pixel-level details, letting downstream models train on shorter sequences and run 5 times smaller."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old way: grid",
+        "viz": "weights",
+        "viz_args": [["hot",12],["hot",11],["hot",12],["hot",10],["hot",11],["hot",12],["hot",11],["hot",12],["hot",10],["hot",11],["hot",12],["hot",11]],
+        "caption": "Every token equally important. 24,000 tokens per video."
+      },
+      {
+        "title": "2. VideoFlexTok starts high-level",
+        "viz": "weights",
+        "viz_args": [["hot",8],["hot",7],["hot",8],["warm",5],["warm",4],["warm",5],["warm",3],["free",2],["free",1],["free",2],["free",1],["free",1]],
+        "caption": "First tokens capture motion and objects. Fewer total tokens needed."
+      },
+      {
+        "title": "3. A semantic guide (DINOv2)",
+        "viz": "box",
+        "viz_args": "Pre-trained vision encoder scores which tokens matter",
+        "caption": "Pull early tokens toward content that describes the scene."
+      },
+      {
+        "title": "4. Later tokens refine details",
+        "viz": "weights",
+        "viz_args": [["hot",8],["hot",7],["hot",8],["moved",6],["moved",5],["moved",6],["warm",3],["warm",2],["warm",3],["free",1],["free",1],["free",1]],
+        "caption": "Only add tokens if decoder needs finer reconstruction."
+      },
+      {
+        "title": "5. Same video quality, smaller model",
+        "viz": "plain",
+        "caption": "Text-to-video model is 5x smaller. 1.1 billion vs 5.2 billion weights."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode video into tokens",
+        "text": "Take raw video and convert it into a compact list using a trained encoder. Add learnable register tokens (special slots) scattered through time to let the model learn where to put important information."
+      },
+      {
+        "b": "Distill semantic meaning into early tokens",
+        "text": "Run a pre-trained vision model (DINOv2) on the video frames. Measure how far your early tokens are from what that vision model sees. Nudge early tokens closer to that semantic signal."
+      },
+      {
+        "b": "Use a flow decoder to reconstruct",
+        "text": "Train a generative model to reverse the encoding: take tokens and turn them back into noisy images, then into clean pixels. The flow decoder learns that early tokens alone can recover the big structure, so it gracefully degrades if you give it fewer tokens."
+      },
+      {
+        "b": "Downstream model predicts tokens",
+        "text": "A text-to-video model takes text descriptions and generates token sequences one by one. Because tokens are organized coarse-to-fine, it naturally learns to output just the important ones first, then add details."
+      },
+      {
+        "b": "Flexible token length when generating",
+        "text": "Use 32 tokens per frame for a quick, low-detail video. Use 60 tokens for higher fidelity. The same trained decoder handles any count."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of a flat grid of tokens where every position has the same weight, VideoFlexTok structures tokens so that earlier ones encode semantic content (what is in the video, motion, scene layout) and later ones add pixel-level details. This layered organization lets downstream models spend their prediction budget efficiently."
+    ],
+    "object": "Token sequence structure"
+  },
+  "hidden": {
+    "h2": "Semantic alignment: how much the tokens capture what matters",
+    "name": "Semantic bias score",
+    "paras": [
+      "Before this paper, a standard video tokenizer simply compressed pixels. There was no guarantee that the first tokens captured important content (objects, actions) versus noise or texture details. The hidden quantity here is semantic alignment: a score that measures whether your tokens carry information that a trained vision model considers important. It is measured by comparing the tokens to patterns extracted by DINOv2, a self-supervised vision model trained to recognize what is in an image. If a token is aligned with those patterns, it carries scene-level information. If it diverges, it is full of low-level texture.",
+      "The paper estimates this by adding a small classification head on top of an internal layer of the decoder. That head tries to predict DINOv2 patterns from the tokens. If it succeeds, the tokens carry scene information. If it fails, the tokens are full of low-level texture. This is called the REPA loss. By penalizing misalignment, the paper forces early tokens to carry scene information, not just pixel detail."
+    ],
+    "heat": {
+      "cells": [["early-token-1",4,true],["early-token-2",4,true],["early-token-3",3,false],["mid-token-4",3,false],["mid-token-5",2,false],["mid-token-6",2,false],["late-token-7",1,false],["late-token-8",1,false],["late-token-9",1,false],["late-token-10",1,false],["late-token-11",1,false],["late-token-12",1,false]],
+      "caption": "Darker means more scene-level content (aligned with vision encoder). Early tokens pushed higher."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model learns where to put scene information by comparing its tokens to what a pre-trained vision model sees in the video."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "A cosine-similarity loss (REPA) pulls decoder representations toward DINOv2 features, ensuring early tokens encode semantic rather than low-level information."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why early tokens capture meaning, not noise",
+    "paras": [
+      "The core insight is that a naive reconstruction loss (trying to minimize pixel error) will not force early tokens to be semantic. Pixels care equally about all detail levels, so the encoder could trivially put low-level texture in the first few tokens and get reasonable reconstruction. To fix this, the paper adds a semantic bias: it trains a decoder that can reach from anywhere in its representation back to DINOv2 features (semantic meaning). Then it connects that training signal to the encoder. Now the encoder learns that early tokens must carry semantic content in order for the decoder to predict DINOv2 features accurately.",
+      "A downstream model then learns that these early tokens are the high-value ones (because they align with meaning), so it naturally prioritizes outputting them. Later tokens are lower entropy (you only need them if you want pixel-perfect detail), so they are predicted less often or skipped. This is not forced; it emerges from the token structure."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Video frames"
+        },
+        {
+          "t": "step",
+          "s": "Encoder + registers compress spatiotemporal video into tokens",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Semantic bias loss (REPA): tokens must predict DINOv2 features",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Flow decoder reconstructs from tokens, any length"
+        },
+        {
+          "t": "step",
+          "s": "Downstream model learns early tokens have high value",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Generated video from shorter token sequence"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The combined loss: reconstruction plus semantic alignment",
+    "words": "Total loss = flow reconstruction loss + (scaling weight) times semantic alignment loss",
+    "equation": "L = L_Flow + lambda * L_REPA",
+    "symbols": [
+      ["L_Flow","how far the reconstructed pixels are from the original (rectified flow loss)"],
+      ["L_REPA","cosine distance between decoder's semantic features and DINOv2's features"],
+      ["lambda","how hard to push tokens toward semantic meaning (a dial, typically 0.1-1.0)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose one frame of video has flow reconstruction loss = 0.50 (pixels are rough).",
+        "The REPA loss = 0.20 (tokens are semantically off from DINOv2).",
+        "Set lambda = 1.0 (equally weighted).",
+        "Total loss = 0.50 + 1.0 * 0.20 = 0.70.",
+        "If we increase lambda to 2.0, total loss = 0.50 + 2.0 * 0.20 = 0.90. The model feels more pressure to match DINOv2.",
+        "If we ignore semantics (lambda = 0), loss = 0.50. Tokens drift toward texture, and early tokens stop being predictable."
+      ]
+    },
+    "note": "The two terms compete: one pulls toward pixel fidelity, one pulls toward semantic richness. Early tokens end up capturing semantic content, later tokens handle pixel detail."
+  },
+  "bars": {
+    "h2": "Training efficiency: model size and token count",
+    "charts": [
+      {
+        "title": "3D Grid tokenizer (baseline)",
+        "rows": [
+          ["Model size","5.2 billion weights","baseline"],
+          ["Tokens per frame","72-100","baseline"],
+          ["Generation quality (gFVD)","20.5","baseline"],
+          ["Training compute required","100%","bad"]
+        ],
+        "note": "Standard method. Generates video well but requires a large model and many tokens."
+      },
+      {
+        "title": "VideoFlexTok",
+        "rows": [
+          ["Model size","1.1 billion weights","good"],
+          ["Tokens per frame","32-40","good"],
+          ["Generation quality (gFVD)","20.3","good"],
+          ["Training compute required","20%","good"]
+        ],
+        "note": "Same quality, 5x smaller model, far fewer tokens. Demonstrates that token structure matters more than raw count."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "DINOv2 does not see the actual content in your video.",
+        "html": "If the video contains content outside DINOv2's training distribution (e.g., very stylized animation, night vision, or rare domains), the semantic bias will pull the tokens toward something DINOv2 recognizes, which might not be what the video actually shows. Early tokens become aligned with DINOv2 by one definition but not with the video's truth."
+      },
+      {
+        "warn": true,
+        "b": "Downstream model learns to ignore late tokens.",
+        "html": "If the downstream training uses a small learning rate or only a few steps, it may never learn that late tokens are useful. The model converges on using just early tokens, and fine detail suffers or is lost."
+      },
+      {
+        "warn": true,
+        "b": "Semantic loss weight lambda is wrong.",
+        "html": "If lambda is too high, the model sacrifices reconstruction fidelity to match DINOv2, creating blurry video. If lambda is too low, early tokens do not specialize in semantics and the coarse-to-fine benefit collapses."
+      },
+      {
+        "b": "Done right.",
+        "html": "With careful tuning and a downstream model that learns the full token sequence, VideoFlexTok produces both scene-level early tokens and detailed reconstructions, enabling smaller, faster video generation, because the layered structure means less computation is wasted on redundant or low-value predictions."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should train a tiny text-to-video model on VideoFlexTok tokens and show that it learns to output scene-level information first. Start with a small training set (e.g., 100 short videos with text captions). Train a small sequence-predicting model to output VideoFlexTok tokens given text, one token after another. Then, when generating, output tokens one by one but stop after different numbers per frame (e.g., 5, 10, 20, 32). Decode each token sequence into video frames and compare visual quality and text alignment (does the video match the text prompt)."
+    ],
+    "metric_eq": "Quality score = (video-text alignment at N tokens) / (alignment at full 32 tokens)",
+    "closing": "As you add more tokens, video quality should improve smoothly, because each layer builds on the previous layers. Early tokens should reliably encode the prompt (a dog running vs a car driving), but later tokens add fine texture. The point is that a model trained on the full sequence naturally learns to prioritize early tokens, so you can drop late ones at inference without losing meaning, because the scene information is already present in the first few."
+  }
+}

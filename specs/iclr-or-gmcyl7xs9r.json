@@ -1,0 +1,245 @@
+{
+  "slug": "iclr-or-gmcyl7xs9r",
+  "title": "MeanCache: From Instantaneous to Average Velocity for Accelerating Flow Matching Inference",
+  "family": "Efficiency & Systems",
+  "one_liner": "Instead of trusting instant velocity readings at each step, average the velocity across a time span to avoid steering the image generation off track when speeding up.",
+  "lead": "Flow Matching is a way to turn noise into images one smooth step at a time, like gradually sharpening a blurry photo. To speed things up, we cache (save) information from earlier steps and reuse it. But when you go fast (fewer steps), the saved info becomes stale and the image drifts off track. MeanCache fixes this by looking at average velocity over a time span instead of just the velocity at one moment, which keeps the path more stable. It also decides smartly which timesteps to cache from, so you get maximum speed without breaking quality.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Speed kills the trajectory",
+    "paras": [
+      "Flow Matching generates images by following a smooth path from random noise to a real image, taking many small steps. Each step asks: given where I am now, which way should I move next? The model predicts a velocity (the direction and speed to move). In the real 50-step process, this works well. But you want to generate images 5 or 10 times faster by skipping steps.",
+      "The naive idea: save (cache) features and velocity information from every 5th step, then reuse that information instead of recomputing it. But here is the trap: a velocity reading from 5 steps ago tells you which way to move right now, but the world has changed—the image state is different. Using a stale velocity prediction steers you in the wrong direction. Over many skipped steps, these small steering errors add up, and the image becomes blurry or distorted. The faster you go, the worse it gets, because more steps are skipped between caches, so the stale velocity is older and less accurate, and errors stack for longer."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Caching based on instantaneous velocity (the direction at one moment) causes accumulated errors when steps are skipped."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Normal generation (slow, 50 steps)",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["warm", 28], ["warm", 31], ["warm", 29], ["warm", 32]],
+        "caption": "Small, steady steps; each velocity guess is fresh and accurate."
+      },
+      {
+        "title": "2. Naive caching (fast, skip 5 steps)",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["free", 2], ["free", 2], ["free", 2], ["hot", 45]],
+        "caption": "Cache from step 0 and step 25. Reuse old velocity four times in between."
+      },
+      {
+        "title": "3. Trajectory drifts",
+        "viz": "box",
+        "viz_args": "stale velocity = wrong direction × 4 steps",
+        "caption": "Reused velocity is old; image state changed; errors stack up."
+      },
+      {
+        "title": "4. Average velocity bridges the gap",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["warm", 34], ["warm", 36], ["warm", 33], ["warm", 35]],
+        "caption": "Compute average direction over the span; smoother, more stable guidance."
+      },
+      {
+        "title": "5. Smart scheduling picks the best caching timesteps",
+        "viz": "box",
+        "viz_args": "shortest path algorithm: cache step 0, 8, 18, 25",
+        "caption": "Algorithm picks timesteps where average velocity is most stable."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Run the full 50-step generation",
+        "text": "Generate the image normally to collect all the data you need."
+      },
+      {
+        "b": "Step 2: Save rate-of-change measurements between timesteps",
+        "text": "Store how fast the image features are changing between pairs of cached points. This is the slope of change over time, saved for reuse."
+      },
+      {
+        "b": "Step 3: Compute average velocity over intervals",
+        "text": "Instead of using velocity at one moment, average it across the time span between two cached points."
+      },
+      {
+        "b": "Step 4: Score timesteps by trajectory stability",
+        "text": "Measure how much error average-velocity caching would cause at each timestep under different skip patterns."
+      },
+      {
+        "b": "Step 5: Find the best cache schedule",
+        "text": "Use shortest-path algorithm to pick which timesteps to cache from, staying within your speed budget."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper shifts from using instantaneous velocity (the predicted direction at a single step) to average velocity (the averaged direction over a time interval). Instead of trusting that an old velocity guess still applies, it smooths the velocity signal over the time span you skipped. This change affects the core trajectory computation."
+    ],
+    "object": "velocity representation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: trajectory deviation",
+    "name": "trajectory deviation under average-velocity caching",
+    "paras": [
+      "Trajectory deviation measures how far off-track the image generation goes when you reuse cached information. When you skip steps, the true path diverges from the predicted path. MeanCache quantifies this divergence by measuring how much error occurs when you use average velocity instead of instantaneous velocity over a time interval.",
+      "The paper estimates trajectory deviation by computing Jacobian-vector products (JVP): a mathematical tool that tells you how fast features change between two cached timesteps. By comparing the true image state at an intermediate step to where average-velocity caching predicts it should be, the paper measures the error. Lower deviation means the image stays closer to the original path."
+    ],
+    "heat": {
+      "cells": [
+        ["step 0 cache", 4, true],
+        ["step 8 cache", 4, true],
+        ["step 18 cache", 3, false],
+        ["step 25 cache", 4, true],
+        ["step 35 cache", 2, false],
+        ["step 45 cache", 2, false],
+        ["step 8-18", 3, false],
+        ["step 18-25", 2, false],
+        ["step 25-35", 3, false],
+        ["step 35-45", 4, false],
+        ["step 45-50", 2, false],
+        ["speedup ratio", 3, false]
+      ],
+      "caption": "Darker means higher trajectory deviation under average-velocity caching. Boxes with borders mark timesteps chosen to cache from."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When caching makes the path drift badly, the error accumulates because each skipped step compounds the previous steering error; measure this drift at each timestep and use it to pick cache points where the drift is smallest or most controllable."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "JVP-based deviation quantifies interval-average-velocity trajectory error; peak-suppressed shortest path minimizes total deviation under speedup budget."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why average velocity fixes trajectory drift",
+    "paras": [
+      "The core problem: when you skip from step 0 to step 25, the velocity prediction at step 0 becomes stale; the image has changed, so the old direction no longer applies. The image drifts off the true path.",
+      "MeanCache's fix: instead of reusing the velocity at step 0, compute the average velocity from step 0 to step 25. This average is computed using cached Jacobian-vector products, which capture how fast features actually change over the span. Average velocity is more stable because it smooths out local bumps. It reflects the overall trend, not a single outdated snapshot. When you use this average direction to leap from step 0 toward step 25, you stay closer to the true path because the average direction is more faithful to the actual trajectory shape.",
+      "Why it is more stable: velocity varies locally (it jiggles), but the average flattens those jiggles. When you cache only at a few timesteps but use average velocity between them, the error shrinks. The paper then uses this insight to design a scheduling algorithm: it scores each possible cache-point pair by how much trajectory deviation would occur if you used average velocity, then finds the set of cache timesteps that minimizes total deviation while hitting your speed target. Early timesteps (which steer the overall image shape) get heavier weight; later timesteps (which add fine details) can be skipped more safely."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "cached features at timesteps 0, 8, 18, 25"
+        },
+        {
+          "t": "step",
+          "s": "measure JVP (rate of feature change) from step 0 to step 8",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "compute average velocity over the interval"
+        },
+        {
+          "t": "step",
+          "s": "compare predicted path vs. true path: estimate deviation"
+        },
+        {
+          "t": "step",
+          "s": "repeat for all possible cache-point pairs; score by deviation"
+        },
+        {
+          "t": "step",
+          "s": "run shortest-path search to find best cache schedule",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "timesteps to cache from for next fast generation"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The averaging formula",
+    "words": "predicted trajectory over interval = cached feature at start + (average velocity) × (time span)",
+    "equation": "z_t_predicted = z_r + (1 / (t - r)) * integral_r_to_t JVP(s) ds * (t - r)",
+    "symbols": [
+      ["z_r", "the image state (features) at the cached timestep r"],
+      ["z_t_predicted", "where we predict the image should be at timestep t"],
+      ["JVP(s)", "jacobian-vector product: how fast features change at step s"],
+      ["integral_r_to_t JVP(s) ds", "sum up the rate of change over the time span from r to t"],
+      ["(1 / (t - r))", "normalize to get the average rate"],
+      ["t - r", "the time span (number of steps skipped)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose you cache at step 0 (image state = z_0 = [10, 15, 8]) and step 10 (z_10 is unknown but you want to predict it).",
+        "JVP from 0 to 10 tells you features shift at an average rate: [0.2, -0.1, 0.3] per step.",
+        "Average rate over 10 steps = [0.2, -0.1, 0.3].",
+        "Predicted z_10 = [10, 15, 8] + [0.2, -0.1, 0.3] × 10 = [10, 15, 8] + [2.0, -1.0, 3.0] = [12.0, 14.0, 11.0].",
+        "If true z_10 is [12.1, 13.9, 11.2], deviation is sqrt((0.1)^2 + (-0.1)^2 + (0.2)^2) ≈ 0.24.",
+        "The algorithm repeats this for all candidate cache intervals, then picks the schedule that minimizes total deviation while achieving your target speedup."
+      ]
+    },
+    "note": "The average velocity from step r to step t predicts a smoother, more stable trajectory than using velocity at a single old timestep."
+  },
+  "bars": {
+    "h2": "Quality vs. speed tradeoff",
+    "charts": [
+      {
+        "title": "Naive instant-velocity caching",
+        "rows": [
+          ["Original full path (50 steps)", 95, "good"],
+          ["4 times acceleration (instantaneous velocity)", 68, "bad"],
+          ["4 times acceleration (naive reuse)", 62, "bad"]
+        ],
+        "note": "Reusing stale velocity leads to severe quality drop and blurry details, because the velocity from 5 steps ago points in the wrong direction for the current image state, so the generator steers the image off its intended path, blurring features."
+      },
+      {
+        "title": "MeanCache (average velocity + smart scheduling)",
+        "rows": [
+          ["Original full path (50 steps)", 95, "good"],
+          ["4 times acceleration (MeanCache)", 88, "good"],
+          ["4.1 times acceleration (MeanCache)", 84, "good"]
+        ],
+        "note": "Average velocity + scheduled caching preserve quality even at 4 times speed, where competitors fail."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Scheduling is greedy, not globally optimal.",
+        "html": "The peak-suppressed shortest-path algorithm finds a good schedule quickly by making locally optimal choices at each step, but this greedy approach may not find the absolute best overall schedule in all cases because it does not backtrack to reconsider earlier choices in light of later constraints."
+      },
+      {
+        "warn": true,
+        "b": "Early timesteps must be cached carefully.",
+        "html": "The first few steps shape the overall image structure. If you cache too sparsely early on, the image foundation drifts, and later detail-filling steps cannot recover. The algorithm weights early steps heavily, but if constraints force sparse early caching, quality drops."
+      },
+      {
+        "warn": true,
+        "b": "Rate-of-change computation adds setup overhead.",
+        "html": "Before using MeanCache, you must compute rate-of-change measurements. This computation is lighter than a full forward pass because it only tracks slopes, not entire feature vectors, so it is cheaper but not free. If you generate only one image, the prep cost is tiny; in interactive systems generating many images, the prep overhead spreads across queries but still subtracts from the speed gain."
+      },
+      {
+        "b": "Done right.",
+        "html": "Cache early timesteps densely, use average velocity, and let the algorithm pick the schedule. Quality stays high even at 4 times speed on large models like FLUX.1 and Qwen-Image."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a minimal generative model (e.g., a simple flow model on CIFAR-10 or a toy image task). Generate an image with 50 steps (baseline, full quality). Then run it at 4 times, 6 times, and 10 times acceleration using three methods: (1) naive instant-velocity caching with fixed intervals (every 5th step), (2) instant-velocity caching with oracle-optimal scheduling, and (3) MeanCache with algorithm-selected scheduling. Measure image quality using SSIM (structural similarity) or LPIPS (perceptual loss) at each speedup. Plot speed vs. quality and show that MeanCache stays higher than naive caching and close to oracle scheduling, even at 10 times speedup."
+    ],
+    "metric_eq": "quality_drop = (quality_at_full_steps - quality_at_acceleration) / quality_at_full_steps; plot quality_drop vs. acceleration_ratio for each method",
+    "closing": "The demo must show that MeanCache's quality drops slower with speedup than naive instant-velocity caching, proving that average velocity is more stable under acceleration."
+  }
+}

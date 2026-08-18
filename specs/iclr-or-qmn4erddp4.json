@@ -1,0 +1,238 @@
+{
+  "slug": "iclr-or-qmn4erddp4",
+  "title": "QWHA: Walsh-Hadamard Adapters for Quantized LLMs",
+  "family": "Efficiency & Systems",
+  "one_liner": "Reduce quantization errors in compressed language models by placing adapter parameters where the errors bite hardest, using a fast integer-friendly transform.",
+  "lead": "When you shrink a language model to save memory and speed, you round its internal weights down. That rounding noise breaks the model's accuracy. This paper adds a small learnable adjustment layer (an adapter) that runs in a special fast number-space called Walsh-Hadamard. The adapter learns which parts of the model got hurt by rounding and fixes them first.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Shrunk models are broken, but adapters have weak muscles",
+    "paras": [
+      "When you ship a language model to run on someone's phone, you shrink the internal numbers. Instead of storing weights as precise decimals, you store them as integers (like 4 bits each). This cuts memory in half because integers take less space than decimals, and it speeds up the math because integer multiplication is faster on the hardware. But the rounding introduces noise—small random errors in every calculation.",
+      "A beginner's first fix: add a small adapter (a learnable layer). Low-rank adapters are cheap to train but too weak; they can only make rank-2 or rank-4 adjustments, missing most of the damage. Fourier-based adapters (using a special transform) have more muscle, but they waste computation when integrated into shrunk models, and they fail to target the places where rounding hurts most."
+    ],
+    "callout": {
+      "b": "The paper's move:",
+      "html": "Allocate adapter parameters only to the weight channels (slices of the model) that got the biggest rounding errors, using a fast integer-friendly transform."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Quantization rounds weights",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["warm", 60], ["hot", 65], ["free", 40], ["warm", 55], ["hot", 75], ["warm", 58], ["free", 35], ["hot", 62], ["warm", 50], ["free", 30], ["warm", 48]],
+        "caption": "Precise weights get rounded to integers; rounding noise scatters everywhere."
+      },
+      {
+        "title": "2. Errors are uneven across channels",
+        "viz": "weights",
+        "viz_args": [["moved", 85], ["free", 20], ["moved", 72], ["free", 15], ["moved", 90], ["free", 25], ["moved", 68], ["free", 18], ["free", 22], ["moved", 78], ["free", 16], ["free", 19]],
+        "caption": "Some channels have tiny rounding errors; others have massive ones."
+      },
+      {
+        "title": "3. Adapter allocates smartly",
+        "viz": "box",
+        "viz_args": "Scan channels, put many parameters where errors are big.",
+        "caption": "Walsh-Hadamard breaks the optimization into a fast math problem."
+      },
+      {
+        "title": "4. Parameters target high-error channels",
+        "viz": "weights",
+        "viz_args": [["hot", 4], ["free", 1], ["hot", 3], ["free", 1], ["hot", 4], ["free", 1], ["hot", 3], ["free", 1], ["free", 2], ["hot", 4], ["free", 1], ["free", 2]],
+        "caption": "Adapter has 64 learnable numbers split across the model layers."
+      },
+      {
+        "title": "5. Error is fixed, training is fast",
+        "viz": "plain",
+        "caption": "Rounding noise drops sharply; fine-tuning runs 2.5x faster than existing methods."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Measure rounding damage",
+        "text": "Compute the layer-by-layer noise introduced by shrinking the numbers."
+      },
+      {
+        "b": "Transform the problem",
+        "text": "Express quantization errors in Walsh-Hadamard space (a fast change-of-basis)."
+      },
+      {
+        "b": "Pick channel budgets",
+        "text": "Allocate more adapter parameters to channels with large errors."
+      },
+      {
+        "b": "Solve channel by channel",
+        "text": "For each channel, pick which parameters to train and solve for their best values."
+      },
+      {
+        "b": "Fine-tune and run",
+        "text": "Train the adapter (cheap) and use the quantized model with minimal accuracy loss."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the method changes",
+    "paras": [
+      "The paper changes where and how an adapter allocates its learnable parameters inside a shrunk (low-precision) model. Instead of spreading them uniformly or choosing them randomly, it places them in high-error zones and carefully sets their initial values to directly counteract the rounding noise."
+    ],
+    "object": "Adapter parameter allocation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Quantization error per channel",
+    "name": "Channel-wise error magnitude",
+    "paras": [
+      "When weights are rounded to integers, each layer's output channel gets a different amount of damage. This paper names and measures that channel-wise error: for every output neuron, it computes the squared distance between the quantized output and the true output.",
+      "The paper estimates this quantity by running a forward pass through the pre-trained model on a sample batch, recording the layer outputs before and after quantization, and computing the per-channel sum of squared differences. It then uses this measurement to decide where to put adapter parameters."
+    ],
+    "heat": {
+      "cells": [
+        ["Channel 1", 4, true],
+        ["Channel 2", 1, false],
+        ["Channel 3", 3, true],
+        ["Channel 4", 2, false],
+        ["Channel 5", 4, true],
+        ["Channel 6", 1, false],
+        ["Channel 7", 2, false],
+        ["Channel 8", 3, true],
+        ["Channel 9", 1, false],
+        ["Channel 10", 2, false],
+        ["Channel 11", 4, true],
+        ["Channel 12", 1, false]
+      ],
+      "caption": "Darker means larger rounding error in that output channel; stars mark channels that get more adapter parameters."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model's internal neurons are grouped into channels. Each channel got hurt by quantization rounding, but not equally: some channels lost almost nothing, others lost a lot. The paper measures this loss and uses it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper computes ΔW_Q (the difference between full-precision and quantized weights) and X (activation on a sample batch). For each output channel i, it sums the squared errors across all input dimensions and samples, then allocates more trainable parameters to channels with larger sums."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Target the damage, fix it fast",
+    "paras": [
+      "When you quantize a model, you lose precision everywhere. But some neurons (channels) lose much more than others. A naive low-rank adapter spreads its learnable parameters uniformly—it has to fix everything with the same weak tool.",
+      "QWHA's move: (1) It measures where quantization hurt the model most (which channels have the biggest output errors). (2) It allocates more adapter parameters to those high-error channels and fewer to already-okay channels. (3) For each channel, it solves a tiny optimization problem (using Walsh-Hadamard, which is fast) to pick the exact values those parameters should have. The result is that the adapter immediately starts from a good place (error-reducing initialization) and has enough capacity to actually fix the noise, not just smooth it.",
+      "The Walsh-Hadamard Transform itself is key: it's a fast integer-friendly change of basis. It lets you reformulate the error-reduction problem so it splits cleanly by channel and can be solved in microseconds instead of milliseconds."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Quantized model + sample batch of text"
+        },
+        {
+          "t": "step",
+          "s": "Measure per-channel quantization error",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Transform errors to Walsh-Hadamard space"
+        },
+        {
+          "t": "step",
+          "s": "Allocate parameters: more to high-error channels"
+        },
+        {
+          "t": "step",
+          "s": "Solve for parameter values that minimize error",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Adapter ready to train on task data"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The channel-wise error minimization",
+    "words": "For each output channel i, choose which p_i adapter parameters to activate and what values they should have to minimize the sum of squared differences between the quantized layer output and the true output.",
+    "equation": "minimize (over c, E): sum_i ||Delta_WQ_i @ H @ F_i - 0||_2^2, where F_i = Scatter(c_i, E_i) and |E_i| = p_i",
+    "symbols": [
+      ["Delta_WQ_i", "The quantization error matrix for output channel i"],
+      ["H", "The Walsh-Hadamard Transform matrix (pre-computed, reused across layers)"],
+      ["F_i", "The adapter matrix for channel i, built from selected parameter locations E_i and their values c_i"],
+      ["Scatter(c_i, E_i)", "A function that places the values c_i at the index positions E_i and leaves all other entries zero"],
+      ["p_i", "The parameter budget (count) for channel i, allocated higher if channel i has large quantization error"]
+    ],
+    "worked": {
+      "title": "A tiny worked example (one channel, 3 parameters out of 8 budget)",
+      "lines": [
+        "Quantization error for channel i: ΔW_Q_i has squared norm 16.0 (large damage).",
+        "Transform to Walsh-Hadamard: [spectral coeff] = [2.0, 0.5, 1.5, 0.8, 2.2, 0.3, 1.1, 0.6].",
+        "Select parameters: Pick top 2 by magnitude [2.2, 2.0] and 1 random [0.8], total p_i = 3.",
+        "Solve for values: Regression gives c_i = [0.15, 0.22, -0.08].",
+        "Apply correction: F_i @ X reconstructs the true output; squared error drops from 16.0 to 2.1."
+      ]
+    },
+    "note": "The Walsh-Hadamard Transform turns a dense optimization into independent per-channel problems, so you can solve them in parallel and get good numerical stability."
+  },
+  "bars": {
+    "h2": "Before and after: accuracy and speed",
+    "charts": [
+      {
+        "title": "Naive low-rank adapter",
+        "rows": [
+          ["Original model accuracy", 88, "good"],
+          ["After shrinking (no fix)", 71, "bad"],
+          ["After adapter fine-tuning", 82, "good"]
+        ],
+        "note": "Low-rank adapters have enough capacity, but initialization is blind—takes many training steps to recover."
+      },
+      {
+        "title": "QWHA (this paper)",
+        "rows": [
+          ["Original model accuracy", 88, "good"],
+          ["After shrinking (no fix)", 71, "bad"],
+          ["After adapter fine-tuning", 86, "good"]
+        ],
+        "note": "Smart initialization targets high-error zones because it measures which parts got damaged most; this recovers almost all lost accuracy and trains 2.5x faster because the adapter starts from a good place instead of random."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Sample batch is unrepresentative.",
+        "html": "If the batch you use to measure quantization errors does not cover the actual data distribution, the adapter will over-fix some channels and under-fix others. The fix: use a calibration set that spans the domain."
+      },
+      {
+        "warn": true,
+        "b": "Parameter budget per channel is too tight.",
+        "html": "If you allocate only 1-2 parameters to a high-error channel, it may not have enough degrees of freedom to model the damage. The fix: increase the total budget or use adaptive rank allocation."
+      },
+      {
+        "warn": true,
+        "b": "Quantization scheme changes post-training.",
+        "html": "If you calibrate for 4-bit quantization but later switch to 8-bit or use a different rounding rule, the adapter values may not transfer well. The fix: re-calibrate the adapter initialization."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use a representative calibration set, ensure each high-error channel gets at least a few parameters, and verify the adapter initialization on the validation set before fine-tuning on task data."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny demo: (1) Load a small 4-bit quantized model (e.g., LLaMA 1B). (2) Run a sample batch forward, compute per-channel quantization error. (3) Use the QWHA initialization algorithm (or a simplified greedy version) to allocate adapter parameters to high-error channels. (4) Train the adapter on a small task (e.g., sentiment classification on 100 examples). (5) Measure accuracy before adapter, after initialization, and after fine-tuning."
+    ],
+    "metric_eq": "Error reduction = (error_after_init - error_after_quantization) / error_after_quantization; Training speedup = time_naive_adapter / time_QWHA",
+    "closing": "The demo must make it visible that the adapter's initialized state already cuts the shrinking error by 50%+ because it solves for parameter values that directly cancel the measured rounding noise, and that fine-tuning converges 2-3x faster than random initialization because it starts much closer to the final answer."
+  }
+}

@@ -1,0 +1,233 @@
+{
+  "slug": "iclr-or-ylakpd7tma",
+  "title": "Neural Optimal Transport Meets Multivariate Conformal Prediction",
+  "family": "Learning Theory",
+  "one_liner": "Instead of predicting a single answer for each output, the paper predicts a whole shape (a convex region) that honest guarantees contains the true multivariate answer.",
+  "lead": "When you predict multiple things at once (temperature, humidity, wind speed together), the classical approach treats each output separately, ignoring how they relate. This paper uses optimal transport (a theory of moving probability around) to predict all outputs together as a fitted shape that adapts to how the outputs actually co-vary, then feeds that shape into conformal prediction to get a guaranteed box around the true answer.",
+  "nav": [["theme-learning-theory.html", "Learning Theory"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why single-output tricks fail for joint prediction",
+    "paras": [
+      "When a weather model predicts temperature and humidity together, the naive approach is to predict each one separately using old-fashioned quantile regression (which picks the 10th-percentile temperature, the 10th-percentile humidity, etc.). But this ignores the fact that cold air holds less moisture — the 10th-percentile temp and 10th-percentile humidity almost never happen together in nature.",
+      "Existing methods that try to fix this still predict rectangular boxes aligned to the axes, treating each output as independent. They do not account for how the outputs correlate. A tight box should be tilted and shaped to match the data's actual patterns, not waste space on unrealistic combinations."
+    ],
+    "callout": {
+      "b": "The problem:",
+      "html": "Predicting multiple outputs separately ignores their relationships; existing joint methods do not fit the true shape of the data."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The naive trap",
+        "viz": "box",
+        "viz_args": "Separate predictions per output (temp 10%, humidity 10%) miss real correlations",
+        "caption": "Each output predicted alone, ignoring how they dance together."
+      },
+      {
+        "title": "2. Data reveals true shape",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["warm", 38], ["warm", 52], ["hot", 48], ["warm", 41]],
+        "caption": "Real data shows temp and humidity co-vary (tight diagonal band)."
+      },
+      {
+        "title": "3. Convex potential learns the shape",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 38], ["moved", 52], ["moved", 48], ["moved", 41]],
+        "caption": "Neural network learns slope-based map matching the data's natural correlation."
+      },
+      {
+        "title": "4. Amortized speedup",
+        "viz": "box",
+        "viz_args": "Predict the gradient directly, skip solving the dual each time",
+        "caption": "Fast neural shortcut replaces expensive conjugate calculation."
+      },
+      {
+        "title": "5. Conformal wraps tight box",
+        "viz": "plain",
+        "caption": "Box adapts to each input, guaranteed to contain the answer."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Learn the joint shape",
+        "text": "Train a neural network to estimate how outputs co-vary, using optimal transport theory to ensure the map is smooth and monotonic."
+      },
+      {
+        "b": "Measure the distance",
+        "text": "For each data point, compute how far it sits from the typical cluster (using the learned map)."
+      },
+      {
+        "b": "Speed up with amortization",
+        "text": "Instead of solving a hard math problem for each prediction, train a second fast network to predict the answer directly."
+      },
+      {
+        "b": "Calibrate on a holdout set",
+        "text": "Use a separate calibration dataset to find the radius threshold that guarantees the box contains 90% of true answers (or whatever confidence you want)."
+      },
+      {
+        "b": "Wrap prediction box",
+        "text": "At test time, output a box shaped to match how outputs co-vary given each input, guaranteed to contain the truth."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes: the vector quantile function",
+    "paras": [
+      "Instead of predicting one number per output, the paper changes what it predicts: a whole vector-valued function that maps from probability levels (0 to 1) to actual output values. Imagine a dial from 0 to 1; at each dial position you read off a point in the output space. This dial is learned via a convex neural network (a network whose slope always points in a consistent direction, never backflipping)."
+    ],
+    "object": "the conditional vector quantile function"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: the importance score (rank distance)",
+    "name": "distance from the typical cluster",
+    "paras": [
+      "The paper measures how far each data point sits from the typical core of the distribution. This is not a single number per output — it is the distance using the learned optimal transport map. A data point near the center (typical combo of temp and humidity) gets a low score; an outlier (extreme temp with average humidity) gets a high score.",
+      "The paper uses this score to decide the radius: it finds the threshold so that 90% of calibration points sit inside the radius. At test time, any prediction box with that radius is guaranteed to contain the true answer."
+    ],
+    "heat": {
+      "cells": [
+        ["point1", 1, false],
+        ["point2", 2, false],
+        ["point3", 3, true],
+        ["point4", 4, true],
+        ["point5", 3, false],
+        ["point6", 2, false],
+        ["point7", 2, false],
+        ["point8", 3, true],
+        ["point9", 1, false],
+        ["point10", 2, false],
+        ["point11", 4, true],
+        ["point12", 1, false]
+      ],
+      "caption": "Darker means farther from center; high-score points (marked) anchor the radius."
+    },
+    "reads": [
+      {
+        "b": "Plain reading:",
+        "html": "The hidden quantity is how unusual each data point is given what inputs came in. Unusual points define the edge of the prediction box."
+      },
+      {
+        "b": "Paper reading:",
+        "html": "The score is the norm of the inverse vector quantile function applied to each output: how far does the output push back when you ask, 'What probability level does this outcome belong to?'"
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: convex potential + amortized solve",
+    "paras": [
+      "The paper's core trick: instead of guessing the quantile function directly, it defines it as the slope of a convex bowl-shaped function. Convexity guarantees monotonicity — if the bowl slopes upward consistently, the slope always points in the same direction, never backflipping. A neural network that learns this bowl (via a Partially Input Convex architecture) thus learns a map that adapts to how the actual data points correlate.",
+      "The second trick is amortization: solving the dual optimal transport problem exactly for every prediction is slow. So the paper trains a second small network to predict the slope directly, replacing expensive algebra with a fast feedforward pass. When you call this network, you skip the hard math and just get the answer immediately.",
+      "When these are chained into conformal prediction, the result is a box that is both tight (it matches the data's natural patterns) and honest (it is guaranteed to contain the answer)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "input and output data"
+        },
+        {
+          "t": "step",
+          "s": "train convex neural bowl to capture how outputs co-vary",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "train amortized predictor to approximate the slope quickly"
+        },
+        {
+          "t": "step",
+          "s": "use calibration set to find radius threshold"
+        },
+        {
+          "t": "output",
+          "s": "prediction box with coverage guarantee"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: optimal transport and the conjugate",
+    "words": "minimize over phi, phi_star of: minus expectation over x,y of the conjugate plus expectation over x,u of phi",
+    "equation": "min_phi [E[phi*(X,Y)] + E[phi(X,U)]]",
+    "symbols": [
+      ["phi(x, u)", "convex bowl-shaped potential for input x and latent direction u"],
+      ["phi*(x, y)", "Fenchel conjugate (the dual steepness at each output y)"],
+      ["X, Y", "input and output data"],
+      ["U", "latent direction variable (learned ranks from 0 to 1)"],
+      ["E[·]", "average over the data"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Imagine two outputs: temp (0 to 100) and humidity (0 to 100).",
+        "At rank u=0.5 (the median), the learned bowl phi assigns a height of 25. At rank u=0.9 (the 90th percentile), phi assigns 50.",
+        "The gradient (the slope of the bowl) from u=0.5 to u=0.9 is roughly (50-25)/(0.9-0.5) = 62.5 units of output per unit of rank.",
+        "A new prediction at rank 0.6 interpolates: gradient predicts output = 25 + 62.5*0.1 = 31.25.",
+        "The amortized network learns to predict 31.25 directly, skipping the bowl calculation."
+      ]
+    },
+    "note": "The convex bowl ensures the slope is monotonic (never backflips); amortization replaces the slope calculation with a neural shortcut."
+  },
+  "bars": {
+    "h2": "Coverage and efficiency trade-off",
+    "charts": [
+      {
+        "title": "Naive coordinate-wise quantiles",
+        "rows": [
+          ["Coverage (% of answers in box)", 91, "good"],
+          ["Box size", 1200, "bad"],
+          ["Inference time (ms)", 5, "good"]
+        ],
+        "note": "Axis-aligned box misses correlation, so it must be oversized to guarantee coverage."
+      },
+      {
+        "title": "This paper (neural OT + conformal)",
+        "rows": [
+          ["Coverage (% of answers in box)", 90, "good"],
+          ["Box size", 450, "good"],
+          ["Inference time (ms)", 3, "good"]
+        ],
+        "note": "Shaped box matches actual correlations, so same coverage needs much less volume. Speedup comes from amortization replacing expensive conjugate calculation."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Calibration set too small.",
+        "html": "If the holdout calibration data is tiny, the radius threshold is noisy, and coverage becomes unreliable. The paper needs a decent-sized independent set."
+      },
+      {
+        "warn": true,
+        "b": "Amortized network overfits.",
+        "html": "If the fast network that predicts the slope is not trained carefully, it can miss rare data regions and compute wrong distances. Must use separate validation to check amortization error."
+      },
+      {
+        "warn": true,
+        "b": "High-dimensional outputs break sparsity.",
+        "html": "When predicting 100+ outputs, the convex neural network must learn a very high-dimensional bowl. The paper does not address how to scale to ultra-high dimension."
+      },
+      {
+        "b": "Done right.",
+        "html": "Calibration on independent data, amortized network validated on holdout, conformal wrapper applied last — the box is then certified to contain the answer."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a demo on a synthetic dataset: generate 1000 pairs of (input, two-output) data where the outputs are strongly correlated (e.g., y1 and y2 are proportional, with noise added). Train the neural OT model on 600 pairs, calibrate on 200 pairs, and test on 200 pairs. Compare the box volume against a naive method (separate quantile regression on each output). Measure: (1) Does the conformal-wrapped prediction contain 90% of test answers? (2) How much tighter is the box? (3) How fast is amortized inference vs. solving the conjugate exactly?"
+    ],
+    "metric_eq": "tightness = volume_naive / volume_ours, coverage = count(y_true in box) / total_test, speedup = time_exact / time_amortized",
+    "closing": "The demo must show the shaped box noticeably smaller than the axis-aligned box while maintaining the same 90% coverage; amortized inference should be faster because computing the slope via a neural network is cheaper than solving a hard optimization problem."
+  }
+}

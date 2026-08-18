@@ -1,0 +1,240 @@
+{
+  "slug": "iclr-or-4q55rwyte9",
+  "title": "AR-Drag: Real-Time Motion-Controllable Autoregressive Video Diffusion",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Generate video one frame at a time in a way that keeps videos smooth by training exactly how the model will run and by learning from rewards that measure motion accuracy.",
+  "lead": "Video diffusion models are slow because they refine video in two directions (forward and backward through time), and they do not easily follow motion instructions like drag gestures. AR-Drag is a lightweight model that generates video one frame at a time and learns both to make realistic frames and to obey motion commands by training on its own predictions and tuning itself to maximize rewards for accurate motion.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why real-time motion-controllable video is hard",
+    "paras": [
+      "Existing video diffusion models refine the whole video back and forth many times—they look at the first frame to improve the last frame, then the last to improve the first, over dozens of rounds. This makes them slow because each frame requires dozens of refinement steps, and all frames are processed together, so latency is proportional to the number of refinement rounds times the number of frames.",
+      "A beginner might try to make the model generate one frame at a time (autoregressive), reading only the frames already made. But this breaks because the model is trained on ground-truth past frames during training, yet at run-time it only sees its own guesses. The model learns to depend on perfect inputs, so its mistakes pile up—each bad frame makes the next worse.",
+      "Controlling motion also fails: motion commands like 'drag this finger to here' do not easily guide one-at-a-time generation, and few-step models lose detail."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Frame-by-frame video generation (when the model runs) is done on the model's own guesses, but training is done on perfect data, creating a mismatch that kills quality and motion control."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The mismatch trap",
+        "viz": "brain",
+        "caption": "Model learns from perfect frames but runs on its own guesses: error snowballs."
+      },
+      {
+        "title": "2. Self-Rollout aligns training",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["free", 18], ["warm", 40], ["warm", 38], ["moved", 25], ["moved", 30]],
+        "caption": "Train by feeding model's own outputs, not ground truth. Match run-time exactly."
+      },
+      {
+        "title": "3. Motion control signal",
+        "viz": "box",
+        "viz_args": "Drag gesture + start coordinates",
+        "caption": "Encode motion as trajectory embeddings (x,y,z coordinates per frame)."
+      },
+      {
+        "title": "4. RL reward for motion",
+        "viz": "weights",
+        "viz_args": [["hot", 75], ["free", 15], ["warm", 30], ["warm", 25], ["moved", 50]],
+        "caption": "Measure how close generated motion matches the drag command trajectory."
+      },
+      {
+        "title": "5. Real-time output",
+        "viz": "plain",
+        "caption": "One frame per step, motion-accurate, 30x faster than bidirectional models."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Learn basic motion control",
+        "text": "Fine-tune a base image-to-video model on data with motion labels (drag gestures)."
+      },
+      {
+        "b": "Step 2: Compress to few-step autoregressive",
+        "text": "Distill the slow bidirectional teacher into a fast frame-at-a-time student by matching the output pattern."
+      },
+      {
+        "b": "Step 3: Fix training-run-time mismatch",
+        "text": "Use Self-Rollout: during training, feed the model its own generated frames instead of ground truth."
+      },
+      {
+        "b": "Step 4: Add randomity for exploration",
+        "text": "In one random denoising step per frame, inject randomness so the model tries different paths, because without randomness the model settles into a single fixed path and stops learning how to handle varied motion commands. Keep other steps deterministic to avoid blowing up computational cost."
+      },
+      {
+        "b": "Step 5: Learn from motion rewards",
+        "text": "Run reinforcement learning to maximize the trajectory reward (how accurately the motion matches the command)."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how the model is trained. Instead of feeding the model ground-truth past frames (the typical 'teacher forcing' trick), it feeds the model its own generated frames. This single switch—Self-Rollout—eliminates the mismatch between training and run-time."
+    ],
+    "object": "Training input source (ground truth to model predictions)"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Train-run-time alignment",
+    "name": "Markov chain consistency (how well training mimics run-time behavior)",
+    "paras": [
+      "The paper silently measures something important: how faithfully the training process matches what happens at run-time. At run-time, each frame is generated from only the frames the model has already made. This is a chain of decisions (frame 1 depends only on the image; frame 2 depends on frame 1; frame 3 depends on frames 1–2, etc.). Training would normally break this chain by giving the model the real frame 2, even if the model guessed wrong on frame 1.",
+      "The paper measures this alignment by actually running Self-Rollout: generate step-by-step during training using the model's own predictions, checking that the pattern of intermediate states (what the model sees during refinement) matches what will happen at run-time. When the alignment is perfect, the model learns to handle its own mistakes without falling apart."
+    ],
+    "heat": {
+      "cells": [
+        ["step-1-train", 4, true],
+        ["step-2-train", 4, true],
+        ["step-3-train", 4, true],
+        ["step-1-infer", 3, false],
+        ["step-2-infer", 3, false],
+        ["step-3-infer", 3, false],
+        ["teacher-forcing", 1, false],
+        ["rollout-match", 4, true],
+        ["error-accum", 2, false],
+        ["state-drift", 2, false],
+        ["control-fidelity", 4, true],
+        ["motion-reward", 4, true]
+      ],
+      "caption": "Darker means training and inference are aligned; Self-Rollout (marked) keeps training faithful to run-time."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper measures whether training uses the same inputs as inference. When training feeds the model ground truth but inference feeds it guesses, the model learns tricks that do not work at run-time. Self-Rollout forces training to use the model's own guesses, eliminating this mismatch."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The Markov property is preserved by using step-by-step ancestral sampling during training, identical to inference. This ensures that the hidden state (the intermediate video representation) at training time matches the state at run-time, enabling stable RL training."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Four linked pieces",
+    "paras": [
+      "Real-time performance comes from generating one frame at a time (autoregressive), rather than refining all frames together. But one-at-a-time generation is fragile: errors compound. Self-Rollout fixes this by training exactly how the model runs—feeding it its own output. This removes the hidden assumption that inputs are always perfect.",
+      "Motion control comes from encoding drag gestures as trajectory embeddings (lists of coordinates per frame), adding them to the base model, and then training the model to maximize a motion-accuracy reward. The reward is computed by comparing the generated motion path to the commanded path.",
+      "Speed comes from few-step denoising: instead of refining each frame 50 times, the model refines each frame only 4–8 times. To keep exploration alive during reinforcement learning without ballooning the computational cost, the paper randomly picks one denoising step to inject noise (SDE), while all others follow a deterministic path (ODE). This balances learning and efficiency.",
+      "The entire system stays small (1.3 billion numbers to tune) and fast because it is autoregressive, distilled, and runs on lightweight attention (backward-looking only, meaning each frame looks only at the past)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Reference image, motion command (drag gesture), text prompt"
+        },
+        {
+          "t": "step",
+          "s": "Encode motion as trajectory embeddings (x,y coordinates per frame)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Generate frame by frame using own previous frames, not ground truth"
+        },
+        {
+          "t": "step",
+          "s": "Measure motion accuracy via trajectory reward (distance between paths)"
+        },
+        {
+          "t": "step",
+          "s": "Reinforce high-reward motions, penalize misaligned outputs"
+        },
+        {
+          "t": "output",
+          "s": "Video with precise motion control, real-time latency"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation: Flow matching with trajectory control",
+    "words": "The model predicts a direction (velocity field) at each point in the denoising trajectory. The training objective is to match the predicted direction to the true direction, guided by motion commands encoded as embeddings.",
+    "equation": "L = E_{m,n} [ || v_theta(x_{m,n}, t, c_traj, c_text) - v_true ||^2 ]",
+    "symbols": [
+      ["x_{m,n}", "the partially-denoised frame m at denoising step n"],
+      ["v_theta", "the model's predicted direction to move in denoising space"],
+      ["v_true", "the ground-truth direction (computed from the data)"],
+      ["c_traj", "the trajectory embedding (coordinates of the motion command)"],
+      ["c_text", "the text prompt embedding (what objects to animate)"],
+      ["m", "frame index (1st frame, 2nd frame, etc.)"],
+      ["n", "denoising step index within a single frame"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Imagine a finger being dragged from (100,200) to (150,220) over 3 frames.",
+        "Frame 1: reference image given. Trajectory embedding = (100,200).",
+        "Frame 2: model generates the finger in a noisy state, refines it 4 steps. At step 2, predicted direction v_theta = move pixel 0.8 units right. True direction v_true = 1.2 units right. Error = (1.2 - 0.8)^2 = 0.16.",
+        "Frame 3: trajectory command = (150,220). Model matches it and gets error 0.04. Total loss after averaging = 0.10.",
+        "At run-time, the model has learned to nudge the finger correctly in the direction of the command, and errors do not compound because Self-Rollout trained it on its own guesses."
+      ]
+    },
+    "note": "The loss measures how well the model predicts the denoising direction at each step, conditioned on the motion trajectory and text. Self-Rollout ensures this direction is learned from model-generated frames, not cheating with ground truth."
+  },
+  "bars": {
+    "h2": "Quality comparison: naive frame-by-frame vs. AR-Drag",
+    "charts": [
+      {
+        "title": "Naive autoregressive (teacher forcing at training)",
+        "rows": [
+          ["Motion accuracy at frame 1", 92, "good"],
+          ["Motion accuracy at frame 10", 64, "bad"],
+          ["Fine detail (hair, fingers)", 48, "bad"]
+        ],
+        "note": "Errors compound: frame 10 was never trained on frame 9's mistakes, so predictions collapse."
+      },
+      {
+        "title": "AR-Drag (Self-Rollout + RL)",
+        "rows": [
+          ["Motion accuracy at frame 1", 94, "good"],
+          ["Motion accuracy at frame 10", 88, "good"],
+          ["Fine detail (hair, fingers)", 86, "good"]
+        ],
+        "note": "Self-Rollout trains on realistic errors. RL reinforces accurate motion. Detail is preserved because training mimics inference exactly."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Variance explosion in RL.",
+        "html": "Long video sequences have many frames. If every denoising step (every refinement) is random, the random variance across all steps balloons. The model cannot learn stable motion because the noise drowns the signal. AR-Drag fixes this by making only one random step per frame and keeping others deterministic."
+      },
+      {
+        "warn": true,
+        "b": "Collision or stuttering when motion constraints conflict.",
+        "html": "If the motion command says 'drag the finger here' but the base model wants to put it somewhere else for semantic reasons (e.g., to make the hand look natural), the two goals fight. The RL reward must be tuned carefully so motion is honored without breaking realism."
+      },
+      {
+        "warn": true,
+        "b": "Model ignores the instruction if reward signal is weak.",
+        "html": "If the trajectory reward is not strong enough relative to the base model's fidelity loss, the model will drift away from the motion command and generate plausible but wrong videos."
+      },
+      {
+        "b": "Done right.",
+        "html": "Self-Rollout eliminates mismatch. RL from a well-tuned trajectory reward learns motion. Selective randomity (one random step, others deterministic) keeps variance tractable. The model learns to follow commands without losing realism or detail."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple image-to-video generator where you click and drag on an image to specify motion (a stick-figure hand moving across a scene, or a ball rolling). Train a tiny version (maybe 100 million numbers to tune) using Self-Rollout: at each training step, generate the next frame using only the model's previous frames, not ground truth. Set up a trajectory reward: measure how far the actual motion path is from the commanded path (straight-line distance in 2D space). Use RL to optimize. Measure motion accuracy frame by frame and compare to a baseline that uses ground-truth frames."
+    ],
+    "metric_eq": "motion_error = mean(distance from predicted motion path to commanded path); error_accumulation = motion_error at frame 10 minus motion_error at frame 1",
+    "closing": "The demo must show that Self-Rollout prevents error accumulation, making motion precise at every frame instead of degrading frame by frame. That is the entire insight: train the way you run."
+  }
+}

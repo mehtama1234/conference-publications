@@ -1,0 +1,252 @@
+{
+  "slug": "iclr-or-v3euas3vcl",
+  "title": "DiffSparse: Learned Token Sparsity in Image Diffusion",
+  "family": "Efficiency & Systems",
+  "one_liner": "A diffusion image model learns which tokens to skip in each layer of each denoising step to run 54% faster while making better images.",
+  "lead": "Image diffusion models create pictures by slowly denoising random noise over 20+ steps, asking each layer to refine every token (a chunk of the image). Most tokens repeat the same computation across layers and steps, wasting time. This paper teaches the model to decide, for each layer and step, which tokens actually need to be recomputed and which can reuse cached results from earlier. The model learns this automatically by training a tiny decision network that figures out which tokens matter most where.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [
+    ["zero", "Start from zero"],
+    ["visual-story", "Visual story"],
+    ["hidden", "The hidden quantity"],
+    ["mechanism", "Why it works"],
+    ["math", "Equation"],
+    ["failures", "What can go wrong"],
+    ["demo", "What to build"]
+  ],
+  "problem": {
+    "h2": "Images take forever to make",
+    "paras": [
+      "A diffusion model generates an image by starting with random noise and gradually denoising it over many steps (20, 50, even 100). Each step passes the image tokens through many layers, and every layer does full computation on every token. For a large model (thousands of layers) on a large image (millions of tokens), this means billions of operations.",
+      "Naive speedup: cache the output from a previous step and reuse it. But which tokens should be reused? Which genuinely need fresh computation? Current methods manually decide: 'always use cached tokens in layers 3, 5, 7; always recompute in 2, 4, 6.' This is brittle, hard to tune, and wasteful. Some tokens matter a lot in some places and not at all in others. And even with caching, most methods still force full computation on certain designated steps, losing speedup potential."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Diffusion models waste time recomputing tokens that could be safely reused, because no one learned the right pattern of which tokens matter where."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The original wasteful way",
+        "viz": "weights",
+        "viz_args": [["hot", 100], ["hot", 100], ["hot", 100], ["hot", 100], ["hot", 100]],
+        "caption": "Every layer computes every token, even redundant ones, in every step."
+      },
+      {
+        "title": "2. The caching idea: reuse some tokens",
+        "viz": "weights",
+        "viz_args": [["hot", 100], ["moved", 45], ["hot", 100], ["moved", 45], ["hot", 100]],
+        "caption": "Cache the output from earlier steps, but which tokens actually need reuse?"
+      },
+      {
+        "title": "3. The problem: manual rules fail",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["free", 40], ["hot", 70], ["free", 30], ["hot", 80]],
+        "caption": "Token importance varies per layer, per step. Manual rules cannot capture that."
+      },
+      {
+        "title": "4. DiffSparse learns the pattern",
+        "viz": "box",
+        "viz_args": "Learnable network predicts: which tokens skip, which reuse, which compute.",
+        "caption": "Train a small network to decide the best sparsity for each layer-step pair."
+      },
+      {
+        "title": "5. Speed up, quality stable",
+        "viz": "weights",
+        "viz_args": [["moved", 80], ["free", 20], ["moved", 75], ["free", 25], ["moved", 70]],
+        "caption": "54% fewer tokens computed, but image quality actually improves from better reuse."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Cache tokens at the start",
+        "text": "Before denoising begins, save the output from each layer to a cache at the first noisy step."
+      },
+      {
+        "b": "Predict token importance per layer",
+        "text": "Train a small network to score which tokens matter most at each layer in each denoising step."
+      },
+      {
+        "b": "Use dynamic programming to decide allocation",
+        "text": "Given a target sparsity (e.g., skip 54% of tokens overall), use a solver to figure out which layers skip which tokens to minimize quality loss."
+      },
+      {
+        "b": "Mask and gate token computation",
+        "text": "For each layer-step, create a binary mask: masked-out tokens reuse cached values; unmasked tokens run through the layer normally."
+      },
+      {
+        "b": "Two-stage training",
+        "text": "First stage learns which entire steps can be fully cached; second stage learns fine-grained per-layer sparsity. This avoids forcing artificial full-computation steps."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper decides which tokens compute and which reuse cached values in each layer of each denoising step, replacing manual, layer-wide sparsity rules with learned, fine-grained binary masks."
+    ],
+    "object": "Token skip/reuse masks"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Token importance scores",
+    "name": "Per-token importance per layer-step",
+    "paras": [
+      "Behind the scenes, the method estimates how much each token matters in each layer and timestep of denoising. Tokens that strongly influence the final image quality get high importance; tokens that add little get low scores. The paper estimates importance using a training-free compositional-attention score (a sum of attention weights across all attention heads in a layer), which tells you which tokens the model is paying attention to.",
+      "The paper uses this importance score in two ways: first, as a training signal to build a learned predictor network (a small neural net that guesses importance from raw features); second, to guide which tokens the dynamic programming solver should sacrifice (skip) when trying to hit a target speedup."
+    ],
+    "heat": {
+      "cells": [
+        ["Token A, early step", 4, true],
+        ["Token A, mid step", 2, false],
+        ["Token A, late step", 1, false],
+        ["Token B, early step", 3, false],
+        ["Token B, mid step", 4, true],
+        ["Token B, late step", 3, false],
+        ["Token C, early step", 1, false],
+        ["Token C, mid step", 1, false],
+        ["Token C, late step", 4, true],
+        ["Token D, early step", 2, false],
+        ["Token D, mid step", 3, false],
+        ["Token D, late step", 2, false]
+      ],
+      "caption": "Darker means higher importance. Notice: importance shifts across steps and tokens; no single token is always important."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Importance tells you which tokens contain the information that shapes the final picture. A token with high attention from many other tokens is usually important; one that is ignored is safe to skip."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Computed via compositional-attention score: sum of all attention weights pointing to that token in all attention heads. Low-overhead, training-free, and correlates well with which tokens the dynamic programming solver should drop."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: The causal chain",
+    "paras": [
+      "Denoising is highly redundant: early steps make coarse changes to the entire image; later steps refine details. Many tokens repeat nearly the same computations across layers and steps. Worse, in regions where nothing is changing (already denoised), the computation is pure waste. DiffSparse exploits this waste by learning where it happens.",
+      "DiffSparse breaks this by letting the model learn where that waste is. A small predictor network learns to map token features to importance scores for each layer-step combo. This is cheap to train: only thousands of iterations instead of millions. Once trained, it can be plugged into any diffusion model that uses caching.",
+      "The dynamic programming solver then treats sparsity allocation as an optimization problem: you have a budget (e.g., skip 54% of tokens overall), and you want to choose which tokens to skip in which layers to minimize the total damage to image quality. The solver considers the cost of skipping each token in each layer and picks the minimal-cost subset that hits your budget. This finds the globally best allocation, not greedy layer-by-layer decisions.",
+      "Two-stage training removes a hidden cost of prior methods: forcing full computation in certain steps. Instead, DiffSparse learns which steps benefit from caching and which need full computation, handling both jointly. This unlocks speedup in steps that prior methods had to leave alone."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Noisy image tokens over multiple denoising steps."
+        },
+        {
+          "t": "step",
+          "s": "Attention-based importance score for each token in each layer-step pair.",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Learned predictor estimates importance as a compact cost for each layer and step."
+        },
+        {
+          "t": "step",
+          "s": "Dynamic programming solver chooses which tokens to skip to meet sparsity budget.",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Binary mask gates: masked-out tokens use cache; others compute."
+        },
+        {
+          "t": "output",
+          "s": "Final image, 54% faster. Quality improves because better reuse patterns reduce noise in cached features."
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The math: Sparsity allocation as dynamic programming",
+    "words": "minimum cost when assigning sparsity to first L layers under a sparsity budget R equals the minimum cost for the first L-1 layers plus the cost of the optimal sparsity choice for layer L.",
+    "equation": "F(L, R) = min over all sparsity rates s in S of [ Cost[L][s] + F(L-1, R-s) ]",
+    "symbols": [
+      ["F(L, R)", "minimum total cost when we have assigned sparsity to the first L layers and used R fraction of tokens overall"],
+      ["L", "the layer index (1 to total number of layers)"],
+      ["R", "the total sparsity budget (e.g., 0.54 means skip 54% of all tokens)"],
+      ["s", "the sparsity rate for this layer (e.g., 0.3 means this layer skips 30% of its tokens)"],
+      ["S", "the set of allowed sparsity rates (e.g., 10%, 20%, 30%, ...)"],
+      ["Cost[L][s]", "the quality loss (measured in perception distance) when layer L skips sparsity rate s of its tokens"],
+      ["Cost[L][s] + F(L-1, R-s)", "the cost of skipping in layer L plus the best solution for layers 1 to L-1 with remaining budget"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with 3 layers and 30% total sparsity budget",
+      "lines": [
+        "Layer 1: Cost of skipping 10% is 2.5 (small penalty); Cost of skipping 20% is 6.0.",
+        "Layer 2: Cost of skipping 10% is 1.8; Cost of skipping 20% is 5.2.",
+        "Layer 3: Cost of skipping 10% is 3.2; Cost of skipping 20% is 8.1.",
+        "DP computes: F(1, 10%) = 2.5; F(1, 20%) = 6.0.",
+        "Then: F(2, 20%) = min(1.8 + 6.0, 5.2 + 2.5) = min(7.8, 7.7) = 7.7 (skip 20% in L1, 10% in L2).",
+        "Then: F(3, 30%) = min(3.2 + 7.7, ...) picks the best final layer assignment.",
+        "The solver reconstructs the path and tells us exactly which layer skips how much to stay within budget and minimize perceived damage."
+      ]
+    },
+    "note": "This equation is a classic optimization technique: break a global problem (which tokens to skip everywhere) into layer-by-layer choices that depend only on the remaining budget, then solve backwards to find the best allocation."
+  },
+  "bars": {
+    "h2": "Naive caching vs. learned sparsity",
+    "charts": [
+      {
+        "title": "Manual sparsity (prior methods)",
+        "rows": [
+          ["Image quality before speedup", 27.95, "good"],
+          ["Image quality at 54% speedup", 28.35, "bad"],
+          ["Actual speedup achieved", 1.75, "bad"]
+        ],
+        "note": "Manual rules drop quality and waste the speedup potential because some layers are forced to compute fully."
+      },
+      {
+        "title": "DiffSparse (learned allocation)",
+        "rows": [
+          ["Image quality before speedup", 27.95, "good"],
+          ["Image quality at 54% speedup", 27.79, "good"],
+          ["Actual speedup achieved", 1.91, "good"]
+        ],
+        "note": "Learned allocation not only keeps quality but often improves it by caching smarter and removing unnecessary full-step computation."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Importance score mismatch.",
+        "html": "If the attention-based importance score does not correlate with actual quality, the solver will skip the wrong tokens. This happens if the model uses skip connections (where a token bypasses computation) or if attention patterns are misleading. Diagnosis: measure what the solver actually dropped and test on validation images."
+      },
+      {
+        "warn": true,
+        "b": "Cache poisoning in early steps.",
+        "html": "If a token is cached at a very noisy step and reused for many steps without updates, errors accumulate. Reusing a bad denoising result ten times over makes garbage. Fix: set higher importance thresholds for early steps, or pre-compute full results for the first few steps."
+      },
+      {
+        "warn": true,
+        "b": "Sparsity budget too aggressive.",
+        "html": "If you set the budget to skip 80% of tokens, the solver must skip important tokens in some layers even if they matter, so quality drops. Below 60% speedup, quality often improves because reuse is mostly on truly redundant tokens; above 80%, the solver is forced into bad trade-offs and crashes. Find the right budget for your latency target."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works because importance is stable (attention does correlate with quality loss), denoising is genuinely redundant (many tokens repeat work), and dynamic programming finds a globally optimal allocation. Test on held-out images and validate that faster samples still pass human evaluation, which matters because human perception often tolerates small computational shortcuts that pixel-level metrics flag as errors."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small diffusion model (e.g., a small image generator, trained on CIFAR-10 upsampled to 64x64). Train DiffSparse to learn token importance. Run inference with different sparsity budgets (20%, 40%, 60%) and measure speedup, image quality (use a simple perceptual loss like L2 on downsampled images), and actual token count computed. Plot speedup against quality and show that learned sparsity beats random token dropping or manual per-layer rules."
+    ],
+    "metric_eq": "speedup = (total tokens in baseline) / (total tokens computed with mask); quality score = 1 - (perceptual loss with mask / perceptual loss without mask)",
+    "closing": "The demo must make it impossible to miss: as you tighten the sparsity budget, speedup grows smoothly but quality only drops after a threshold, and learned allocation beats naive alternatives at every point."
+  }
+}

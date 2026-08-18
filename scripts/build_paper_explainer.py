@@ -69,7 +69,7 @@ def render_flow(f):
 def render_heat(h):
     if not h: return ""
     cells = "".join(f'<div class="cell f{lvl}{" rubber" if mark else ""}">{e(lab)}</div>'
-                    for lab,lvl,mark in h["cells"])
+                    for _c in h["cells"] for lab,lvl,mark in [(list(_c)+[1,False])[:3]])
     cap = f'<p class="small">{h["caption"]}</p>' if h.get("caption") else ""
     return f'<div class="heat">{cells}</div>{cap}'
 

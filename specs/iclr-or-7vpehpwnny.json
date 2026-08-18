@@ -1,0 +1,212 @@
+{
+  "slug": "iclr-or-7vpehpwnny",
+  "title": "Peak-Return Greedy Slicing",
+  "family": "Reinforcement Learning",
+  "one_liner": "Break full trajectories into high-quality subtrajectories so the model learns from short, good sequences instead of long, mediocre ones.",
+  "lead": "In offline reinforcement learning, you learn a policy from data collected by other agents and stored in a dataset — no live trial-and-error allowed. A Transformer (a neural network that reads long sequences one element at a time, keeping track of context) is good at reading sequences, but the standard approach trains it on complete trajectories from start to finish. This paper shows that mixing in shorter sequences of just the good parts makes the model learn faster and make better decisions, because the bad stretches confuse the learning signal — removing them leaves only clear cause-and-effect pairs.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The full trajectory trap",
+    "paras": [
+      "Offline reinforcement learning means you have a frozen dataset of past episodes and must learn a policy (a decision rule) from it without trying anything new. A dataset contains complete trajectories: sequences of states, actions, and rewards that happened in earlier runs. A Transformer is a neural network that reads long sequences one element at a time, keeping track of context, so it seems natural for trajectory learning.",
+      "The naive approach trains a Transformer on complete trajectories end-to-end. But real episodes are messy. A trajectory might look like: good moves, then a bad decision, then recovery, then another mistake. The model trains on all of it as one unit. The problem: the bad stretches muddy the learning. The model sees an action that worked once followed by an action that failed, and it is unclear which one to imitate. The model must average over good and bad, so it learns a blurry policy that hesitates."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Instead of training on all moves in a trajectory, cut the trajectory into shorter chunks and train only on the chunks where the model did well."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Full trajectory",
+        "viz": "weights",
+        "viz_args": [["warm", 20], ["hot", 35], ["free", 10], ["warm", 25], ["free", 15]],
+        "caption": "A complete episode mixes good moves and bad moves together."
+      },
+      {
+        "title": "2. The model's dilemma",
+        "viz": "box",
+        "viz_args": "Confused: which moves to copy?",
+        "caption": "Training on the whole sequence, the model learns to average good and bad."
+      },
+      {
+        "title": "3. Estimating future returns",
+        "viz": "weights",
+        "viz_args": [["free", 10], ["hot", 35], ["hot", 32], ["warm", 22]],
+        "caption": "Algorithm scores each time step by how much reward came after it."
+      },
+      {
+        "title": "4. Greedy slicing",
+        "viz": "weights",
+        "viz_args": [["hot", 35], ["hot", 32], ["warm", 22]],
+        "caption": "Keep only the high-scoring subtrajectories. Throw away low-scoring chunks."
+      },
+      {
+        "title": "5. Clean training signal",
+        "viz": "box",
+        "viz_args": "Model learns: copy the good parts",
+        "caption": "The model now trains on mostly winning moves, so it learns crisply."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Estimate returns",
+        "text": "For each time step, predict how much reward will come after that point."
+      },
+      {
+        "b": "Score each time step",
+        "text": "Higher estimated return means that step was in a good part of the trajectory."
+      },
+      {
+        "b": "Greedy slicing",
+        "text": "Cut the trajectory into segments; keep segments where all steps scored high, drop low-scoring breaks."
+      },
+      {
+        "b": "Train on subtrajectories",
+        "text": "Feed the model only the good segments, so it learns a sharper policy."
+      },
+      {
+        "b": "Truncate at test time",
+        "text": "During deployment, use shorter context windows to match the pattern the model saw in training."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the input to the Transformer: instead of feeding it one complete trajectory, feed it shorter subtrajectories chosen because they are high-quality. The trajectory itself is unchanged; only the partitioning is new. This is a simple switch in data preparation, but it shifts what the model sees during training."
+    ],
+    "object": "Trajectory partitioning"
+  },
+  "hidden": {
+    "h2": "The return distribution: which steps are lucky?",
+    "name": "Estimated future reward per step",
+    "paras": [
+      "The paper introduces a hidden quantity: for each state-action pair in the dataset, estimate how much total reward will arrive in the rest of that episode. Call this the future return. High future return means that step was in a good part of the episode; low future return means the agent got unlucky later. This is hidden because you do not directly observe it — you have to infer it from the data.",
+      "The paper estimates this using MMD (Maximum Mean Discrepancy), a statistical tool that compares the distribution of rewards after each step. Concretely, it checks: when this state-action was visited, what range of rewards came next? If the answer is usually large, the estimate is optimistic. This gives the algorithm a principled way to score each time step without looking forward into the future (which would be unfair)."
+    ],
+    "heat": {
+      "cells": [["t1", 1, false], ["t2", 4, true], ["t3", 4, true], ["t4", 3, false], ["t5", 1, false], ["t6", 2, false], ["t7", 3, false], ["t8", 4, true], ["t9", 2, false], ["t10", 1, false], ["t11", 3, true], ["t12", 2, false]],
+      "caption": "Darker means higher estimated future reward. Steps t2, t3, t8, t11 scored high and stay in training data."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Some time steps end up in trajectories where everything went well. Some end up in trajectories where things went wrong. The algorithm learns to notice which is which by looking at the pattern of rewards, then trains only on the good ones."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The MMD-based return estimator characterizes the distribution of post-step rewards, providing optimistic estimates that serve as a scoring mechanism for subtrajectory selection."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why chopping trajectories makes learning crisper",
+    "paras": [
+      "Here is the causal chain. A Transformer learns by comparing its own predictions to actual outcomes. When you feed it a complete messy trajectory (good moves, then bad moves, then recovery), the model must figure out which actions to imitate. Each action in the sequence is followed by a reward that tells you if it was good or bad in context. But actions at the end of bad stretches have low rewards attached, and actions at the start of good stretches have high rewards. The model sees both and learns a confused mixture.",
+      "By slicing at high-return boundaries, you separate episodes into segments where the agent consistently did well. Now every action in a training segment has a plausible high reward somewhere after it — the model does not see the penalty for bad actions, only the reward for the next good move. This is not cheating; it is cleaning the learning signal. The model trains on segments where the causal story is clear: this action, then this action, then high reward. That clarity speeds up learning, because each action now has a reliable label: the model sees more cause-and-effect pairs and fewer confusing edge cases, so it converges to a sharp policy faster.",
+      "At test time, the model should use sequences of the same length (or shorter) as it saw during training. A short memory during deployment means the model relies on recent history rather than full episodes — it matches the training distribution, so its learned behaviors remain reliable."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Complete trajectory: good and bad mixed"
+        },
+        {
+          "t": "step",
+          "s": "Estimate future reward at each time step",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Greedily cut at low-reward boundaries"
+        },
+        {
+          "t": "step",
+          "s": "Keep only high-return segments",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Training sees only the clear-signal pieces"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The scoring equation",
+    "words": "penalty equals the importance weight times the squared distance between estimated return and actual cumulative future reward",
+    "equation": "loss = sum_i w_i * (r_i - return_estimate_i)^2",
+    "symbols": [
+      ["r_i", "actual cumulative reward from time step i onward"],
+      ["return_estimate_i", "predicted future reward at time step i"],
+      ["w_i", "weight (1 if kept in subtrajectory, 0 if sliced away)"],
+      ["loss", "total error across all kept time steps"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Time step 1: actual return = 50, estimate = 48, w = 1 (kept) -> penalty = 1 * (50-48)^2 = 4",
+        "Time step 2: actual return = 10, estimate = 45, w = 0 (sliced) -> penalty = 0 * (10-45)^2 = 0 (this step is ignored)",
+        "Time step 3: actual return = 42, estimate = 40, w = 1 (kept) -> penalty = 1 * (42-40)^2 = 4",
+        "Total loss = 4 + 0 + 4 = 8. The sliced step does not contribute to learning, so bad estimates for bad steps do not confuse the model."
+      ]
+    },
+    "note": "The weighting is the key: steps outside high-return zones are weighted to zero, so they do not corrupt the learning signal."
+  },
+  "bars": {
+    "h2": "What happens to performance",
+    "charts": [
+      {
+        "title": "Standard Transformer (full trajectories)",
+        "rows": [["Performance on training dataset", 62, "bad"], ["Generalization to new states", 48, "bad"], ["Success on benchmarks", 55, "bad"]],
+        "note": "The model struggles because full trajectories contain good and bad moves mixed together."
+      },
+      {
+        "title": "With Peak-Return Greedy Slicing",
+        "rows": [["Performance on training dataset", 76, "good"], ["Generalization to new states", 68, "good"], ["Success on benchmarks", 72, "good"]],
+        "note": "Slicing away bad parts gives the model a clearer signal, so it learns a crisper policy that generalizes better."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Slicing away rare good events.",
+        "html": "If a good outcome happens only once in an episode and is surrounded by low-scoring steps, greedy slicing might remove it. The algorithm must set the return-estimation threshold carefully, or it will miss valuable lessons."
+      },
+      {
+        "warn": true,
+        "b": "Biased return estimates.",
+        "html": "The MMD estimator assumes the distribution of future rewards can be learned from the data. If the dataset is skewed (e.g., mostly bad trajectories with a few outlier good ones), the estimator may be wrong, and the algorithm will slice incorrectly."
+      },
+      {
+        "warn": true,
+        "b": "Mismatch between training and deployment.",
+        "html": "If the model trains on short subtrajectories but is deployed with a full-episode context, or vice versa, performance drops because the learned patterns do not match the test distribution."
+      },
+      {
+        "b": "Done right.",
+        "html": "Tune the threshold so slicing removes clear junk but preserves edge cases. Validate the return estimator on held-out data. Deploy with the same context length as training, or use adaptive truncation to bridge the gap."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small offline RL environment: a gridworld or simple control task with a pre-collected dataset of 1000 episodes, some high-reward and some low-reward. Train a Transformer baseline on all complete trajectories. Then train the same model with Peak-Return Greedy Slicing: run the MMD estimator to score each time step, slice trajectories at low-score boundaries, and retrain. At test time, deploy both models with the same context length."
+    ],
+    "metric_eq": "improvement = (sliced_success_rate - baseline_success_rate) / baseline_success_rate * 100 percent",
+    "closing": "The demo must make it obvious that removing bad stretches from training data gives the model a clearer policy and higher success rate."
+  }
+}

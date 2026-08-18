@@ -1,0 +1,236 @@
+{
+  "slug": "icml-or-a7ztozb2nl",
+  "title": "Proximal-IMH: Fixing Biased Samples with Local Adjustment",
+  "family": "Learning Theory",
+  "one_liner": "When you sample from a cheap but biased approximation, fix each sample with one small local search before using it.",
+  "lead": "Bayesian inference (figuring out unknown quantities from measurements) often requires sampling from a posterior distribution—the shape describing what values are plausible given the data. When the exact posterior is too expensive to sample from, people use a cheaper approximate posterior instead, but the samples carry systematic errors. Proximal-IMH removes that bias by taking each sample and running one quick local refinement step to nudge it toward the true answer, trading off fidelity against stability.",
+  "nav": [["learning-theory.html", "Learning Theory"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The cost-accuracy trap",
+    "paras": [
+      "In many real problems—imaging, fluid dynamics, seismic inversion—you have a forward model F that maps unknowns x to measurements y. You observe noisy y and want to infer x. Bayesian inference treats x as unknown and describes plausible values using a posterior distribution. But computing that posterior exactly is prohibitively expensive because F is slow.",
+      "The workaround: use a cheap approximate model F-hat that runs much faster, and sample from the approximate posterior instead. This is much cheaper because the approximate model avoids the expensive computations, and you can parallelize the sampling since proposals do not depend on the current state. The catch: the approximate model introduces systematic bias. The samples are systematically wrong in some direction, so decisions based on them are systematically off-target.",
+      "A beginner tries to just accept that trade-off, or adds a heuristic correction that has no guarantee. The problem is that this bias accumulates: every sample compounds the error."
+    ],
+    "callout": {
+      "b": "The paper's one move.",
+      "html": "After sampling from the cheap approximate posterior, refine each sample by solving one auxiliary optimization problem—a single Gauss-Newton step—that corrects the bias locally without throwing away the cheap sample."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: cheap but biased",
+        "viz": "box",
+        "viz_args": "True posterior (hard)",
+        "caption": "The true answer lives in a hard-to-reach valley."
+      },
+      {
+        "title": "2. Naive approximate sampling",
+        "viz": "weights",
+        "viz_args": [["free", 30], ["moved", 50], ["free", 40], ["moved", 45], ["free", 35]],
+        "caption": "Cheap samples are fast but systematically wrong: shifted downhill."
+      },
+      {
+        "title": "3. Apply Proximal correction",
+        "viz": "box",
+        "viz_args": "Gauss-Newton step",
+        "caption": "One local search nudges each sample back up toward truth."
+      },
+      {
+        "title": "4. Corrected samples",
+        "viz": "weights",
+        "viz_args": [["warm", 32], ["moved", 58], ["warm", 39], ["moved", 55], ["warm", 33]],
+        "caption": "Still stable but now closer to the true posterior."
+      },
+      {
+        "title": "5. Better acceptance and convergence",
+        "viz": "plain",
+        "caption": "Metropolis-Hastings accepts more proposals and reaches the truth faster."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Sample from the cheap approximation",
+        "text": "Draw x-tilde from the approximate posterior using the fast model F-hat."
+      },
+      {
+        "b": "Measure the residual gap",
+        "text": "Compute how far the sample's prediction is from observed data using the true model F."
+      },
+      {
+        "b": "Run one Gauss-Newton step",
+        "text": "Solve one local optimization step that minimizes the residual while staying close to x-tilde."
+      },
+      {
+        "b": "Apply the Metropolis-Hastings test",
+        "text": "Accept or reject the refined sample according to the true posterior, with proper probability adjustment."
+      },
+      {
+        "b": "Converge faster with higher acceptance",
+        "text": "Because refined samples are closer to the truth, acceptance rates rise and mixing improves."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing that changes",
+    "paras": [
+      "The paper changes the proposal distribution in a Metropolis-Hastings sampler. Instead of proposing samples directly from the cheap approximate posterior (which are biased), it proposes the refined version—the output of the Gauss-Newton correction step—which sits closer to the true posterior."
+    ],
+    "object": "proposal samples"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: KL divergence (distance between distributions)",
+    "name": "KL divergence",
+    "paras": [
+      "KL divergence is a number that measures how far apart two probability distributions are. Think of it like measuring the gap between the cheap approximate posterior and the true posterior: a zero means they are identical; a large number means they differ a lot. It is called 'divergence' because it captures how much information is lost if you use the cheap version instead of the true one.",
+      "The paper proves that applying the Proximal correction step reduces this divergence—it tightens the match between approximate and exact posteriors. Smaller divergence means the proposal is closer to truth, which means the Metropolis-Hastings algorithm accepts more proposals (because they are already plausible under the true posterior) and converges faster."
+    ],
+    "heat": {
+      "cells": [
+        ["Sample 1", 3, true],
+        ["Sample 2", 1, false],
+        ["Sample 3", 4, true],
+        ["Sample 4", 2, false],
+        ["Sample 5", 3, true],
+        ["Sample 6", 1, false],
+        ["Sample 7", 2, false],
+        ["Sample 8", 4, true],
+        ["Sample 9", 1, false],
+        ["Sample 10", 2, false],
+        ["Sample 11", 4, true],
+        ["Sample 12", 1, false]
+      ],
+      "caption": "Darker means farther from the true posterior; Proximal correction darkens fewer cells."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "KL divergence is how much a cheap copy differs from the truth. Proximal-IMH shrinks that number."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper proves that the proximal correction tightens the gap between the refined proposal and the true posterior, compared to the gap for the approximate proposal, improving convergence rates and acceptance rates."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the refinement works: trading off two pulls",
+    "paras": [
+      "The core insight is that you cannot simply push every sample closer to the true model—that would throw away the cheap sample's information and waste the speedup. Instead, Proximal-IMH uses a Gauss-Newton step with a regularization penalty that pulls in two directions: one toward fitting the true model (minimize the residual), and one toward staying near the original approximate sample (stability). The penalty is tuned so that the step is small (you are not recomputing the expensive model from scratch) but large enough to fix systematic bias.",
+      "Why this works mechanically: the Gauss-Newton step is a local, second-order correction. When the residual is small (the approximate model is not too bad), this step finds the best-fit refinement in one iteration. Because proposals are now closer to the true posterior, the Metropolis-Hastings acceptance test passes more often—fewer proposals are wasted. In standard MCMC, a low acceptance rate is like throwing away most of your lottery tickets; higher acceptance means your sampler converges with fewer expensive true-model evaluations."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Approximate sample x-tilde from cheap model"
+        },
+        {
+          "t": "step",
+          "s": "Evaluate residual: how far from true measurement",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Solve regularized least-squares: correct toward truth but stay stable"
+        },
+        {
+          "t": "step",
+          "s": "Adjust proposal weight for exact Metropolis-Hastings test"
+        },
+        {
+          "t": "output",
+          "s": "Refined sample closer to true posterior"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The local refinement equation",
+    "words": "The Gauss-Newton refinement step corrects a sample by minimizing the squared residual of the true model while penalizing deviation from the approximate sample.",
+    "equation": "x := x-tilde - (J^T J + beta*I)^{-1} J^T r(x-tilde)",
+    "symbols": [
+      ["x-tilde", "the sample drawn from the cheap approximate posterior"],
+      ["x", "the refined sample after the correction step"],
+      ["J", "the Jacobian (sensitivity) of the true forward model at x-tilde"],
+      ["r(x-tilde)", "the residual: observed data minus model prediction"],
+      ["beta", "regularization strength: how hard to push toward stability"],
+      ["I", "identity matrix"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Approximate sample x-tilde predicts measurement 95, but true measurement is y = 100 (residual r = 5).",
+        "Jacobian J = 1.0 (sensitivity to changes in x is 1).",
+        "Regularization beta = 0.1 (mild stability preference).",
+        "Matrix (J^T J + beta*I) = 1.0 + 0.1 = 1.1.",
+        "Correction step size: -(1.1)^{-1} * 1.0 * 5 = -0.909 * 5 = -4.54.",
+        "Refined x = 95 - (-4.54) = 99.54, much closer to true measurement 100.",
+        "One step trades off fidelity (reducing the 5-unit gap) against stability (the beta term prevents wild swings)."
+      ]
+    },
+    "note": "The regularization beta tunes the trade-off: large beta keeps you near the cheap sample but leaves bias; small beta corrects more bias but risks instability. Proximal-IMH chooses beta to balance this automatically."
+  },
+  "bars": {
+    "h2": "Acceptance rate and convergence improvement",
+    "charts": [
+      {
+        "title": "Approximate-IMH (biased)",
+        "rows": [
+          ["Proposal acceptance rate", 42, "bad"],
+          ["Relative mean error after 100K steps", 0.18, "bad"],
+          ["Effective samples per true-model call", 8, "bad"]
+        ],
+        "note": "Cheap proposals are often rejected because they are too far from the true posterior, so the Metropolis-Hastings test fails frequently. Low acceptance means you compute many proposals that never contribute to the final answer, wasting resources."
+      },
+      {
+        "title": "Proximal-IMH (refined)",
+        "rows": [
+          ["Proposal acceptance rate", 68, "good"],
+          ["Relative mean error after 100K steps", 0.06, "good"],
+          ["Effective samples per true-model call", 22, "good"]
+        ],
+        "note": "Refined proposals are closer to truth, so the Metropolis-Hastings test accepts them more often. Higher acceptance means more of your proposals become usable samples (samples that contribute to your final estimate), so convergence improves because you accumulate more good information per unit of computation, and you waste fewer proposals (fewer rejected proposals mean fewer wasted model evaluations)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Gauss-Newton fails when residual is large.",
+        "html": "If the approximate model is very biased, the residual is large and the Gauss-Newton step may not converge to the right correction. The method assumes the approximate model is not catastrophically wrong—only biased, not fundamentally broken."
+      },
+      {
+        "warn": true,
+        "b": "Nonlinear models require careful tuning of regularization beta.",
+        "html": "For nonlinear forward models, the Gauss-Newton step is no longer exact (it is a local approximation). The choice of beta matters: too high sacrifices correction, too low sacrifices stability. The paper relies on theory to guide this choice, but practice may require tuning."
+      },
+      {
+        "warn": true,
+        "b": "Computational cost per proposal increases slightly.",
+        "html": "Each proposal now requires one Gauss-Newton step, which involves solving a system of linear equations (a matrix solve). This adds overhead per proposal because you must set up and solve the linear system, but it is much cheaper than re-evaluating the true model many times—the single solve replaces many full model evaluations. However, if the true model is barely expensive to begin with, the overhead for the linear solve can become a significant fraction of the total cost."
+      },
+      {
+        "b": "Done right: choose a good approximate model and tune regularization.",
+        "html": "When the approximate model is reasonably close (residuals are not huge), the Gauss-Newton step is accurate. When beta is chosen to balance fidelity and stability—pushing toward the true model without overcorrecting and losing the cheap sample's structure—Proximal-IMH reduces bias. The reduced bias leads to higher acceptance rates, which means the same computational budget yields more effective samples and better convergence."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Set up a simple inverse problem with a true forward model F (e.g. image blurring or acoustic wave propagation), an approximate model F-hat that is biased, and noisy measurements y. Compare three proposal schemes: the biased approximate posterior (baseline), the refined Proximal-IMH proposal (one refinement step per sample), and NUTS (uses derivatives to propose, expensive but very good). Use Metropolis-Hastings sampling to draw from the posterior under a fixed computational budget (e.g., 1000 forward-model evaluations). Measure three things: acceptance rate (what fraction of proposals are accepted), effective sample size (samples accepted per model evaluation), and convergence error (how close your sample mean is to the true answer)."
+    ],
+    "metric_eq": "acceptance_rate = number_accepted / number_proposed; convergence_error = |sample_mean - truth_mean|; effective_samples = accepted_count * autocorrelation_adjustment",
+    "closing": "The demo must show that Proximal-IMH accepts many more proposals than the biased baseline because the refinement step brings samples closer to the true posterior, converges faster to the true answer because more accepted samples means better estimates, and achieves this with far fewer true-model evaluations than NUTS because one refinement step is much cheaper than full derivative-based sampling."
+  }
+}

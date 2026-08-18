@@ -1,0 +1,440 @@
+{
+ "slug": "iclr-or-0yossmu1ey",
+ "title": "DPad: Efficient Diffusion Language Models with Suffix Dropout",
+ "family": "Efficiency & Systems",
+ "one_liner": "Stop wasting computation on distant future words by attending only to nearby upcoming tokens during decoding.",
+ "lead": "Diffusion models generate text by starting with random gibberish and iteratively guessing all future words, denoising them toward real language. But they predict hundreds of words at once, and the model wastes computation looking at (attending to) far-away words that barely matter. DPad solves this by letting the model ignore distant future words, keeping only nearby ones. It delivers up to 61 times faster decoding (when the finished model answers a new question) without sacrificing accuracy, because the model looks at (attends to) distant words almost never anyway, so dropping them loses almost no information.",
+ "nav": [
+  [
+   "theme-efficiency-systems.html",
+   "Efficiency & Systems"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Predicting everything costs too much",
+  "paras": [
+   "Diffusion language models generate text in a strange way: instead of predicting one word at a time, they predict ALL remaining words at once and refine them together over many steps, like developing a photograph from fuzzy to sharp. At each step, the model uses attention\u2014a mechanism that lets each word look at other words to decide what to write next\u2014to compute probabilities for every single future word.",
+   "The waste: when deciding word 50, the model pays attention to word 500 equally, even though that word is far in the future and irrelevant. Computing attention scores to hundreds of distant words you will barely use is expensive. A beginner would think 'just ignore far words and compute attention to all of them anyway' or 'just drop random words,' but random dropping breaks information flow, and ignoring all distant words is too crude. The paper's insight: distant words are visited rarely by attention, so dropping them in a predictable pattern (distance-decay dropout) does almost no harm."
+  ],
+  "callout": {
+   "b": "The move.",
+   "html": "Restrict attention to nearby suffix words (future words not yet well-refined) using a sliding window and distance-decay dropout, eliminating redundant computation without retraining."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. All tokens predicted at once",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      72
+     ],
+     [
+      "hot",
+      68
+     ],
+     [
+      "hot",
+      65
+     ],
+     [
+      "hot",
+      70
+     ],
+     [
+      "hot",
+      64
+     ]
+    ],
+    "caption": "Diffusion model computes attention scores for all 500 future tokens at each step."
+   },
+   {
+    "title": "2. Far tokens barely used",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      72
+     ],
+     [
+      "warm",
+      18
+     ],
+     [
+      "warm",
+      8
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      1
+     ]
+    ],
+    "caption": "Attention weights drop off with distance: nearby tokens get looked at, distant ones ignored."
+   },
+   {
+    "title": "3. Sliding window + decay",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      72
+     ],
+     [
+      "moved",
+      68
+     ],
+     [
+      "warm",
+      8
+     ],
+     [
+      "free",
+      0
+     ],
+     [
+      "free",
+      0
+     ]
+    ],
+    "caption": "DPad keeps only 100 nearby tokens, skips the rest via distance-decay pattern before attention."
+   },
+   {
+    "title": "4. Computation drops",
+    "viz": "box",
+    "viz_args": "500 tokens -> 100 tokens kept -> 5x faster attention math",
+    "caption": "Fewer tokens in attention means the multiply-add math is 5 times faster; up to 61 times overall."
+   },
+   {
+    "title": "5. Neighbor info preserved",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      72
+     ],
+     [
+      "moved",
+      68
+     ],
+     [
+      "moved",
+      9
+     ],
+     [
+      "free",
+      0
+     ],
+     [
+      "free",
+      0
+     ]
+    ],
+    "caption": "Nearby tokens absorb the lost information from dropped tokens via attention flow."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Set up the window.",
+    "text": "Choose a window size (e.g., keep 100 tokens). This slides with the current block of text being refined."
+   },
+   {
+    "b": "Apply distance-decay.",
+    "text": "Before attention computation, mark distant tokens as dropped based on a rule: the further the token, the higher chance it is dropped (distance-decay pattern)."
+   },
+   {
+    "b": "Compute sparse attention.",
+    "text": "Run attention only on kept tokens, not dropped ones. This skips the expensive attention-score calculation for discarded tokens."
+   },
+   {
+    "b": "Retrieve information.",
+    "text": "Nearby tokens use cross-layer attention to read information stored in the suffix; lost distant information flows to neighbors."
+   },
+   {
+    "b": "Refine and repeat.",
+    "text": "Proceed with diffusion steps as normal, predicting refined words using the sparse attention; no retraining needed."
+   }
+  ]
+ },
+ "object": {
+  "h2": "The one thing that changes",
+  "paras": [
+   "The paper changes which suffix tokens (future words not yet refined much) the attention mechanism can see. Normally, every token can attend to every other token. With DPad, each token attends only to a sliding window of nearby suffix tokens, plus the prefix (earlier words already settled) and current block. Distant suffix tokens are deleted before attention computation."
+  ],
+  "object": "Suffix token visibility"
+ },
+ "hidden": {
+  "h2": "Attention sparsity pattern",
+  "name": "Distance-decay attention dropout",
+  "paras": [
+   "This is the pattern of which words get deleted before attention runs. The paper observes that attention weights naturally decay with distance: word 50 attends more to word 51 than to word 500. So if you drop word 500, nearby words should absorb the lost information via attention flow to neighbors. The paper calls this the Lottery Ticket Hypothesis applied to words: just like removing subnetworks with their original weights works, removing distant words during decoding (when the finished model answers a new question) works because the model is already good at routing attention to nearby words.",
+   "The paper measures this by plotting average attention scores of suffix tokens across layers. When they drop distant tokens, nearby tokens' attention scores increase slightly, proving information is being redistributed. The distance-decay rule deterministically removes tokens based on their offset from the current block: the further, the more likely to be dropped."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "distant",
+     1,
+     false
+    ],
+    [
+     "distant",
+     1,
+     false
+    ],
+    [
+     "distant",
+     1,
+     false
+    ],
+    [
+     "medium",
+     2,
+     false
+    ],
+    [
+     "medium",
+     2,
+     false
+    ],
+    [
+     "nearby",
+     3,
+     true
+    ],
+    [
+     "nearby",
+     4,
+     true
+    ],
+    [
+     "nearby",
+     4,
+     true
+    ],
+    [
+     "nearby",
+     3,
+     false
+    ],
+    [
+     "medium",
+     2,
+     false
+    ],
+    [
+     "distant",
+     1,
+     false
+    ],
+    [
+     "distant",
+     1,
+     false
+    ]
+   ],
+   "caption": "Darker means higher chance word is kept. Window stays close; distant words are dropped."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Imagine you are writing a sentence and looking far ahead into a draft. The very next few words matter a lot; words 100 steps ahead barely matter. So why compute attention to all of them? Drop the far ones, let the nearby ones carry their information forward."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The paper shows via measured analysis (Fig. 4) that average attention from current-block queries to suffix tokens exhibits exponential decay with distance. This motivates suffix dropout: pruning distant tokens wastes computation since they receive low attention anyway. Information is preserved because nearby tokens, which receive higher attention, absorb context via cross-layer information flow."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: the attention bottleneck",
+  "paras": [
+   "Here is how diffusion-based large language models work: at each refinement step, every word in the sequence runs an attention operation\u2014a multiply-add calculation where the current words are compared against all other words to decide where to look. The cost grows as the square of the sequence length. If you predict 500 words at once, that is 500-by-500 pairs per attention head, and you do this many times.",
+   "DPad exploits one fact: attention to distant suffix words is nearly zero. The mechanism is straightforward: (1) before attention, predetermine which words to keep using the distance-decay rule; (2) remove dropped words from the stored key-value pairs before computing attention; (3) compute attention only over the remaining words. The computation shrinks from 500-by-500 down to 100-by-100, a 25 times reduction per attention head. Across all layers and refinement steps, this compounds to 61 times faster decoding. Accuracy is preserved because (a) nearby words still get attended to fully, and (b) information from dropped distant words flows to nearby neighbors via cross-layer attention in the next refinement step\u2014nearby words learn to aggregate the distant context implicitly."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "All 500 suffix words predicted"
+    },
+    {
+     "t": "step",
+     "s": "Apply distance-decay rule: drop far words",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Keep only 100 nearby words in stored pairs"
+    },
+    {
+     "t": "step",
+     "s": "Compute attention on 100 by 100 grid instead of 500 by 500"
+    },
+    {
+     "t": "step",
+     "s": "Cross-layer flow lets neighbors absorb lost information"
+    },
+    {
+     "t": "output",
+     "s": "Refined predictions, 61 times faster because fewer words in attention math, same accuracy because neighbors absorb distant context"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The sparse attention formula",
+  "words": "The cost of attention for one step is the number of tokens in the key-value cache times the number of queries, times a constant. Original cost = all_suffix_tokens * num_queries. With DPad, cost = kept_nearby_tokens * num_queries. The speedup is the ratio of original to new.",
+  "equation": "Speedup \u2248 (num_suffix_tokens) / (window_size + distance_decay_kept)",
+  "symbols": [
+   [
+    "num_suffix_tokens",
+    "total number of future words predicted (e.g., 500)"
+   ],
+   [
+    "window_size",
+    "fixed window of very close tokens kept (e.g., 100)"
+   ],
+   [
+    "distance_decay_kept",
+    "additional tokens kept by decay rule, vanishing with distance"
+   ],
+   [
+    "Speedup",
+    "ratio of original computation cost to new cost"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose we predict 500 suffix tokens and set window size to 100.",
+    "Distance-decay keeps an additional 20 tokens on average via the rule (older tokens rarer).",
+    "Total kept: 100 + 20 = 120 tokens.",
+    "Attention cost original: 500 \u00d7 500 = 250,000 operations.",
+    "Attention cost with DPad: 120 \u00d7 120 = 14,400 operations.",
+    "Speedup on attention alone: 250,000 / 14,400 \u2248 17\u00d7.",
+    "Across all refining steps and layers, this compounds to 61\u00d7 measured end-to-end speedup."
+   ]
+  },
+  "note": "The speedup is roughly quadratic in the compression ratio because attention requires a multiply-add operation over the sequence length."
+ },
+ "bars": {
+  "h2": "Before and after: speedup without loss",
+  "charts": [
+   {
+    "title": "Vanilla diffusion LLM",
+    "rows": [
+     [
+      "Decoding speed",
+      1,
+      "bad"
+     ],
+     [
+      "Accuracy on GSM8K",
+      91,
+      "good"
+     ],
+     [
+      "Words attended per step",
+      500,
+      "bad"
+     ]
+    ],
+    "note": "Baseline: slow because all words are in the stored key-value pairs."
+   },
+   {
+    "title": "DPad (suffix dropout)",
+    "rows": [
+     [
+      "Decoding speed",
+      61,
+      "good"
+     ],
+     [
+      "Accuracy on GSM8K",
+      89,
+      "good"
+     ],
+     [
+      "Words attended per step",
+      120,
+      "good"
+     ]
+    ],
+    "note": "DPad: 61 times faster decoding because smaller attention (100 by 100 instead of 500 by 500), accuracy intact because nearby words hold sufficient context."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Information loss in distant predictions.",
+    "html": "If a distant suffix token carries critical information (e.g., a rare name or number far in the sequence), dropping it might cause the refinement steps to miss that detail. The paper shows this is rare because nearby tokens absorb context, but it can happen on very long sequences where information is sparse and far apart."
+   },
+   {
+    "warn": true,
+    "b": "Poor window size choice.",
+    "html": "Too small a window (e.g., 20 tokens) will drop necessary local context and accuracy drops sharply. Too large (e.g., 400 tokens) gains little speedup. The paper tunes this by trial and error; there is no universal rule."
+   },
+   {
+    "warn": true,
+    "b": "Degradation on tasks requiring global reasoning.",
+    "html": "On tasks where the model must track information across very long spans (e.g., a document with 2000 words where a fact at position 100 matters at position 1500), suffix dropout might miss the connection because the far word was dropped. The paper shows stable performance on in-context learning (answering questions given examples), but other long-horizon tasks are untested."
+   },
+   {
+    "b": "Done right.",
+    "html": "Use DPad on tasks where local coherence dominates (most language modeling). Combine it with parallel decoding for complementary speedup. Validate on your specific task; the 120-token window works well for sequences under 512 tokens."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a small diffusion LLM (or use LLaDA-1.5 if available) and implement suffix dropout. Run it on a benchmark like GSM8K (math word problems) or HumanEval (code generation). Measure two things: (1) end-to-end decoding latency (wall-clock time from input to output), and (2) task accuracy (fraction of correct answers). Vary the window size from 50 to 300 and plot the speed-accuracy tradeoff. The demo should show that a 120-word window delivers 40 to 50 times faster decoding because the attention matrix shrinks from 500 by 500 to 120 by 120, with minimal accuracy loss (1 to 2 percentage points), proving that distant words truly are redundant since the model rarely attends to them."
+  ],
+  "metric_eq": "speedup = latency_vanilla / latency_dpad; accuracy_delta = accuracy_vanilla - accuracy_dpad",
+  "closing": "The demo makes it impossible to deny: you can predict words 61 times faster because removing distant words shrinks the attention computation, and this works because the model already attends to distant words almost never."
+ }
+}

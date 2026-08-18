@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-gpgwkprmra",
+  "title": "RAEE: Robust Retrieval-Augmented Early Exit",
+  "family": "Efficiency & Systems",
+  "one_liner": "Ask similar examples when to stop the model early, speeding up question-answering without training new exit classifiers.",
+  "lead": "When a language model answers a question, it runs many layers of computation. But most layers are overkill: the model often knows the right answer by layer 10, not layer 24. Early exit stops the model at an intermediate layer to save time instead of running to the end. The hard part is deciding which layer to stop at. Training new classifiers to make that choice is expensive and fragile. This paper says: just store which layers gave correct answers on training data, retrieve the ones that look like your current question, and copy their exit layer.",
+  "nav": [["theme-efficiency-systems.html","Efficiency & Systems"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Layers do more work than they need to",
+    "paras": [
+      "Language models run data through 24 or 48 layers of mathematical operations. But the model's answer often stabilizes long before the final layer. At layer 10 it is 99% confident what the answer is, and layers 11-24 are just repeating the same thing. Exiting early saves time because every layer requires the same amount of computation; if you skip layers 11-24, you have done only 10/24 of the work.",
+      "The problem: how do you know which layer to exit at? Naive approach: train a small classifier at each layer to predict stop/go. This requires running many training loops, one per layer, and those classifiers often fail when the test input is different from training. Or, heuristic approach: exit when the model's confidence crosses some threshold. But confidence is noise; a model can be confident and wrong, or uncertain and right."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Build a database of which layers gave correct answers on training data, then when answering a new question retrieve examples similar to your input and copy their exit choices."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "plain",
+        "caption": "Model runs all 24 layers. Layers 10-15 already got the answer right."
+      },
+      {
+        "title": "2. Store exit success",
+        "viz": "weights",
+        "viz_args": [["hot",10],["warm",9],["free",5],["warm",8],["free",3],["free",2],["free",1],["free",1],["free",2],["warm",7],["free",3],["free",4]],
+        "caption": "Training: record which layer first got each question right."
+      },
+      {
+        "title": "3. Find similar examples",
+        "viz": "box",
+        "viz_args": "Retrieve top-8 training examples that match current input.",
+        "caption": "When answering a new question, find training data that look like this one."
+      },
+      {
+        "title": "4. Copy their exit layer",
+        "viz": "weights",
+        "viz_args": [["moved",9],["moved",9],["moved",10],["moved",9],["moved",8],["free",1],["free",2],["free",1],["free",3],["moved",9],["free",2],["free",2]],
+        "caption": "All 8 similar examples exited around layer 9. Exit there now."
+      },
+      {
+        "title": "5. Done faster, still right",
+        "viz": "plain",
+        "caption": "Stop at layer 9. Save 40% computation. Prediction still correct."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Build database offline",
+        "text": "Run each training example through the model, recording which layer first predicted correctly."
+      },
+      {
+        "b": "Embed inputs",
+        "text": "When a new question arrives, convert it to a list of numbers using the model's first layer."
+      },
+      {
+        "b": "Retrieve top-k neighbors",
+        "text": "Search the database for training examples with number-lists nearest to the new input's number-list."
+      },
+      {
+        "b": "Aggregate exit layers",
+        "text": "Collect the exit layers from the top-k neighbors and combine them (e.g. majority vote)."
+      },
+      {
+        "b": "Stop at that layer",
+        "text": "Run the model only up to the agreed exit layer and predict from that layer's output."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes: the exit decision",
+    "paras": [
+      "Most early-exit methods train a tiny classifier at each layer to decide stop/go. RAEE does not train any classifiers. Instead, it stores a database and looks things up. The exit decision becomes a retrieval problem, not a learning problem."
+    ],
+    "object": "exit layer decision"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: which layer each input type exits at",
+    "name": "which layer each type of input exits at",
+    "paras": [
+      "The paper introduces a named quantity: the exit layer distribution. For any input, there is a true layer where it could first predict correctly (the gold exit layer). But the model does not know it in advance. The paper observes: similar inputs tend to have similar gold exit layers. If you have seen 100 questions about animals and they all exit around layer 12, a new animal question probably also exits at layer 12.",
+      "The paper estimates this distribution by storing, for each training example, the layer where it first predicted correctly. When answering a new question, it retrieves top-k training examples and uses their exit layers as a surrogate for the new example's gold exit layer."
+    ],
+    "heat": {
+      "cells": [
+        ["training_layer_11", 4, true],
+        ["training_layer_9", 3, false],
+        ["training_layer_12", 4, true],
+        ["test_layer_11", 4, true],
+        ["retrieval_layer_9", 2, false],
+        ["retrieval_layer_10", 3, false],
+        ["retrieval_layer_11", 4, true],
+        ["heuristic_layer_15", 1, false],
+        ["classifier_layer_14", 2, false],
+        ["classifier_layer_13", 2, false],
+        ["consensus_layer_11", 4, true],
+        ["final_exit_layer_11", 4, true]
+      ],
+      "caption": "Darker means more training examples exit at that layer. Highlight: test input should exit where most similar neighbors did."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The exit layer distribution is just the answer to: at what layer does the model first get this kind of question right?"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper models early exit as a distribution prediction problem and approximates the distribution via retrieval of exit information from k nearest neighbors."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: nearest neighbors have the same exit layer",
+    "paras": [
+      "The core insight is simple: if two inputs are similar (their number-lists are close in a mathematical sense), they should exit at similar layers. Why? Because similar questions often trigger the same pattern of thinking. A math question and a music question use different neural circuits; the model settles on the right answer via different paths, exiting at different layers. But two math questions both make the model follow the math circuit, settling at similar layers.",
+      "RAEE exploits this: instead of training a separate classifier for each layer (expensive), it uses retrieval to copy the exit decision from examples the model has already seen. Retrieval is fast and requires zero training. The aggregation step (majority vote or averaging the top-k exit layers) smooths out noise: if 7 neighbors exit at layer 11 and 1 exits at layer 9, layer 11 is the consensus."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "New question arrives"
+        },
+        {
+          "t": "step",
+          "s": "Compute a number-list (via layer 1 of model) representing the question",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Retrieve top-8 training examples with nearest number-lists",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Look up their exit layers from the database",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Vote: which layer did most neighbors exit at?",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Run model up to that layer, predict from its output"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The aggregation equation",
+    "words": "exit layer is the mode of the exit layers from the top-k neighbors, optionally weighted by similarity distance",
+    "equation": "L_exit = argmax_l count(exit_layers_of_neighbors == l)    OR with distance weighting:    L_exit = argmax_l sum_{i=1}^{k} exp(-distance_i) * (exit_layer_i == l)",
+    "symbols": [
+      ["L_exit", "the layer chosen to exit at"],
+      ["exit_layer_i", "the layer neighbor i exited at in training"],
+      ["distance_i", "how far neighbor i's embedding is from the query"],
+      ["k", "how many neighbors to retrieve (typically 8)"],
+      ["count(...)","how many neighbors exited at this layer"],
+      ["argmax_l", "pick the layer l that maximizes the sum"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Query input: a trivia question about animals.",
+        "Retrieve top-8 neighbors: all are also animal trivia.",
+        "Their exit layers: [11, 11, 11, 11, 12, 10, 11, 11].",
+        "Count at each layer: layer-10=1, layer-11=6, layer-12=1.",
+        "argmax = layer-11 (6 neighbors exited there).",
+        "Decision: exit at layer 11.",
+        "Alternative (distance-weighted): neighbor 1 distance=0.05, layer=11 -> weight=exp(-0.05)≈0.95; neighbor 5 distance=0.3, layer=12 -> weight=exp(-0.3)≈0.74. Weighted sum for layer-11 = 0.95+0.95+0.95+0.95+0=3.8. Weighted sum for layer-12 = 0.74. Layer-11 still wins."
+      ]
+    },
+    "note": "The equation picks the exit layer that the most similar neighbors chose, because neighbors reveal the golden distribution without training."
+  },
+  "bars": {
+    "h2": "Before and after: speed and accuracy",
+    "charts": [
+      {
+        "title": "Trained classifier per layer",
+        "rows": [
+          ["Training cost (GPU hours)", 16, "bad"],
+          ["Speed gain when answering questions", 1.8, "good"],
+          ["Accuracy on test data", 88, "good"]
+        ],
+        "note": "Training many classifiers is expensive and brittle."
+      },
+      {
+        "title": "RAEE retrieval-based",
+        "rows": [
+          ["Setup cost (one pass through data)", 2, "good"],
+          ["Speed gain when answering questions", 2.2, "good"],
+          ["Accuracy on test data", 91, "good"]
+        ],
+        "note": "No training, just retrieval. Even accuracy improves because neighbors reveal the true exit pattern."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Out-of-distribution inputs.",
+        "html": "If the test input has no similar neighbors in the training database, the retrieval will grab distant examples whose exit layers are noisy. The method assumes test and training distributions overlap."
+      },
+      {
+        "warn": true,
+        "b": "Small retrieval database.",
+        "html": "If the training database is tiny, top-k neighbors might still be quite far away. Accuracy depends on having a large, diverse training set to retrieve from."
+      },
+      {
+        "warn": true,
+        "b": "Number-list quality from layer 1.",
+        "html": "The method uses the model's layer-1 number-list to find neighbors. If that list does not represent which questions are alike, retrieval will fail."
+      },
+      {
+        "b": "Done right.",
+        "html": "With a large, representative training set and good number-lists from layer 1, the method generalizes to new tasks with zero training of exit classifiers."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small language model (e.g. DistilBERT or a 7-layer transformer). Train on a classification task (e.g. MNLI, RTE). Store the exit layer for each training example (the first layer where it predicted correctly). When answering test questions, retrieve the top-8 training examples with closest number-lists and vote on the exit layer. Measure speedup (layers skipped divided by total layers) and accuracy (correct predictions on test)."
+    ],
+    "metric_eq": "speedup = (total_layers - average_exit_layer) / total_layers;    accuracy = count(correct_predictions) / count(test_examples)",
+    "closing": "The demo should show: speedup between 1.5x and 2.5x with no accuracy loss or even gain, and no training of exit classifiers."
+  }
+}
