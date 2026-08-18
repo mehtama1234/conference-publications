@@ -1,0 +1,248 @@
+{
+  "slug": "iclr-or-ef5o9gnnle",
+  "title": "ToolTree: Efficient LLM Tool Planning via Dual-Feedback Monte Carlo Tree Search",
+  "family": "Agents & Tool Use",
+  "one_liner": "LLM agents make better tool choices by looking ahead and pruning bad paths before wasting computation on them.",
+  "lead": "An LLM agent facing a multi-step task—like booking a flight, then querying prices, then updating a calendar—needs to plan which tools to use in order. Today's agents pick greedily (pick the best tool right now) or search randomly through options. ToolTree does something smarter: it sketches out branches of possible tool sequences, prunes the weak-looking ones before executing them, then uses real execution results to fix its understanding. The payoff: agents spend less time exploring dead ends and more time on promising paths.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why greedy and pure search both fail",
+    "paras": [
+      "Today's LLM agents pick tools in two broken ways. Greedy agents ask at each step: what tool looks best right now? They pick it immediately. The trap: an early mistake—picking a tool that looked promising but dead-ends three steps in—means the agent wastes the rest of its compute following a ruined path. No recovery, no lookahead.",
+      "Search-based agents try to fix this by exploring many branches at once. But they have their own trap: they rank branches by predicting future success without actually running the tools. They guess. A branch might look terrible on paper but amazing in reality once you execute the first tool and see the actual result. By the time they realize a path worked, it is too late to credit the early choice that made it possible."
+    ],
+    "callout": {
+      "b": "The core trap:",
+      "html": "Agents either stumble forward blindly, or they plan ahead but plan wrong because they are guessing instead of seeing real results."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The greedy trap",
+        "viz": "weights",
+        "viz_args": [["hot", 95], ["hot", 88], ["moved", 12], ["free", 5], ["free", 3], ["free", 2], ["free", 2], ["free", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1]],
+        "caption": "Agent picks the best-looking tool, but it leads nowhere."
+      },
+      {
+        "title": "2. The search trap",
+        "viz": "box",
+        "viz_args": "Three branches: guesses say 1 is best, but 1 fails and 2 actually works.",
+        "caption": "Agent predicts success without running tools, so rankings are wrong."
+      },
+      {
+        "title": "3. ToolTree scouts before executing",
+        "viz": "weights",
+        "viz_args": [["warm", 78], ["warm", 65], ["warm", 72], ["free", 18], ["free", 12], ["free", 8], ["free", 5], ["free", 3], ["free", 2], ["free", 1], ["free", 1], ["free", 1]],
+        "caption": "Fast model screens branches for schema-fit before execution."
+      },
+      {
+        "title": "4. Execute survivors, use real results",
+        "viz": "weights",
+        "viz_args": [["moved", 72], ["moved", 65], ["free", 18], ["free", 12], ["free", 8], ["hot", 78], ["warm", 65], ["warm", 50], ["free", 25], ["free", 10], ["free", 5], ["free", 2]],
+        "caption": "Agent runs winning branches, gets real data, prunes losers instantly."
+      },
+      {
+        "title": "5. Result: no wasted compute",
+        "viz": "box",
+        "viz_args": "Spend compute only on paths that work.",
+        "caption": "Agent allocates budget smartly, hitting better solutions under fixed cost."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Scout",
+        "text": "Fast model checks each potential tool choice for basic fit (right data type, right schema). Filters out obvious mismatches."
+      },
+      {
+        "b": "Expand",
+        "text": "For survivors, expand a branch in the search tree (add that tool to the sequence)."
+      },
+      {
+        "b": "Execute",
+        "text": "Run the surviving tool, see the real output, not a guess."
+      },
+      {
+        "b": "Score",
+        "text": "Use actual result to measure whether this branch path is working (post-execution reward)."
+      },
+      {
+        "b": "Prune",
+        "text": "Kill branches with low post-score before wasting compute, because real execution reveals which paths actually work."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "ToolTree changes how an agent allocates its computation budget across candidate tool sequences. Instead of assigning equal weight to all branches or trusting guesses, it leans on two signals: a lightweight pre-check (does this tool fit the data?), then real post-execution feedback (did this actually move us closer to the goal?). This dual signal lets the agent steer budget toward branches that are both plausible and actually working."
+    ],
+    "object": "computation budget allocation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Path Credibility Score",
+    "name": "Path credibility (pre-check + real execution payoff)",
+    "paras": [
+      "Greedy agents and guessing searchers do not track the credibility of a tool sequence over time. ToolTree introduces a score that combines two sources: a pre-execution credibility (does this tool schema match the task?), and a post-execution payoff (did the real tool output move us closer to success?). This score is updated each time a tool is actually run, not guessed about.",
+      "The paper estimates this score by running the LLM twice per branch: once before expansion (schema check), once after execution (outcome check). The post-execution check is the key innovation—it grounded ranking in reality, not prediction."
+    ],
+    "heat": {
+      "cells": [
+        ["Pre-score (schema fit)", 4, true],
+        ["Pre-score (schema fit)", 4, true],
+        ["Pre-score (schema fit)", 3, false],
+        ["Pre-score (schema fit)", 2, false],
+        ["Post-score (real outcome)", 4, true],
+        ["Post-score (real outcome)", 4, true],
+        ["Post-score (real outcome)", 1, false],
+        ["Post-score (real outcome)", 1, false],
+        ["Combined credibility", 4, true],
+        ["Combined credibility", 3, false],
+        ["Combined credibility", 2, false],
+        ["Combined credibility", 1, false]
+      ],
+      "caption": "Darker means higher credibility. Darker cells survive pruning. Combined score merges pre (fast) and post (real) signals."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "ToolTree keeps score of which tool paths look promising (pre-check) and which actually worked (post-execution). The score drives which paths get more compute budget next."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper models credibility as a combination of pre-execution LLM evaluation (schema validation) and post-execution reward (task progress). Higher credibility paths are expanded; low-credibility branches are pruned before executing tools, saving cost."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why dual-stage pruning makes agents smarter",
+    "paras": [
+      "The core mechanism has two moving parts: the pre-execution pruning and the post-execution pruning.",
+      "Pre-execution pruning works because an LLM can very quickly check whether a tool call makes sense without actually running it. When a task asks to book a flight, the agent can instantly reject branches that try to call a weather API or a calendar API—obviously wrong schemas. This filtering happens before any tool is invoked, so it costs almost nothing but eliminates garbage branches.",
+      "Post-execution pruning is the stronger move, because after a tool actually runs, the agent sees real data instead of predictions. This is the moment to ask: did this work? If the tool returned an error, or the data looks wrong for the next step, or the task moved backward, the agent knows immediately and can stop wasting compute on that branch. It does not wait three more steps to discover the path is dead. It prunes now and reallocates budget to surviving branches. This is credit assignment that is grounded in reality, not speculation.",
+      "Why does this beat pure search? Pure search must predict whether a branch is worth exploring without running any tools. It ranks branches on guess alone. ToolTree collects real execution results as it goes, so by the time the agent chooses which branch to expand next, it has actual evidence, not a forecast. Early paths that looked bad on paper but worked in reality are immediately upgraded; paths that looked good but failed are immediately downgraded. The agent spends its finite compute budget on the paths that real execution has proven to be working."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Task and candidate tool call"
+        },
+        {
+          "t": "step",
+          "s": "Fast LLM: check schema fit",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Pre-score high? Execute tool"
+        },
+        {
+          "t": "step",
+          "s": "Real result: score the outcome",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Post-score low? Prune branch"
+        },
+        {
+          "t": "output",
+          "s": "Budget flows to best paths"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The scoring formula",
+    "words": "Total branch value is the sum of a pre-execution schema credibility and a post-execution task-progress reward, each weighted by their importance.",
+    "equation": "V(path) = alpha * S_pre(path) + beta * R_post(path)",
+    "symbols": [
+      ["V(path)", "total credibility score for a tool sequence"],
+      ["alpha", "weight given to pre-execution schema checking (how much to trust the fast check)"],
+      ["S_pre(path)", "schema fit score before execution: how well does the tool call match the task requirement"],
+      ["beta", "weight given to post-execution feedback (how much to trust real results)"],
+      ["R_post(path)", "reward from actually running the tool: does the real output move toward the goal"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Branch A: calls weather API on a flight-booking task. S_pre = 0.2 (schema mismatch), R_post = 0 (never executes due to pre-pruning). V(A) = 0.6 * 0.2 + 0.4 * 0 = 0.12. Pre-check kills it.",
+        "Branch B: calls correct flight API but with wrong date. S_pre = 0.9 (good schema), R_post = 0.3 (tool runs but returns wrong results). V(B) = 0.6 * 0.9 + 0.4 * 0.3 = 0.54 + 0.12 = 0.66.",
+        "Branch C: calls flight API with correct date. S_pre = 0.95, R_post = 0.9 (tool works, data progresses task). V(C) = 0.6 * 0.95 + 0.4 * 0.9 = 0.57 + 0.36 = 0.93. C gets the most budget next.",
+        "Pre-score filters obviously wrong tool calls without executing. Post-score credits paths that actually deliver real progress. Budget flows to C."
+      ]
+    },
+    "note": "The two weights (alpha, beta) control whether to trust the fast pre-check or the slower real execution more. In practice, post-execution reward (beta) is higher because it is grounded in reality."
+  },
+  "bars": {
+    "h2": "The efficiency payoff",
+    "charts": [
+      {
+        "title": "Greedy agent (today)",
+        "rows": [
+          ["Step 1-3 correct", 96, "good"],
+          ["Step 4: early wrong choice kills path", 42, "bad"],
+          ["Steps 5-8: forced to follow dead end", 28, "bad"]
+        ],
+        "note": "No lookahead. One bad early choice ruins the rest."
+      },
+      {
+        "title": "Pure search (guess ranking)",
+        "rows": [
+          ["Step 1-3: predicted success", 88, "good"],
+          ["Step 4: prediction was wrong", 52, "bad"],
+          ["Step 5-8: realizes mistake too late", 38, "bad"]
+        ],
+        "note": "Plans without real data. Discovers its rankings were wrong after wasting compute."
+      },
+      {
+        "title": "ToolTree (this paper)",
+        "rows": [
+          ["Step 1-3: pre-pruning filters garbage", 96, "good"],
+          ["Step 4: real execution reveals path quality", 82, "good"],
+          ["Step 5-8: budget steered to working paths", 89, "good"]
+        ],
+        "note": "Pre-checks and real execution feedback let budget flow to proven working paths immediately."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Pre-check too strict.",
+        "html": "If the schema validation is too eager to prune, it rejects branches that would have worked because it does not have real execution data to verify them, only fast pattern-matching. The agent misses valid paths. Trade off strictness: tighter filtering saves compute by skipping expansions, but may miss solutions that the fast check incorrectly flagged as impossible."
+      },
+      {
+        "warn": true,
+        "b": "Post-execution reward misaligned.",
+        "html": "If the scoring function does not correctly measure task progress (e.g., it gives high score for a tool that ran successfully but moved the task backward), the agent will steer budget toward false paths. The reward signal must be grounded in the actual task goal."
+      },
+      {
+        "warn": true,
+        "b": "Budget exhaustion.",
+        "html": "If the agent is severely compute-constrained (only a few tool calls allowed), pre-pruning might filter too aggressively, leaving no high-credibility branches to explore. The balance between pre-checking and exploration matters."
+      },
+      {
+        "b": "Done right.",
+        "html": "Set alpha and beta to give real execution results (beta) more weight than fast checks (alpha), because real data is more trustworthy than pattern-matching. Use a task-specific reward signal, not a generic one, because generic scores do not know what the task actually needs. Allow at least one full expansion pass before aggressive pruning, because the agent needs initial data to ground its pruning decisions."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A proof-of-concept demo should show three agents (greedy, pure search, ToolTree) solving a multi-step tool use task with a fixed compute budget (e.g., 32 tool calls allowed). The demo should track: (1) how many branches each agent explores, (2) which branches are pruned and when, (3) the final task success rate, and (4) the accuracy-per-compute metric (success rate divided by number of tool calls spent). The demo proves ToolTree's win: same or better success on the same budget by eliminating wasted exploration."
+    ],
+    "metric_eq": "efficiency = (task_success_rate) / (tool_calls_spent)",
+    "closing": "ToolTree should show higher success rate (same or better) while spending fewer tool calls, or equivalently, the same success with lower compute budget, because pre-pruning and real-data steering eliminate wasted exploration on dead-end branches."
+  }
+}
