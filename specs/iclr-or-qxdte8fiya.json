@@ -10,7 +10,7 @@
     "h2": "Why long contexts confuse models",
     "paras": [
       "A language model (a machine that generates text one word at a time) can only look at a limited window of context when answering a question. When you give it a long document with lots of background information, it gets lost in the noise and misses the relevant details. The naive approach is to just feed the whole document as text into the prompt, but this bloats the input, wastes memory, and models still fail to find what matters.",
-      "The real problem is that models store information in two different places: in their parameters (weights, the actual numbers that make up the model), or in the context window (the text you feed in). Models are actually better at reasoning over knowledge stored in their parameters than over long raw text, but we have no way to teach them to encode a new document into their parameters when a new question arrives."
+      "The real problem is that models store information in two different places: in their parameters (weights, the actual numbers that make up the model), or in the context window (the text you feed in). Models are actually better at reasoning over knowledge stored in their parameters than over long raw text, because the model's neurons are already trained to decode parameter patterns into coherent thoughts—but we have no way to teach them to encode a new document into their parameters when a new question arrives."
     ],
     "callout": {
       "b": "The core challenge.",
@@ -68,7 +68,7 @@
       },
       {
         "b": "Outer loop: backprop through reasoning",
-        "text": "Backpropagate through both loops to improve how the model learns and reasons."
+        "text": "Backpropagate the reasoning accuracy loss back through the inner loop's adjustment steps, because this teaches which encodings helped solve the question."
       },
       {
         "b": "At test time: adapt",
@@ -87,8 +87,9 @@
     "h2": "The hidden quantity: learning signal across both loops",
     "name": "meta-gradient (teaching signal about encoding quality)",
     "paras": [
-      "The paper measures a quantity called the meta-gradient: the signal that tells the model which encodings actually help answer questions. It is not the gradient on one task; it is the gradient of a gradient. Specifically: after the model encodes a context into the adapter (inner loop), how well does that updated adapter help answer the question (outer loop)? The outer loop backpropagates this success signal back through the inner loop's updates to improve future encodings.",
-      "The paper estimates this by running a two-loop training procedure: the inner loop computes gradients to encode the context, and the outer loop computes gradients through those inner gradients. They use a memory-saving trick called truncated gradient unrolling: instead of saving the entire history of gradient computations (which would use prohibitive memory), they save only the last few steps, making the computation tractable."
+      "The paper measures a quantity called the meta-gradient: the signal that tells the model which encodings actually help answer questions, because it measures how the quality of the encoding (from the inner loop) maps to the success of the reasoning task (from the outer loop). It is not the gradient on one task; it is the gradient of a gradient—a measure of how a change in the inner loop changes the outer loop's success. The meta-gradient captures whether the inner loop's encoding work actually moved the needle on the reasoning task, because it backpropagates the reasoning accuracy signal through the adapter updates.",
+      "Specifically: after the model encodes a context into the adapter (inner loop), the outer loop measures how well that updated adapter helps answer the question. The outer loop backpropagates this success signal back through the inner loop's updates to improve future encodings, because the error gradient flowing backward tells the model which tweaks to the adapter actually helped the question, so the model learns to create encodings that are useful for reasoning, not just compressing text.",
+      "The paper estimates this by running a two-loop training procedure: the inner loop computes gradients to encode the context, and the outer loop computes gradients through those inner gradients. They use a memory-saving trick called truncated gradient unrolling: instead of saving the entire history of gradient computations (which would use prohibitive memory), they save only the last few steps, making the computation tractable without sacrificing quality, because the most recent gradient steps contain the information the outer loop needs to judge the encoding quality."
     ],
     "heat": {
       "cells": [["inner-step-1", 1, false], ["inner-step-2", 1, false], ["inner-step-3", 2, false], ["saved-gradient-1", 4, true], ["saved-gradient-2", 4, true], ["saved-gradient-3", 4, true], ["outer-backprop-1", 4, true], ["outer-backprop-2", 3, true], ["outer-backprop-3", 3, true], ["final-weight-update", 4, true], ["base-model-param", 1, false], ["adapter-param", 2, false]],
@@ -108,9 +109,9 @@
   "mechanism": {
     "h2": "Why encoding contexts into parameters helps reasoning",
     "paras": [
-      "The core insight is that language models encode knowledge better in their parameters than as raw text in the prompt. When you do a few gradient updates on the adapter using the context, you are teaching the model to compress the context into numbers that the model already knows how to interpret. This is much more efficient than asking the model to parse a long text string.",
-      "The two-loop structure solves two problems: (1) The inner loop encodes the context into the adapter by minimizing a prediction loss over the context text. (2) The outer loop ensures the encoded adapter actually helps answer the reasoning question, not just memorize the text. During training, the outer loop backpropagates the reasoning loss back through the inner loop to steer what kinds of encodings are useful. At test time, you run the inner loop once on each new context, then discard the raw text and answer using only the encoded adapter.",
-      "Truncated gradient unrolling cuts memory in half by only storing the computational graph for the last few inner steps. This means the meta-gradient is approximate, but it is accurate enough for the outer loop to learn which encodings work."
+      "The core insight is that language models encode knowledge better in their parameters than as raw text in the prompt, because the model's learned weights and attention patterns are the language it truly thinks in—converting text to parameter updates lets it work natively. When you do a few gradient updates on the adapter using the context, you are teaching the model to compress the context into numbers that the model already knows how to interpret. This is much more efficient than asking the model to parse a long text string, because parameter updates happen through the model's own learning machinery, not by asking it to read and remember sentences.",
+      "The two-loop structure solves two problems: (1) The inner loop encodes the context into the adapter by minimizing a prediction loss over the context text. (2) The outer loop ensures the encoded adapter actually helps answer the reasoning question, not just memorize the text, because the outer loop grades the encoding on whether it solves the actual downstream task, steering the inner loop toward useful patterns rather than verbatim storage. During training, the outer loop backpropagates the reasoning loss back through the inner loop to steer what kinds of encodings are useful. At test time, you run the inner loop once on each new context, then discard the raw text and answer using only the encoded adapter.",
+      "Truncated gradient unrolling cuts memory in half by only storing the computational graph for the last few inner steps, yet remains accurate because the final steps hold the information the outer loop needs—earlier steps vanish into the already-updated weights. This means the meta-gradient is approximate, but it is accurate enough for the outer loop to learn which encodings work."
     ],
     "visual": {
       "kind": "pipeline",
@@ -119,7 +120,7 @@
         {"t": "step", "s": "Inner loop: gradient steps on adapter", "hl": true},
         {"t": "step", "s": "Adapter learns to encode patterns"},
         {"t": "step", "s": "Compute meta-gradient through inner loop", "hl": true},
-        {"t": "step", "s": "Outer loop learns which encodings help reasoning"},
+        {"t": "step", "s": "Outer loop learns which encodings help reasoning by grading the encoded adapter on the actual question"},
         {"t": "output", "s": "Answer question using only adapter"}
       ]
     }
