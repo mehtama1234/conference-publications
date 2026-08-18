@@ -37,6 +37,18 @@ def assign(paper_rec, subs):
             best, best_score = s, score
     return best
 
+def card_with_deep(r):
+    """Paper card; if this paper has a deep first-principles explainer page, weave a link to it."""
+    html = bs.paper_card(r)
+    slug = bs.slug(r["id"])
+    if os.path.exists(os.path.join(bs.SITE, f"{slug}.html")):
+        link = (f'<div style="margin-top:8px"><a href="{slug}.html" style="display:inline-block;'
+                f'font-family:var(--mono);font-size:12px;color:var(--accent);border:1px solid var(--accent);'
+                f'border-radius:6px;padding:3px 10px;text-decoration:none">&#9733; Read the deep first-principles explainer &rarr;</a></div>')
+        if html.endswith("</div>"):
+            html = html[:-6] + link + "</div>"
+    return html
+
 def build_theme(theme, rows):
     s = bs.slug(theme)
     subs = load_subthemes(s)
@@ -64,7 +76,7 @@ def build_theme(theme, rows):
         o.append(f'<h2 style="border-top:1px solid var(--line);padding-top:16px">{bs.esc(x["name"])} '
                  f'<span style="font-family:var(--mono);font-size:13px;color:var(--accent)">{len(x["_papers"])}</span></h2>')
         o.append(f'<p class="lead" style="font-size:16px">{bs.esc(x["gist"])}</p>')
-        for r in sorted(x["_papers"], key=lambda r: r["id"]): o.append(bs.paper_card(r))
+        for r in sorted(x["_papers"], key=lambda r: r["id"]): o.append(card_with_deep(r))
         o.append('</section>')
     o.append(bs.FOOT)
     open(os.path.join(bs.SITE, f"theme-{s}.html"), "w").write("\n".join(o))
