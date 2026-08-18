@@ -1,0 +1,12 @@
+REAL MECHANISM of MoGA (from the paper's method section — use THIS, it is the actual algorithm, not the abstract):
+
+- A video is cut into ~580,000 tokens (a token = a small patch of the video turned into a list of numbers). Full attention compares every token to every other = N-squared = far too expensive.
+- The ROUTER is literally ONE linear layer (a small matrix W). For each token x it computes M scores r = W·x, one score per group (M groups, e.g. M=5 or M=20).
+- softmax turns those M scores into fractions that add to 1; the token is sent to the SINGLE group with the highest score (argmax = pick the top one). This is hard top-1 routing, exactly like Mixture-of-Experts.
+- KEY INSIGHT: the M rows of the router matrix W act as M learned "anchor points" (cluster centers). Assigning a token = finding which anchor it points at most. No token-to-token comparison is ever done — that is why it is cheap (one small matrix multiply per token = linear cost).
+- After routing, tokens of the same group are PERMUTED to sit next to each other, then full attention runs INSIDE each group only (using FlashAttention with variable-length segments), then the outputs are re-permuted back to the original positions. Formula: MoGA(x) = p(g(x)|x) · SelfAttention(q, K_group, V_group).
+- Complexity drops from O(N^2) to about O(N^2 / M): with M groups each ~N/M tokens, you do M groups × (N/M)^2 = N^2/M work.
+- GROUP BALANCING LOSS L_gb = alpha · M · sum_i (F_i · P_i), where F_i = fraction of tokens sent to group i, P_i = average router probability for group i. Without it the router cheats by dumping most tokens into a few groups (which collapses back to near-full attention). With it, groups fill evenly (metric converges to ~1).
+- It also adds static groups (fixed spatial 2x2 or 4x4 windows); each token gets one dynamic-group output plus two static-group outputs, averaged.
+- Real measured: M=5 for 30s video gives 2.26 PFLOPs vs full attention's much larger cost; the router itself is one linear layer so routing cost is negligible.
+- The learned groups are SEMANTIC: after training, a person's head, hands, and clothing across different shots get routed to the SAME group, so the model tracks a character across a long video.

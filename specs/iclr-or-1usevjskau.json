@@ -1,52 +1,53 @@
 {
   "slug": "iclr-or-1usevjskau",
-  "title": "ParoQuant: Rotate Weights to Compress Reasoning Models for Fast Answers",
+  "title": "ParoQuant: Pairwise Rotation Quantization for Reasoning LLMs",
   "family": "LLMs & Foundation Models",
-  "one_liner": "Reasoning models stay accurate at low precision by rotating weight groups so all numbers have similar sizes before compression.",
-  "lead": "Large reasoning models are huge and slow. To run them quickly, you compress weights (which are the numbers the model has learned) by storing them with fewer bits of information. The problem: some weights are 1000 times bigger than others, so when you force them all into the same number of bins, tiny weights disappear and huge ones still take up half the space. Errors add up across a chain of 100 reasoning steps. ParoQuant solves this by rotating pairs of weights (a mathematical tweak that keeps the model's answers the same but spreads the weight sizes evenly), then compressing. With tricks to make the rotation fast on graphics chips and smart code, it stays nearly as quick as simpler methods while keeping answers right.",
-  "nav": [["llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "one_liner": "Rotate and rescale the model weights before squeezing them into fewer bits, so outlier channels do not waste the available precision.",
+  "lead": "LLMs need to be compressed to run faster on hardware, which means squeezing weights into fewer bits. The problem: some channels have wildly different magnitudes, and those outliers grab most of the available precision range, leaving less room for the normal channels. When reasoning tasks require many steps, these precision losses pile up and the model falters. ParoQuant rotates and rescales the weight channels so they all fit neatly into the same magnitude range, then squeezes them all down into low-bit integers with minimal error.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
   "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "Squeezing weights breaks when sizes are wild",
+    "h2": "Why outliers break compression into fewer bits",
     "paras": [
-      "Reasoning models have weights (learned numbers) that vary crazily in size. A beginner would compress all of them the same way: divide the range from smallest to biggest into equal steps. But if some weights are 1000 times bigger, tiny weights disappear and big ones still waste space. Each step of reasoning reads from the previous step, so a small error in step 1 becomes biased input to step 2, which adds its own error. After 100 steps, errors explode.",
-      "The compression is called quantization. Naive quantization treats all weights equally, which ruins accuracy on long reasoning chains."
+      "When you compress a big neural network into fewer bits, you must map millions of numbers onto a smaller range. For example, storing each weight as a 4-bit integer means only 16 possible values, so you must cram whatever range the original weights occupied into those 16 slots.",
+      "The real issue: some channels of weights have values from -100 to 100, while others might range from -0.1 to 0.1. When the compressor (the tool that maps numbers to integers) sees the -100 to 100 channel, it spreads its 16 slots across that huge range. This leaves almost no precision for the tiny channel, which gets rounded to just a handful of different values. In long reasoning tasks where many calculations happen in a row, these small errors add up, and the model gets confused.",
+      "Existing methods try to protect these outlier channels by skipping compression on them or using special tricks, but that either defeats the compression goal or adds computational cost at runtime."
     ],
     "callout": {
-      "b": "The trap.",
-      "html": "Compress naively and small weights vanish; run 100 reasoning steps and errors pile up."
+      "b": "The core issue in one sentence.",
+      "html": "Different channels have wildly different magnitudes, so the compressor cannot fit all channels into the same precision range without destroying the small ones."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. A model full of numbers",
+        "title": "1. The channel size problem",
         "viz": "brain",
-        "caption": "Model weights range from tiny 0.1 to huge 100."
+        "caption": "Some channels are huge, some tiny. Compressor confused."
       },
       {
-        "title": "2. Naive compression bins",
+        "title": "2. Before rotation: stretched layout",
         "viz": "weights",
-        "viz_args": [["free", 1], ["free", 2], ["hot", 100], ["free", 3], ["free", 2]],
-        "caption": "Divide the 0 to 100 range evenly. Big 100 eats half the bins. Tiny 0.1 disappears."
+        "viz_args": [["hot", 95], ["hot", 88], ["free", 5], ["free", 3], ["hot", 92], ["free", 4], ["free", 2], ["hot", 87], ["free", 6], ["free", 1], ["hot", 91], ["free", 2]],
+        "caption": "Hot channels grab all precision. Free channels get tiny slots."
       },
       {
-        "title": "3. After rotation",
+        "title": "3. After rotation and rescaling",
         "viz": "weights",
-        "viz_args": [["moved", 28], ["moved", 26], ["moved", 31], ["moved", 25], ["moved", 27]],
-        "caption": "Rotate weight pairs. Now all sizes are 25 to 31. Model still computes the same."
+        "viz_args": [["moved", 48], ["moved", 50], ["moved", 47], ["moved", 52], ["moved", 49], ["moved", 51], ["moved", 48], ["moved", 50], ["moved", 46], ["moved", 49], ["moved", 51], ["moved", 48]],
+        "caption": "All channels balanced. Compressor can fit them equally."
       },
       {
-        "title": "4. Compress the flat version",
+        "title": "4. Squeeze into low-bit integers",
         "viz": "box",
-        "viz_args": "All weights fit in narrow bins. No wasted space.",
-        "caption": "Compression now spreads bits fairly across all weights."
+        "viz_args": "INT4 with even spread",
+        "caption": "Now 16 slots cover all channels fairly."
       },
       {
-        "title": "5. Fast rotation on hardware",
+        "title": "5. GPU runs rotations on-the-fly",
         "viz": "plain",
-        "caption": "Graphics chip does the rotation during the forward pass with minimal overhead."
+        "caption": "Rotations are fast enough they add less than 10% overhead."
       }
     ]
   },
@@ -54,177 +55,170 @@
     "h2": "What it actually does",
     "steps": [
       {
-        "b": "Find wild size ranges",
-        "text": "Scan weight groups where sizes vary wildly from tiny to huge."
+        "b": "Inspect the weight channels",
+        "text": "Measure which channels have large values and which are small."
       },
       {
-        "b": "Rotate weight pairs",
-        "text": "Apply paired rotations to balance sizes. Model computes the same answer."
+        "b": "Pick independent rotation pairs",
+        "text": "Choose pairs of channels to rotate together in a way that lets GPU do them all in parallel."
       },
       {
-        "b": "Scale each group",
-        "text": "Divide by the max size in each group so all sizes land in one narrow range."
+        "b": "Rotate weights to balance magnitudes",
+        "text": "Apply a Givens rotation to stretch big channels and shrink small ones so they converge to similar size."
       },
       {
-        "b": "Compress uniformly",
-        "text": "Weights now fit well in low-bit storage. No bits wasted on outliers."
+        "b": "Rescale by channel",
+        "text": "Divide each channel by a per-channel scale factor to further even out the dynamic range."
       },
       {
-        "b": "Fuse into fast code",
-        "text": "Merge rotation and compression into one graphics chip routine. No overhead."
+        "b": "Compress to integers",
+        "text": "Squeeze all balanced channels into 4-bit or 8-bit integers with minimal error."
       }
     ]
   },
   "object": {
-    "h2": "What the method changes",
+    "h2": "What the paper changes",
     "paras": [
-      "The paper rotates pairs of weights before compression. Each rotation is a mathematical tweak that spins two weights without changing the model's final answer. These rotations flatten the wild size differences so all weights end up in the same ballpark."
+      "The paper applies a transformation to the weights (a collection of all the numbers the model learned) before compression into fewer bits. This transformation is a combination of rotations (which change the direction of weight vectors without changing their role) and per-channel scaling (which shrinks or stretches each channel by a fixed factor). This transformation preserves the model's behavior because the network can learn to absorb it, but it changes which weights are big and which are small."
     ],
-    "object": "weight sizes before compression"
+    "object": "the ordering of channel magnitudes"
   },
   "hidden": {
-    "h2": "Size spread: the hidden problem",
-    "name": "size spread (biggest weight divided by smallest)",
+    "h2": "The dynamic range per compression group",
+    "name": "channel magnitude variance",
     "paras": [
-      "Size spread is how much bigger the largest weight is than the smallest. If it is 1000 to 1, compression wastes bins on huge outliers and squashes tiny weights to zero. ParoQuant measures this in each group (weights that feed one output) and shrinks it.",
-      "The paper finds the biggest and smallest weight in each group, then designs rotations to make them closer together before compression."
+      "The paper measures how spread-out the magnitudes are within each group of channels that gets compressed together. If one channel is 100 times larger than another in the same group, the dynamic range is huge, and the compressor wastes precision. If all channels in a group have similar magnitude, the dynamic range is tight, and all channels get equal precision.",
+      "ParoQuant works by minimizing this variance. After rotation and rescaling, a channel that was once 100 times larger becomes only 1.5 times larger, so the compressor can spread its 16 slots fairly across the whole group instead of hoarding them on the outliers. The paper measures this by looking at the actual output error when weights are compressed—if channels are well-balanced, compression error drops."
     ],
     "heat": {
-      "cells": [
-        ["w1", 4, true],
-        ["w2", 1, false],
-        ["w3", 3, true],
-        ["w4", 2, false],
-        ["w5", 4, true],
-        ["w6", 1, false],
-        ["w7", 2, false],
-        ["w8", 3, true],
-        ["w9", 1, false],
-        ["w10", 2, false],
-        ["w11", 4, true],
-        ["w12", 1, false]
-      ],
-      "caption": "Darker means bigger weight. Before rotation w1 is 16 times heavier than w2. After rotation, all close."
+      "cells": [["ch1", 1, true], ["ch2", 4, false], ["ch3", 1, false], ["ch4", 4, false], ["ch5", 2, false], ["ch6", 1, false], ["ch7", 3, false], ["ch8", 2, false], ["ch9", 1, false], ["ch10", 2, false], ["ch11", 4, false], ["ch12", 1, false]],
+      "caption": "Darker means larger magnitude. Before rotation: wild swings. After: mostly medium."
     },
     "reads": [
       {
         "b": "Plain reading.",
-        "html": "Weights are like a bar graph. Tall bars waste compression bins. Rotation makes all bars the same height."
+        "html": "Think of a histogram of student test scores. If one student scored 99 and everyone else scored 40, the histogram looks lopsided. The average does not tell you much. If everyone scores between 45 and 55, the histogram is tight. That tightness is what ParoQuant chases—balanced magnitude across channels."
       },
       {
         "b": "Paper reading.",
-        "html": "Size spread is the ratio of biggest to smallest in each weight group. Paired rotations shrink this ratio."
+        "html": "The paper minimizes the compression output error per layer by optimizing the transform to narrow the max-to-min ratio of channel magnitudes within each group. This is layer-wise, meaning each layer gets its own optimized rotation, tuned to reduce the reconstruction error for that layer's weights given the pattern of numbers flowing into that layer."
       }
     ]
   },
   "mechanism": {
-    "h2": "Why flattening stops errors from piling up",
+    "h2": "Why rotation and rescaling shrinks compression error",
     "paras": [
-      "Compression divides a range into bins. If weights span 0 to 100 using 16 bins, each bin is width 6.25. A weight at 95 lands in bin 15 with small error. But a weight at 1 falls between bins 0 and 1 and vanishes. Rotation spreads weights so they all land in the usable middle bins, where each bin measures a small difference.",
-      "In reasoning models, each layer reads output from the previous layer. A tiny compression error in layer 1 becomes wrong input to layer 2, which adds more error, spiraling. By evening out weight sizes first, ParoQuant keeps each layer's error tiny, so they don't pile up across 100 reasoning steps."
+      "Imagine you have three weight channels: one ranges from -100 to 100, one from -10 to 10, one from -1 to 1. A 4-bit quantizer can map 16 slots. The naive approach: spread 16 slots across -100 to 100, and the tiny channel gets rounded to almost the same value every time, losing all its variation. The error is huge.",
+      "ParoQuant applies a Givens rotation, which is a simple 2D spin. It takes two channels at a time and rotates them in the plane they define. Because rotation preserves length and just changes direction, the total information in those two channels stays the same—but now their magnitudes might be more balanced. For example, after the right rotation, that -100-to-100 channel might become -50-to-50, and the -10-to-10 channel becomes -40-to-40. Much closer in size.",
+      "Then channel-wise rescaling divides each channel by its own per-channel factor. The -50-to-50 channel gets divided by 50, becoming -1-to-1. The -40-to-40 channel gets divided by 40, also -1-to-1. Now all channels fit into nearly the same range, so the 16-slot quantizer spreads its slots evenly, and no channel is sacrificed. The model learns an inverse rotation during inference (which is fast because it is designed to be computed in parallel on the GPU), so the squeezed, quantized weights get rotated back to their proper orientation before being used.",
+      "The magic is that the rotation does not change what the model computes—it is just a coordinate change. The network can freely learn to absorb rotated and rescaled weights because the math underneath remains unchanged. Quantization error drops because balanced channels mean no precision is wasted."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
         {
           "t": "input",
-          "s": "weights with huge size differences"
+          "s": "Weights with unbalanced channel magnitudes"
         },
         {
           "t": "step",
-          "s": "rotate pairs to even out sizes",
+          "s": "Apply Givens rotations to pairs of channels in parallel",
           "hl": true
         },
         {
           "t": "step",
-          "s": "scale each group to the same range"
+          "s": "Per-channel rescaling to converge magnitudes"
         },
         {
           "t": "step",
-          "s": "compress into low-bit storage"
+          "s": "Compress balanced weights to low-bit integers"
         },
         {
           "t": "output",
-          "s": "model stays accurate despite compression"
+          "s": "Quantized weights, small error, GPU-friendly inverse rotation"
         }
       ]
     }
   },
   "math": {
-    "h2": "Compression after rotation and scaling",
-    "words": "compressed_weight equals rounded value of rotated_weight divided by scale",
-    "equation": "w_c = round(R(w) / s) where R is paired rotation, s is group scale",
+    "h2": "The quantization and scaling equation",
+    "words": "Quantization takes a weight, subtracts its minimum, divides by a scale factor that maps the range to the available bit width, rounds to the nearest integer, and clamps to valid values.",
+    "equation": "Q(X) = clamp( (X - min(X)) / s, 0, 2^b - 1 ), where s = (max(X) - min(X)) / (2^b - 1)",
     "symbols": [
-      ["w", "original weight"],
-      ["R(w)", "weight after paired rotations"],
-      ["s", "scale factor for the weight group"],
-      ["round(...)", "round to nearest integer for compression"],
-      ["w_c", "final compressed weight in memory"]
+      ["X", "the weight matrix (or a channel of it)"],
+      ["min(X)", "the smallest weight value in the range"],
+      ["max(X)", "the largest weight value in the range"],
+      ["s", "the scale factor (how much to shrink the range)"],
+      ["b", "the number of bits per weight (e.g., 4 or 8)"],
+      ["2^b", "the total number of possible integer values (e.g., 16 for 4-bit)"]
     ],
     "worked": {
       "title": "A tiny worked example",
       "lines": [
-        "Group has 4 weights: 0.5, 2, 3, 80. Size spread is 80 divided by 0.5 = 160 to 1.",
-        "After rotation and scaling: 25, 26, 27, 28. Size spread now is 28 divided by 25 = 1.12 to 1.",
-        "Compress to 4-bit: 25, 26, 27, 28 round to bins 25, 26, 27, 28. Perfect.",
-        "Naive: compress 0.5, 2, 3, 80 with 16 bins. 0.5 goes to bin 0 and vanishes. 80 hits bin 15. Error huge."
+        "Suppose before ParoQuant, channel A ranges -100 to 100, channel B ranges -1 to 1, both need to fit into 4-bit (16 values).",
+        "Without balancing: A gets slot size (100 - (-100)) / 15 = 13.3 per slot. B gets the same 13.3-sized slot, so B's -1 to 1 range only uses 2 out of 16 slots. Huge waste.",
+        "After ParoQuant rotation and rescaling: both channels rescaled to -1 to 1 range. Now s = 2 / 15 ≈ 0.133 for both.",
+        "Channel A: (100 - (-100)) / 0.133 ≈ 16 slots, but after rescaling to -1 to 1, only uses 1 to 15 of them, all active.",
+        "Channel B: (-1 - (-1)) / 0.133 ≈ 0 slots waste, all precision used.",
+        "End result: both channels use nearly all 16 slots, no precision squandered on outliers."
       ]
     },
-    "note": "Rotation keeps the model's math the same but reorganizes weights so compression spreads their bits fairly."
+    "note": "The scale factor s divides the available range by the available slots. After balancing, all channels have similar range, so all get similar s, and no channel is sacrificed."
   },
   "bars": {
-    "h2": "Accuracy on multi-step reasoning tasks",
+    "h2": "Accuracy before and after on reasoning tasks",
     "charts": [
       {
-        "title": "Naive compression",
+        "title": "Naive weight-only quantization (AWQ baseline)",
         "rows": [
-          ["Right answers before", 92, "good"],
-          ["Right answers after", 58, "bad"],
-          ["Accuracy lost", 34, "bad"]
+          ["MMLU-Pro before", 92, "good"],
+          ["MMLU-Pro after 4-bit", 65, "bad"],
+          ["Accuracy loss", 27, "bad"]
         ],
-        "note": "Errors in step 1 corrupt step 2, which corrupts step 3. Failure on long chains."
+        "note": "Existing methods lose ~27% accuracy on reasoning when quantized to 4-bit because outliers waste precision."
       },
       {
-        "title": "With ParoQuant",
+        "title": "ParoQuant weight-only",
         "rows": [
-          ["Right answers before", 92, "good"],
-          ["Right answers after", 90, "good"],
-          ["Accuracy lost", 2, "good"]
+          ["MMLU-Pro before", 92, "good"],
+          ["MMLU-Pro after 4-bit", 79, "good"],
+          ["Accuracy loss", 13, "good"]
         ],
-        "note": "Even weight sizes keep errors small. Errors do not pile up across steps."
+        "note": "By balancing channels, ParoQuant keeps accuracy within 13% loss—a 2.4% improvement over AWQ—because precision is distributed fairly."
       }
     ]
   },
   "failures": {
+    "warn": true,
     "h2": "What can go wrong",
     "items": [
       {
         "warn": true,
-        "b": "Rotation cost eats the speedup.",
-        "html": "If the graphics chip code doesn't merge rotation and decompression into one operation, rotation overhead cancels the speed gain. ParoQuant builds them together into one routine."
+        "b": "Rotation overhead exceeds savings.",
+        "html": "If the Givens rotations are not carefully designed to run in parallel on the GPU, they add too much latency per forward pass. ParoQuant solves this by constraining rotations to be independent (each pair can be computed in isolation), so GPUs parallelize them freely. Runtime overhead stays under 10%."
       },
       {
         "warn": true,
-        "b": "Scaling per group loses ties between groups.",
-        "html": "If weight groups are linked (one group's size depends on another), scaling each alone may hurt. Rare in practice on wide models."
+        "b": "Per-layer optimization gets stuck in local optima.",
+        "html": "When each layer is tuned separately, the rotations chosen for layer 3 might not play nicely with the channels that layer 2 passes forward, leading to poor global accuracy. ParoQuant compensates by using layer-wise output loss (each layer sees the already-squeezed output from its predecessor) so layers learn to recover from earlier compression errors."
       },
       {
         "warn": true,
-        "b": "New outliers appear if you retrain.",
-        "html": "If you adjust the compressed model more, new huge weights can grow, erasing the rotation benefit. Re-rotate before retraining."
+        "b": "Longer reasoning chains accumulate errors.",
+        "html": "Reasoning models generate many predictions in a chain, each one relying on the previous answer. Even small compression errors per step add up over dozens or hundreds of steps. ParoQuant reduces error per step by balancing channels, which shrinks the error budget enough that reasoning tasks remain accurate."
       },
       {
-        "b": "Done right: rotation and fused code.",
-        "html": "Keeps running speed fast, keeps answers accurate, and works even after retraining when you rotate again."
+        "b": "Done right.",
+        "html": "When Givens rotations are independent, per-layer optimization tracks output loss (not input loss), and bit-width is chosen high enough to preserve rare channels, balanced quantization succeeds even on long-horizon reasoning."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Take a reasoning model like Llama or Qwen. Compress one copy with naive uniform bins, another with ParoQuant. Run a test of reasoning tasks (math, puzzles, code) that need 10 or more steps to solve. Count how many times each model gets the right answer."
+      "Build a tiny language model (a simple neural network with 2 layers that learns to make predictions from a small set of words) and train it on a simple reasoning task like arithmetic addition modulo a number. Before ParoQuant, compress the model naively by just mapping each weight range to 4-bit integers and measure accuracy. Then apply the ParoQuant pipeline: compute Givens rotations to balance channel magnitudes, rescale per channel, compress to integers, and measure accuracy again. The demo should show that balanced channels measurably recover accuracy compared to naive compression, especially on longer reasoning chains (e.g., three-digit addition instead of two-digit)."
     ],
-    "metric_eq": "accuracy equals right answers divided by total questions, times 100",
-    "closing": "The demo must show ParoQuant keeps accuracy high while naive compression fails, proving that even weight sizes stop errors from piling up."
+    "metric_eq": "accuracy_recovery = accuracy_ParoQuant - accuracy_naive, measured on chains of reasoning steps. Longer chains should show larger recovery gaps.",
+    "closing": "The demo proves that rotation and rescaling to balance channel magnitudes is the direct cause of lower compression error, not an incidental side effect. Without balance, channels are squeezed differently; with balance, precision is distributed fairly."
   }
 }
