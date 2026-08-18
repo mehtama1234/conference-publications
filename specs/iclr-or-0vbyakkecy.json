@@ -1,0 +1,203 @@
+{
+  "slug": "iclr-or-0vbyakkecy",
+  "title": "Draft-Based Approximate Inference for LLMs",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Use a smaller fast model to predict which tokens matter most, so the big model can skip reading them, saving memory and time.",
+  "lead": "Long-context language models are slow. When a model processes text with thousands of words, it must reread every single word over and over to generate each new word—quadratic waste. This paper offers a concrete fix: run a tiny fast model first to spot which old words are useless noise, then tell the big model to skip them. The trick is using the small model not to generate text, but to peek ahead and measure which words the big model will actually need to read.",
+  "nav": [["theme-llms-foundation-models.html","LLMs & Foundation Models"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "The cost of reading everything",
+    "paras": [
+      "When a language model reads a long document, it is stuck rereading every single word to produce the next word. If the prompt has 10,000 words, the model must reread all 10,000 when generating word 1, all 10,000 when generating word 2, and so on. This causes two costs: first, the attention operation (which means compare each word to every other word) runs in quadratic time—doubling the context length quadruples the computation. Second, keeping all the old word summaries in memory (the KV cache) takes linear space, and GPU memory is precious.",
+      "A beginner trying to fix this might simply drop the oldest words, or randomly skip some tokens. But this breaks accuracy: those words might be essential for answering the question. Existing methods try to guess which words are unimportant by looking at past attention patterns, but this guess is coarse and unreliable—using yesterday's attention to predict tomorrow's needs is a guess from stale data."
+    ],
+    "callout": {
+      "b": "The core fix:",
+      "html": "Run a tiny fast draft model first. Use its predictions to identify which tokens are actually useless, then erase them from the cache before the big model reads."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The wasteful path",
+        "viz": "weights",
+        "viz_args": [["hot",70],["hot",68],["free",20],["hot",65],["hot",72],["hot",66],["free",15],["hot",69],["hot",64],["free",18],["hot",70],["hot",67]],
+        "caption": "Big model must read every token every time. Redundant work."
+      },
+      {
+        "title": "2. The problem: stale guesses",
+        "viz": "box",
+        "viz_args": "Yesterday's attention scores guessing today's needs",
+        "caption": "Old attention patterns are unreliable signals for which tokens to drop."
+      },
+      {
+        "title": "3. Draft model peers ahead",
+        "viz": "weights",
+        "viz_args": [["warm",45],["free",15],["warm",42],["free",18],["warm",40],["free",20],["warm",38],["free",25],["warm",35],["free",22],["warm",32],["free",28]],
+        "caption": "Tiny draft model scans the prompt cheaply, showing what matters next."
+      },
+      {
+        "title": "4. Tokens marked for drop",
+        "viz": "weights",
+        "viz_args": [["moved",70],["moved",68],["hot",20],["moved",65],["moved",72],["moved",66],["hot",15],["moved",69],["moved",64],["hot",18],["moved",70],["moved",67]],
+        "caption": "Important tokens stay (hot). Useless ones vanish (moved away)."
+      },
+      {
+        "title": "5. Big model reads only essentials",
+        "viz": "weights",
+        "viz_args": [["hot",70],["free",5],["hot",68],["free",3],["hot",72],["free",8],["hot",69],["free",4]],
+        "caption": "Big model runs on compressed input. Same accuracy, half the time."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {"b": "1. Send prompt to draft model","text": "Feed the input text to a small, fast model that is roughly one-tenth the size of the big model."},
+      {"b": "2. Draft model computes attention","text": "The draft model runs its attention layers, creating cross-attention matrices showing which new tokens depend on which old tokens."},
+      {"b": "3. Measure importance from draft attention","text": "Extract importance scores by summing attention weights for each input token across all output positions."},
+      {"b": "4. Erase unimportant tokens","text": "Drop tokens with low importance scores from the KV cache before the big model touches them."},
+      {"b": "5. Big model decodes on compressed cache","text": "The large model runs on the filtered cache, saving memory and computation with no loss of accuracy."}
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper swaps the token importance scorer. Existing methods measure importance by looking at the big model's own past attention (what already happened). This paper measures importance by running the small model ahead and seeing what the big model will need (what will happen). This lookahead signal is much more accurate because it comes from an actual forward pass, not a guess."
+    ],
+    "object": "Token importance scorer"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: token importance",
+    "name": "Token importance score",
+    "paras": [
+      "The paper measures how much each input token matters for generating the next output. It defines this plainly: importance is the sum of attention weights for one token across all the queries used to generate future output. In plain words, if 100 different future queries attend to token 5, its importance is high. If only 2 future queries attend to it, its importance is low. Tokens with low importance can be dropped without harming accuracy.",
+      "The paper estimates this hidden quantity by running a draft model and reading off its attention values (how much each query pays attention to each key). Instead of guessing from the past, the draft model actually computes what it will attend to, giving a direct measurement. The draft model is small enough to run cheaply, but still aligned well enough with the big model that its importance predictions are reliable."
+    ],
+    "heat": {
+      "cells": [
+        ["Token 1",4,true],
+        ["Token 2",2,false],
+        ["Token 3",3,true],
+        ["Token 4",1,false],
+        ["Token 5",4,true],
+        ["Token 6",1,false],
+        ["Token 7",2,false],
+        ["Token 8",4,true],
+        ["Token 9",1,false],
+        ["Token 10",2,false],
+        ["Token 11",4,true],
+        ["Token 12",1,false]
+      ],
+      "caption": "Darker means future queries will attend to this token more often. Highlight borders mark high-importance tokens."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "How many downstream words will need to look at this word? Count the sum of attention weights pointing to it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "For each word in the input, sum up the attention weights from all draft output queries pointing to that word."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why measuring importance ahead works",
+    "paras": [
+      "The core insight: importance is a property of the input tokens, not the big model's internal state. The draft model, even though smaller, still processes the same input text and produces attention patterns that roughly align with the big model. These attention patterns reliably reveal which input tokens the big model will care about. Because the draft model runs a full forward pass (not guessing), its importance estimates are far more precise than methods that extrapolate from old attention scores.",
+      "The mechanism works in two stages. First, SpecKV (KV cache dropping) uses draft attention to identify which input tokens the big model will ignore during decoding, and erases them from memory. Second, SpecPC (prompt compression) uses draft attention to spot which old tokens in the prompt are barely referenced by subsequent tokens, and removes them before the big model even processes them. Combining both techniques cuts memory and latency without sacrificing accuracy, because the draft model's importance signal is both early (available before the big model runs) and accurate (based on a real forward pass)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input","s": "Long prompt + task"},
+        {"t": "step","s": "Draft model runs, computes attention","hl": true},
+        {"t": "step","s": "Read importance scores from attention"},
+        {"t": "step","s": "Drop low-importance tokens from cache and prompt"},
+        {"t": "output","s": "Big model runs on compressed input"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The importance formula",
+    "words": "For each input token, sum up all the attention weights pointing to it from downstream queries",
+    "equation": "importance[k] = sum over all output positions t of attention[t, k]",
+    "symbols": [
+      ["k","an input token (position in the prompt)"],
+      ["t","an output position (where a new word is being generated)"],
+      ["attention[t, k]","how much the query at position t attends to the key at position k (a number from 0 to 1)"],
+      ["importance[k]","the total attention weight received by input token k (higher = more needed)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Input has 5 tokens. Draft model generates output attending to them via these attention matrices:",
+        "Output word 1 attends to: [0.5, 0.0, 0.3, 0.1, 0.1]",
+        "Output word 2 attends to: [0.1, 0.6, 0.1, 0.1, 0.1]",
+        "Output word 3 attends to: [0.2, 0.2, 0.5, 0.1, 0.0]",
+        "Sum each column: importance scores are [0.8, 0.8, 0.9, 0.3, 0.2]",
+        "Word 3 is essential (0.9), words 1 and 2 are medium (0.8), words 4 and 5 are noise (0.3 and 0.2).",
+        "Drop tokens 4 and 5 before big model runs: 40% memory saved, same answer."
+      ]
+    },
+    "note": "Importance is not a mysterious learned weight; it is literally how much future output queries will attend to each input token, measured directly from the draft model."
+  },
+  "bars": {
+    "h2": "Accuracy vs efficiency",
+    "charts": [
+      {
+        "title": "Baseline (drop randomly or by sliding window)",
+        "rows": [
+          ["Accuracy on long tasks",72,"bad"],
+          ["Memory used",95,"bad"],
+          ["Latency",92,"bad"]
+        ],
+        "note": "Random or fixed dropping loses information. Accuracy tanks when important tokens are erased."
+      },
+      {
+        "title": "This paper (SpecKV + SpecPC)",
+        "rows": [
+          ["Accuracy on long tasks",88,"good"],
+          ["Memory used",60,"good"],
+          ["Latency",65,"good"]
+        ],
+        "note": "Draft-based importance is precise. The draft model reveals which words matter to future generation, so the big model erases only the noise. With real waste removed, accuracy stays high, memory shrinks because fewer words are kept, and speed gains because there is less to read."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Draft model is too weak.",
+        "html": "If the draft model is much smaller or different from the big model, its attention patterns will not match, and importance estimates become unreliable. The fix: use a draft model that is a pruned or distilled version of the same base model, so they stay aligned."
+      },
+      {
+        "warn": true,
+        "b": "Important tokens hidden in detail.",
+        "html": "Some tokens matter only on rare queries. If the draft model does not generate enough lookahead output, it might miss low-probability but high-impact tokens. The fix: use a large enough lookahead window and aggregate across all attention heads."
+      },
+      {
+        "warn": true,
+        "b": "Cost of the draft model itself.",
+        "html": "If the draft model is too expensive to run, the savings from skipping tokens in the big model do not outweigh the cost. The fix: use a small enough draft model, or a version that has been compressed (smaller weights, lower precision numbers)."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the draft model is a faithful approximation of the big model and run with enough lookahead, importance scores are accurate, and both memory and latency drop with no accuracy loss."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Write a Python script that loads two models: a large language model (the target) and a small draft model (10x smaller). On a long-context benchmark like a 10,000-word document, run the draft model to extract importance scores, drop the bottom 30% of tokens, and then run the target model on the compressed cache. Measure accuracy on a set of questions about the document, and measure latency and GPU memory usage."
+    ],
+    "metric_eq": "Accuracy drop = accuracy_full_cache - accuracy_dropped_tokens. Speedup = latency_full_cache / latency_dropped_tokens",
+    "closing": "The demo must show that dropping tokens selected by the draft model maintains accuracy while both latency and memory shrink. Accuracy drop should be less than 1 percent."
+  }
+}

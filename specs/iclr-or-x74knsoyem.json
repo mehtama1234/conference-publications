@@ -1,0 +1,227 @@
+{
+  "slug": "iclr-or-x74knsoyem",
+  "title": "Label Smoothing Improves Machine Unlearning",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "Using smoothed labels during gradient ascent makes a model forget unwanted training data more reliably without retraining from scratch.",
+  "lead": "Machine unlearning is the ability to make a trained model forget specific data it learned during training. Retraining from scratch is reliable but expensive for large models. Cheaper methods like gradient ascent (pushing loss upward on unwanted data) exist, but they leave ghost traces because the model learned the data so well that its gradients are nearly flat. UGradSL fixes this by adding a small dose of label smoothing during forgetting—making target labels less confident—which keeps the gradient steep enough to unlearn, without the cost of retraining.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why cheap unlearning leaves ghost traces",
+    "paras": [
+      "Once a model finishes training, it has learned to map training examples to their answers very precisely. The most direct way to make it forget a specific data point is to retrain the entire model from scratch without that point—but for very large models with billions of adjustable values, retraining is prohibitively expensive.",
+      "A cheaper approach is gradient ascent: push the model's predictions wrong on the unwanted data by climbing the loss gradient, as if you are maximizing error. The problem is that well-memorized data has nearly zero loss, which means its gradient is nearly flat. When the gradient is flat, there is no direction to push, and the model barely budges. The unlearning stalls."
+    ],
+    "callout": {
+      "b": "The core tension.",
+      "html": "Retraining works but costs too much. Gradient ascent is cheap but the gradient is flat for well-memorized data."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Training ends, model learns data",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["hot", 75], ["warm", 50], ["hot", 78], ["warm", 45], ["warm", 55], ["hot", 82], ["warm", 48], ["warm", 52], ["hot", 70], ["warm", 40], ["warm", 60]],
+        "caption": "Weights are tuned precisely to get answers right."
+      },
+      {
+        "title": "2. Gradient ascent tries to unlearn",
+        "viz": "weights",
+        "viz_args": [["moved", 79], ["moved", 74], ["warm", 50], ["moved", 77], ["warm", 45], ["warm", 55], ["moved", 81], ["warm", 48], ["warm", 52], ["moved", 69], ["warm", 40], ["warm", 60]],
+        "caption": "Gradient is nearly flat; nudges are tiny and model barely forgets."
+      },
+      {
+        "title": "3. Add label smoothing: soften target",
+        "viz": "box",
+        "viz_args": "Target: cat -> smoother target: 80% cat, 20% other",
+        "caption": "Instead of cat-or-nothing, aim for partial answer."
+      },
+      {
+        "title": "4. Gradient climbs a steeper slope",
+        "viz": "weights",
+        "viz_args": [["moved", 65], ["moved", 60], ["free", 50], ["moved", 62], ["free", 45], ["free", 55], ["moved", 68], ["free", 48], ["free", 52], ["moved", 55], ["free", 40], ["free", 60]],
+        "caption": "Now gradient is steep; model relearns toward softer target."
+      },
+      {
+        "title": "5. Result: data is forgotten cheaply",
+        "viz": "plain",
+        "caption": "Model predictions on unwanted data no longer match training."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "1. Identify forgetting data",
+        "text": "Select samples the model must unlearn."
+      },
+      {
+        "b": "2. Smooth target labels",
+        "text": "Replace hard targets (only correct answer) with soft targets (correct answer gets most weight, wrong answers split remainder)."
+      },
+      {
+        "b": "3. Gradient ascent on smoothed targets",
+        "text": "Run optimizer backward: push model away from original predictions, toward the softened labels."
+      },
+      {
+        "b": "4. Keep other data stable",
+        "text": "Do normal gradient descent on remaining data; this pulls weights back toward answers they should keep, counterbalancing the unlearning push."
+      },
+      {
+        "b": "5. No retraining needed",
+        "text": "Done in one forward pass; model is unlearned at small computational cost."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Standard gradient ascent for unlearning tries to maximize loss on unwanted data using the original hard labels (one correct answer, rest wrong). UGradSL changes this single thing: it replaces those hard targets with smoothed labels during the gradient ascent step, keeping the rest of the algorithm identical."
+    ],
+    "object": "Target labels during unlearning"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Gradient steepness",
+    "name": "Gradient magnitude on unwanted data",
+    "paras": [
+      "When a model has memorized training data, the loss is nearly zero, which means the gradient is nearly flat. A flat gradient gives no direction to move. The hidden quantity the paper measures and improves is the size of the gradient signal available during unlearning. Larger gradient means a clearer direction to push the model away from the memorized behavior, because a steeper slope tells the optimizer exactly which direction will reduce loss most quickly.",
+      "The paper estimates this gradient signal by computing the loss under both hard and smoothed labels. Hard labels (certainty of 1.0 for correct answer) produce shallow gradients on memorized data because the model's prediction is already nearly correct, leaving little error to push against. Smoothed labels (correct answer gets 0.9 probability, wrong answers share 0.1) create steeper gradients because the targets are no longer at the edge of possibility—they are in a region where the model's current predictions still have clear distance to travel, giving the gradient a larger slope to climb."
+    ],
+    "heat": {
+      "cells": [["Loss on hard label", 1, false], ["Gradient magnitude", 1, false], ["Loss on soft label", 3, true], ["Gradient magnitude", 3, true], ["Well-memorized data", 4, true], ["Training data", 2, false], ["Remaining data", 2, false], ["Unlearning data", 4, true], ["Model weights", 2, false], ["Model confidence", 1, false], ["Label uncertainty", 3, true], ["Forgetting signal", 3, true]],
+      "caption": "Darker means stronger gradient signal. Smoothing makes shallow gradients into steep signals."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When you memorize a piano piece perfectly, you cannot improve by practicing—there is nothing to correct. To unlearn it, you need to practice something wrong enough that the distance from wrong to right is noticeable and your mind focuses on fixing it. Smooth labels give you that distance."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "When data is well-memorized, the loss (prediction error) is nearly zero, so the gradient (direction to adjust) is nearly flat. Smoothed labels move the target away from the memorized point into a region with real loss and steep gradients, enabling effective gradient ascent."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the gradient cliff",
+    "paras": [
+      "The core mechanism is geometric. Well-memorized training data sits in a flat valley—the model's predictions match the targets so precisely that there is almost no error, so there is no slope to climb. When you use gradient ascent, trying to push the model's predictions away, there is no hill to push against. The model barely moves because the optimizer takes steps proportional to the gradient's size, and a nearly-zero gradient produces nearly-zero steps.",
+      "Smoothed labels move the target away from the flat spot. Instead of aiming at the exact correct answer, you aim at a softer target: 90% correct answer, 10% spread across wrong classes. This moves the goal into a region where the loss still has slope. Now when gradient ascent climbs, it climbs a real slope and moves noticeably, because the optimizer's steps are proportional to gradient size and a steep gradient produces large steps. The model shifts its predictions away from memorized outputs toward the softer targets, and the unwanted data is forgotten. At the same time, you apply normal gradient descent on the remaining training data, keeping the model accurate on what it should remember. The balance between the two gradients keeps the model useful while unlearning."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Unwanted training samples with original labels"
+        },
+        {
+          "t": "step",
+          "s": "Smooth labels: 90% correct, 10% distributed over wrong classes",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute loss against smoothed targets"
+        },
+        {
+          "t": "step",
+          "s": "Climb loss gradient: update weights away from smoothed targets"
+        },
+        {
+          "t": "output",
+          "s": "Model predictions shift; unwanted data is forgotten"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: loss over two data sets",
+    "words": "Total loss for unlearning equals loss with smoothed labels on unwanted data (climbing gradient) plus normal loss on remaining data (descending gradient).",
+    "equation": "L_total = alpha * L_soft(f(x_f), y_smooth) + L_hard(f(x_r), y_r)",
+    "symbols": [
+      ["L_total", "the combined loss for this unlearning step"],
+      ["alpha", "how much weight to give unlearning relative to keeping other data useful"],
+      ["L_soft", "cross-entropy loss using softened target labels"],
+      ["f(x_f)", "model output on unwanted data sample x_f"],
+      ["y_smooth", "softened label: correct class gets 0.9, wrong classes share 0.1"],
+      ["L_hard", "cross-entropy loss using original hard labels"],
+      ["f(x_r)", "model output on remaining data sample x_r"],
+      ["y_r", "original hard label for remaining data"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose unwanted sample: image of dog, class label 1 (dog), alpha=0.5.",
+        "Hard label: y = [0, 1, 0, 0] (100% dog).",
+        "Soft label: y_smooth = [0.033, 0.9, 0.033, 0.033] (90% dog, 10% split across 3 other classes).",
+        "If model predicts [0.2, 0.5, 0.15, 0.15] (50% dog, not confident):",
+        "  Hard loss = -log(0.5) = 0.69 (steep penalty for 50% dog vs 100% dog).",
+        "  Soft loss = -0.9*log(0.5) - 0.033*log(0.2)*3 = -0.62 - 0.16 = 0.46 (much lower, smoother slope).",
+        "Now gradient on soft loss has clear direction: push prediction away from [0.2, 0.5, 0.15, 0.15] toward [0.033, 0.9, 0.033, 0.033].",
+        "Same update on remaining data pulls prediction back toward useful answers, balancing both objectives."
+      ]
+    },
+    "note": "The soft labels turn a flat valley (hard labels on memorized data) into a sloped hill, so gradient ascent actually has a direction to move."
+  },
+  "bars": {
+    "h2": "Unlearning accuracy: forgetting vs utility",
+    "charts": [
+      {
+        "title": "Gradient ascent alone (baseline)",
+        "rows": [
+          ["Old task before forgetting", 94, "good"],
+          ["Old task after forgetting", 89, "bad"],
+          ["Other data after forgetting", 92, "good"],
+          ["Forgotten data still matches training", 45, "bad"]
+        ],
+        "note": "Gradient is flat on memorized data; unlearning stalls."
+      },
+      {
+        "title": "UGradSL with smoothed labels",
+        "rows": [
+          ["Old task before forgetting", 94, "good"],
+          ["Old task after forgetting", 78, "good"],
+          ["Other data after forgetting", 93, "good"],
+          ["Forgotten data diverges from training", 22, "good"]
+        ],
+        "note": "Smoother targets give steep gradients; model forgets cleanly without retraining."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Smoothing value too small (too little softening).",
+        "html": "If you soften labels too little (e.g., 99% correct, 1% wrong), gradients stay nearly flat and unlearning fails. The opposite of the original problem."
+      },
+      {
+        "warn": true,
+        "b": "Smoothing value too large (too much softening).",
+        "html": "If you soften labels too much (e.g., 50% correct, 50% wrong), you push the model equally away from all classes, producing random noise instead of genuine forgetting. The model loses its ability to distinguish the unwanted class."
+      },
+      {
+        "warn": true,
+        "b": "Remaining data gets corrupted.",
+        "html": "If gradient descent on remaining data is too weak (alpha too high toward unlearning), the model forgets useful information alongside unwanted data. Balance is critical."
+      },
+      {
+        "b": "Done right: choose smoothing carefully.",
+        "html": "The paper provides a self-adaptive method to select the smoothing parameter automatically, avoiding manual tuning. Start with a moderate value (e.g., 0.9 for correct class) and verify on a validation set that both unlearning accuracy and remaining-data accuracy improve together, because this balance proves that gradients from smoothing are steep enough to unlearn yet weak enough not to corrupt the model's other knowledge."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple classifier (e.g., three-class image classifier) trained on a small dataset (e.g., CIFAR-10 subset). Select a small forgetting set (20 images from one class). Apply standard gradient ascent unlearning, measure how much the model's predictions on the forgetting set change. Then apply UGradSL with smoothed labels (e.g., 0.9 for correct class, 0.05 for each wrong class) and measure again. The demo must show that smoothing produces a steeper gradient signal and better forgetting with less computational cost than retraining, because side-by-side comparison of prediction changes on the forgetting set will reveal that smoothed labels move the model's answers further away in fewer steps."
+    ],
+    "metric_eq": "Unlearning success = (training-accuracy-before) - (training-accuracy-after), measured on forgotten samples only. Higher is better. Also measure: remaining-data-accuracy-before minus remaining-data-accuracy-after. Should be near zero (no useful data forgotten).",
+    "closing": "The demo must make clear that smoothed labels give gradient ascent a steep enough slope to unlearn, without retraining."
+  }
+}

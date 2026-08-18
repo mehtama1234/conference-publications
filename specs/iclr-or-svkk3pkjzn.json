@@ -1,0 +1,197 @@
+{
+  "slug": "iclr-or-svkk3pkjzn",
+  "title": "iLLaVA: Merging Image Tokens to Speed Up Vision-Language Models",
+  "family": "Efficiency & Systems",
+  "one_liner": "iLLaVA speeds up vision-language models by merging redundant image tokens in both the encoder and the language model, recycling information from discarded tokens so nothing useful is lost.",
+  "lead": "A vision-language model reads an image in two stages: first an image encoder (a specialized model that processes the image) converts the image into a sequence of tokens (compressed pieces of information), then a language model reads those tokens to answer questions. Most prior methods only trim tokens in the second stage. iLLaVA goes further: it trims redundant tokens in both stages, and when it discards a token, it carefully preserves useful information by merging it into a nearby token that gets kept. Because the encoder produces most tokens and the language model's computation scales with token count, trimming both stages cuts overall time while merging keeps accuracy intact.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why vision-language models are slow",
+    "paras": [
+      "A vision-language model processes an image by first breaking it into a grid of patches (small square regions), then converting each patch into a token (a compressed vector, a list of numbers). A typical image might become 500 to 1000 tokens. The language model then reads all those tokens alongside text instructions to answer questions. In the language model, each token compares itself to every other token to decide what to pay attention to (attention means focusing: each word looks at all other words to decide which ones are relevant). When you have N tokens, that is N times N comparisons, so doubling the tokens quadruples the work.",
+      "Existing acceleration methods only prune tokens inside the language model stage. But they miss the bigger bottleneck: the image encoder itself (the first stage) produces the majority of those tokens, and computing the encoder is expensive on its own. Trimming tokens only at the end does not reduce the work of the encoder or the load it places on the language model."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Image encoders create most tokens, and the language model consumes them with quadratic cost. Existing methods prune only the output; iLLaVA prunes both the encoder and the language model, and recycles discarded information so accuracy does not drop."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Raw image becomes tokens",
+        "viz": "weights",
+        "viz_args": [["hot", 88], ["hot", 82], ["warm", 45], ["free", 12], ["hot", 91], ["warm", 38], ["free", 8], ["free", 5], ["warm", 42], ["hot", 79], ["free", 15], ["warm", 35]],
+        "caption": "Image encoder breaks image into 500+ tokens; most are noise."
+      },
+      {
+        "title": "2. Language model must read all",
+        "viz": "box",
+        "viz_args": "Language model sees 500+ tokens; quadratic cost = slow.",
+        "caption": "Every token increases compute by its own count again."
+      },
+      {
+        "title": "3. iLLaVA selects and tags useful tokens",
+        "viz": "weights",
+        "viz_args": [["moved", 88], ["moved", 82], ["free", 45], ["free", 12], ["moved", 91], ["free", 38], ["free", 8], ["free", 5], ["free", 42], ["moved", 79], ["free", 15], ["free", 35]],
+        "caption": "Based on attention scores, pick the 40% most informative."
+      },
+      {
+        "title": "4. Merge others into their nearest useful neighbor",
+        "viz": "weights",
+        "viz_args": [["moved", 92], ["moved", 85], ["moved", 94], ["moved", 81], ["free", 0], ["free", 0], ["free", 0], ["free", 0], ["free", 0], ["free", 0], ["free", 0], ["free", 0]],
+        "caption": "Discarded tokens' information flows into neighbors as weighted sums."
+      },
+      {
+        "title": "5. Result: half as many tokens, same knowledge",
+        "viz": "plain",
+        "caption": "Language model processes fewer tokens with no accuracy loss."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Identify noise using attention",
+        "text": "In each encoder block, the attention module naturally shows which parts of the image matter (birds matter, background does not). Use those scores to pick the top 40 percent of tokens as keepers."
+      },
+      {
+        "b": "Step 2: Group discarded tokens with their nearest keeper",
+        "text": "For each token marked for deletion, find the 5 nearest keepers based on similarity. This token becomes part of their group."
+      },
+      {
+        "b": "Step 3: Merge by weighted average",
+        "text": "For each group, blend all the tokens together using a weighted sum (each token weighted by how similar it is to the keeper). The keeper now carries the merged knowledge."
+      },
+      {
+        "b": "Step 4: Repeat in both encoder and language model",
+        "text": "Apply this strategy at multiple layers inside the image encoder to progressively reduce tokens as they flow forward. Do the same selectively in the language model."
+      },
+      {
+        "b": "Step 5: Faster answers with no loss",
+        "text": "The language model receives half as many tokens, which means one quarter the attention comparisons (since comparisons scale as N times N). Merged tokens carry information from their deleted neighbors because each discarded token's value is blended into the keeper, so the model still sees all important visual details even though some tokens are gone."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The thing that changes",
+    "paras": [
+      "iLLaVA operates on the token sequence: it deletes some tokens and merges their information into others. Unlike prior methods that only act on the language model's input, iLLaVA applies token merging inside the image encoder as well, where most tokens originate. Cutting tokens in the encoder saves time in two ways: the encoder itself has less work to do because each forward pass through the layers processes fewer tokens, and the language model receives fewer inputs so its attention cost drops (since attention scales as N times N, halving tokens cuts cost to one quarter)."
+    ],
+    "object": "image and language tokens"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: attention-based importance",
+    "name": "Attention-score-based token importance",
+    "paras": [
+      "The paper measures which tokens matter using attention scores. Attention is the mechanism by which transformers focus: at each token position, the model computes a score for every other token (how much it should pay attention to it). Tokens that are heavily attended to (high scores) carry important information; tokens that are rarely attended (low scores) are noise.",
+      "iLLaVA applies this idea: it collects the average attention score each token receives across all attention heads in an encoder block, then ranks tokens by that score. High-scoring tokens are kept; low-scoring tokens are discarded (but their information is merged into neighbors before discarding). This is a training-free method: the scores are computed from the existing attention weights without any retraining."
+    ],
+    "heat": {
+      "cells": [["w1", 4, true], ["w2", 4, true], ["w3", 2, false], ["w4", 1, false], ["w5", 4, true], ["w6", 1, false], ["w7", 1, false], ["w8", 1, false], ["w9", 2, false], ["w10", 3, false], ["w11", 1, false], ["w12", 2, false]],
+      "caption": "Darker means higher attention score, so token is kept. Lighter means discarded but merged."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A token that many other tokens pay attention to must encode something the model cares about. A token few attend to is probably redundant or background."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper computes S_avg (average attention score per token) and selects the top 40 percent as keepers, recycling low-scoring tokens into the groups of high-scoring ones."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why merging redundancy works",
+    "paras": [
+      "The mechanism has two parts: why it is safe to delete low-importance tokens, and how merging preserves information. First, the image encoder is designed to extract visual features progressively. Most of the image (sky, grass, uniform texture) gets the same encoded meaning; only a few regions (the bird, distinctive objects) require separate tokens. Attention scores naturally reflect this: background tokens score low because they carry no new information. Deleting them removes noise, not signal.",
+      "Second, when you delete a token, you lose all its numerical content. iLLaVA instead merges it: the discarded token gets averaged into its 5 nearest neighbors (selected by how similar their encoded vectors are). This blending preserves the signal in the deleted token because it is likely expressing a subtle variation of the same concept as its neighbors. Mathematically, each token contributes to the merge weighted by its similarity score, so tokens more closely related to the keeper contribute more. The keeper becomes a slightly richer representation of its local neighborhood."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Encoder block outputs tokens with attention scores"},
+        {"t": "step", "s": "Rank tokens by attention importance", "hl": true},
+        {"t": "step", "s": "Mark top 40 percent as keepers, rest for deletion"},
+        {"t": "step", "s": "For each doomed token, find 5 nearest keeper neighbors"},
+        {"t": "step", "s": "Merge: blend doomed token into neighbor group via weighted sum", "hl": true},
+        {"t": "step", "s": "Pass merged tokens to next layer"},
+        {"t": "output", "s": "Forward with fewer tokens, no information loss"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The merging equation",
+    "words": "For each token to be deleted, compute the weighted sum of that token and its neighbors by averaging them according to their similarity to each neighbor.",
+    "equation": "merged_token = sum_j (sim_j / sum_k sim_k) * token_j",
+    "symbols": [
+      ["merged_token", "the new combined value assigned to the keeper token"],
+      ["sim_j", "similarity score between the deleted token and neighbor token j (based on dot product of their vector representations)"],
+      ["token_j", "the encoded vector of neighbor j"],
+      ["sum_k sim_k", "total similarity, used to normalize weights to sum to 1"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a background token will be deleted. Its vector is [0.2, 0.5, 0.3] and three keepers nearby are: K1=[0.2, 0.4, 0.3], K2=[0.15, 0.6, 0.2], K3=[0.1, 0.3, 0.5].",
+        "Compute similarity (dot product): sim_K1 = 0.2*0.2 + 0.5*0.4 + 0.3*0.3 = 0.04 + 0.2 + 0.09 = 0.33. sim_K2 = 0.03 + 0.3 + 0.06 = 0.39. sim_K3 = 0.02 + 0.15 + 0.15 = 0.32.",
+        "Total similarity: 0.33 + 0.39 + 0.32 = 1.04.",
+        "Weights: 0.33/1.04 = 0.32, 0.39/1.04 = 0.38, 0.32/1.04 = 0.31.",
+        "Merged value assigned to K1: 0.32*K1 + 0.38*K2 + 0.31*K3 = 0.32*[0.2,0.4,0.3] + 0.38*[0.15,0.6,0.2] + 0.31*[0.1,0.3,0.5] ≈ [0.17, 0.43, 0.31].",
+        "K1 becomes [0.17, 0.43, 0.31], richer with information from its neighbors."
+      ]
+    },
+    "note": "The merging sums are weighted by similarity because more similar tokens carry more relevant information to preserve in the keeper."
+  },
+  "bars": {
+    "h2": "Impact on speed and accuracy",
+    "charts": [
+      {
+        "title": "Before (no merging)",
+        "rows": [["Time per image in milliseconds", 200, "bad"], ["Tokens the language model reads", 500, "bad"], ["Accuracy on questions", 78, "good"]],
+        "note": "Image encoder runs fully; all tokens flow to the language model."
+      },
+      {
+        "title": "After iLLaVA (with merging)",
+        "rows": [["Time per image in milliseconds", 100, "good"], ["Tokens the language model reads", 250, "good"], ["Accuracy on questions", 78, "good"]],
+        "note": "Encoder is faster because it outputs fewer tokens. Language model is faster because it reads fewer inputs (quadratic cost reduced). Knowledge is preserved in merged tokens."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Aggressive pruning loses fine details.",
+        "html": "If you delete too many tokens (e.g., 70 percent instead of 60 percent), even careful merging cannot preserve all visual detail, because each merger blends information from multiple tokens and you lose resolution with each blend. The merged tokens become too coarse and the model answers questions poorly. The paper tested different deletion rates and found 40 percent keepers works best."
+      },
+      {
+        "warn": true,
+        "b": "Attention scores can be misleading early in the model.",
+        "html": "In the first few layers of the encoder, attention patterns are still noisy (the model has not yet learned what to focus on). Relying on these scores to select tokens can remove truly useful information. iLLaVA applies merging only in middle and later layers to avoid this."
+      },
+      {
+        "warn": true,
+        "b": "Merging with incorrect neighbors degrades accuracy.",
+        "html": "If a doomed token is merged into an unrelated keeper (bad similarity match), its information is mixed with the wrong context, creating corrupted vectors. The paper uses similarity thresholds to ensure only closely related tokens are grouped."
+      },
+      {
+        "b": "Done right, the trade-off holds.",
+        "html": "When you choose the right layers (middle and later ones, not the noisy early layers) and the right pruning ratio (40 percent keepers), merging preserves accuracy because the information in nearby tokens is redundant (early layers extract similar features), so blending them loses little. The paper demonstrates this on multiple image and video datasets, and even shows that a larger model with iLLaVA can match a smaller model that runs unmerged."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small vision-language model that answers a question about an image. First, run it without token merging and record the time it takes and the model's answer. Then enable iLLaVA merging: in the image encoder, rank tokens by attention (which reflects what the model learned to focus on), keep the top 40 percent because they carry the information the model depends on for understanding, and for each deleted token, blend its values into its most similar keeper using a weighted sum (weighted by how similar they are, since similar tokens carry similar information). Do the same in one language model layer. Measure the new time and re-run the same question. The demo should show that time drops 30 to 50 percent while the answer remains correct because merging preserves information (the deleted token's content flows into the keeper, so nothing important is lost) and reduces computation (fewer tokens means fewer comparisons in attention, scaling from N times N down to 0.4N times 0.4N)."
+    ],
+    "metric_eq": "speedup = latency_without_merging / latency_with_merging; accuracy_change = accuracy_with_merging - accuracy_without_merging",
+    "closing": "If the speedup is real but accuracy plummets, merging is too aggressive. If latency barely changes, merging is not applied to the right layers. The demo proves that iLLaVA moves the speed-accuracy curve."
+  }
+}

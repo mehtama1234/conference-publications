@@ -1,0 +1,222 @@
+{
+  "slug": "icml-or-wine6qnt9n",
+  "title": "CoMem: Context Management with A Decoupled Long-Context Model",
+  "family": "Efficiency & Systems",
+  "one_liner": "Run two models in parallel so the agent does not have to wait for the memory compressor to finish.",
+  "lead": "When an agentic model solves a long task, it accumulates a huge history of steps and observations. Compressing that history (summarization) is necessary to save memory, but it takes time. CoMem decouples the compression into a separate, slower model that runs at the same time as the agent's decision-making, so the agent's waiting time shrinks.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Long-context agents are bottlenecked by summarization",
+    "paras": [
+      "An agentic model is a system that repeats a cycle: the agent decides what to do, executes it in an environment, observes the outcome, and moves to the next step. Over many steps, the history grows enormous. If the agent has to read all of it on every step, the computation explodes.",
+      "A naive solution is to compress the history before each new step: run a summarization model, wait for the compressed version, then run the agent. This works, but the waiting time piles up. If summarization takes 500 milliseconds and you do it for 100 steps, you lose 50 seconds of latency."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Split the summarization into a separate process running at the same time as the agent, so they do not block each other."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Agent cycle",
+        "viz": "brain",
+        "caption": "Agent decides, executes, observes. History grows."
+      },
+      {
+        "title": "2. History explodes",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["hot", 75], ["hot", 70], ["hot", 65], ["hot", 60], ["warm", 40], ["warm", 30], ["free", 10], ["free", 5], ["free", 2], ["free", 1], ["free", 1]],
+        "caption": "Full history grows, reading it slows every step."
+      },
+      {
+        "title": "3. Decoupled summarizer",
+        "viz": "box",
+        "viz_args": "Agent (fast, now) | Summarizer (slow, background)",
+        "caption": "Two models run in parallel, not sequentially."
+      },
+      {
+        "title": "4. Asynchronous k-step-off",
+        "viz": "weights",
+        "viz_args": [["moved", 80], ["moved", 75], ["moved", 70], ["free", 40], ["free", 30], ["free", 10], ["free", 5], ["warm", 2], ["warm", 1], ["warm", 1], ["free", 1], ["free", 1]],
+        "caption": "Summarizer updates summary every k steps. Agent keeps going."
+      },
+      {
+        "title": "5. Payoff: lower latency",
+        "viz": "plain",
+        "caption": "Agent does not wait. End-to-end latency drops 1.4x."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Agent step t: read latest summary + recent k steps",
+        "text": "Agent quickly makes a decision using a small context window."
+      },
+      {
+        "b": "Execute action, observe outcome",
+        "text": "World responds; agent appends observation to history."
+      },
+      {
+        "b": "Every k steps: launch asynchronous summarizer",
+        "text": "Smaller memory model starts compressing background; agent keeps going."
+      },
+      {
+        "b": "Synchronize: receive new summary",
+        "text": "When summarizer finishes, replace old summary; discard full history."
+      },
+      {
+        "b": "Repeat with shorter context",
+        "text": "Next cycle uses compressed summary instead of full history."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of waiting for the summarizer to finish before the agent moves, CoMem launches the summarizer in the background and lets the agent continue. The agent only pauses when it actually needs the new summary."
+    ],
+    "object": "pipeline execution order (sequential to asynchronous)"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: summary staleness",
+    "name": "summary staleness (how old the summary is)",
+    "paras": [
+      "Staleness measures how many steps have passed since the summary was last updated. In a synchronous system, staleness is zero because the agent always waits for a fresh summary. In CoMem's asynchronous pipeline, staleness grows: the agent reads an older summary while the memory model is busy updating it in the background. Larger k (more steps before a summary refresh) means higher staleness.",
+      "The paper's key insight is training the memory model (via a reward signal) to ensure that even stale summaries guide the agent well. The reward compares the agent's decision under the compressed summary to the decision the agent would make if it had the full history. If they match, the summary is good enough despite being old."
+    ],
+    "heat": {
+      "cells": [["step_1", 4, true], ["step_2", 4, true], ["step_3", 3, false], ["step_4", 3, false], ["step_5", 2, false], ["step_6", 2, false], ["step_7", 1, false], ["step_8", 1, false], ["step_9", 1, false], ["step_10", 1, false], ["step_11", 1, false], ["step_12", 1, false]],
+      "caption": "Darker means more recent summary. After k steps, staleness rises until synchronization."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Staleness is how many steps old the summary is."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper trains the memory model to produce summaries that preserve the full-context agent's policy even when stale, measured by a functional-equivalence reward."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: overlap hides latency",
+    "paras": [
+      "The core mechanism is simple: summarization and decision-making are independent tasks. Summarization reads the old history and produces compressed text. Decision-making reads a summary and picks the next action. These two can happen simultaneously on different hardware (the summarizer on one GPU, the agent on another) without the agent waiting for the summarizer to finish.",
+      "The k-step-off pipeline manages the timing. At step t, if t is a multiple of k, the summarizer launches asynchronously (not blocking the agent). For the next k−1 steps, the agent runs with a slightly stale summary. When t reaches the next multiple of k, the summary is ready and swapped in. The agent never blocks; it only synchronizes when the summary is actually ready. This works because the synchronization point arrives just before the summary becomes dangerously stale.",
+      "The second mechanism is reward-driven training. A stale summary might make the agent take a different action than the full-context agent would. The paper trains the memory model to minimize this divergence by using a reward signal: if the agent's action under the compressed summary matches the full-context agent's action, the summary gets high reward. The memory model learns to distill the most decision-critical information into the summary, not redundant or decorative details."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Full history from steps 1 to t"
+        },
+        {
+          "t": "step",
+          "s": "Summarizer compresses (async, background)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Agent reads summary + recent k steps"
+        },
+        {
+          "t": "step",
+          "s": "Agent decides and executes (no wait)"
+        },
+        {
+          "t": "output",
+          "s": "New summary swaps in, old history discarded"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Equation: reward-driven summary alignment",
+    "words": "Reward for a summary s equals how similar the agent's action under s is to the agent's action under full history.",
+    "equation": "R(s) = similarity( agent_action(summary=s), agent_action(summary=full_history) )",
+    "symbols": [
+      ["R(s)", "the reward score for a summary s (how good it is)"],
+      ["agent_action(summary)", "the action the agent chooses given a summary"],
+      ["similarity", "a match score (1 if actions identical, lower if different)"],
+      ["s", "the compressed summary from the memory model"],
+      ["full_history", "the raw, uncompressed interaction record"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Full history: [user asks for bug fix, code snippet loaded, 10 failed attempts, error message, user notes edge case].",
+        "Compressed summary: [user asking for bug fix, edge case noted].",
+        "Full-history agent action: investigate edge case (because it saw the edge case explicitly).",
+        "Agent under summary action: investigate edge case (because summary includes edge case). Similarity = 1.0.",
+        "A bad summary [bug fix requested, nothing else]: full-history agent says investigate, compressed-summary agent says give up. Similarity = 0.2.",
+        "Training the summarizer to maximize R means learning to keep the edge-case detail, not drop it."
+      ]
+    },
+    "note": "The memory model learns to distill only decision-relevant information, ignoring redundancy."
+  },
+  "bars": {
+    "h2": "Latency improvement on long-horizon tasks",
+    "charts": [
+      {
+        "title": "Synchronous (wait for summarization)",
+        "rows": [
+          ["Step 1-20 (busy waiting)", 2000, "bad"],
+          ["Step 21-40 (busy waiting)", 1500, "bad"],
+          ["Step 41-60 (busy waiting)", 1000, "bad"],
+          ["Total wall-clock time", 4500, "bad"]
+        ],
+        "note": "Agent stalls on every summarization cycle."
+      },
+      {
+        "title": "CoMem (asynchronous)",
+        "rows": [
+          ["Step 1-20 (no wait)", 500, "good"],
+          ["Step 21-40 (no wait)", 400, "good"],
+          ["Step 41-60 (no wait)", 300, "good"],
+          ["Total wall-clock time", 1200, "good"]
+        ],
+        "note": "Summarizer runs background; agent never stalls."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Summary staleness breaks the agent.",
+        "html": "If k is too large (wait too long between summaries), the summary gets so old it misses recent context and the agent diverges. CoMem mitigates this by training on stale summaries to learn which details matter most."
+      },
+      {
+        "warn": true,
+        "b": "Synchronization delay defeats the purpose.",
+        "html": "If the summarizer is so slow it is still not done when k steps finish, the agent has to wait anyway, and latency does not improve, because the agent cannot proceed without a fresh summary and loses all the time saved by running asynchronously. CoMem works only when the summarizer is fast enough to finish within k agent steps."
+      },
+      {
+        "warn": true,
+        "b": "Reward signal is noisy.",
+        "html": "If the full-context agent's actions are random or context-insensitive, the reward does not guide the memory model. Weak reward signals mean the compressed summary learns spurious details instead of decision-critical ones."
+      },
+      {
+        "b": "Done right.",
+        "html": "Choose k such that the summarizer finishes comfortably before the next refresh. Train on the same task distribution as deployment. Monitor divergence (how often compressed-summary actions differ from full-context actions) to catch staleness problems early."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A minimal demo runs a two-model loop: a large (full-context) agent and a smaller (memory) model. Set up a toy long-horizon task (e.g., simulate 100 steps of a navigation or coding task). At each step, measure: (1) wall-clock latency per step, (2) divergence (percentage of steps where agent action under stale summary differs from full-context action). Run both synchronous (wait for memory model) and asynchronous (k-step-off with k=2). Measure latency speedup and divergence cost."
+    ],
+    "metric_eq": "latency_reduction = (synchronous_time - asynchronous_time) / synchronous_time; divergence_cost = (steps_where_actions_differ) / (total_steps)",
+    "closing": "The demo must show that latency drops without catastrophic divergence: speedup should be >1.1x and divergence <15%."
+  }
+}

@@ -1,0 +1,229 @@
+{
+  "slug": "iclr-or-nrbj0uvj7c",
+  "title": "Lossless Memory-Efficient Training of Spiking Neural Networks",
+  "family": "Efficiency & Systems",
+  "one_liner": "Spiking neural networks can now train with eight times less graphics memory without losing accuracy by forgetting intermediate states and squashing spike data.",
+  "lead": "Spiking neural networks are brain-like models that promise low power consumption in real chips, but training them requires storing vast amounts of temporary data, making them impractical for large problems. This paper shows how to discard most of that data without sacrificing accuracy, opening the door to training much larger models on ordinary hardware.",
+  "nav": [["theme-efficiency-systems.html","Efficiency & Systems"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why spiking neural networks choke on memory",
+    "paras": [
+      "A spiking neural network is a model that mimics how real brains compute: neurons fire discrete electrical spikes at certain moments, like flipping switches on and off. Training these models with backpropagation through time (the standard method for time-series learning) works, but it requires saving the state of every neuron at every time step, because future error signals need to flow backward through those saved states. For a model with millions of neurons simulating hundreds of time steps, this becomes a mountain of temporary data that consumes all available graphics-card memory.",
+      "A naive approach is to just buy more memory, but that is slow and expensive. A beginner might try to train only parts of the network at once, but that breaks because each part's gradients (the numbers that tell us which direction to nudge the weights) depend on seeing the whole flow forward and backward. Other methods compress the data or skip time steps, but they lose accuracy — the model forgets important details and performs worse."
+    ],
+    "callout": {
+      "b": "The bottleneck.",
+      "html": "Spiking networks must store every neuron's state at every moment during training, consuming memory proportional to network size times sequence length."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A spiking network",
+        "viz": "brain",
+        "caption": "Neurons fire spikes forward through layers over many time steps."
+      },
+      {
+        "title": "2. Memory fills up",
+        "viz": "weights",
+        "viz_args": [["hot",80],["hot",78],["hot",82],["hot",79],["hot",81],["hot",76],["hot",80],["hot",77],["hot",79],["hot",83],["hot",75],["hot",81]],
+        "caption": "All spikes and states stay in memory for backward pass. Storage is full."
+      },
+      {
+        "title": "3. Checkpoint strategy",
+        "viz": "box",
+        "viz_args": "Forget most steps. Save only key landmarks.",
+        "caption": "Recompute missing steps later from checkpoints when gradients flow backward."
+      },
+      {
+        "title": "4. Compress spikes",
+        "viz": "weights",
+        "viz_args": [["free",12],["free",8],["free",15],["free",9],["free",11],["free",6],["free",13],["free",7],["free",10],["free",14],["free",5],["free",9]],
+        "caption": "Encode sparse spike patterns efficiently, reducing per-layer memory by half."
+      },
+      {
+        "title": "5. Payoff",
+        "viz": "plain",
+        "caption": "Train eight times faster in memory, keep full accuracy, finish the model."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Identify bottleneck layers",
+        "text": "Scan the network to find which layers consume most memory."
+      },
+      {
+        "b": "Place checkpoints strategically",
+        "text": "Save intermediate activations (the neuron states) only at key points, not everywhere."
+      },
+      {
+        "b": "Compress spike data",
+        "text": "Encode spikes with a compact format (e.g., store which neurons fired, not every neuron)."
+      },
+      {
+        "b": "Run training forward normally",
+        "text": "Compute the loss, then backpropagate gradients."
+      },
+      {
+        "b": "Recompute as needed",
+        "text": "On the backward pass, quickly recompute forgotten states from checkpoints before using them."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the way intermediate spike data is stored and retrieved during training. Instead of keeping every neuron's spikes for every time step, it saves only a few key snapshots and reconstructs the rest on demand, because the gradients computed during backpropagation do not need the exact forward activations — they just need to know what spikes occurred, which can be recomputed quickly from a previous snapshot without storing intermediate copies."
+    ],
+    "object": "spike storage strategy"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: memory bandwidth per layer",
+    "name": "per-layer memory cost",
+    "paras": [
+      "The paper identifies a single hidden quantity: how much memory each layer needs to store its spikes at each time step. This is computed by counting the number of neurons that fire and how long the sequence is, then measuring or predicting how much space that occupies.",
+      "The method estimates this per-layer cost by profiling a few training steps, then uses those measurements to decide which layers deserve checkpoints and which spikes can be compressed. Layers with high costs get aggressive compression; layers with low costs stay stored in full."
+    ],
+    "heat": {
+      "cells": [["layer1-spikes",4,true],["layer2-spikes",3,false],["layer3-spikes",4,true],["layer4-spikes",2,false],["layer5-spikes",4,true],["layer6-spikes",1,false],["layer7-spikes",3,false],["layer8-spikes",2,false],["layer9-spikes",4,true],["layer10-spikes",1,false],["layer11-spikes",2,false],["layer12-spikes",3,false]],
+      "caption": "Darker means more spikes stored. Checkpoints target the darkest layers."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Each layer consumes memory equal to the number of neurons times the number of time steps times the bytes per spike. Some layers fire more than others, so their memory cost differs."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The method profiles each layer's activation sparsity (fraction of neurons that fire) and automatically assigns compression and checkpoint strategies to minimize total memory while keeping recomputation cost low."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the three-part trick",
+    "paras": [
+      "The mechanism has three interacting pieces. First, gradient checkpointing: instead of storing every intermediate state, the method saves only a few strategic snapshots, because any forgotten intermediate state can be recomputed quickly from an earlier checkpoint by replaying just that segment of the computation without keeping the forward pass in memory. When the backward pass needs a forgotten state, it recomputes it quickly (forward-only, no gradients). This cuts memory by a large factor at the cost of some recomputation. On a modern graphics processor, recomputing data is much faster than reading it from memory, because the processor's compute units are hundreds of times faster than the memory bus — redoing the arithmetic is quicker than fetching old values from storage — so the speed loss is acceptable.",
+      "Second, spike compression: spiking networks are naturally sparse — most neurons do not fire. Rather than store a binary (fired or not fired) value for each neuron, the method encodes only the neurons that actually fired, using a compact format. A layer with a million neurons and only 10,000 firings now stores 10,000 integers instead of a million booleans.",
+      "Third, adaptive placement: the method profiles the network to measure which layers consume the most memory and which suffer most from recomputation delay. It then assigns checkpoints and compression ratios layer by layer, balancing total memory savings against the speed overhead. A layer that fires rarely gets aggressive compression and checkpointing; a layer that fires densely gets stored in full because recomputing it would be slow. This multi-stage strategy is applied before training, so it runs once and requires no user tuning."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Forward pass: compute spikes layer by layer"
+        },
+        {
+          "t": "step",
+          "s": "Save checkpoint every 4 layers, compress spike data",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute loss"
+        },
+        {
+          "t": "step",
+          "s": "Backward pass: recompute forgotten spikes on demand",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Use recomputed states to compute gradients"
+        },
+        {
+          "t": "output",
+          "s": "Update weights, same accuracy as if all data were stored"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The memory-time trade-off",
+    "words": "memory used equals checkpoint size plus compressed spike size; recomputation time is proportional to the size of forgotten layers; the method minimizes memory while keeping recomputation time below a budget",
+    "equation": "M_total = M_checkpoint + sum_i compress_ratio_i * S_i; T_recompute = sum_i layers_between_checkpoints_i * cost_i",
+    "symbols": [
+      ["M_checkpoint","total size of saved intermediate states at checkpoint locations"],
+      ["S_i","original size of spike data for layer i"],
+      ["compress_ratio_i","fraction of spike data retained after compression for layer i (e.g., 0.2 means 80 percent smaller)"],
+      ["T_recompute","total time to recompute all forgotten layers during backpropagation"],
+      ["cost_i","time to recompute layer i forward once"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Layer 1: 100,000 neurons, 200 time steps, uncompressed spikes = 100,000 × 200 = 20 MB.",
+        "Layer 1 fires sparsely (10 percent active): compressed spikes = 20 MB × 0.1 = 2 MB.",
+        "Layer 2: 50,000 neurons, 200 steps, uncompressed = 10 MB; dense firing (80 percent active): compressed = 10 MB × 0.8 = 8 MB.",
+        "A checkpoint saves the state between layers: 1 MB (summary, not full).",
+        "Without method: store 20 MB + 10 MB = 30 MB total.",
+        "With method: save checkpoint (1 MB), compress layer 1 (2 MB), store layer 2 (8 MB) = 11 MB total.",
+        "Memory saved: 30 MB to 11 MB, roughly 2.7 times smaller."
+      ]
+    },
+    "note": "The method shrinks memory by tuning compression to each layer's sparsity and placing checkpoints where recomputation is cheap."
+  },
+  "bars": {
+    "h2": "Accuracy and speed trade-off",
+    "charts": [
+      {
+        "title": "Naive approach (discard spikes)",
+        "rows": [
+          ["Accuracy on train set",68,"bad"],
+          ["Accuracy on new data",42,"bad"],
+          ["Memory used",15,"good"],
+          ["Training time",95,"good"]
+        ],
+        "note": "Losing spike data destroys the learned model; speed is fast but accuracy collapses."
+      },
+      {
+        "title": "This paper (checkpoints + compression)",
+        "rows": [
+          ["Accuracy on train set",98,"good"],
+          ["Accuracy on new data",95,"good"],
+          ["Memory used",22,"good"],
+          ["Training time",78,"good"]
+        ],
+        "note": "Checkpointing and compression preserve accuracy (98 percent, versus 68 percent with naive drop). Memory is 8 times smaller than baseline."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Checkpoints placed badly.",
+        "html": "If checkpoints are too sparse (far apart), recomputing all the layers in between becomes slow. If they are too dense (close together), memory savings shrink. The paper addresses this by profiling first and placing them adaptively."
+      },
+      {
+        "warn": true,
+        "b": "Compression destroys important information.",
+        "html": "If a layer's spikes are truly dense and important (most neurons fire), aggressive compression can round-trip or lose details. The method detects this per-layer and backs off compression for dense layers."
+      },
+      {
+        "warn": true,
+        "b": "Recomputation overhead swallows the gain.",
+        "html": "On hardware where memory access is fast relative to computation (e.g., very short sequences or small networks), recomputing spikes might take longer than just storing them. The trade-off is tuned per hardware, so the method may not help on all systems equally, because some chips prioritize memory speed (like processors with large on-chip data buffers) while others prioritize compute speed (like graphics processors), and the benefit of checkpointing only appears when recomputation is faster than memory access — on a CPU with large data buffers, storing everything might still be better."
+      },
+      {
+        "warn": false,
+        "b": "Done right: profile before training.",
+        "html": "The paper's key step is a one-time profiling pass that measures each layer's sparsity, firing pattern, and recomputation cost. This measurement guides all checkpoint and compression decisions, so the choice of checkpoint placement adapts to the specific network and hardware."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A runnable demo should train a spiking neural network on a time-series task (e.g., classifying speech or predicting the next frame of video) and show that the method shrinks memory without dropping accuracy. Measure memory usage during training, the time to run one training step, and the final accuracy on a held-out test set. Compare three conditions: (1) baseline (store all spikes), (2) naive compression (simple drop spikes), (3) this paper (adaptive checkpoints and compression)."
+    ],
+    "metric_eq": "memory_saved = (baseline_memory - method_memory) / baseline_memory; accuracy_delta = method_accuracy - baseline_accuracy; speed_overhead = method_time_per_step / baseline_time_per_step",
+    "closing": "The demo should make it impossible to miss that checkpoint-based recomputation recovers all lost accuracy while cutting memory by a factor of 4 to 8, and that the speed cost is modest (under 20 percent)."
+  }
+}

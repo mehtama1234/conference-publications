@@ -1,0 +1,237 @@
+{
+  "slug": "iclr-or-10iiew095e",
+  "title": "StreamingThinker: Large Language Models Can Think While Reading",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Instead of thinking only after reading the whole text, the model thinks as it reads, one sentence at a time, reducing the wait before the first reasoning output.",
+  "lead": "Today's language models read the entire text first, then think about it. That delays reasoning and makes earlier context fade into the background. StreamingThinker changes the order: the model reads a sentence, reasons about it, reads the next sentence, reasons about it, and so on—like how you think while reading. This cuts the waiting time by 80 percent and final answer time by over 60 percent, without sacrificing correctness.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why models think after reading, not during",
+    "paras": [
+      "Language models today always follow the same recipe: take the input, read all the way to the end, then start reasoning. This delay matters. If you are waiting for a model to answer a math problem or a question about a document, you wait for the entire input to load before any reasoning starts. The wait time depends on how many input words the model must consume before it produces its first reasoning word, and this can be large.",
+      "There is a deeper problem: by the time reasoning starts, the model has already laid down memory of the first sentences. When reasoning processes the whole text at once, those early parts are buried among later ones, and the model's focus spreads thin across everything. Early context gets diluted."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Models read everything, then think. This creates unnecessary delay and makes early information fade."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. What the old way does",
+        "viz": "box",
+        "viz_args": "Read all 5 sentences, THEN think",
+        "caption": "Input sits in a queue until fully loaded."
+      },
+      {
+        "title": "2. The problem bites",
+        "viz": "weights",
+        "viz_args": [["early", 2], ["middle", 3], ["late", 4], ["early", 2], ["middle", 3]],
+        "caption": "Early facts fade into noise when attention spans all five."
+      },
+      {
+        "title": "3. StreamingThinker's move",
+        "viz": "box",
+        "viz_args": "Read sentence → think → read → think",
+        "caption": "Reasoning starts as soon as first sentence arrives."
+      },
+      {
+        "title": "4. The mask blocks ahead",
+        "viz": "weights",
+        "viz_args": [["moved", 4], ["moved", 3], ["free", 1], ["free", 1], ["free", 1]],
+        "caption": "Each reasoning step sees only past, not future sentences."
+      },
+      {
+        "title": "5. The payoff",
+        "viz": "plain",
+        "caption": "Reasoning starts 80% faster, same accuracy, low latency."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Chop the input into pieces",
+        "text": "Divide text into sentences or chunks."
+      },
+      {
+        "b": "Stream reasoning in parallel",
+        "text": "For each chunk, generate reasoning steps as input arrives."
+      },
+      {
+        "b": "Block future peeks",
+        "text": "Attention mask forbids reasoning from seeing ahead."
+      },
+      {
+        "b": "Independent position indices",
+        "text": "Input words and reasoning words each count from zero separately."
+      },
+      {
+        "b": "Parallel KV cache",
+        "text": "Two memory lanes run together: input encoding and reasoning."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes WHEN reasoning starts. Instead of after reading, reasoning begins as each new piece of text arrives. It also changes HOW reasoning pays attention: a causal mask (like a blinder) blocks reasoning from looking ahead to sentences not yet read."
+    ],
+    "object": "when and how attention sees"
+  },
+  "hidden": {
+    "h2": "Token waiting time: how long until reasoning talks",
+    "name": "Tokens to first reasoning output",
+    "paras": [
+      "This is the number of input tokens the model must read before it produces the first word of reasoning. In the old system, you read all 500 input tokens, THEN start. In streaming, you read 100 tokens and reasoning begins—a huge difference in latency (how fast you perceive a response).",
+      "The paper measures this directly: it counts tokens consumed before the model says its first reasoning word. It also measures time delay the same way—wall-clock seconds from when you send the input to when you get back the first reasoning word."
+    ],
+    "heat": {
+      "cells": [
+        ["Input 1", 4, true],
+        ["Input 2", 4, false],
+        ["Reason 1", 2, false],
+        ["Input 3", 3, false],
+        ["Reason 2", 2, false],
+        ["Input 4", 2, false],
+        ["Input 5", 3, false],
+        ["Reason 3", 1, false],
+        ["Reason depth", 2, true],
+        ["Answer", 1, false],
+        ["Time to first", 3, true],
+        ["Answer latency", 3, true]
+      ],
+      "caption": "Darker means token arrived earlier; underlines mark when streaming reasoning kicks in."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "How many tokens must you read before you get back an answer? Streaming reads fewer."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Time to first token (TTFT) and time delay for first answer token are the key latency metrics."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why streaming reasoning works without losing accuracy",
+    "paras": [
+      "The trick is a three-part architecture. First, a streaming attention mask: when reasoning about sentence N, the mask says <em>you can look back to any of sentences 1 through N, but NOT ahead to N+1, N+2, ...</em> This forces the reasoning to stay grounded in what has been read so far. Without the mask, the model would cheat—it would peek ahead to information it should not have yet.",
+      "Second, streaming position encoding (a separate counting system). Normal models number tokens 1, 2, 3, ... 100. Here, input tokens count up (1, 2, 3, ... 50), and reasoning tokens count up independently (1, 2, 3, ... 30). This separation prevents the model from getting confused about which token belongs where. Why? Because if they share one counter, later reasoning tokens get higher numbers than early ones, and the model's learned associations break (positional interference).",
+      "Third, parallel KV caches—two separate memory lanes. One lane holds the input sentence as it arrives. The other lane holds the reasoning steps. Because they run in parallel, the model can encode a new input sentence while simultaneously generating reasoning about the previous sentence. No waiting, no redundant re-encoding."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Incoming text stream (one sentence)"
+        },
+        {
+          "t": "step",
+          "s": "Streaming attention mask (block ahead)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Independent position indices"
+        },
+        {
+          "t": "step",
+          "s": "Parallel KV encoding + reasoning"
+        },
+        {
+          "t": "output",
+          "s": "Reasoning output, low latency"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core formula: streaming thinking probability",
+    "words": "The probability of a reasoning sequence, where each reasoning step depends only on the input seen so far, plus a controllable depth adjustment at the end.",
+    "equation": "P_streaming = [product over t of P(R_t | C_<=t, R_<t)] * P(R_q | Q, C_<=T, R_<=T) * P(R | Q, C_<=T, R_<=T, I)",
+    "symbols": [
+      ["R_t", "the reasoning generated after reading sentence t"],
+      ["C_<=t", "all input sentences from start up to and including sentence t"],
+      ["R_<t", "all reasoning steps generated before step t"],
+      ["P(...)", "probability; the model computes how likely each next word is"],
+      ["product over t", "multiply these probabilities for every sentence chunk"],
+      ["Q", "the question"],
+      ["I", "optional instructions for reasoning depth"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Sentence 1 arrives. Model generates R_1 (reasoning about sentence 1 only). Probability = P(R_1 | C_1, no prior reasoning) = 0.75 (plausible).",
+        "Sentence 2 arrives. Model generates R_2, given sentences 1-2 and prior reasoning R_1. Probability = P(R_2 | C_<=2, R_1) = 0.82.",
+        "Sentence 3 arrives. Model generates R_3, given sentences 1-3 and prior reasoning R_1, R_2. Probability = P(R_3 | C_<=3, R_<3) = 0.80.",
+        "Final answer depends on all inputs and all reasoning so far: P(answer | Q, all C, all R) = 0.85.",
+        "Streaming total = 0.75 × 0.82 × 0.80 × 0.85 ≈ 0.42. The model computes this probability pattern efficiently because each step only looks back, never ahead."
+      ]
+    },
+    "note": "Each reasoning step is constrained to depend only on inputs already read, enforced by the attention mask, which is why streaming is causal (no peeking ahead)."
+  },
+  "bars": {
+    "h2": "Performance: streaming keeps accuracy, cuts latency",
+    "charts": [
+      {
+        "title": "Batch thinking (read all, then reason)",
+        "rows": [
+          ["Accuracy on math", 88, "good"],
+          ["Accuracy on logic", 82, "good"],
+          ["Time to first answer", 3200, "bad"],
+          ["Token wait", 500, "bad"]
+        ],
+        "note": "Correct answers but high latency; you wait for entire input."
+      },
+      {
+        "title": "StreamingThinker (read and reason together)",
+        "rows": [
+          ["Accuracy on math", 86, "good"],
+          ["Accuracy on logic", 81, "good"],
+          ["Time to first answer", 1200, "good"],
+          ["Token wait", 100, "good"]
+        ],
+        "note": "Accuracy stays nearly identical because streaming reasoning still sees all the input by the end (just spread across time); latency drops because reasoning starts early instead of waiting for the full input, which is why the first answer is 60% faster and you wait for 80% fewer words before reasoning begins."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Early context is weaker.",
+        "html": "When reasoning while reading, the model has less context at each step. If the answer depends heavily on later sentences clarifying earlier ones, streaming reasoning may miss the connection. The paper mitigates this with a post-reading depth-adjustment step (re-reasoning after all input is consumed), but true streaming means less historical information is available."
+      },
+      {
+        "warn": true,
+        "b": "Position encoding must be separate.",
+        "html": "If you forget to give input and reasoning tokens independent position counters, positional interference occurs: the model conflates positions and reasoning quality drops. This is not a limitation of the idea, but of the engineering."
+      },
+      {
+        "warn": true,
+        "b": "Attention mask must be causal.",
+        "html": "If the mask allows reasoning to peek ahead (a bug), the reasoning cheats and uses information it has not yet seen, which contradicts the whole point of streaming—producing timely answers based only on available data. Correctness collapses because the model learned to depend on information it should not have access to yet. The mask is the law."
+      },
+      {
+        "b": "Done right.",
+        "html": "When all three components (streaming attention, independent position encoding, parallel KV) are properly aligned, the model reasons incrementally without loss of core accuracy, only a small drop (1-2 points), and gains 60-80% latency reduction."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small model (or a 7-billion-parameter variant) and train it on a dataset of problems (math, logic, or reading comprehension) using the streaming approach. Then run two versions side by side: batch reasoning (old way) and streaming reasoning (StreamingThinker). Measure time to first reasoning output, accuracy on the final answer, and total latency."
+    ],
+    "metric_eq": "latency_gain = (time_batch - time_streaming) / time_batch × 100%, accuracy_gap = accuracy_batch - accuracy_streaming",
+    "closing": "The demo must show that streaming latency is at least 60% faster AND accuracy loss is less than 3 percentage points, because at that margin you are confident the streamng architecture is working (if losses exceed 5%, either the causal mask is letting information peek through, or position indices are tangled and confusing the model)."
+  }
+}

@@ -1,0 +1,244 @@
+{
+ "slug": "icml-or-1ytbhxugef",
+ "title": "Task-Aware Structured Memory",
+ "family": "Efficiency & Systems",
+ "one_liner": "Keep only the tokens a task needs by merging visual tokens intelligently and fetching more only when a question becomes different.",
+ "lead": "When a language model reads many images and examples at once, it stores every pixel detail in memory, which gets huge and slow. This paper (TASM) lets it keep only what matters for the current task, fuse related visual pieces (tokens, or small chunks of data) without losing their spatial arrangement, and fetch more details only when a new question arrives.",
+ "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+ "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+ "problem": {
+  "h2": "The memory wall in multi-modal learning",
+  "paras": [
+   "When a language model learns from examples (in-context learning), it stores the key-value pairs—essentially a complete index of every word and pixel—so it can look them up during generation. With images and many examples, this index explodes. If you naively keep every token, memory grows quadratically with the number of examples, and the model slows down checking every stored detail for every new token it generates.",
+   "Earlier approaches tried to delete less-important tokens, but visual tokens are spatial: removing one token can sever the connections between neighboring pixels, breaking the ability to reason about object shape and location. Other methods rank tokens by their attention weight, but attention weights reflect what the model has already focused on—not what will actually matter for the next task."
+  ],
+  "callout": {
+   "b": "The challenge.",
+   "html": "Compress memory without losing visual structure, and do it based on what the task needs, not what the model has attended to in the past."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Starting with all examples",
+    "viz": "weights",
+    "viz_args": [["hot", 45], ["hot", 40], ["hot", 50], ["hot", 42], ["hot", 48]],
+    "caption": "Every example's pixels and tokens stored—memory grows fast."
+   },
+   {
+    "title": "2. Old method: delete by attention",
+    "viz": "weights",
+    "viz_args": [["moved", 45], ["free", 0], ["hot", 50], ["free", 0], ["hot", 48]],
+    "caption": "Pruning ruptures spatial links between image regions."
+   },
+   {
+    "title": "3. Task vector points the direction",
+    "viz": "box",
+    "viz_args": "Task: 'find object color' guides what stays relevant",
+    "caption": "Separate signal from noise by the task's need."
+   },
+   {
+    "title": "4. Merge similar tokens, keep shape",
+    "viz": "weights",
+    "viz_args": [["warm", 35], ["warm", 32], ["hot", 50], ["warm", 34], ["hot", 48]],
+    "caption": "Graph matching clusters tokens without tearing visual structure."
+   },
+   {
+    "title": "5. Fetch more when the question changes",
+    "viz": "box",
+    "viz_args": "New query: 'count objects' - retrieve extra detail",
+    "caption": "On-demand retrieval adds tokens when the question type shifts."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Compute task direction",
+    "text": "Take the question and answer, extract a single vector showing their difference—that is the task's direction."
+   },
+   {
+    "b": "Rank tokens by task alignment",
+    "text": "Score each token by how aligned it is to that task direction, not by how much the model attended to it."
+   },
+   {
+    "b": "Merge without tearing",
+    "text": "Use graph matching to pair nearby tokens into single merged tokens, preserving the spatial layout of the image."
+   },
+   {
+    "b": "Build two-tier memory",
+    "text": "Store the most task-relevant tokens in fast Core Memory; put less-used tokens in a slower storage layer on disk."
+   },
+   {
+    "b": "Fetch dynamically at runtime",
+    "text": "During generation, check if the attention distribution has shifted (new query type); if so, retrieve extra tokens on demand."
+   }
+  ]
+ },
+ "object": {
+  "h2": "The object the paper changes",
+  "paras": [
+   "The paper does not change the model's weights or training. Instead, it changes the memory index—specifically which tokens are stored, how they are organized, and when they are fetched during generation."
+  ],
+  "object": "The memory index: which tokens stay, which merge, which are fetched on demand"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: alignment with task direction",
+  "name": "Task alignment score",
+  "paras": [
+   "Most compression methods rank tokens by attention weight (past focus). TASM instead measures alignment with the task direction—how closely each token points in the direction of the question-to-answer transformation. This is a single number per token, computed by projecting the token onto the latent task manifold (a mathematical way of asking: how much does this token move in the direction we need?).",
+   "The paper estimates it by taking the question and answer representations, subtracting them to get a task vector, then dot-producting each token with that vector. Tokens with high alignment are task-relevant; tokens near zero are noise (like punctuation)."
+  ],
+  "heat": {
+   "cells": [
+    ["Token 1 (question)", 3, true],
+    ["Token 2 (edge)", 1, false],
+    ["Token 3 (object)", 4, true],
+    ["Token 4 (punctuation)", 1, false],
+    ["Token 5 (object detail)", 4, true],
+    ["Token 6 (background)", 1, false],
+    ["Token 7 (edge)", 1, false],
+    ["Token 8 (object color)", 4, true],
+    ["Token 9 (noise)", 1, false],
+    ["Token 10 (spatial relation)", 3, true],
+    ["Token 11 (answer scaffold)", 3, true],
+    ["Token 12 (filler)", 1, false]
+   ],
+   "caption": "Darker means higher alignment with task direction. Tasks seeking object color light up color tokens; spatial tasks light up relation tokens."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Imagine a compass pointing from the question toward the answer. Tokens in that compass direction are task-relevant; tokens perpendicular to it are noise."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The paper projects tokens onto the task vector (the latent task manifold) and uses a layer-adaptive gating function to blend local attention (shallow layers, which see visual details) with global task alignment (deep layers, which see semantic relationships)."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why task alignment preserves structure better than attention",
+  "paras": [
+   "Attention weights are high on any token the model has already focused on—including 'attention sinks' like punctuation marks or special tokens that cluster attention for no semantic reason. So deleting low-attention tokens does not mean deleting irrelevant tokens; it means deleting tokens the model has not looked at yet.",
+   "Task alignment is different: it measures whether a token is actually relevant to the task transformation. When you compress based on task alignment, you delete tokens that are orthogonal to the task (perpendicular to the task vector), not tokens that were simply not noticed. This preserves the spatial structure of images, because spatial relationships (edges, object boundaries) are often highly task-aligned, even if the model's attention has not yet visited them.",
+   "Merging tokens via graph matching rather than deletion further protects structure: instead of vaporizing tokens, it fuses spatially-close tokens into single tokens, keeping the topology intact. The dynamic retrieval at runtime is the final step: tokens you cannot afford to keep in Core Memory are stored on disk (the Latent Bank), and fetched on-demand when the query type changes, signaled by a shift in the attention distribution."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Examples with images and text"
+    },
+    {
+     "t": "step",
+     "s": "Extract task vector from question and answer",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Score each token by alignment to task vector"
+    },
+    {
+     "t": "step",
+     "s": "Merge spatially-close tokens via graph matching",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Split into Core Memory and Latent Bank"
+    },
+    {
+     "t": "step",
+     "s": "During generation, detect query shift and fetch from bank"
+    },
+    {
+     "t": "output",
+     "s": "Compact, adaptive memory; fast generation"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The equation: layer-adaptive task alignment",
+  "words": "At each layer, blend local attention importance (shallow layers see pixel details) with global task importance (deep layers see meaning) using an adaptive gate",
+  "equation": "alignment_score(token, layer) = lambda(layer) * task_vector_score + (1 - lambda(layer)) * attention_score, where lambda(layer) ≈ 0.1 at shallow layers and ≈ 0.9 at deep layers",
+  "symbols": [
+   ["alignment_score(token, layer)", "how relevant this token is at this layer, blending two signals"],
+   ["lambda(layer)", "the gate: how much to trust the task vs. past attention (depends on depth)"],
+   ["task_vector_score", "dot product of token representation with task direction vector"],
+   ["attention_score", "the model's past attention weight on this token"],
+   ["shallow layers", "early model layers that extract edges and spatial details"],
+   ["deep layers", "later model layers that reason about semantics and meaning"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Shallow layer (layer 2 out of 12): lambda(2) ≈ 0.1. Token 'edge of car': task_score = 0.3, attention_score = 0.8. Alignment = 0.1 * 0.3 + 0.9 * 0.8 = 0.03 + 0.72 = 0.75. Mostly attention-driven because visual edges matter early.",
+    "Deep layer (layer 11 out of 12): lambda(11) ≈ 0.9. Same token 'edge of car': task_score = 0.8, attention_score = 0.2. Alignment = 0.9 * 0.8 + 0.1 * 0.2 = 0.72 + 0.02 = 0.74. Now task-driven because in deep layers, only task-relevant edges survive.",
+    "Compare to a punctuation token: task_score = 0.01 (orthogonal to task), attention_score = 0.9 (sink effect). Shallow: 0.1*0.01 + 0.9*0.9 = 0.81. Deep: 0.9*0.01 + 0.1*0.9 = 0.099. Punctuation gets downweighted in deep layers where task matters most."
+   ]
+  },
+  "note": "The gate flexibly shifts from trusting attention (which captures visual details) in shallow layers to trusting task alignment (which ignores sinks) in deep layers, preserving structure while eliminating noise."
+ },
+ "bars": {
+  "h2": "Trade-off: compression vs. accuracy",
+  "charts": [
+   {
+    "title": "Hard pruning (delete low-attention tokens)",
+    "rows": [
+     ["General task before", 98, "good"],
+     ["General task after pruning", 65, "bad"],
+     ["Spatial task after pruning", 52, "bad"],
+     ["Temporal task after pruning", 78, "bad"]
+    ],
+    "note": "Pruning tears spatial structure; spatial and temporal reasoning collapses."
+   },
+   {
+    "title": "TASM (task-aware merge and dynamic retrieval)",
+    "rows": [
+     ["General task before", 98, "good"],
+     ["General task after TASM", 92, "good"],
+     ["Spatial task after TASM", 98, "good"],
+     ["Temporal task after TASM", 108, "good"]
+    ],
+    "note": "Task alignment + graph merging preserve structure. Dynamic retrieval recovers performance on harder tasks."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Task vector is noisy or unstable.",
+    "html": "If the question and answer representations are not cleanly separated (e.g., in few-shot settings with weak examples), the task vector is weak. The paper addresses this by using layer-adaptive gating: in shallow layers where attention is stable, it trusts attention; in deep layers where semantics are clear, it trusts the task vector."
+   },
+   {
+    "warn": true,
+    "b": "Graph matching is expensive.",
+    "html": "Bipartite graph matching to merge tokens is combinatorially hard. The paper constrains the problem spatially (only merge nearby tokens), making it tractable."
+   },
+   {
+    "warn": true,
+    "b": "Dynamic retrieval adds latency.",
+    "html": "Checking the attention distribution shift at every generation step costs time. The paper uses a simple JS divergence threshold to trigger retrieval only when necessary, keeping the overhead low (3.4% trigger rate, 33ms latency overhead)."
+   },
+   {
+    "b": "Done right.",
+    "html": "TASM avoids these by using layer-adaptive blending (which works even when task signals are weak), spatially-constrained matching (which is computationally fast), and probabilistic retrieval gating (which adds little delay). The result is near-lossless compression across all task types."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a mini multi-modal model (e.g., CLIP + small language model, or just embeddings) on a small image-text dataset (e.g., CIFAR-10 with captions, or a custom 10-example in-context set). Implement TASM: (1) compute task vectors from two example pairs; (2) score all tokens by task alignment; (3) merge tokens via greedy spatial matching; (4) evaluate accuracy on held-out spatial and temporal reasoning tasks before and after compression. Show that task-aware compression outperforms random token deletion and attention-based deletion on spatial tasks, because task alignment preserves spatial relationships (edges and object boundaries are aligned with task vectors) while deletion or attention-based pruning tears them apart."
+  ],
+  "metric_eq": "Structure preservation = accuracy on spatial reasoning before compression minus accuracy on spatial reasoning after compression. A good result is < 5 percentage points drop at 60% compression ratio.",
+  "closing": "The demo must show that deleting tokens based on task alignment recovers accuracy on spatial reasoning tasks where random or attention-based deletion catastrophically fails."
+ }
+}

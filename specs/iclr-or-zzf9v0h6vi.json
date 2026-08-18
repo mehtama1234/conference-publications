@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-zzf9v0h6vi",
+  "title": "DSSA: Dense-Sparse Switchable Attention",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Reuse pretrained weights instead of adding new ones when switching from short to long text.",
+  "lead": "Language models read long documents by scoring how relevant every past word is, but that costs more computation and memory as the text gets longer. Existing solutions add extra sets of weights and switches that break the normal training process. DSSA keeps using the same weights but changes how the scoring is computed—dense (full) for short texts, sparse (selective) for long ones.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Scoring relevance becomes expensive as text grows",
+    "paras": [
+      "Modern language models use something called attention: for each word, the model scores how relevant every previous word is, then collects a weighted summary. When text is short (say 2,000 words), this works fine. But when text is long (say 100,000 words), the model needs to score every-word-against-every-word, which costs time and memory proportional to length-squared.",
+      "A beginner tries to train a sparse-attention model from scratch: pick a subset of relevant words, attend only to those. But practitioners train the model on short texts first (when full attention is cheaper), then try to adapt it to long texts later—this happens because training on long text would be slow from day one. This creates a mismatch: the model learned with one attention pattern, then suddenly gets a different one. Existing solutions like NSA add three extra sets of attention weights and gate them together, but this breaks convergence and slows training because the model must relearn how to use new structures."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Existing sparse-attention methods add new weights and switches that disrupt the standard training pipeline."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Dense attention",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["hot", 75], ["hot", 78], ["hot", 82], ["hot", 76]],
+        "caption": "Every word scores every past word. Expensive but works for short text."
+      },
+      {
+        "title": "2. NSA problem: three separate heads",
+        "viz": "weights",
+        "viz_args": [["moved", 60], ["moved", 65], ["moved", 58], ["free", 30], ["free", 25]],
+        "caption": "NSA adds three attention modules plus gates. Model relearns from scratch."
+      },
+      {
+        "title": "3. DSSA reuses the same weights",
+        "viz": "weights",
+        "viz_args": [["warm", 80], ["warm", 75], ["warm", 78], ["free", 15], ["free", 10]],
+        "caption": "Start with dense attention weights. Change how patterns are selected, not weights."
+      },
+      {
+        "title": "4. Sparse pattern: selected plus sliding blocks",
+        "viz": "box",
+        "viz_args": "Select topk blocks + sliding window. Union masks the sparse pattern.",
+        "caption": "Only attend to important blocks and a fixed window. Merged as one mask."
+      },
+      {
+        "title": "5. Same weights, different pattern",
+        "viz": "plain",
+        "caption": "Dense for short text. Sparse for long. No new weights, stable training."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Start with pretrained dense attention",
+        "text": "Use weights trained on short sequences. No retraining."
+      },
+      {
+        "b": "Compress blocks to find important ones",
+        "text": "Compute attention scores on compressed text. Identify high-scoring blocks."
+      },
+      {
+        "b": "Select and merge attention patterns",
+        "text": "Union the top-scoring blocks and a local sliding window into one sparse mask."
+      },
+      {
+        "b": "Apply sparse attention with same weights",
+        "text": "Use the original KV projections. Compute attention only on the selected blocks."
+      },
+      {
+        "b": "Switch smoothly as text grows",
+        "text": "Sequence length determines pattern. No gate logic, no multi-head aggregation."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": [
+      "DSSA does not add new weights. Instead, it changes which previous words the attention mechanism looks at. For short text, it looks at all words (dense). For long text, it looks at a sparse subset: the topmost-scored blocks plus a local sliding window."
+    ],
+    "object": "Attention pattern (which words to attend to)"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: attention focus",
+    "name": "Sparse pattern selection",
+    "paras": [
+      "DSSA introduces a hidden selection step: which token blocks deserve attention. Unlike a trainable router (as in NSA), DSSA computes this purely from attention scores of a compressed representation—no new learned values added.",
+      "The paper measures this by (1) which blocks are in the final sparse mask (topk scoring blocks plus sliding window), and (2) how alignment between this sparse pattern and dense attention scores affects downstream performance. A good sparse pattern keeps the same attention flow as dense attention; a bad one misses important information."
+    ],
+    "heat": {
+      "cells": [
+        ["block-0", 4, true],
+        ["block-1", 1, false],
+        ["block-2", 3, true],
+        ["block-3", 2, false],
+        ["block-4", 4, true],
+        ["block-5", 1, false],
+        ["block-6", 2, false],
+        ["block-7", 3, true],
+        ["block-8", 1, false],
+        ["block-9", 2, false],
+        ["block-10", 4, true],
+        ["block-11", 1, false]
+      ],
+      "caption": "Darker blocks score higher in compressed attention. DSSA selects these plus nearby blocks."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "DSSA asks: which previous blocks matter most? It answers by scoring a compact version of the sequence, taking the top blocks plus a window of nearby ones."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "DSSA uses attention scores from compressed attention to identify important token blocks, then unions this with a sliding window mask to form a unified sparse attention pattern that avoids the multi-head gating overhead of NSA."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why reusing weights works without breaking training",
+    "paras": [
+      "When a model is trained on short sequences with dense attention, the weights learn to work with that specific attention pattern—they become calibrated to it. If you suddenly switch to a different pattern (as NSA does), the weights are misaligned and training restarts. DSSA avoids this by keeping the same weights and merely choosing which blocks to attend to.",
+      "The trick is that sparse attention is a *subset* of dense attention: you run the same weight multiplications, but on fewer pairs. The model's learned weights still work because they are applied to the same (key, value) projections. Only the masking changes. This is why the paper calls it parameter-free: no new learnable weights are added.",
+      "Additionally, DSSA uses a compressed representation to pick which blocks matter (avoiding the expensive block selection that itself would offset the sparse-attention speedup). By merging the topk-scoring blocks with a sliding window into a single unified mask, it eliminates the overhead of NSA's three-way output gate."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Long token sequence"
+        },
+        {
+          "t": "step",
+          "s": "Compress to small blocks",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Score each block with compressed attention",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Select topk blocks and merge with sliding window",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply sparse attention using reused KV weights",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Output: 4x faster because sparse pattern is a subset"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The sparse attention equation",
+    "words": "Attention output for the unified sparse pattern is computed on the union of topk blocks (from compressed attention scores) and a sliding local window, using the original key-value projection weights.",
+    "equation": "O_sparse = softmax(Q @ K_selected^T / sqrt(d)) @ V_selected",
+    "symbols": [
+      ["Q", "query (what the model asks)"],
+      ["K_selected", "keys from selected blocks only"],
+      ["V_selected", "values from selected blocks only"],
+      ["d", "depth (number of hidden values per block)"],
+      ["O_sparse", "output from sparse attention pattern"],
+      ["softmax(...)", "convert scores to fractions that sum to one"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a 1024-token sequence is divided into 32 blocks of 32 tokens each.",
+        "Dense attention: score all 32-by-32 = 1024 block pairs. Cost: O(1024^2) = 1,048,576 operations.",
+        "DSSA: compress to 8 super-blocks, score 8-by-8 = 64 pairs. Top 2 blocks score 0.85 and 0.82. Merge with sliding window (±3 neighbors = 7 blocks). Total 9 blocks selected.",
+        "Sparse attention: score 9-by-9 = 81 block pairs. Cost: 81 / 1024 ≈ 8% of dense. The model uses the same trained KV weights on these 9 blocks, not new ones.",
+        "Result: 4x wall-clock speedup because sparse pattern is a subset of dense, and reused weights are already calibrated."
+      ]
+    },
+    "note": "Sparse pattern is a subset of dense attention, so reused weights remain valid without retraining—the model already knows how to use them."
+  },
+  "bars": {
+    "h2": "Performance trade-off",
+    "charts": [
+      {
+        "title": "NSA (separate weights)",
+        "rows": [
+          ["Short sequences before", 100, "good"],
+          ["Long sequences after", 95, "good"],
+          ["Training convergence time", 120, "bad"]
+        ],
+        "note": "NSA adds parameters and three modules, slowing convergence despite decent final performance."
+      },
+      {
+        "title": "DSSA (reused weights)",
+        "rows": [
+          ["Short sequences before", 100, "good"],
+          ["Long sequences after", 98, "good"],
+          ["Training convergence time", 95, "good"]
+        ],
+        "note": "DSSA retains performance (98% of dense) with stable, fast training because weights never change pattern."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Sparse pattern misses important words.",
+        "html": "If the compressed-attention heuristic picks the wrong blocks, the sparse attention loses information. This happens when important context is scattered (not concentrated in topk blocks). The paper mitigates this by adding a sliding window to catch local context."
+      },
+      {
+        "warn": true,
+        "b": "Compression step becomes a bottleneck.",
+        "html": "Computing attention on compressed blocks still requires sorting and topk selection. If this step is slow, the overall speedup shrinks. DSSA addresses this with optimized code running on the graphics chip."
+      },
+      {
+        "warn": true,
+        "b": "Very long text beyond what the model saw during training.",
+        "html": "Models trained on texts up to 4k tokens may not generalize well to 100k tokens, even with sparse attention. Sparse pattern assumptions may not hold at extreme lengths."
+      },
+      {
+        "b": "Done right.",
+        "html": "DSSA works when the task's important context clumps into blocks (e.g., reasoning chains in chain-of-thought), when the model is retrained on long text (not just used as-is), and when the compression ratio matches the task's locality."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should show that DSSA on long text (say 8k tokens) produces nearly identical outputs to dense attention on the same text, while cutting runtime by 3-4x. The metric is: (1) runtime speedup (measured elapsed time on the actual graphics chip), (2) output similarity (cosine distance should be >0.99, meaning the same numbers), and (3) task accuracy (e.g., on long-context QA, DSSA should match dense within 1-2 percentage points because sparse and dense are almost the same)."
+    ],
+    "metric_eq": "Speedup = Time_dense / Time_sparse; Similarity = cos_distance(output_dense, output_sparse); Accuracy_gap = Accuracy_dense - Accuracy_DSSA",
+    "closing": "The demo must show that sparse attention with reused weights stays accurate while halving or quartering the compute."
+  }
+}

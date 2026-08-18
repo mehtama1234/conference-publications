@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-aa14rlfr6k",
+  "title": "FlexRL: Load-Balanced RL for Vision-Language Models",
+  "family": "Efficiency & Systems",
+  "one_liner": "Split data loading across machines and chop sequences into chunks so GPUs never sit idle during RL training of large multimodal models.",
+  "lead": "When training a vision-language model (a model that sees images and understands text) using reinforcement learning (a feedback loop where the model tries things and learns from the results), the system wastes time waiting. Data loading stalls in one place, and uneven text/image/video lengths cause some GPUs to finish early and idle while others still work. FlexRL moves data loading to many machines at once and cuts long sequences into small chunks. Every GPU stays busy because data arrives faster (spread across workers) and all GPUs finish their work at the same time (chunks are equal-sized), so the whole training speeds up 4 to 8 times.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The bottleneck: training freezes waiting for data",
+    "paras": [
+      "Training a vision-language model with reinforcement learning is like an assembly line: fetch data, run the model (inference), score the results, nudge the weights. But the data comes in wild sizes: a text prompt is 50 words, a photo is huge, a video is enormous. One loader tries to grab everything at once, and it chokes. Meanwhile, some GPUs finish their work early and sit idle, twiddling their thumbs, while others are still crunching.",
+      "A beginner tries to just load all the data in one central place and hope the GPUs run at the same speed. This breaks because images and videos are slow to fetch over the network, and when they arrive, some sequences are short (10 tokens) and others are long (2000 tokens). A GPU assigned a short sequence finishes in 10 milliseconds; the one with the long sequence takes 200 milliseconds. The short-sequence GPU is now idle, wasting its expensive silicon."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "FlexRL spreads data loading to many worker machines in parallel and splits long sequences into small, equal-sized chunks so every GPU finishes at the same time."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: one loader",
+        "viz": "box",
+        "viz_args": "One big bottleneck",
+        "caption": "A single loader grabs all data slowly; GPUs wait."
+      },
+      {
+        "title": "2. Uneven sequences arrive",
+        "viz": "weights",
+        "viz_args": [["short", 20], ["short", 25], ["long", 95], ["long", 88], ["medium", 50]],
+        "caption": "Some sequences are tiny, others huge; GPUs run at different speeds."
+      },
+      {
+        "title": "3. Decentralized loading",
+        "viz": "box",
+        "viz_args": "Many workers in parallel",
+        "caption": "Worker 1, 2, 3 fetch data at the same time; no more central jam."
+      },
+      {
+        "title": "4. Sequence sharding: chop into chunks",
+        "viz": "weights",
+        "viz_args": [["moved", 32], ["moved", 32], ["moved", 32], ["moved", 32], ["moved", 32]],
+        "caption": "Long sequences split into equal chunks; every GPU runs the same duration."
+      },
+      {
+        "title": "5. GPUs run in lockstep",
+        "viz": "box",
+        "viz_args": "All finish together",
+        "caption": "No idle time; the pipeline flows smoothly from start to end."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Fan out data loading",
+        "text": "Instead of one machine loading everything, ten worker machines each fetch their own chunk of data at the same time."
+      },
+      {
+        "b": "Send only metadata to the controller",
+        "text": "Workers send a tiny summary (image names, text lengths) to a controller; the controller decides what to do next without waiting for the full data."
+      },
+      {
+        "b": "Chop sequences into fixed-size pieces",
+        "text": "A 2000-token sequence and a 100-token sequence both become a series of 128-token chunks; the GPU processes one chunk at a time."
+      },
+      {
+        "b": "Distribute chunks to GPUs evenly",
+        "text": "Each GPU gets the same number of chunks, so it takes the same time to finish its batch."
+      },
+      {
+        "b": "Reassemble results after processing",
+        "text": "Once all GPUs finish their chunks, combine the outputs and move on to the next training step; the whole machine runs in rhythm."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes two things: where and how data arrives. Instead of one central loader, many worker machines load data in parallel. Instead of keeping sequences whole (which means GPU run-time varies), cut every sequence into fixed-size chunks (which means every GPU finishes at the same time)."
+    ],
+    "object": "data loading architecture and sequence granularity"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: GPU utilization",
+    "name": "fraction of time a GPU is actively computing",
+    "paras": [
+      "GPU utilization is simply how much of each GPU's time is spent doing real work (processing sequences) versus waiting idle. In the old system, a GPU assigned a 50-token sequence might finish in 10 milliseconds, then sit idle for 190 milliseconds waiting for the other GPUs assigned 2000-token sequences to catch up. That GPU's utilization is only 5%.",
+      "FlexRL measures this by timing how long each GPU actually runs during training and comparing it to the total time the batch took. The paper's insight: by splitting sequences into equal chunks, every GPU gets an equal amount of work, so they all finish at the same time and utilization shoots up to 90%+ across the cluster."
+    ],
+    "heat": {
+      "cells": [
+        ["GPU1", 1, false],
+        ["GPU2", 1, false],
+        ["GPU3", 1, false],
+        ["GPU4", 4, true],
+        ["GPU5", 2, false],
+        ["GPU6", 2, false],
+        ["GPU7", 4, true],
+        ["GPU8", 1, false],
+        ["GPU9", 3, true],
+        ["GPU10", 2, false],
+        ["GPU11", 4, true],
+        ["GPU12", 3, true]
+      ],
+      "caption": "Darker means the GPU is computing; lighter means it is idle. Before FlexRL: spotty work. After: all four lights bright and full."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Imagine a restaurant with 10 cashiers. Some customers order one item (10 seconds), others order a whole party (3 minutes). Cashier 1 finishes fast and stands idle while Cashier 7 is swamped. GPU utilization is the fraction of time all cashiers are working. By pre-packaging orders into equal-sized bundles (one item per bundle), every cashier always has the same amount of work."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper measures GPU utilization as the total time spent running actual computations (the low-level code that runs on the graphics chip) divided by the time-to-completion of the batch. Decentralized loading and sequence sharding together keep this ratio above 90%, whereas the baseline (central loader, whole sequences) drops to 30-40% because GPUs are bottlenecked waiting for data arrival and for slower peers."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: two moving parts working in lockstep",
+    "paras": [
+      "The reason FlexRL speeds up training is mechanical. In a reinforcement learning pipeline, you fetch data (slow), run the model (medium), score results (fast), and update weights (fast). If data fetching blocks the whole pipeline, everything waits. FlexRL decentralizes: while GPU 1 is running inference on data from Worker A, Worker B is already fetching the next batch. The pipeline never stops for I/O.",
+      "The second part: sequences have different lengths. A 50-token prompt and a 2000-token video description take wildly different compute time. If GPUs are assigned whole sequences, they finish at different times, and the fast ones idle. FlexRL chops all sequences into 128-token chunks. Now every GPU gets exactly 10 chunks or exactly 10 chunks, no matter the original length. They finish at the same time, so no GPU ever waits. Utilization stays high.",
+      "The outcome: data I/O no longer blocks training (thanks to decentralization), and compute time is balanced (thanks to chunking). The whole pipeline runs at maximum speed because every resource is busy all the time."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Raw images, text, video"
+        },
+        {
+          "t": "step",
+          "s": "Workers fetch in parallel",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Chop sequences into equal chunks"
+        },
+        {
+          "t": "step",
+          "s": "Distribute chunks to GPUs"
+        },
+        {
+          "t": "step",
+          "s": "All GPUs finish at the same time",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Model weights updated"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The speedup formula",
+    "words": "speedup = original time / new time, where new time = max(data loading time with parallelism, computation time with balanced chunks). Because loading is spread across workers and chunks are equal-sized, both terms shrink and speedup is roughly the number of worker machines times the balancing factor.",
+    "equation": "T_new = max( T_load / num_workers , T_compute_balanced ); speedup = T_old / T_new",
+    "symbols": [
+      ["T_old", "total time with centralized loader and whole sequences"],
+      ["T_new", "total time with decentralized loader and chunked sequences"],
+      ["T_load", "time to load all data with one machine"],
+      ["num_workers", "number of parallel worker machines"],
+      ["T_compute_balanced", "computation time when all GPUs finish at the same time"],
+      ["speedup", "factor by which the new system is faster"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Scenario: 10 GPUs, 1000 images, 50 sequences.",
+        "Old system: load 1000 images serially (central loader) = 100 seconds. Sequences run on 10 GPUs at uneven speeds, finish in 50 seconds. Total: 100 + 50 = 150 seconds.",
+        "FlexRL with 5 worker machines: load 1000 images in parallel (200 per worker) = 100 / 5 = 20 seconds. Chunked sequences run at perfect balance = 50 seconds. Total: 20 + 50 = 70 seconds.",
+        "Speedup = 150 / 70 = 2.14x. With 10 workers, loading shrinks to 10 seconds, total = 60 seconds, speedup = 2.5x. (Paper reports 4-8x on real clusters because the imbalance before is worse than this toy example.)"
+      ]
+    },
+    "note": "The speedup is real because decentralization shrinks I/O wait time by the number of workers, and chunking removes GPU idle time from load imbalance."
+  },
+  "bars": {
+    "h2": "Before and after",
+    "charts": [
+      {
+        "title": "Old system: bottlenecked",
+        "rows": [
+          ["Data loading", 85, "bad"],
+          ["GPU inference", 40, "bad"],
+          ["Scoring and updates", 30, "good"],
+          ["GPU utilization", 25, "bad"]
+        ],
+        "note": "Central loader is the wall. GPUs idle while waiting for data and while fast sequences sit idle."
+      },
+      {
+        "title": "FlexRL: balanced",
+        "rows": [
+          ["Data loading", 20, "good"],
+          ["GPU inference", 40, "good"],
+          ["Scoring and updates", 30, "good"],
+          ["GPU utilization", 88, "good"]
+        ],
+        "note": "Parallelized loading shrinks its time. Chunking keeps GPUs busy. Utilization climbs because no resource is idle."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Sequence boundaries matter.",
+        "html": "If you split a sequence in the middle of a semantic idea (e.g., chop a question from its answer), the model loses context. FlexRL handles this by tracking boundaries at the token level and only splitting at safe points (between sentences, between images). If boundaries are ignored, the model learns gibberish."
+      },
+      {
+        "warn": true,
+        "b": "Worker machine imbalance.",
+        "html": "If one worker machine is slow (old hardware, network lag), it holds up the schedule. Decentralized loading only helps if workers are roughly equal, because the slowest worker determines how long the whole stage takes; if one worker is 10x slower than the others, the speedup shrinks and it becomes the new bottleneck instead of the central loader."
+      },
+      {
+        "warn": true,
+        "b": "Small batch sizes may not benefit.",
+        "html": "If the batch size is 8 sequences and you have 10 workers, some workers do nothing that step. FlexRL assumes batches are large (hundreds of sequences) so parallelism has room to shine. Tiny batches do not benefit as much."
+      },
+      {
+        "b": "Done right.",
+        "html": "When worker machines are balanced, sequence boundaries are honored, and batches are large, FlexRL removes both data I/O and compute imbalance. The whole 128-GPU cluster runs in lockstep because all GPUs finish their equal-sized chunks at the same time and no GPU waits for others, and training speeds up 4-8 times with no loss of model quality because the model trains on the same data just faster."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny RL training loop for a vision-language model with 1 million parameters on a small dataset (500 images, 500 text prompts, no videos). Implement two versions: one with a central data loader and whole sequences, one with FlexRL's decentralized loader and chunked sequences. Use 8 GPUs (or simulate using 8 CPU threads to approximate GPU behavior). Train for 100 steps and measure total time and GPU utilization (the fraction of time each GPU is doing actual computation, summed and divided by 8)."
+    ],
+    "metric_eq": "GPU utilization = (sum of time each GPU spent computing) / (8 * total time for 100 steps); speedup = time_old / time_flexrl",
+    "closing": "The demo must show that FlexRL keeps all 8 GPUs busy nearly all the time (>85% utilization), while the baseline has GPUs idle half the time. The demo is not about final model accuracy; it is about proving the system runs faster because no GPU waits."
+  }
+}

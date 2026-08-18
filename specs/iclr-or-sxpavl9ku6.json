@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-sxpavl9ku6",
+  "title": "Heterogeneous Federated Fine-Tuning with Parallel One-Rank Adaptation",
+  "family": "Efficiency & Systems",
+  "one_liner": "Split each LoRA module into multiple tiny one-rank pieces, and let weak clients skip the ones they cannot afford, folding them into frozen weights instead.",
+  "lead": "Large language models are fine-tuned by adding small trainable adapters called LoRA modules (low-rank patches) on top of frozen weights. When fine-tuning happens across multiple devices in federated learning, devices have different computing power—some can afford rank-4 adapters, others only rank-1. This mismatch causes noise and training failure. Fed-PLoRA solves this by splitting each LoRA module into multiple parallel one-rank pieces, letting each device train only the pieces it can handle.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Mismatch across devices breaks federated training",
+    "paras": [
+      "When a large language model (an AI trained on vast text) is adapted to a new task, we add small trainable modules called LoRA adapters on top of the frozen pre-trained weights. In federated learning, many devices collaborate: a phone with slow chips, a laptop, a server. Each device is responsible for updating adapters locally, then sending updates back to the server, which combines them and sends the updated adapters back to all devices.",
+      "The problem: devices have different compute budgets. A server with fast chips can afford rank-4 adapters (4 numbers wide in each rank). A phone with slow chips can only handle rank-1 (1 number wide). When the server averages rank-4 updates from a fast device with rank-1 updates from a phone, the two do not match. The server has to zero-pad (add fake zeros) to make them the same size, then truncate (cut off the fake parts). This introduces initialization noise—the phone's adapter looks different each round—and aggregation noise—the averaging is inaccurate.",
+      "A beginner might try: just let each device train its own rank independently and average in full weight space. This works but doubles the communication cost and still leaves misalignment."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Replace each LoRA rank with multiple parallel one-rank modules, let each device train only the ones it can afford, and fold the rest into frozen weights before training."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Classic LoRA has one rank-4 adapter",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["warm", 40], ["warm", 40], ["warm", 40], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10]],
+        "caption": "Rank-4 means 4 lines of numbers. A weak device cannot train all 4."
+      },
+      {
+        "title": "2. Fed-PLoRA splits rank-4 into four rank-1 modules",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["warm", 35], ["warm", 35], ["warm", 35], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10]],
+        "caption": "Now a weak device trains only 1 or 2, folds the rest into frozen."
+      },
+      {
+        "title": "3. Weak device folds unused modules into frozen weights",
+        "viz": "box",
+        "viz_args": "Frozen + Modules 3,4 -> becomes locked block",
+        "caption": "Folding means adding the unused adapter values to frozen weights once."
+      },
+      {
+        "title": "4. Training updates only the selected modules",
+        "viz": "weights",
+        "viz_args": [["moved", 40], ["moved", 40], ["free", 25], ["free", 25], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10], ["free", 10]],
+        "caption": "Device trains modules 1, 2. Modules 3, 4 stay in frozen weights."
+      },
+      {
+        "title": "5. Server averages only the trained modules per device",
+        "viz": "weights",
+        "viz_args": [["warm", 42], ["warm", 42], ["warm", 35], ["warm", 35], ["warm", 32], ["warm", 32], ["warm", 30], ["warm", 30], ["warm", 28], ["warm", 28], ["warm", 25], ["warm", 25]],
+        "caption": "No misalignment, no zero-padding. Each device updates a clean subset."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Split",
+        "text": "Replace one rank-4 LoRA module with four parallel rank-1 modules."
+      },
+      {
+        "b": "Fold",
+        "text": "Each device selects which rank-1 modules to train. Fold the rest into frozen weights before training starts."
+      },
+      {
+        "b": "Train",
+        "text": "Device trains only its selected modules. Frozen weights never change."
+      },
+      {
+        "b": "Collect",
+        "text": "Server receives updates only from modules each device actually trained."
+      },
+      {
+        "b": "Average",
+        "text": "Server averages the trained modules. No zero-padding or truncation needed."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces the single multi-rank LoRA adapter (which can be rank-1, rank-2, rank-4, etc. depending on the device) with a fixed set of parallel rank-1 adapters. Every device receives all of them, but trains only the subset it can afford."
+    ],
+    "object": "LoRA module structure"
+  },
+  "hidden": {
+    "h2": "Initialization and aggregation noise",
+    "name": "Mismatch between local and global adapters",
+    "paras": [
+      "When devices use different LoRA ranks, the server has to pad the smaller-rank updates with zeros and then truncate (cut off the fake parts). This creates two kinds of noise: initialization noise happens when a device receives a truncated adapter that looks different each round, and aggregation noise happens when the averaging of mismatched sizes is inaccurate.",
+      "Fed-PLoRA measures this by checking if each device's local target module (the frozen weights plus folded modules) matches the global adapter being trained. If it matches exactly, there is zero initialization noise and low aggregation noise."
+    ],
+    "heat": {
+      "cells": [
+        ["Device 1 rank-1", 1, false],
+        ["Device 2 rank-2", 2, false],
+        ["Device 3 rank-3", 3, false],
+        ["Server pad rank-3", 4, true],
+        ["Truncate mismatch", 4, true],
+        ["Init noise Device 1", 3, true],
+        ["Agg noise all ranks", 3, true],
+        ["Fed-PLoRA no pad", 1, false],
+        ["All modules fold", 1, false],
+        ["No truncation", 1, false],
+        ["Zero init noise", 1, false],
+        ["Low agg noise", 1, false]
+      ],
+      "caption": "Darker means higher noise. Fed-PLoRA (bottom rows) eliminates zero-padding and truncation."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When a weak device gets a rank-3 adapter but can only use rank-1, the server has to pretend the other 2 parts are zero. Next round, the device starts fresh. This wastes information."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Fed-PLoRA achieves zero initialization noise because each client receives the full set of R global PLoRA modules and selects a subset for local training, so all modules remain aligned in initialization across rounds."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the folding trick",
+    "paras": [
+      "Here is what works: an untrained LoRA adapter contributes nothing—it starts as zeros. So instead of leaving it as a trainable zero, you can add it permanently to the frozen weights before training. This is called folding. Once folded, the weak device trains only the adapters it can afford, but from the model's perspective it is using all of them (because the folded ones are baked into the weights).",
+      "This eliminates the mismatch. The server never sees rank-1 from one device and rank-3 from another. Every device trains a subset of the same rank-1 adapters. When the server receives updates from device 1 (modules 1, 2) and device 2 (modules 2, 3), it knows exactly which module each update is for. It averages module 1 only from device 1, module 2 from both, and module 3 only from device 2. No truncation, no zero-padding, no noise."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Device receives rank-4 global PLoRA (all parallel rank-1 modules)"
+        },
+        {
+          "t": "step",
+          "s": "Select subset to train (e.g. modules 1, 2)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Fold unused modules (3, 4) into frozen weights"
+        },
+        {
+          "t": "step",
+          "s": "Train selected modules (1, 2) on local data"
+        },
+        {
+          "t": "step",
+          "s": "Send back updates only for trained modules"
+        },
+        {
+          "t": "output",
+          "s": "Server averages each module from devices that trained it"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The folding equation and aggregation",
+    "words": "Local target module = frozen weights plus sum of folded rank-1 modules",
+    "equation": "W_local = W_frozen + sum of B_j * A_j for j not in selected set",
+    "symbols": [
+      ["W_local", "The effective weights on this device during training"],
+      ["W_frozen", "Pre-trained weights that never change"],
+      ["B_j", "Second matrix of rank-1 module j (column vector from previous round)"],
+      ["A_j", "First matrix of rank-1 module j (row vector from previous round)"],
+      ["j not in selected set", "Modules the device chose not to train"],
+      ["sum of B_j * A_j", "Contribution of each folded module (rank-1 update)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say we have 4 parallel rank-1 modules. Frozen weights W_frozen are at value 100.",
+        "Module 1: B_1 = 2, A_1 = 3, so B_1 * A_1 = 2 * 3 = 6 update.",
+        "Module 2: B_2 = 1, A_2 = 4, so B_2 * A_2 = 1 * 4 = 4 update.",
+        "Module 3: B_3 = 2, A_3 = 2, so B_3 * A_3 = 2 * 2 = 4 update.",
+        "Module 4: B_4 = 1, A_4 = 1, so B_4 * A_4 = 1 * 1 = 1 update.",
+        "Weak device can only afford to train modules 1, 2.",
+        "Folding: W_local = 100 + 4 + 1 = 105 (modules 3, 4 folded in, treated as frozen).",
+        "Device trains modules 1 and 2 with this W_local as the starting point.",
+        "Updates to modules 1, 2 go back to server. Modules 3, 4 never trained by this device but stay in global set for other devices."
+      ]
+    },
+    "note": "Folding lets a weak device use all rank-1 modules (via frozen weights) but train only the ones it can afford."
+  },
+  "bars": {
+    "h2": "Performance comparison",
+    "charts": [
+      {
+        "title": "Standard heterogeneous LoRA (zero-padding method)",
+        "rows": [
+          ["Initialization noise per round", 45, "bad"],
+          ["Aggregation noise after averaging", 52, "bad"],
+          ["Communication cost (uplink bytes)", 40, "good"]
+        ],
+        "note": "Noise comes from mismatched ranks and truncation."
+      },
+      {
+        "title": "Fed-PLoRA with folding",
+        "rows": [
+          ["Initialization noise per round", 0, "good"],
+          ["Aggregation noise after averaging", 18, "good"],
+          ["Communication cost (uplink bytes)", 38, "good"]
+        ],
+        "note": "No noise from rank mismatch. Communication stays low because devices send only what they trained."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Uneven training of modules.",
+        "html": "If one device always selects the same subset (e.g. always modules 1, 2) and another always selects a different subset (modules 3, 4), then modules 1, 2 improve while modules 3, 4 stagnate, because the server only updates modules that devices actually train—if no device trains module 4, it never gets a gradient update. Fix: randomize the selection across rounds."
+      },
+      {
+        "warn": true,
+        "b": "Server does not have enough clients training a module.",
+        "html": "If module 3 is too hard and no weak device ever selects it, it never updates. The global module 3 stays at its initial value. Fix: ensure the server can trigger a minimum number of devices to train each module."
+      },
+      {
+        "warn": true,
+        "b": "Folding into frozen weights loses adaptation history.",
+        "html": "Once a module is folded, it becomes frozen. If that module later needs to update, it cannot—it is locked into the weights. Fix: only fold modules that are truly not needed for the current task."
+      },
+      {
+        "b": "Done right.",
+        "html": "If devices randomly select modules across rounds and the server has enough total clients, every module gets updated by someone, initialization noise is zero, and aggregation noise is low."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small language model (e.g. a 6-layer transformer that reads text and predicts the next word). Add standard LoRA (rank-4) to one layer. Simulate 3 federated devices: one server with fast chips (trains all 4 rank-1 modules), one laptop (trains 2), one phone (trains 1). Run both standard heterogeneous LoRA (zero-padding method) and Fed-PLoRA for 10 rounds, each round running local training on a small task dataset. Measure initialization noise each round (how much the local target weights differ from the previous round's global module) and final task accuracy."
+    ],
+    "metric_eq": "Initialization noise = norm of (W_local_round_t - global_module_round_t)",
+    "closing": "Fed-PLoRA should show zero initialization noise every round while standard LoRA noise grows across rounds. Final task accuracy should be equal or better despite the weak device training fewer modules, because the weak device still uses all modules (via folding), just does not update them—so it has access to the knowledge from other clients' module updates."
+  }
+}
