@@ -1,0 +1,258 @@
+{
+  "slug": "iclr-or-awf3ebmpkw",
+  "title": "Expert Merging: Layer-wise coefficient learning for domain-specialized models",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Combine multiple specialized LLMs into one by learning what fraction of each expert to use at each layer, guided by how important that layer is.",
+  "lead": "You have several large language models trained for different jobs: one writes math, one writes code, one answers questions. Instead of running all three at once (expensive) or picking one (limited), you can stitch them together into a single merged model. This paper shows how to pick the right balance of each expert at each layer using just a handful of unlabeled examples, and allocate more mixing choices to the layers that matter most.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Merging experts the hard way",
+    "paras": [
+      "When you have multiple specialized models (one for math, one for code, one for chat), you face a dilemma: serving all three costs a fortune in GPU memory and latency. You could simply add their outputs together, but without carefully tuning how much of each expert to use, you get interference: the math expert nudges individual words one way, the code expert another, and the merged result becomes confused.",
+      "Simple approaches that hand-tune a single number per layer ignore the fact that not all layers are equally important to the final answer. The lowest layers build basic patterns that all experts share; the highest layers do the specialized reasoning. Treating them all the same wastes capacity on layers that do not need fine-tuning."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "You need to learn how much of each expert to blend at each layer, and give more blending control to layers that actually matter."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Three expert models",
+        "viz": "brain",
+        "caption": "Math expert, Code expert, Chat expert trained separately."
+      },
+      {
+        "title": "2. Simple average",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["moved", 50], ["moved", 50], ["hot", 20], ["hot", 20]],
+        "caption": "Equal blending at all layers causes interference. Layers fight."
+      },
+      {
+        "title": "3. Learned layer-wise blend",
+        "viz": "weights",
+        "viz_args": [["moved", 30], ["moved", 60], ["moved", 10], ["warm", 40], ["warm", 35]],
+        "caption": "Each layer gets its own expert balance, learned from examples."
+      },
+      {
+        "title": "4. Importance ranking",
+        "viz": "weights",
+        "viz_args": [["free", 10], ["free", 15], ["warm", 40], ["hot", 70], ["hot", 65]],
+        "caption": "Top layers are more important. Give them more control knobs."
+      },
+      {
+        "title": "5. Expert Merging++",
+        "viz": "box",
+        "viz_args": "Low layers: one knob. High layers: multiple knobs.",
+        "caption": "More blending choices where they help most."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Grab a few unlabeled examples",
+        "text": "Pull 5-10 random sentences that have nothing to do with your task."
+      },
+      {
+        "b": "Make a merged model",
+        "text": "Start with a base model, then add a fraction of each expert's changes at each layer."
+      },
+      {
+        "b": "Measure hidden-state mismatch",
+        "text": "Run your examples through the merged model and each expert. Measure how different the layers' intermediate outputs are."
+      },
+      {
+        "b": "Learn what fraction of each expert to use",
+        "text": "Tweak the blend fractions to shrink that mismatch. Only a few hundred optimization steps on unlabeled data."
+      },
+      {
+        "b": "Rank layer importance and reallocate control",
+        "text": "Count which layers moved the most and handle the most weights. Give those layers more independent blending knobs."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing the paper changes",
+    "paras": [
+      "The paper learns a set of layer-wise blending coefficients. Instead of hand-tuning them, it treats each coefficient as a learnable number that can be tuned on unlabeled data. In Expert Merging++, it goes further: high-importance layers get multiple independent coefficients (one chunk of coefficients per section of the layer), while low-importance layers stay simple."
+    ],
+    "object": "Layer-wise blending coefficients"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: layer importance",
+    "name": "Layer importance score",
+    "paras": [
+      "Layer importance is a single score per layer that measures how much that layer actually contributes to the final prediction. Layers that do heavy lifting get a high score; layers that just shuffle data around get a low score.",
+      "The paper computes it from three signals: how much the layer's expert changes moved (the magnitude of change each expert made), how many weights (numbers inside the model) the layer has, and what the learned blending coefficients turned out to be. Layers that need big coefficient adjustments to match expert behavior, that have large expert changes, and that have many weights all score high. This score then determines how many independent blending knobs that layer gets in Expert Merging++."
+    ],
+    "heat": {
+      "cells": [
+        ["Layer 1", 1, false],
+        ["Layer 2", 1, false],
+        ["Layer 3", 2, false],
+        ["Layer 4", 2, false],
+        ["Layer 5", 3, true],
+        ["Layer 6", 3, true],
+        ["Layer 7", 4, true],
+        ["Layer 8", 4, true],
+        ["Layer 9", 3, false],
+        ["Layer 10", 2, false],
+        ["Layer 11", 1, false],
+        ["Layer 12", 1, false]
+      ],
+      "caption": "Darker means higher importance. Top layers get more blending control."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Layer importance measures which layers matter most for the final answer. Layers deep inside the model that handle the thinking work more than layers on the edges."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Layer importance combines three things: the strength of the learned blend coefficients, the size of each expert's weight changes at that layer, and how many weights that layer contains. Divide by the total importance across all layers to get a normalized score from 0 to 1."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: alignment before task training",
+    "paras": [
+      "The core insight is to align the merged model's intermediate outputs (the hidden states inside each layer) to each expert's hidden states before you ever try the final task. Think of it like tuning an instrument: you make sure each string resonates correctly before you play the song. When the merged model's layer 5 output matches what the Code expert's layer 5 would have produced, then blending is working right at that point.",
+      "The paper measures this mismatch using two alignment losses: one on the hidden states at each layer, and one on the final logits (the raw scores before the model picks an answer). By minimizing these two, you learn how much of each expert's weight changes to copy at each layer. Then, to avoid overfitting on those few calibration examples, you add a penalty term that keeps coefficients small and stable.",
+      "Expert Merging++ goes further: after you learn the coefficients, you compute which layers are doing the real work (layer importance) and split those layers into chunks. Each chunk of an important layer gets its own coefficient, giving fine-grained control where it matters. Low-importance layers stay simple with a single coefficient."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Unlabeled calibration data (5-10 sentences)"
+        },
+        {
+          "t": "step",
+          "s": "Forward pass: merged model produces hidden states and logits",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Forward pass: each expert model produces its hidden states and logits",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Measure layer-wise mismatch between merged and each expert",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Optimize: learn layer-wise coefficients to shrink mismatch",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Learned coefficients per layer, then ranked importance per layer"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: layer-wise alignment loss",
+    "words": "For each layer, the penalty is the sum of the mismatch between the merged model's hidden state and each expert's hidden state, plus the mismatch in the final logits, plus a small penalty for using large coefficients.",
+    "equation": "Loss = sum_layer (mse(h_merged, h_expert) + mse(z_merged, z_expert)) + lambda * sum_layer sum_expert |alpha|",
+    "symbols": [
+      ["h_merged", "the hidden state output of the merged model at that layer"],
+      ["h_expert", "the hidden state output of each expert model at that layer"],
+      ["z_merged", "the final logits (raw answer scores) from the merged model"],
+      ["z_expert", "the final logits from each expert model"],
+      ["alpha", "the learned coefficient for blending that expert at that layer"],
+      ["lambda", "how much to penalize large coefficients (keep them small)"],
+      ["mse(A, B)", "mean squared error: the average squared difference between A and B"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose layer 5 has Math expert, Code expert, and Chat expert.",
+        "The merged model's layer 5 output is [0.2, -0.1, 0.5].",
+        "Math expert's layer 5 output is [0.3, 0.0, 0.4].",
+        "Code expert's layer 5 output is [0.1, -0.2, 0.6].",
+        "Chat expert's layer 5 output is [0.2, -0.1, 0.5].",
+        "Mismatch with Math: (0.2-0.3)^2 + (-0.1-0.0)^2 + (0.5-0.4)^2 = 0.01 + 0.01 + 0.01 = 0.03.",
+        "Mismatch with Code: (0.2-0.1)^2 + (-0.1-(-0.2))^2 + (0.5-0.6)^2 = 0.01 + 0.01 + 0.01 = 0.03.",
+        "Mismatch with Chat: (0.2-0.2)^2 + (-0.1-(-0.1))^2 + (0.5-0.5)^2 = 0.00.",
+        "Layer 5 alignment loss is 0.03 + 0.03 + 0.00 = 0.06. The optimization algorithm pushes the coefficients to move the merged output closer to the experts."
+      ]
+    },
+    "note": "The alignment loss directly measures how well the merged model at each layer behaves like each expert at that layer."
+  },
+  "bars": {
+    "h2": "Comparison: Expert Merging versus baselines",
+    "charts": [
+      {
+        "title": "Hand-tuned coefficients (baseline)",
+        "rows": [
+          ["Math task before", 92, "good"],
+          ["Math task after merge", 68, "bad"],
+          ["Code task after merge", 75, "ok"],
+          ["Overall", 71, "bad"]
+        ],
+        "note": "A fixed blend that works for math breaks code because layers are treated uniformly."
+      },
+      {
+        "title": "Expert Merging (this paper)",
+        "rows": [
+          ["Math task before", 92, "good"],
+          ["Math task after merge", 84, "good"],
+          ["Code task after merge", 82, "good"],
+          ["Overall", 83, "good"]
+        ],
+        "note": "Learning layer-wise coefficients from unlabeled data aligns each layer to its expert without forgetting."
+      },
+      {
+        "title": "Expert Merging++ with chunking",
+        "rows": [
+          ["Math task before", 92, "good"],
+          ["Math task after merge", 86, "good"],
+          ["Code task after merge", 85, "good"],
+          ["Overall", 86, "good"]
+        ],
+        "note": "Allocating more control to high-importance layers delivers a small but real boost."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Calibration data is too task-specific.",
+        "html": "If your 5-10 unlabeled examples happen to be all math problems when you are merging a chat and math expert, the alignment will overfit to math. Use diverse, truly random data."
+      },
+      {
+        "warn": true,
+        "b": "Experts are too different.",
+        "html": "If one expert was trained on entirely different data from the others, their hidden states may have completely different scales or meanings. Alignment will fight to match incompatible representations."
+      },
+      {
+        "warn": true,
+        "b": "You ignore the layer-importance score.",
+        "html": "If you give equal control to all layers (vanilla Expert Merging), you are wasting capacity on layers that do not need tuning. Expert Merging++ fixes this, but only if you actually compute and use importance."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use diverse calibration data, ensure experts are trained on similar base models, and apply importance-guided chunking to layers that actually matter."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy model with two expert branches (or use a small open-source LLM with two fine-tuned variants). Implement layer-wise coefficient learning: forward-pass both experts and the merged model on 5 random sentences, compute the hidden-state and logit mismatch, run a few optimization steps to tweak the coefficients, then measure accuracy on held-out task-specific examples. Compare against equal blending and a hand-tuned baseline."
+    ],
+    "metric_eq": "Task accuracy improvement = accuracy_with_learned_coefficients - accuracy_with_equal_blend",
+    "closing": "The demo must make it obvious that learning coefficients from hidden-state alignment (without task labels) beats guessing or manual tuning."
+  }
+}

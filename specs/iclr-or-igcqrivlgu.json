@@ -1,0 +1,238 @@
+{
+  "slug": "iclr-or-igcqrivlgu",
+  "title": "Don't Throw Away Your Beams: Improving Consistency-based Uncertainties in LLMs via Beam Search",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Instead of sampling random candidate answers to measure how confident an LLM is, use beam search to pick the best candidates, which gives steadier uncertainty estimates.",
+  "lead": "When a language model is asked a question, we want to know how confident it is in the answer. One way to measure that confidence is to ask the model the same question multiple times and see how much the answers agree. This paper replaces random sampling with a smarter search method that picks the most likely answers first, giving much steadier confidence measurements across repeated runs.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "How do we know if an LLM's answer is right or made up?",
+    "paras": [
+      "Large language models can sound confident while saying things that are false. When you ask one a factual question, it might give you a confident answer that is completely wrong. Humans need a way to spot when the model is uncertain, so they know when to trust it and when to double-check.",
+      "Today's method: ask the model the same question five or ten times, let it pick different random answers each time, and then check how many times the answers are the same. If the model keeps saying the same thing, we guess it is confident. If the answers are all over the place, we guess it is unsure. The problem is that models that are very sure about their favorite answer will pick that answer over and over by random chance, making the variance (the wiggle from one run to the next) very high and hard to measure."
+    ],
+    "callout": {
+      "b": "The core issue.",
+      "html": "Random sampling gives highly unpredictable confidence scores because the model's favorite answers keep getting picked by chance, drowning out the real pattern."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "brain",
+        "caption": "LLM is asked the same question three times randomly."
+      },
+      {
+        "title": "2. Random sampling (old way)",
+        "viz": "weights",
+        "viz_args": [["moved", 90], ["free", 10], ["moved", 90], ["moved", 90], ["free", 10]],
+        "caption": "Model keeps picking its favorite answer by chance alone."
+      },
+      {
+        "title": "3. High variance problem",
+        "viz": "weights",
+        "viz_args": [["free", 50], ["free", 60], ["free", 40]],
+        "caption": "Confidence estimates bounce around wildly across runs."
+      },
+      {
+        "title": "4. Beam search (new way)",
+        "viz": "box",
+        "viz_args": "Top-4 best answers picked in order",
+        "caption": "Beam search locks in the most likely answers early."
+      },
+      {
+        "title": "5. Low variance, steady confidence",
+        "viz": "weights",
+        "viz_args": [["warm", 65], ["warm", 64], ["warm", 66]],
+        "caption": "Confidence scores stay stable run after run."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Generate best answers",
+        "text": "Use beam search to find the top-k most likely answers to the question."
+      },
+      {
+        "b": "Step 2: Add random backup answers",
+        "text": "Sample additional random answers to fill out the candidate pool to size M."
+      },
+      {
+        "b": "Step 3: Compare all answers",
+        "text": "Measure how much each answer is similar to all the others using semantic similarity."
+      },
+      {
+        "b": "Step 4: Weight by likelihood",
+        "text": "Answers that the model said are more likely get more weight in the agreement calculation."
+      },
+      {
+        "b": "Step 5: Compute confidence",
+        "text": "Aggregate weighted agreement scores into a single confidence number."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces the sampling method that generates the list of candidate answers. Instead of drawing answers completely at random according to what the model thinks (multinomial sampling), the paper uses beam search to grab the most likely answers first, then fills the rest with random samples. This hybrid approach locks in the high-quality candidates early and reduces noise."
+    ],
+    "object": "candidate answer generation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: answer diversity",
+    "name": "consistency variance across runs",
+    "paras": [
+      "The paper tracks a quantity called consistency variance: how much the uncertainty score bounces around when you run the method multiple times on the same question. In random sampling, this variance is high because the model's favorite answers keep showing up by accident. In beam search, this variance is low because the best answers are always included.",
+      "The paper measures this by running the method on the same inputs many times and checking how much the confidence number changes. This is reported as error bars on the test results, and beam search has smaller error bars than random sampling."
+    ],
+    "heat": {
+      "cells": [
+        ["Run 1 confidence", 3, true],
+        ["Run 2 confidence", 3, true],
+        ["Run 3 confidence", 3, true],
+        ["Run 4 confidence", 2, false],
+        ["Random sampling var", 4, false],
+        ["Beam search var", 1, false],
+        ["Duplicate answers (random)", 4, false],
+        ["Diverse top-k answers", 1, true],
+        ["Stability metric", 3, true],
+        ["One answer dominates", 4, false],
+        ["Random luck picking answers", 2, false],
+        ["Deterministic best-k", 1, true]
+      ],
+      "caption": "Darker means higher variance or more repetition. Beam search keeps scores and answer sets stable."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The method checks how much the confidence scores wiggle when you run the same question multiple times. Beam search reduces the wiggle because the best answers always show up."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper reports standard deviations of the PR-AUC (area under precision-recall curve) scores across runs. Beam search methods show lower standard deviations, indicating reduced variance."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: locking in the best answers",
+    "paras": [
+      "The mechanism has three parts. First, beam search is deterministic: when you ask it for the top-4 answers, it always gives you the same top-4. Random sampling is not: sometimes the model picks answer A, sometimes answer B, even though both have high probability. Second, in tasks with short answers (like QA), the model's probability distribution is very peaked: the top answer is far more likely than the second-best. Random sampling keeps re-picking the top answer by pure chance, so you see duplicates and no real diversity. Beam search avoids this by locking in the diverse top-k answers first. Third, the paper weights each answer by how likely the model thinks it is, so even though beam search is deterministic, the final confidence score still accounts for which answers the model prefers.",
+      "The net effect: the uncertainty estimate becomes stable (low variance across runs) because the candidate set is always the same high-quality pool, yet still accurate because weighting accounts for the model's actual probabilities."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Question to the model"
+        },
+        {
+          "t": "step",
+          "s": "Beam search: grab top-k most likely answers",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Add M-k random answers to fill pool"
+        },
+        {
+          "t": "step",
+          "s": "Score similarity of each answer pair"
+        },
+        {
+          "t": "step",
+          "s": "Weight by model likelihood"
+        },
+        {
+          "t": "output",
+          "s": "Confidence score (low variance, stable)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The weighted consistency formula",
+    "words": "The uncertainty is computed as one minus the average (weighted by how likely each answer is) of how similar each answer is to the model's best guess.",
+    "equation": "U_beam = 1 - (1/M) * sum_i w_i * sim(y_i, y_best)",
+    "symbols": [
+      ["U_beam", "the uncertainty score (low = model is confident, high = model is unsure)"],
+      ["M", "total number of candidate answers we collect"],
+      ["w_i", "the likelihood weight of answer i (how much the model prefers it)"],
+      ["sim(y_i, y_best)", "semantic similarity between answer i and the model's best answer (0 to 1)"],
+      ["y_i", "the i-th candidate answer"],
+      ["y_best", "the highest-probability answer from beam search"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we collect M=4 answers. Beam search gives us the top-2 (y_1, y_2), random sampling gives us y_3 and y_4.",
+        "Model thinks: y_1 has weight 0.5, y_2 has 0.3, y_3 has 0.15, y_4 has 0.05.",
+        "Similarities to best answer y_1: sim(y_1,y_1)=1.0, sim(y_2,y_1)=0.6, sim(y_3,y_1)=0.2, sim(y_4,y_1)=0.1.",
+        "Weighted agreement: 0.5*1.0 + 0.3*0.6 + 0.15*0.2 + 0.05*0.1 = 0.5 + 0.18 + 0.03 + 0.005 = 0.715.",
+        "Uncertainty U_beam = 1 - 0.715 = 0.285 (so confidence is about 71%).",
+        "If random sampling had picked y_1 twice and y_3 twice, weighted agreement would jump to 0.5*1.0 + 0.5*0.2 = 0.6, giving U=0.4 (noisy). Beam search avoids this by always including y_1 and y_2."
+      ]
+    },
+    "note": "The weights give high importance to answers the model prefers, while beam search ensures the best answers always show up in the candidate pool."
+  },
+  "bars": {
+    "h2": "Comparison: random sampling vs. beam search",
+    "charts": [
+      {
+        "title": "Random sampling (old way)",
+        "rows": [
+          ["Confidence on correct QA", 73, "good"],
+          ["Confidence on wrong QA", 68, "bad"],
+          ["Run-to-run variance", 12, "bad"]
+        ],
+        "note": "Random sampling picks the same high-probability answers by accident, inflating variance and making the uncertainty unreliable."
+      },
+      {
+        "title": "Beam search (this paper)",
+        "rows": [
+          ["Confidence on correct QA", 76, "good"],
+          ["Confidence on wrong QA", 52, "good"],
+          ["Run-to-run variance", 3, "good"]
+        ],
+        "note": "Beam search locks in the best answers first, giving more reliable uncertainty estimates and much lower variance across repeated runs."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Beam search only works in white-box settings.",
+        "html": "The method needs access to the model's internal probability scores for each token. If you only have black-box access (you can query the model but cannot see probabilities), you cannot use beam search to estimate likelihoods."
+      },
+      {
+        "warn": true,
+        "b": "Beam width size matters.",
+        "html": "If the beam width k is too small, you might miss good alternative answers. If it is too large, you waste computation and the method converges to pure random sampling. The paper tuned k for each dataset."
+      },
+      {
+        "warn": true,
+        "b": "Not all UQ methods benefit equally.",
+        "html": "The paper tested beam search on many different uncertainty methods. Some methods that rely on semantic clustering of answers showed worse results with beam search because clustering works better with more diverse samples."
+      },
+      {
+        "b": "Done right.",
+        "html": "When used on standard consistency methods (comparing answer agreement directly), beam search consistently beats random sampling and reduces variance, especially on QA tasks with peaked distributions."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple tool that asks a question to an LLM (e.g. a small open model like Llama 3 or Qwen 3), runs both random sampling and beam search uncertainty methods on the same question ten times, and plots the confidence scores from each run. You should see that beam search confidence scores form a tight cluster (low variance) while random sampling scores bounce around (high variance). Then ask a wrong-answer question (one the model will get incorrect) and show that beam search confidence is lower (more uncertain) while random sampling might still be falsely confident."
+    ],
+    "metric_eq": "variance_beam < variance_random && confidence_wrong_beam < confidence_wrong_random",
+    "closing": "The demo succeeds if: (1) beam search confidence scores wiggle less across runs, and (2) beam search correctly identifies wrong answers as uncertain while random sampling stays overconfident."
+  }
+}

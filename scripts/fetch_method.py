@@ -24,26 +24,34 @@ def get(url, timeout=60, binary=False):
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read() if binary else r.read().decode("utf-8", "ignore")
 
-def find_arxiv(title):
-    q = urllib.parse.quote(f'ti:"{title[:80]}"')
+def _query(qstr):
+    q = urllib.parse.quote(qstr)
     try:
-        xml = get(f"http://export.arxiv.org/api/query?search_query={q}&max_results=3", timeout=30)
+        return get(f"http://export.arxiv.org/api/query?search_query={q}&max_results=5", timeout=30)
     except Exception:
-        return None
-    entries = re.findall(r"<entry>(.*?)</entry>", xml, re.S)
-    for e in entries:
-        t = re.search(r"<title>(.*?)</title>", e, re.S)
-        aid = re.search(r"<id>http://arxiv\.org/abs/([^<]+)</id>", e)
-        if t and aid and norm(t.group(1))[:60] == norm(title)[:60]:
-            return aid.group(1)
-    # looser: token overlap >= 0.7
-    for e in entries:
-        t = re.search(r"<title>(.*?)</title>", e, re.S)
-        aid = re.search(r"<id>http://arxiv\.org/abs/([^<]+)</id>", e)
-        if t and aid:
-            a, b = set(norm(t.group(1)).split()), set(norm(title).split())
-            if b and len(a & b) / len(b) >= 0.7:
+        return ""
+
+def find_arxiv(title):
+    # main-title words (drop a "Name:" prefix), used for a broad all-field query
+    core = re.sub(r"^[A-Za-z0-9\-]+:\s*", "", title)
+    for qstr in (f'ti:"{title[:80]}"', f'all:{core[:90]}', f'ti:"{core[:70]}"'):
+        xml = _query(qstr)
+        entries = re.findall(r"<entry>(.*?)</entry>", xml, re.S)
+        # exact-ish first
+        for e in entries:
+            t = re.search(r"<title>(.*?)</title>", e, re.S)
+            aid = re.search(r"<id>http://arxiv\.org/abs/([^<]+)</id>", e)
+            if t and aid and norm(t.group(1))[:55] == norm(title)[:55]:
                 return aid.group(1)
+        # token-overlap fallback >= 0.65 of our title words present
+        for e in entries:
+            t = re.search(r"<title>(.*?)</title>", e, re.S)
+            aid = re.search(r"<id>http://arxiv\.org/abs/([^<]+)</id>", e)
+            if t and aid:
+                a, b = set(norm(t.group(1)).split()), set(norm(title).split())
+                if b and len(a & b) / len(b) >= 0.65:
+                    return aid.group(1)
+        time.sleep(2)
     return None
 
 def extract_method(pdf_bytes):

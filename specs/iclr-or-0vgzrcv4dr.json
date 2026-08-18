@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-0vgzrcv4dr",
+  "title": "Asymmetric Proximal Policy Optimization: mini-critics boost LLM reasoning",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Instead of one expensive value estimator, train a small ensemble of lightweight critics on different data chunks and use their disagreement to tell you when to skip learning.",
+  "lead": "When you train a large language model to reason better using reinforcement learning, you need a way to tell the model which moves are paying off. Most recent methods skip the traditional value function (a critic that estimates future rewards) because it is slow and unreliable at this scale. AsyPPO brings back the critic, but makes it fast by splitting it into many tiny critics, each learning from a small, separate pile of examples. When the tiny critics disagree with each other, you know something strange is happening and should be careful.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why standard critics fail for big language models",
+    "paras": [
+      "To train a language model to reason better, you give it problems and reward correct answers. But the model does not learn directly from rewards. Instead, you need a separate program (called a critic or value function) that predicts how good the current state is. The critic tells the policy learner which moves are worth taking. Unfortunately, training a full critic alongside a giant language model is slow and memory-hungry. Even worse, when reward signals are sparse (only a few right answers in a huge pile of attempts) or the reasoning chain is very long, the critic gives noisy guesses that mislead training.",
+      "A beginner might try to build a bigger, smarter critic to fix this. But that just uses more memory and time. The real problem is not size; it is that a single critic sees all the data in the same way and learns one biased guess."
+    ],
+    "callout": {
+      "b": "The fix:",
+      "html": "Train many tiny critics on separate data chunks so they see different views, then use their disagreement to decide when learning is safe."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "brain",
+        "caption": "Big model plus one critic means slow, noisy value guesses."
+      },
+      {
+        "title": "2. Old idea: bigger critic",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["hot", 55], ["hot", 62], ["hot", 58], ["hot", 64], ["hot", 52], ["hot", 61], ["hot", 59], ["hot", 63], ["hot", 57], ["hot", 65], ["hot", 60]],
+        "caption": "One massive critic sees everything; still wrong."
+      },
+      {
+        "title": "3. New idea: split the data",
+        "viz": "weights",
+        "viz_args": [["moved", 40], ["warm", 38], ["moved", 42], ["warm", 36], ["moved", 41], ["warm", 39], ["warm", 37], ["moved", 43], ["warm", 35], ["moved", 44], ["warm", 38], ["moved", 40]],
+        "caption": "Six tiny critics, each learns from different examples."
+      },
+      {
+        "title": "4. They disagree",
+        "viz": "box",
+        "viz_args": "Critic A: state is good. Critic B: state is bad. Critic C: state is medium.",
+        "caption": "When critics split, something is weird or new."
+      },
+      {
+        "title": "5. Use disagreement",
+        "viz": "plain",
+        "caption": "Skip learning where critics agree; explore where they differ."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Split examples",
+        "text": "Divide training responses into six separate piles, each no overlap."
+      },
+      {
+        "b": "Train tiny critics",
+        "text": "Each critic learns to predict value from only its pile, starting from the same base model."
+      },
+      {
+        "b": "Measure disagreement",
+        "text": "Collect six value predictions for each state; compute how far apart they are."
+      },
+      {
+        "b": "Mask redundant learning",
+        "text": "Where all critics agree, the learning signal is weak; skip that state."
+      },
+      {
+        "b": "Safer exploration",
+        "text": "Where critics split badly, turn down curiosity bonus to avoid stupid moves."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of one large value estimator, the method builds an ensemble of six lightweight critics. Each critic is a small neural network (just a value head) trained on a disjoint slice of data. Because they start identical but see different examples, they diverge slightly and offer diverse value predictions. The key is the data partitioning: responses are split uniformly so no two critics see the same response for the same prompt."
+    ],
+    "object": "value estimation architecture"
+  },
+  "hidden": {
+    "h2": "Critic disagreement: the hidden quantity",
+    "name": "inter-critic uncertainty",
+    "paras": [
+      "Critic disagreement is how far apart the six value predictions are. When all six critics estimate a state to be worth 50 points, there is no disagreement. When three say 40 and three say 60, disagreement is high. This disagreement reveals something important: either the state is genuinely ambiguous (a new kind of problem the model has never seen), or one of the critics is unreliable. High disagreement means low confidence.",
+      "The paper estimates disagreement by computing the variance (spread) of the six value predictions. A small variance means confident prediction; high variance means the critics are not sure. Disagreement acts as a signal of when the learning algorithm should be careful."
+    ],
+    "heat": {
+      "cells": [
+        ["critic-A", 3, false],
+        ["critic-B", 3, false],
+        ["critic-C", 2, false],
+        ["critic-D", 3, false],
+        ["critic-E", 3, false],
+        ["critic-F", 2, false],
+        ["mean", 3, false],
+        ["variance", 1, true],
+        ["safe", 4, false],
+        ["risky", 1, false],
+        ["agree", 4, true],
+        ["disagree", 1, false]
+      ],
+      "caption": "Darker means higher value estimate. When five critics cluster high (right) and one low (left), variance is high; disagreement signals caution."
+    },
+    "reads": [
+      {
+        "b": "Plain reading:",
+        "html": "Six mini-judges vote on how good a state is. If they mostly agree, trust the vote. If they split, something is weird, so be careful."
+      },
+      {
+        "b": "Paper reading:",
+        "html": "Variance over the ensemble value estimates serves as a proxy for uncertainty in value estimation, enabling uncertainty-aware modifications to the PPO objective."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting critics and using disagreement works",
+    "paras": [
+      "A single large critic sees everything, so it learns one answer to every question. That answer tends to be biased toward common cases, missing rare but important ones. More importantly, a single critic can be confidently wrong. When multiple critics each see different slices of data, they independently learn slightly different lessons. A critic trained only on easy examples will overestimate value; one trained on hard examples will underestimate. Disagreement reveals this split in perspective.",
+      "The mechanism has two parts. First, where critics agree (low disagreement), the learning signal is weak and redundant; the algorithm skips those states to save compute. Second, where critics disagree (high disagreement), the algorithm turns down the curiosity bonus. The curiosity bonus is an extra reward that encourages exploration. But in high-disagreement states, the model is uncertain and exploring randomly is wasteful. By being cautious where critics split, the algorithm avoids learning bad patterns from states it does not understand.",
+      "Using disjoint data is critical. If all critics saw the same examples, they would learn the same thing and disagreement would be zero. By partitioning responses uniformly (critic A sees responses 1,7,13,...; critic B sees 2,8,14,...; etc.), each critic builds its own view. The shared pre-trained weights give all critics a head start, so they learn efficiently. Lightweight architecture keeps memory and time comparable to methods that skip critics altogether."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "State from reasoning problem"
+        },
+        {
+          "t": "step",
+          "s": "Six critics estimate value independently",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute disagreement (variance of six estimates)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Mask learning in low-disagreement states",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Suppress curiosity in high-disagreement states",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Safer, more stable policy updates"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The uncertainty-aware objective",
+    "words": "Variance of critic ensemble masks advantages where critics agree and filters entropy regularization where critics diverge",
+    "equation": "L = min(r_t * A_t, clip(r_t, 1-epsilon, 1+epsilon) * A_t) * mask(var) - beta * H(pi) * filter(var)",
+    "symbols": [
+      ["L", "total loss for the policy update"],
+      ["r_t", "probability ratio (new policy divided by old policy at step t)"],
+      ["A_t", "advantage estimate (how good this move is)"],
+      ["epsilon", "clipping range that limits how far the policy can shift"],
+      ["var", "variance of the six critic estimates"],
+      ["mask(var)", "zero out advantage in low-variance states, one elsewhere"],
+      ["H(pi)", "entropy (curiosity bonus encouraging exploration)"],
+      ["beta", "how strongly to apply curiosity"],
+      ["filter(var)", "reduce entropy weight in high-variance states"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Critic values for one state: [48, 50, 52, 49, 51, 50]. Mean = 50, variance = 1.67 (tight agreement).",
+        "Advantage estimate says: advantage = 8 (good move). Mask value = 0 (critics agree, no learning needed). Contribution to loss = 0.",
+        "Different state: Critic values [30, 55, 35, 60, 40, 58]. Mean = 46, variance = 169 (huge spread).",
+        "Advantage = 12. Mask value = 1 (allow learning, critics disagree). Entropy filter = 0.5 (reduce curiosity). Contribution = 12 * 1 - 0.5 * entropy.",
+        "Same advantage, but first state skips redundant learning, second state learns cautiously."
+      ]
+    },
+    "note": "The variance of six value predictions tells you when critics are confused, so the algorithm can skip wasted learning or tone down reckless exploration."
+  },
+  "bars": {
+    "h2": "Training stability and final performance",
+    "charts": [
+      {
+        "title": "Old method (single baseline)",
+        "rows": [
+          ["Baseline accuracy", 65, "bad"],
+          ["Mid-training stability", 62, "bad"],
+          ["Final reasoning accuracy", 68, "good"]
+        ],
+        "note": "One method for value; training wobbles; modest final score."
+      },
+      {
+        "title": "AsyPPO with mini-critics",
+        "rows": [
+          ["Baseline accuracy", 65, "good"],
+          ["Mid-training stability", 78, "good"],
+          ["Final reasoning accuracy", 72, "good"]
+        ],
+        "note": "Training stays smooth thanks to reliable uncertainty signals; final accuracy improves by 4+ points."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Data partitioning must be truly disjoint.",
+        "html": "If two critics see the same response, they learn identically and disagreement disappears. Uniform splitting (critic A gets indices 0,6,12...; B gets 1,7,13...) is essential."
+      },
+      {
+        "warn": true,
+        "b": "Variance estimation can be noisy with few examples.",
+        "html": "If a state appears only once or twice in the batch, the six critic values might diverge by chance. A minimum batch size helps stabilize variance estimates."
+      },
+      {
+        "warn": true,
+        "b": "Masking legitimate learning signals.",
+        "html": "In low-variance states, critics might agree on a wrong answer. The algorithm trusts agreement too much and skips correcting that error."
+      },
+      {
+        "b": "Done right: disjoint data, large enough batches, and measured tuning.",
+        "html": "Real training works because modern reasoning benchmarks have enough diversity that disjoint data actually splits the problem space usefully. The method is practical, not theoretical."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small language model (or take a pre-trained one) and a simple reasoning task (like arithmetic or short proofs). Train a policy to solve it using PPO with one critic, then train another copy using AsyPPO with six mini-critics trained on disjoint data. Track training time, peak memory, and final accuracy. The demo should show: (1) AsyPPO trains faster and uses less memory than standard PPO, (2) mid-training performance is less noisy with mini-critics, (3) final accuracy improves by a few percentage points."
+    ],
+    "metric_eq": "final_accuracy_AsyPPO - final_accuracy_baseline, plus training_time_baseline / training_time_AsyPPO (speedup factor)",
+    "closing": "The demo proves that disagreement among lightweight critics is a real signal you can use to train smarter."
+  }
+}
