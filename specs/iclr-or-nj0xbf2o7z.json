@@ -1,0 +1,237 @@
+{
+  "slug": "iclr-or-nj0xbf2o7z",
+  "title": "Seesaw: Batch Size and Learning Rate Scheduling",
+  "family": "Optimization",
+  "one_liner": "Speed up large model training by swapping learning-rate cuts for batch-size growth and smarter step sizing.",
+  "lead": "Training huge language models takes weeks. A simple observation: smaller batches need smaller learning rates (jumps), and bigger batches can handle bigger jumps. Seesaw trades one for the other — whenever you would shrink the learning rate in half, instead grow the batch in half and shrink the learning rate less aggressively (by the square root of 2). This keeps the training trajectory the same but finishes sooner by skipping redundant steps.",
+  "nav": [["theme-optimization.html", "Optimization"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Training is slow because of learning rate schedules",
+    "paras": [
+      "When training a large language model, you feed it text in groups (batches). Each batch teaches the model a tiny bit by nudging the weights (the numbers inside the model that store learned patterns). The size of each nudge is called the learning rate.",
+      "A common trick: early in training, use bigger nudges (high learning rate) to move fast toward a good region. Later, use tinier nudges (low learning rate) to make small, careful adjustments near the answer. This works because tiny nudges keep the weights from overshooting and thrashing around — each step moves just enough to refine the solution without undoing what was learned before. This schedule of decreasing learning rate is called a learning-rate schedule, and it works well on current computers.",
+      "But here is the puzzle: if you use a bigger batch (more examples per step), you can afford bigger, bolder nudges, because you are averaging over more data so your estimate is more stable. And indeed, for simple training methods (like plain SGD), halving the learning rate is equivalent to doubling the batch size. Yet nobody knows if this trade works for Adam — the adaptive optimizer most people use for language models. So training schedules get tuned by guess-and-check, wasting time."
+    ],
+    "callout": {
+      "b": "The method in one sentence:",
+      "html": "Seesaw replaces learning-rate cuts with batch-size growth, keeping training on the same path but finishing faster because bigger batches allow parallel computation, so the same amount of computation runs in fewer serial steps on the clock."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: small batches, large jumps",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["warm", 40], ["free", 28], ["hot", 62], ["warm", 35], ["free", 25], ["hot", 68], ["warm", 45], ["free", 32], ["hot", 60], ["warm", 38], ["free", 22]],
+        "caption": "Early training: tiny batch size, big learning-rate jumps."
+      },
+      {
+        "title": "2. The plateau: learning rate shrinks",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["warm", 40], ["free", 28], ["hot", 62], ["warm", 35], ["free", 25], ["hot", 48], ["warm", 25], ["free", 18], ["hot", 50], ["warm", 28], ["free", 12]],
+        "caption": "Standard way: cut learning rate in half, nudges shrink."
+      },
+      {
+        "title": "3. Seesaw's move: grow the batch instead",
+        "viz": "box",
+        "viz_args": "Batch size: 512 -> 1024",
+        "caption": "Double batch size while learning rate shrinks by sqrt(2)."
+      },
+      {
+        "title": "4. Result: same training path, fewer steps",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["warm", 40], ["free", 28], ["hot", 62], ["warm", 35], ["free", 25], ["hot", 48], ["warm", 25], ["free", 18], ["hot", 50], ["warm", 28], ["free", 12]],
+        "caption": "Path looks identical, but we skipped half the serial steps."
+      },
+      {
+        "title": "5. Real payoff: 36% wall-clock speedup",
+        "viz": "plain",
+        "caption": "Same final accuracy, same GPU work, much faster elapsed time."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "1. Start training",
+        "text": "Launch with small batch size and large learning rate."
+      },
+      {
+        "b": "2. Detect a learning-rate cut point",
+        "text": "When the standard schedule would halve the learning rate."
+      },
+      {
+        "b": "3. Swap the move",
+        "text": "Double batch size, multiply learning rate by 1/sqrt(2) instead of 0.5."
+      },
+      {
+        "b": "4. Train the next epoch",
+        "text": "Use more examples per step, smaller nudges, but same update direction."
+      },
+      {
+        "b": "5. Repeat until convergence",
+        "text": "Keep swapping learning-rate cuts for batch growth."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": [
+      "Seesaw changes the learning rate when the standard schedule would cut it. Instead of halving the learning rate, it shrinks it by the square root of 2 (a gentler cut) and doubles the batch size. This is a *substitution*: you perform the same scheduled cut, but in a different way."
+    ],
+    "object": "Learning rate and batch size during cuts"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: loss dynamics",
+    "name": "Loss dynamics (training path)",
+    "paras": [
+      "Loss is how wrong the model is on your data. As you train, the loss shrinks. A graph of loss over time is called the loss curve. The big secret: if you double the batch and shrink the learning rate by sqrt(2), the loss curve looks almost identical. This is not obvious — you might think bigger batches or different learning rates would change how fast the loss falls. But the paper shows they stay aligned.",
+      "The paper measures this by computing the loss at each step and checking that Seesaw and the standard schedule trace nearly the same trajectory. They also prove this theoretically using a tool from deep learning called the neural tangent kernel, which models how weights change during training on simple problems."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 1", 4, true],
+        ["Step 2", 4, true],
+        ["Step 3", 4, true],
+        ["Step 4", 4, true],
+        ["Step 5", 4, true],
+        ["Step 6", 4, true],
+        ["Step 7", 3, false],
+        ["Step 8", 2, false],
+        ["Step 9", 1, false],
+        ["Step 10", 1, false],
+        ["Step 11", 1, false],
+        ["Step 12", 1, false]
+      ],
+      "caption": "Darker means loss is falling faster. Seesaw keeps the loss trajectory aligned with standard schedules."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The loss curve tells you if training is working — it should fall. If Seesaw produces a loss curve that matches the standard schedule's curve at the same number of *useful computations* (FLOPs), then Seesaw is truly equivalent, not just a trick."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Loss dynamics preservation: the paper proves that for SGD on convex problems and for normalized SGD (a model of Adam), the loss follows the same trajectory when batch size and learning rate are adjusted by this specific recipe."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the deep reason",
+    "paras": [
+      "Here is the core idea: in noisy training, what matters is not how big each jump is, but how stable those jumps are. When your batch is small, each update is based on just a few examples, so it is noisy and wildly wrong. You cannot trust it, so you take tiny steps. When your batch is large, you average over many examples, so your direction is reliable, and you can take bigger steps.",
+      "The math relationship is: if you double the batch size, your estimate is twice as stable (the noise shrinks by the square root of 2). So you can make your learning rate bigger by the same square root of 2. If you do this, each step of training has the same effect on the loss — your trajectory stays on course.",
+      "Seesaw exploits this: instead of cutting the learning rate in half at a schedule point, it cuts by sqrt(2) and doubles the batch. The training dynamics stay the same, but now you are feeding twice as many examples per step. On a modern GPU cluster, this means you can run in parallel more efficiently, so *wall-clock time* (real elapsed time on the clock) shrinks by roughly 36%."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current batch size and learning rate"
+        },
+        {
+          "t": "step",
+          "s": "Detect scheduled learning-rate cut point",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Double batch size, divide learning rate by sqrt(2)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Train on bigger batch with smaller nudge",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Same loss curve, fewer serial steps"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation",
+    "words": "The new learning rate is the old learning rate divided by the square root of two, and the new batch size is the old batch size times two.",
+    "equation": "new_lr = old_lr / sqrt(2)  ;  new_batch_size = old_batch_size * 2",
+    "symbols": [
+      ["new_lr", "The learning rate after Seesaw's swap"],
+      ["old_lr", "The learning rate before the swap"],
+      ["sqrt(2)", "The square root of 2, approximately 1.41"],
+      ["new_batch_size", "The batch size (number of examples) after the swap"],
+      ["old_batch_size", "The batch size before the swap"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Before swap: batch size 512, learning rate 0.001",
+        "Standard cut: batch size stays 512, learning rate becomes 0.0005 (halved)",
+        "Seesaw swap: batch size becomes 1024, learning rate becomes 0.001 / 1.41 = 0.00071",
+        "The learning rate dropped by a factor of 1.41 (gentler than halving), and we feed twice as many examples in parallel, so elapsed time shrinks without changing training's path."
+      ]
+    },
+    "note": "Doubling the batch shrinks the noise (because you are averaging over more examples), so you can increase learning rate by sqrt(2) and keep the same training direction with better stability."
+  },
+  "bars": {
+    "h2": "Comparing standard schedule to Seesaw",
+    "charts": [
+      {
+        "title": "Standard learning-rate decay",
+        "rows": [
+          ["Loss at step 1000", 3.2, "good"],
+          ["Loss at step 2000", 2.1, "good"],
+          ["Loss at step 4000", 1.5, "good"],
+          ["Wall-clock time (hours)", 48, "bad"]
+        ],
+        "note": "Training works well but takes real time to run through many serial steps."
+      },
+      {
+        "title": "Seesaw batch-growth schedule",
+        "rows": [
+          ["Loss at step 1000", 3.2, "good"],
+          ["Loss at step 2000", 2.1, "good"],
+          ["Loss at step 2500 (skipped steps)", 1.5, "good"],
+          ["Wall-clock time (hours)", 31, "good"]
+        ],
+        "note": "Same loss curve traced with fewer serial steps; modern parallelism makes real time much shorter (36% speedup)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Bigger batch might not fit in GPU memory.",
+        "html": "Doubling batch size means more examples loaded at once. If you are already maxed out, you cannot apply Seesaw."
+      },
+      {
+        "warn": true,
+        "b": "The proof only covers simple training scenarios.",
+        "html": "The theory works for linear regression and a simplified proxy for Adam. Real deep learning is much messier, so the dynamics might not stay perfectly aligned in complex models."
+      },
+      {
+        "warn": true,
+        "b": "Loss might diverge if batch grows too fast.",
+        "html": "Growing the batch and shrinking the learning rate has limits. If you double batch and cut learning rate too aggressively, the model can go off course."
+      },
+      {
+        "b": "Works well when you have parallelism.",
+        "html": "The speedup comes from running bigger batches in parallel. If your hardware is already saturated, the benefit shrinks."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Train a small language model (say, 10 million parameters) on a toy dataset for 100 steps. Plot the loss curve under (a) standard learning-rate schedule and (b) Seesaw. If Seesaw works, the two curves should overlap. Then measure wall-clock time: Seesaw should finish noticeably sooner because it skips the serial steps that bigger batches can run in parallel."
+    ],
+    "metric_eq": "speedup = time_standard / time_seesaw  ;  curve_alignment = average_loss_difference_per_step",
+    "closing": "The demo makes one thing impossible to miss: the loss traces the same path (proving equivalence to the standard schedule) but the wall-clock timer runs faster (proving the speedup is real because modern GPUs parallelize bigger batches better than they serialize more steps)."
+  }
+}

@@ -120,7 +120,8 @@ def render_bars(b):
     for c in b["charts"]:
         rows = "".join(
             f'<div class="barrow"><span>{e(lab)}</span><div class="bar"><div class="fill {tone}" '
-            f'style="width:{val}%"></div></div><b>{e(val)}</b></div>' for lab,val,tone in c["rows"])
+            f'style="width:{val}%"></div></div><b>{e(val)}</b></div>'
+            for _r in c["rows"] for lab,val,tone in [(list(_r)+[50,""])[:3]])
         note = f'<p class="small">{c["note"]}</p>' if c.get("note") else ""
         charts += f'<div class="chart"><h3>{e(c["title"])}</h3>{rows}{note}</div>'
     return (f'<section class="visual"><div class="eyebrow">What the result should look like</div>'

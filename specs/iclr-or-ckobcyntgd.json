@@ -1,0 +1,228 @@
+{
+  "slug": "iclr-or-ckobcyntgd",
+  "title": "Memory-Efficient Hierarchical Algorithm for Large-scale Optimal Transport",
+  "family": "Optimization",
+  "one_liner": "Move stuff between two piles more efficiently by breaking the problem into smaller, easier pieces.",
+  "lead": "Imagine rearranging books from one shelf to another. The cost is how far each book travels. For just a few books this is easy, but for trillions of pixels in an image or millions of 3D points, calculating the best rearrangement uses too much memory and takes too long. This paper solves that by working on small patches at a time, then zooming out, using a faster solver inside.",
+  "nav": [["theme-optimization.html","Optimization"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why moving stuff around gets stuck",
+    "paras": [
+      "A very useful tool in data science is asking: how do I rearrange one pile to look like another pile, using the least travel distance? Call this the transport cost. For 1000 pixels or points, you can answer this brute-force. For a million pixels (1024 by 1024 image), the naive method has to touch every pixel against every other pixel, storing a giant table with a trillion entries in memory. Your computer runs out of RAM.",
+      "A beginner's first try: store just a subset of that table at a time. But then the solver that minimizes the cost (a numerical optimizer) bounces between many subsets, wasting time on redundant calculations. You trade memory for speed, and lose both."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Break the transport problem into a tree: solve each small patch exactly, then glue solutions together coarsely, then refine only the pieces that matter."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The naive problem",
+        "viz": "brain",
+        "caption": "Rearrange pixels from left to right. The optimizer consults a huge memory table."
+      },
+      {
+        "title": "2. Memory explodes",
+        "viz": "weights",
+        "viz_args": [["hot",90],["hot",85],["hot",92],["hot",88],["hot",95],["hot",87],["hot",91],["hot",89],["hot",93],["hot",86],["hot",94],["hot",90]],
+        "caption": "For a 1024x1024 image, storing all pairwise costs needs a trillion entries."
+      },
+      {
+        "title": "3. Solve small patches first",
+        "viz": "box",
+        "viz_args": "Split 1024x1024 into 16 patches (256x256 each); solve each exactly.",
+        "caption": "Each small patch uses far less memory. Solver runs fast on tiny pieces."
+      },
+      {
+        "title": "4. Glue together coarsely",
+        "viz": "weights",
+        "viz_args": [["warm",50],["warm",48],["warm",52],["moved",35],["moved",36],["warm",49],["warm",51],["warm",47],["warm",53],["moved",34],["warm",50],["warm",49]],
+        "caption": "At coarse scale, connect patches. Only touched entries (moved) need storage."
+      },
+      {
+        "title": "5. Refine what matters",
+        "viz": "weights",
+        "viz_args": [["free",15],["free",14],["hot",78],["hot",82],["free",12],["free",16],["free",13],["free",14],["hot",80],["free",11],["free",15],["free",12]],
+        "caption": "Prune unused edges. Re-solve only high-cost pieces. Memory drops 70%."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Multiscale pyramid",
+        "text": "Represent the transport problem at multiple scales: finest (individual pixels), coarser (small patches), coarsest (whole image)."
+      },
+      {
+        "b": "Solve bottom-up",
+        "text": "Begin at the finest level. Use a fast optimizer to compute the best transport within each small patch."
+      },
+      {
+        "b": "Coarse-level gluing",
+        "text": "Jump to coarser scales. Compute how to connect patch outputs using less data storage."
+      },
+      {
+        "b": "Prune inactive edges",
+        "text": "Mark which transport routes are never used. Delete them, shrinking the memory table further."
+      },
+      {
+        "b": "Refine top-down",
+        "text": "Descend from coarse to fine, re-solving only the paths that the pruning marked as important."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the algorithm changes",
+    "paras": [
+      "The paper changes what data the optimizer sees at each step. Instead of one giant table of all possible routes (which explodes in size), it feeds the solver a small, multiscale pyramid: fine levels use only nearby routes, coarse levels use only broad brush strokes. As the pyramid shrinks, so does the memory."
+    ],
+    "object": "Data table structure"
+  },
+  "hidden": {
+    "h2": "The active-route count",
+    "name": "Number of non-zero transport edges",
+    "paras": [
+      "At each level of the pyramid, most pixels or points do not trade with most others. A pixel at the top-left of the image sends its stuff mostly downward and rightward, not to the bottom-left. The paper counts how many non-zero edges (routes that actually carry stuff) appear in the solution. This is the hidden quantity.",
+      "The paper measures this by running the solver and checking which routes have flow greater than zero. At coarser scales, this number shrinks dramatically because distant points are grouped into single chunks. Pruning removes edges with nearly-zero flow, further shrinking the count."
+    ],
+    "heat": {
+      "cells": [["edge1",1,false],["edge2",4,true],["edge3",2,false],["edge4",4,true],["edge5",1,false],["edge6",3,true],["edge7",1,false],["edge8",4,true],["edge9",2,false],["edge10",1,false],["edge11",4,true],["edge12",1,false]],
+      "caption": "Darker edges carry more flow. Only bright edges (marked) are pruned; dark edges are kept."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The hidden quantity is the sparsity (how empty the table is). If you have a billion routes but only a thousand carry stuff, you only need to store a thousand, not a billion."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper estimates the active-route count after solving at each level. Pruning thresholds delete routes with flow below a threshold, ensuring the next level solves a much smaller problem."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this works: the causal chain",
+    "paras": [
+      "The naive method fails because a one-level solver sees every pixel and every other pixel at once. The memory table must have an entry for each pair, totalling N squared, where N is millions. The paper fixes this by organizing the problem as a tree: at the top, pixels are grouped into coarse blocks; below that, smaller blocks; at the bottom, individual pixels. Each level solves its local problem using a Primal-Dual Hybrid Gradient (a numerical optimizer that is very efficient). Because each level only sees its own scale, the table at that level is tiny.",
+      "When the optimizer solves the coarse level, it outputs which blocks should connect. Most connections are unnecessary (the flow is zero), so pruning deletes them. Then the algorithm descends to the fine level and re-solves, but only for the connections marked as alive. This two-phase approach (solve coarse with pruning, then refine the small survivors) means every step works with a sparse table, not a full one.",
+      "The reason this keeps costs low is that the Primal-Dual optimizer converges faster on each small problem than it would on one giant problem. Moreover, solutions at the coarse level guide the fine level toward the good regions of the search space, so fewer iterations are needed to find the final answer."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Image with N pixels or point cloud with N points"
+        },
+        {
+          "t": "step",
+          "s": "Build a tree: coarse blocks at top, fine detail at bottom",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Solve with Primal-Dual at coarse level using small memory table",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Prune: mark zero-flow edges for deletion",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Refine at fine level, reusing coarse guidance, using pruned table",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Optimal transport with 70% less memory and 8x speedup"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The cost equation",
+    "words": "Total cost is the sum over all routes of the flow times the distance per route, plus a penalty term that pushes the solver toward the coarse-level solution.",
+    "equation": "cost = sum_routes ( flow_route * distance_route ) + lambda * sum_pixels ( deviation_from_coarse_solution )",
+    "symbols": [
+      ["flow_route","how much stuff moves on this route"],
+      ["distance_route","how far this route travels"],
+      ["lambda","strength of the penalty that keeps fine level close to coarse level"],
+      ["deviation_from_coarse_solution","how far the fine solution has drifted from the coarse level's answer"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Image divided into 4 patches. Coarse solver says patch A sends 50 units to patch B.",
+        "Fine refinement: subdivide A into 2 tiles, B into 2 tiles. Fine solver can send from A1 to B1 or A2 to B2.",
+        "If A1 sends 25 to B1 and A2 sends 25 to B2, deviation is 0, penalty is 0.",
+        "If A1 sends all 50 to B1, deviation is high (A2 is idle), penalty is lambda * large squared deviation.",
+        "Strong lambda pulls the fine solution close to the coarse structure; weak lambda allows freedom.",
+        "Result: with lambda=10, the fine algorithm converges in 200 steps instead of 5000, reusing the coarse path as a hot start."
+      ]
+    },
+    "note": "This penalty keeps the fine level from ignoring the coarse guidance, which ensures the memory savings and speed gains hold."
+  },
+  "bars": {
+    "h2": "Before and after: memory and speed",
+    "charts": [
+      {
+        "title": "Naive method (one-level solver)",
+        "rows": [
+          ["Memory used (GB)",2400,"bad"],
+          ["Solve time (seconds)",8500,"bad"],
+          ["Transport cost",0.889,"bad"]
+        ],
+        "note": "All memory is consumed upfront storing the full cost table. Transport cost is low because the solver sees all options."
+      },
+      {
+        "title": "Hierarchical method with pruning",
+        "rows": [
+          ["Memory used (GB)",700,"good"],
+          ["Solve time (seconds)",950,"good"],
+          ["Transport cost",0.897,"good"]
+        ],
+        "note": "Memory drops to 29% of naive because each level stores only local routes. Speed improves 8.9x because Primal-Dual Hybrid Gradient solves each small level in fewer iterations than one giant level, and pruning removes useless routes before refinement, so the final level has fewer variables to optimize."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Pruning threshold set wrong.",
+        "html": "If you prune too aggressively (deleting routes with low but nonzero flow), the fine level cannot find good solutions because vital paths are blocked. You trade memory gain for bad transport cost. If you prune timidly, memory drops only a little."
+      },
+      {
+        "warn": true,
+        "b": "Coarse-level solution is garbage.",
+        "html": "If the coarse level does not solve well (e.g. the optimizer runs out of iterations), the penalty term misleads the fine level, forcing it toward a bad starting point. The refinement then cannot escape."
+      },
+      {
+        "warn": true,
+        "b": "Tree structure does not match the data.",
+        "html": "If the hierarchical grouping of pixels or points is arbitrary (e.g. random blocks instead of spatially coherent ones), many routes span far across the tree. Sparsity is lost because distant pixels that need to trade are now far apart in the tree, forcing the solver to consider all cross-tree connections, not just local ones. Pruning does not help reduce the table size, because almost every route carries nonzero flow (the solver cannot skip them without losing accuracy), so memory stays high."
+      },
+      {
+        "warn": false,
+        "b": "Done right.",
+        "html": "Use a fast solver (Primal-Dual Hybrid Gradient is designed for this), build a tree that respects spatial coherence (group nearby pixels and points together so most transport is local), and tune the pruning threshold by checking a few samples. Memory and speed improve together because the coarse level solves a tiny problem fast, and the pruned fine level inherits a warm start. Cost drops only slightly because the coarse guidance is already a good solution for the global flow pattern."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny end-to-end demo: take a small image (say 256 by 256, 65k pixels) or a point cloud (10k points). Implement the naive solver (one level, no tree) and the hierarchical solver (four levels, pruning active). Measure memory peak (using Python memory profiler or system top) and wall-clock time. Compute the transport cost for each and compare."
+    ],
+    "metric_eq": "speedup = time_naive / time_hierarchical; memory_reduction_pct = 100 * (1 - memory_hierarchical / memory_naive); cost_diff_pct = 100 * (cost_hierarchical - cost_naive) / cost_naive",
+    "closing": "The demo must show that hierarchical + pruning cuts memory by at least 50% and halves solve time, even if transport cost rises by a small amount. That trade-off is the entire point."
+  }
+}

@@ -1,0 +1,234 @@
+{
+ "slug": "iclr-or-0r1ku3dlps",
+ "title": "Distributionally Robust Linear Regression with Block Lewis Weights",
+ "family": "Optimization",
+ "one_liner": "A faster algorithm for fitting a single regression line that works well for all subgroups of data at once, not just the average.",
+ "lead": "When you have data split into groups (say, patient ages, weather regions, factory lines), building one model that works well for <em>every</em> group is harder than fitting just the average. This paper speeds up that process using a new weighting scheme called block Lewis weights, which focuses computation on groups where the data is genuinely ambiguous, because those groups are the actual bottleneck — easy groups are already solved, so spending more computation there wastes effort.",
+ "nav": [["theme-optimization.html","Optimization"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "The setup: one model for every group",
+  "paras": [
+   "Imagine you run a hospital and want a single prediction model for patient outcomes. But your patient data splits into age groups. A model trained on the average outcome works great for 50-year-olds but fails for 20-year-olds. The naive fix: train a separate model for each group. But that is expensive and wasteful — you have dozens or hundreds of groups.",
+   "A smarter idea: train one model and check that it works <em>reasonably well</em> on all groups at once. The problem: checking every group and fixing them all requires solving expensive linear-system equations many, many times. Existing solvers use interior point methods (older optimization algorithms that are mathematically sound but slow), which need thousands of these system-solves, making the whole approach slow for real data."
+  ],
+  "callout": {
+   "b": "The challenge in one sentence.",
+   "html": "A model that works well for all groups solves faster if you can identify which groups are hard to predict and focus computation on those, rather than treating all groups equally, because the solver's time is dominated by working on redundant easy cases that are already nearly solved."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The setup",
+    "viz": "box",
+    "viz_args": "Age groups: 20s|40s|60s",
+    "caption": "Hospital data split into age groups; one model must fit all."
+   },
+   {
+    "title": "2. The problem",
+    "viz": "weights",
+    "viz_args": [["free",30],["hot",85],["free",25],["hot",80],["free",35],["hot",90]],
+    "caption": "Some groups are far from the average; standard methods treat them all equally."
+   },
+   {
+    "title": "3. The paper's move",
+    "viz": "box",
+    "viz_args": "Measure group ambiguity",
+    "caption": "Identify which groups contribute most to the problem; down-weight the easy ones."
+   },
+   {
+    "title": "4. Focus computation",
+    "viz": "weights",
+    "viz_args": [["moved",15],["hot",85],["moved",12],["hot",80],["moved",18],["hot",90]],
+    "caption": "Spend expensive solver steps only on groups that matter; skip the clear ones."
+   },
+   {
+    "title": "5. The payoff",
+    "viz": "plain",
+    "caption": "Fewer system-solves needed; same answer in less wall-clock time."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "1. Measure each group",
+    "text": "Compute a score for how far each group's data points sit from the best-fit line."
+   },
+   {
+    "b": "2. Assign group importance",
+    "text": "Groups with harder, more uncertain predictions get higher weight; easy groups get lower weight."
+   },
+   {
+    "b": "3. Reframe as a single regression",
+    "text": "Instead of solving a separate problem per group, solve one weighted regression that automatically balances all groups."
+   },
+   {
+    "b": "4. Use fast optimization",
+    "text": "Apply a faster solver (accelerated proximal method), which needs far fewer system-solves than older interior point methods because the weighted problem has lower effective rank, so each iteration makes bigger progress toward convergence."
+   },
+   {
+    "b": "5. Return the model",
+    "text": "The result is one set of numbers that defines the line, works well on all groups, found much faster because the solver skipped redundant work on easy groups and focused only on the groups that truly matter."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper changes the <em>weights assigned to each group</em> in the optimization process. Instead of treating all groups equally, it computes a weight for each group based on how hard that group is to predict. This one change cascades: the optimization algorithm now focuses expensive computation where it matters."
+  ],
+  "object": "group weights"
+ },
+ "hidden": {
+  "h2": "Group importance: which groups drive the hard part of the problem",
+  "name": "group importance weight",
+  "paras": [
+   "This paper measures a hidden quantity called <em>group importance</em>: a number (between 0 and 1) for each group that says how much that group contributes to making the overall regression problem hard. A group with many data points far from the best-fit line is important — it drives the overall error. A group clustered tightly around the line is unimportant — it is solved easily.",
+   "The paper computes group importance using a mathematical object called Lewis weights, which comes from a shape-based construction (imagine how points scatter in space). The weight is higher for groups where the data points are spread out and fewer in number (hard to pin down) and lower for groups that are tightly clustered or numerous (easy to fit)."
+  ],
+  "heat": {
+   "cells": [
+    ["Group A",4,true],
+    ["Group B",1,false],
+    ["Group C",3,true],
+    ["Group D",2,false],
+    ["Group E",4,true],
+    ["Group F",1,false],
+    ["Group G",2,false],
+    ["Group H",3,true],
+    ["Group I",1,false],
+    ["Group J",2,false],
+    ["Group K",4,true],
+    ["Group L",1,false]
+   ],
+   "caption": "Darker cells mean higher importance weight for that group. Highlighted groups drive most of the optimization work."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Some groups in your data are harder to predict — their points scatter widely. The paper identifies those groups and weights them higher in the optimization, so the solver spends more effort getting those right."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "Block Lewis weights are a construction that assigns each group a weight proportional to the effective number of degrees of freedom in that group's regression problem. Groups where data is spread wide or few in count receive higher weight, directly translating to more solver iterations devoted to them."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why focusing on hard groups makes the whole problem faster",
+  "paras": [
+   "Here is the core mechanism: a regression solver works by iteratively nudging the numbers that define the line, aiming to lower the overall error. Each nudge requires solving a large linear system (a matrix equation). If you have 100 groups, a naive approach solves 100 separate systems or one huge combined system — expensive either way.",
+   "Lewis weights reframe the problem mathematically. Instead of solving 100 independent group problems, you solve one <em>weighted</em> regression where each group is weighted by how hard it is. Groups that are easy and redundant drop to low weight; groups that are ambiguous or underrepresented rise to high weight. This is not just a cosmetic reframe — it directly reduces the rank of the problem the solver has to handle (the effective size shrinks). A faster iterative solver then exploits this lower rank to converge in far fewer steps. Fewer steps means fewer matrix systems to solve, which means less total computation.",
+   "The insight: <em>groups do not all matter equally</em>. Easy groups are already well-fit; solving them more precisely wastes CPU. Hard groups are the bottleneck. By redirecting computation to where it really matters, the total cost drops while the final accuracy stays the same."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Groups with different scatter and size"
+    },
+    {
+     "t": "step",
+     "s": "Compute Lewis weight for each group",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Reframe as single weighted regression"
+    },
+    {
+     "t": "step",
+     "s": "Solve with accelerated proximal method"
+    },
+    {
+     "t": "output",
+     "s": "One model, all groups, fewer system-solves"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The optimization objective",
+  "words": "Minimize the weighted sum of group losses: group-one's loss weighted by w1 plus group-two's loss weighted by w2, and so on, where each weight w_g is the Lewis weight for group g.",
+  "equation": "min_theta sum_g w_g * loss_g(theta)",
+  "symbols": [
+   ["theta", "the model parameters (numbers that define the regression line)"],
+   ["w_g", "the Lewis weight for group g (how much that group matters)"],
+   ["loss_g(theta)", "the squared-error loss on group g given current parameters"],
+   ["sum_g", "add up over all groups"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose you have 3 groups: Group A (10 points, tight cluster), Group B (5 points, scattered), Group C (20 points, medium spread).",
+    "Lewis weight for A = 0.2 (many points, tight, easy).",
+    "Lewis weight for B = 0.6 (few points, scattered, hard).",
+    "Lewis weight for C = 0.4 (many points, medium).",
+    "If A's loss is 10.0, B's loss is 5.0, C's loss is 8.0 (hypothetical values):",
+    "Weighted objective = 0.2 * 10.0 + 0.6 * 5.0 + 0.4 * 8.0 = 2.0 + 3.0 + 3.2 = 8.2.",
+    "The optimizer will work hard on B (high weight, contributes 3.0 to the objective) and lightly on A (low weight, only 2.0 contribution), even though A has the most points."
+   ]
+  },
+  "note": "The weights tell the optimizer which groups to focus on; faster solvers then converge more quickly because the effective problem size shrinks."
+ },
+ "bars": {
+  "h2": "Complexity comparison",
+  "charts": [
+   {
+    "title": "Interior point method (standard approach)",
+    "rows": [
+     ["Number of system-solves required", 240, "bad"],
+     ["Time per system-solve", 1200, "bad"],
+     ["Total wall-clock time", 4800, "bad"]
+    ],
+    "note": "Interior point methods are slow because they need many iterations and each iteration solves a large system. Treating all groups equally means no opportunity to save computation."
+   },
+   {
+    "title": "This paper: accelerated proximal with Lewis weights",
+    "rows": [
+     ["Number of system-solves required", 48, "good"],
+     ["Time per system-solve", 1200, "good"],
+     ["Total wall-clock time", 960, "good"]
+    ],
+    "note": "Lewis weights reduce the effective problem rank because they downweight easy groups and focus on hard ones. Accelerated methods then converge much faster, because a smaller rank means each iteration makes bigger progress. The same accuracy is reached in about 5 times fewer system-solves, translating to much lower total time."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Outlier groups dominate.",
+    "html": "If one group is so scattered or unusual that its Lewis weight becomes very high, the optimizer will over-focus on it and potentially neglect the majority of the data. Mitigation: use techniques that cap or smooth group weights to prevent this imbalance."
+   },
+   {
+    "warn": true,
+    "b": "Empty or near-empty groups.",
+    "html": "If a group has very few data points (or is artificially thinned), its Lewis weight can become unreliable or very large, destabilizing the optimization. Mitigation: filter out or merge tiny groups before running the algorithm."
+   },
+   {
+    "warn": true,
+    "b": "Non-linear relationships.",
+    "html": "This paper assumes linear regression (a straight-line fit). If a group's true relationship is curved or non-linear, no amount of weighting can fix it; the model will still perform poorly on that group."
+   },
+   {
+    "b": "Done right.",
+    "html": "When groups are well-separated, their relationships are roughly linear, and no single group is pathological, Lewis weights work reliably to speed up the solver without sacrificing accuracy, because the weights are based on genuine data properties and align well with the groups' actual difficulty."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a synthetic dataset with 5 groups: one with 100 tight points, one with 50 scattered points, one with 200 tight points, one with 10 scattered points, and one with 30 medium points. Fit a linear regression model using three methods: (1) interior point method on all groups equally, (2) this paper's Lewis-weight-based accelerated proximal method, and (3) separate linear regressions per group. Measure wall-clock time and final error on each group."
+  ],
+  "metric_eq": "time_interior_point / time_lewis_accelerated = speedup ratio; error_lewis_group_i = per-group final squared-error for group i",
+  "closing": "The demo must show that Lewis weights achieve the same per-group accuracy as interior point methods (within 5 percent) but in 3-10 times less wall-clock time, because the weighting lets the faster solver skip redundant work on easy groups, and match or beat the per-group accuracy of separate regressions while being massively faster."
+ }
+}

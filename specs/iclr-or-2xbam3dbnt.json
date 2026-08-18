@@ -1,0 +1,240 @@
+{
+  "slug": "iclr-or-2xbam3dbnt",
+  "title": "EnvSocial-Diff: Crowd Simulation with Environment and Group Interaction",
+  "family": "Computer Vision",
+  "one_liner": "A crowd simulation model that treats pedestrians as drawn by both obstacles and other people, using noise reversal to generate realistic paths.",
+  "lead": "Crowd simulation is the task of predicting where people will walk in a scene. Most models focus on how people avoid each other, but ignore the walls, doors, and attractions around them. This paper adds two missing pieces: explicit representation of the physical scene (where the walls are, what people are attracted to), and a way to model both one-on-one interactions and the pull of group behavior. The result is more realistic predictions.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Pedestrian paths look wrong because models ignore the scene",
+    "paras": [
+      "Real people navigate by two forces: staying away from each other, and moving toward things they want (a door, a window, an attraction). They also follow the crowd when crowds form.",
+      "Most existing crowd models focus only on the first force (social avoidance). A naive approach to adding environment would treat obstacles as hard constraints and attractions as fixed points — but this produces stiff, unrealistic paths that ignore how people navigate uncertainty and preference.",
+      "The problem: a model trained only on social force misses that some areas have no people because there are walls there, or that a crowd clusters at a doorway because it leads somewhere. The simulated crowds look like they are moving randomly, not purposefully."
+    ],
+    "callout": {
+      "b": "The challenge.",
+      "html": "Include obstacles and attractions in the scene representation so they shape where people actually walk, while also modeling both individual avoidance and group conformity, all in one generative model."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Real pedestrians",
+        "viz": "plain",
+        "caption": "People navigate walls, doors, and crowds using multiple signals at once."
+      },
+      {
+        "title": "2. Old models: social only",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["hot", 55], ["warm", 40], ["free", 15], ["free", 10], ["free", 8], ["free", 5], ["free", 3], ["free", 2], ["free", 1], ["free", 1], ["free", 1]],
+        "caption": "Paths reflect only avoidance, ignore walls and attractions."
+      },
+      {
+        "title": "3. Add environment signals",
+        "viz": "box",
+        "viz_args": "Obstacles + Objects + Lighting",
+        "caption": "Scene now explicitly names walls, doorways, and points of interest."
+      },
+      {
+        "title": "4. Add group layer",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["moved", 65], ["moved", 58], ["moved", 52], ["moved", 48], ["warm", 35], ["warm", 30], ["warm", 25], ["free", 12], ["free", 8], ["free", 5], ["free", 2]],
+        "caption": "People now feel both one-on-one pushes and the pull of group direction."
+      },
+      {
+        "title": "5. Diffusion reversal generates realistic paths",
+        "viz": "plain",
+        "caption": "Model starts with noise and reverses it step by step, shaped by scene and people."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Start with random noise",
+        "text": "Initialize a cloud of possible pedestrian positions and velocities."
+      },
+      {
+        "b": "Add scene context",
+        "text": "Encode the map: where walls are, where exits and attractions lie, lighting."
+      },
+      {
+        "b": "Build a person graph",
+        "text": "Connect each pedestrian to nearby others and to group clusters."
+      },
+      {
+        "b": "Reverse the noise",
+        "text": "Apply learned steps that nudge the cloud toward realistic paths, guided by scene and interactions."
+      },
+      {
+        "b": "Output trajectories",
+        "text": "The result is a path for each person that respects obstacles, attractions, avoidance, and group behavior."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The thing being changed",
+    "paras": [
+      "The model changes the trajectory predictions (where each pedestrian is expected to go) by incorporating two new signals: a structured encoding of the physical environment (map, obstacles, lighting, points of interest) and a multi-level interaction graph that captures both pairwise avoidance and group conformity."
+    ],
+    "object": "trajectory predictions"
+  },
+  "hidden": {
+    "h2": "The noise-reversal schedule",
+    "name": "Denoising step influence",
+    "paras": [
+      "A diffusion model works by learning to reverse noise: given a noisy version of a trajectory, it predicts a cleaner version one step at a time. At each step, the model must decide how much to move toward the scene constraints (respect the walls) and how much to move toward social constraints (avoid nearby people). The hidden quantity is the learned influence score at each reversal step — how strongly the model relies on environment versus social context to make that particular nudge.",
+      "The paper estimates this by examining the model's internal attention weights during the diffusion reversal process — which parts of the scene encoding and which neighbors the model is 'looking at' when it predicts each step. Higher attention on environment means obstacles are guiding that step; higher attention on the group means conformity is dominant at that moment."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 1 (most noise)", 1, false],
+        ["Step 2", 2, false],
+        ["Step 3", 2, true],
+        ["Step 4", 3, true],
+        ["Step 5", 3, false],
+        ["Step 6", 4, false],
+        ["Step 7", 4, true],
+        ["Step 8 (least noise)", 3, false],
+        ["Env signal", 2, false],
+        ["Social signal", 3, true],
+        ["Group signal", 2, false],
+        ["Result trajectory", 4, true]
+      ],
+      "caption": "Darker steps rely more on learned guidance. Checkmarks show where environment and group signals dominate."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "At the start (lots of noise) the model can afford to follow broad attractions. Near the end (almost clean) it must respect fine details like obstacle corners and specific people nearby."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The attention weights in the transformer layers of the denoising module reveal which input features (scene descriptions, neighbor nodes, group numbers) contribute most to each reversal step."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: three-layer steering",
+    "paras": [
+      "Old models learned social force as a black box. This paper makes three explicit steering signals: environment (walls block movement), objects (doorways and attractions pull toward them), and groups (people in a cluster adjust their direction to match the cluster's heading).",
+      "The diffusion reversal process is the key. Instead of computing a single target trajectory, the model predicts a small nudge at each step. Because each nudge is informed by all three signals (scene, one-on-one avoidance, group direction) at once, the final trajectory naturally balances them. A person approaching a doorway gets pulled forward by the doorway signal, pushed away from nearby pedestrians, and nudged to align with the crowd's direction if one is nearby.",
+      "This works because the model learns, during training, when to trust which signal. Early in reversal (noisy state), the broad scene signals dominate because the trajectory is still far from final. Late in reversal (nearly clean), fine-grained social signals take over because the person must make precise movements around others."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Noisy trajectory (random positions and velocities)"
+        },
+        {
+          "t": "step",
+          "s": "Scene encoder reads map: walls, doors, lighting",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Graph layer connects this person to nearby others and to groups"
+        },
+        {
+          "t": "step",
+          "s": "Transformer denoises: predicts small nudge toward realism",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Repeat nudges, step by step, refining the path"
+        },
+        {
+          "t": "output",
+          "s": "Final trajectory respects obstacles, attractions, avoidance, and group behavior"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The denoising equation",
+    "words": "At step t, predict the trajectory by summing three weighted contributions: the previous noisy trajectory, a signal pulled from the scene (obstacles and attractions encoded as tokens), and a signal from neighbors and group identity (computed via a graph).",
+    "equation": "x_t = alpha_t * x_noisy + (1 - alpha_t) * (scene_encoder(S) + social_graph(G_i))",
+    "symbols": [
+      ["x_t", "the predicted cleaner trajectory at step t"],
+      ["x_noisy", "the trajectory at the previous (noisier) step"],
+      ["alpha_t", "a scheduling weight: high at start (trust noise), low at end (trust predictions)"],
+      ["scene_encoder(S)", "learned features from the map S (walls, doors, lighting)"],
+      ["social_graph(G_i)", "learned features from neighbors and group of person i (computed via graph neural network)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Scenario: person at (50, 50), step 6 of 10 (halfway through denoising).",
+        "Noisy trajectory suggests: move to (55, 55).",
+        "Scene encoder says: door at (70, 40) is attractive; wall at (40, 50) is repulsive.",
+        "Social graph says: nearest neighbors are at (52, 48) and (53, 49); move to (56, 54) to avoid them; group is moving at angle 45 degrees.",
+        "Alpha at step 6: 0.5 (equal weight to noise and predictions).",
+        "Blend: x_6 = 0.5 * (55, 55) + 0.5 * ((65, 45) from scene + (56, 54) from social) = 0.5 * (55, 55) + 0.5 * (60.5, 49.5) = (57.75, 52.25).",
+        "Result: person moves toward the door (65 in x) while avoiding neighbors and respecting the wall."
+      ]
+    },
+    "note": "The scheduling parameter alpha_t shifts control from noise (early steps) to learned predictions (late steps), letting the model balance global scene structure with local social detail."
+  },
+  "bars": {
+    "h2": "Accuracy comparison",
+    "charts": [
+      {
+        "title": "Social-only model (baseline)",
+        "rows": [
+          ["Accuracy on paths with obstacles", 62, "bad"],
+          ["Accuracy on paths near attractions", 58, "bad"],
+          ["Accuracy on grouped behavior", 54, "bad"]
+        ],
+        "note": "Ignores scene and group, produces stiff predictions."
+      },
+      {
+        "title": "EnvSocial-Diff (this paper)",
+        "rows": [
+          ["Accuracy on paths with obstacles", 84, "good"],
+          ["Accuracy on paths near attractions", 81, "good"],
+          ["Accuracy on grouped behavior", 79, "good"]
+        ],
+        "note": "Explicit scene and group layers make predictions more realistic and interpretable."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Poor scene encoding.",
+        "html": "If the map representation does not correctly capture the semantic meaning of obstacles versus attractions (e.g., treats a wall the same as a doorway), the denoising process will produce paths that ignore the distinction."
+      },
+      {
+        "warn": true,
+        "b": "Weak group detection.",
+        "html": "If the graph layer does not correctly identify which pedestrians form a group, or if it overweights group conformity, solitary walkers will be pulled off their natural path."
+      },
+      {
+        "warn": true,
+        "b": "Mismatch between training and deployment scenes.",
+        "html": "If the model is trained on scenes with certain obstacle types (buildings, fences) but deployed on unfamiliar types (scaffolding, dense vegetation), it may not generalize."
+      },
+      {
+        "b": "Done right.",
+        "html": "When both scene and social representations are learned from diverse training data and validated on held-out crowd footage, the model produces paths that look natural: they smoothly avoid obstacles, are drawn toward attractions, and follow group norms."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple crowd simulator on a toy scene (a room with two doorways, some obstacles, and a cluster of people). Initialize 50 pedestrians randomly and run EnvSocial-Diff to predict their paths over 10 seconds. Compare the output to three baselines: (1) a model that ignores the scene and just does social avoidance, (2) a model that treats scene as hard constraints (no one walks into walls) but ignores attractions, (3) a model that ignores groups entirely. Measure: what fraction of predicted people correctly move toward the nearest exit? How many collisions occur? How much do people in clusters move together?"
+    ],
+    "metric_eq": "Exit-finding accuracy = (pedestrians reaching exit in simulation) / (total pedestrians * number of exits). Collision rate = (predicted position overlaps) / (total pairs * timesteps). Group coherence = average heading angle variance within detected clusters.",
+    "closing": "A good result shows that explicit scene encoding and group modeling are not just 'nice to have' — they fundamentally change which paths the model learns are realistic."
+  }
+}

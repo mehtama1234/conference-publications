@@ -1,0 +1,245 @@
+{
+  "slug": "iclr-or-abjcjkiwi5",
+  "title": "OccDriver: Occupancy-Guided Trajectory Planner",
+  "family": "Robotics & Control",
+  "one_liner": "A self-driving planner that imagines the future scene from its own actions, then uses that imagined scene to steer more safely.",
+  "lead": "Today's self-driving systems plan a path without knowing what other cars will do next. OccDriver imagines how the scene will evolve if the car takes a particular path, and uses that prediction to make smarter choices. It works in two passes: first a quick rough sketch, then a careful refinement that sees the consequences.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why planning without foresight gets stuck",
+    "paras": [
+      "A self-driving car must decide what path to take in the next few seconds. The world around it is moving: other cars turn, pedestrians cross, cyclists swerve. The car cannot see these moves in advance.",
+      "Most planning systems generate a path by asking: 'If I steer left, will I hit anyone right now?' They only check the immediate next moment. The problem is that traffic is dynamic: cars change lanes, accelerate, and brake. Over the next 5 to 10 seconds, the positions of nearby vehicles will be very different from where they are now. A planner that only checks the current moment cannot see these future positions, so it misses collisions that will develop later.",
+      "A beginner planner might reason: 'I need the positions of all other agents over time.' But the catch is that those positions depend on what the ego car does—if the car brakes, the car behind it slows too. Without a model of how the scene evolves in response to the car's own actions, the planner is blind to these chain reactions."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "The car plans a path without simulating how other agents respond to its movement."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The starting scene",
+        "viz": "box",
+        "viz_args": "ego car + 3 other cars",
+        "caption": "Self-driving car surrounded by others. What happens next?"
+      },
+      {
+        "title": "2. The problem: one trajectory guess",
+        "viz": "weights",
+        "viz_args": [["guess", 40], ["free", 30], ["free", 30], ["free", 35], ["free", 25]],
+        "caption": "Old method picks one path and checks if it hits anyone now."
+      },
+      {
+        "title": "3. OccDriver's first draft",
+        "viz": "weights",
+        "viz_args": [["draft", 35], ["draft", 28], ["draft", 32], ["free", 30], ["free", 25]],
+        "caption": "Generate multiple rough path ideas quickly, in parallel."
+      },
+      {
+        "title": "4. Imagine the future scene",
+        "viz": "box",
+        "viz_args": "each path -> predict where scene will be",
+        "caption": "For each draft path, imagine where cars will be in future."
+      },
+      {
+        "title": "5. Refine with foresight",
+        "viz": "weights",
+        "viz_args": [["refined", 50], ["refined", 42], ["free", 25], ["free", 20], ["free", 28]],
+        "caption": "Pick and smooth the safest path using imagined future."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Generate coarse drafts",
+        "text": "Sample multiple rough trajectories from the starting position."
+      },
+      {
+        "b": "Predict future occupancy",
+        "text": "For each draft, imagine the scene layout a few seconds ahead conditioned on that trajectory."
+      },
+      {
+        "b": "Score drafts against the imagined future",
+        "text": "Check how safe each draft path is in the predicted future scene, not just now."
+      },
+      {
+        "b": "Refine the best paths",
+        "text": "Polish the top trajectory choices using the predicted scene evolution."
+      },
+      {
+        "b": "Cross-consistency check",
+        "text": "Ensure the refined trajectory matches the occupancy prediction—they should tell the same story."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of predicting where other agents will be and then planning in isolation, OccDriver interleaves prediction and planning: it generates candidate paths, predicts the scene's evolution for each one, and refines the paths based on those predictions. The object it moves is the planning loop itself—from a one-pass 'check now' into a two-pass 'imagine then refine' cycle."
+    ],
+    "object": "planning loop structure"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: occupancy flow",
+    "name": "occupancy flow field",
+    "paras": [
+      "The hidden quantity is the occupancy flow—a map showing where space will be occupied in the future. It encodes two things: which regions of the scene will be filled (by other cars, pedestrians, obstacles) and how those occupied regions are drifting or rotating. Think of it as a temperature map of the road ahead, where red zones are 'will be crowded' and blue zones are 'will be open.'",
+      "OccDriver learns to predict occupancy flow conditioned on a candidate trajectory: 'If I take this path, here is how the scene will rearrange itself.' The paper estimates occupancy flow using a rasterized neural network (one that reads and writes as images, not lists of objects). It trains by comparing predicted occupancy against ground truth from the dataset."
+    ],
+    "heat": {
+      "cells": [
+        ["w1", 4, true],
+        ["w2", 2, false],
+        ["w3", 3, false],
+        ["w4", 1, false],
+        ["w5", 4, true],
+        ["w6", 1, false],
+        ["w7", 2, false],
+        ["w8", 3, false],
+        ["w9", 1, false],
+        ["w10", 2, false],
+        ["w11", 4, false],
+        ["w12", 1, false]
+      ],
+      "caption": "Darker means more densely occupied in the predicted future. Highlights show ego car zone."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Occupancy flow is a field that says 'this patch of road will be crowded' and 'this one will be clear,' evolving over time."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Occupancy flow is a learned rasterized field conditioned on the ego trajectory, predicted via a layer-by-layer neural network that reads images, and scored against ground-truth occupancy grids."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why predicting the scene first helps the plan",
+    "paras": [
+      "A trajectory is only safe if it avoids collisions not just now but throughout its duration. The only way to know what the road will look like later is to simulate or predict it. But simulating every other agent's behavior explicitly—asking 'where will this car go?' for each one—is expensive because the number of agents can be large and their futures depend on each other. OccDriver uses a learned prediction model instead: given the ego car's tentative path, the model predicts where all other agents will end up by treating their future locations as a single spatial field (the occupancy map). This is faster because one image-prediction model runs once, rather than looping through dozens of agents.",
+      "The second insight: if you generate a candidate path and then predict the scene, you have immediate feedback. You can refine the path by sliding it left or right to steer clear of the predicted occupancy. This creates a tight feedback loop: prediction shapes planning, and planning grounds prediction. Because they are trained jointly with a consistency loss (the path and the occupancy prediction should agree on safety), they learn to be coherent."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "current scene snapshot and ego state"
+        },
+        {
+          "t": "step",
+          "s": "generate multiple candidate rough paths",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "predict occupancy flow for each path",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "score paths against predicted occupancy",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "refine top-scoring path via occupancy feedback",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "final smooth, safe trajectory"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The joint loss: prediction and planning must agree",
+    "words": "total loss = trajectory loss + alpha * occupancy loss + beta * consistency loss, where consistency checks that the trajectory and occupancy prediction are aligned.",
+    "equation": "L = L_traj + alpha * L_occ + beta * L_consist",
+    "symbols": [
+      ["L_traj", "penalty if the trajectory does not match the ground-truth path taken"],
+      ["L_occ", "penalty if the predicted occupancy does not match ground-truth future occupancy"],
+      ["L_consist", "penalty if the trajectory and occupancy prediction tell conflicting stories (e.g. path goes through predicted occupied region)"],
+      ["alpha", "how much to care about occupancy prediction accuracy"],
+      ["beta", "how much to care about consistency between the two"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Scenario: a car predicts occupancy and generates a trajectory. Ground truth is available.",
+        "L_traj = 2.1 (trajectory differs from ground truth by average 0.7 m, squared loss = 2.1)",
+        "L_occ = 0.8 (occupancy prediction misses a car, grid cell error = 0.8)",
+        "L_consist = 0.3 (planned path clips edge of predicted occupied region, overlap score = 0.3)",
+        "Set alpha = 1.0, beta = 2.0 (care equally about trajectory, occupancy, but penalize inconsistency more).",
+        "Total loss = 2.1 + 1.0 * 0.8 + 2.0 * 0.3 = 4.1",
+        "Gradient flows back: if the path ventures into predicted-occupied space, both L_consist and the trajectory planner learn to avoid it."
+      ]
+    },
+    "note": "The three losses pull in the same direction: a safe path is one that the occupancy model predicts will not collide, and the trajectory and occupancy must be mutually consistent."
+  },
+  "bars": {
+    "h2": "How it performs compared to one-pass planning",
+    "charts": [
+      {
+        "title": "Method without occupancy prediction",
+        "rows": [
+          ["Stays in lane", 87, "good"],
+          ["Avoids static obstacles", 82, "good"],
+          ["Avoids dynamic cars", 64, "bad"],
+          ["Comfort (smooth steering)", 73, "good"]
+        ],
+        "note": "One-pass planner only checks whether it collides right now, so it misses agents that are moving toward its path and will collide in a few seconds."
+      },
+      {
+        "title": "OccDriver with occupancy feedback",
+        "rows": [
+          ["Stays in lane", 88, "good"],
+          ["Avoids static obstacles", 84, "good"],
+          ["Avoids dynamic cars", 81, "good"],
+          ["Comfort (smooth steering)", 79, "good"]
+        ],
+        "note": "When the planner sees where agents will be in the future, it steers clear of that predicted crowded space earlier, before the agents arrive."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Prediction errors compound.",
+        "html": "If the occupancy prediction is wrong (e.g., it predicts a car will stop but it accelerates), the planner's refined path is based on a false image of the future and can be worse than the initial draft."
+      },
+      {
+        "warn": true,
+        "b": "Multimodal futures are hard.",
+        "html": "A car might go left or right. The occupancy prediction must handle multiple possible futures. If the model averages over all possibilities, the refined path sees a blurry ghost-scene and makes weak choices."
+      },
+      {
+        "warn": true,
+        "b": "Runs slowly at decision time.",
+        "html": "Running two passes (draft then refine) takes longer than a one-pass planner. In a real self-driving car, the computer must decide what to do in milliseconds. Extra computation time—especially the neural-network prediction pass—can cause delays that prevent the car from reacting fast enough."
+      },
+      {
+        "b": "Done right: train on a diverse dataset.",
+        "html": "If trained on data where ego behavior and occupancy are recorded together, the model learns to predict occupancy in response to the ego's actual actions, reducing the prediction-planning mismatch."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A minimal demo would take a recorded driving scenario (from nuPlan or a simulated dataset), generate 3–5 candidate rough trajectories, run OccDriver's occupancy prediction model conditioned on each, compute the collision score for each (area of predicted occupancy overlap with the path), and show which path the planner refined. Visualize the initial scene, the predicted future occupancy as a heatmap, the candidate paths colored by collision score, and the final refined path overlaid. Include before-and-after metrics: how many collision points did the initial draft have versus the refined path?"
+    ],
+    "metric_eq": "collision_risk = sum of occupancy_value for each grid cell the trajectory crosses, lower is safer",
+    "closing": "The demo shows that using a prediction of where agents will be (rather than where they are now) lets the planner steer around future collisions early enough that the final path has fewer near-miss moments than the initial drafts."
+  }
+}

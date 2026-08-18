@@ -1,0 +1,205 @@
+{
+  "slug": "icml-or-jxhf6z0s1l",
+  "title": "CrossQ: Task-Aligned Cross-Token Conditional Quantization",
+  "family": "Representation & Self-Supervised Learning",
+  "one_liner": "CrossQ shrinks the massive lookup tables that search engines store by smarter compression that understands which token scores actually matter for ranking.",
+  "lead": "ColBERT, a search engine that ranks answers by comparing many small number-lists (tokens) from a question against many small number-lists from each document, finds good matches. But storing all these lists for billions of documents fills entire hard drives. CrossQ cuts storage by 64 times by compressing these number-lists more intelligently: instead of squeezing numbers equally, it learns which numbers are critical for ranking and protects those.",
+  "nav": [["theme-representation-self-supervised-learning.html", "Representation & Self-Supervised Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The storage wall",
+    "paras": [
+      "A late-interaction retriever (a search engine that matches many small parts of text, not just one big meaning) stores millions of tiny number-lists — one for each word or phrase in every document. For billions of documents, this fills terabytes. The naive approach: squeeze each number-list by rounding its numbers to fewer bits, preserving average reconstruction accuracy. But search does not care about average. It cares about whether the ten highest-scoring documents remain in the top ten after compression.",
+      "When you compress by averaging, the exact winner tokens (the few numbers that decide ranking) get mangled just like the irrelevant ones, and the ranking breaks."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "CrossQ compresses token lists by learning which tokens matter for ranking, and it protects those while squeezing the rest."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The setup",
+        "viz": "brain",
+        "caption": "Search engine: question goes in, rank top-10 answers."
+      },
+      {
+        "title": "2. The problem bites",
+        "viz": "weights",
+        "viz_args": [["hot", 8], ["free", 2], ["hot", 7], ["free", 1], ["hot", 9], ["free", 3], ["warm", 4], ["free", 2], ["warm", 3], ["free", 1], ["hot", 6], ["free", 2]],
+        "caption": "Standard compression squeezes all tokens equally; winner tokens (hot) lose precision."
+      },
+      {
+        "title": "3. Conditioning trick",
+        "viz": "box",
+        "viz_args": "document context box",
+        "caption": "CrossQ adds lightweight context about the document, computed once at index time."
+      },
+      {
+        "title": "4. Smart codes",
+        "viz": "weights",
+        "viz_args": [["hot", 8], ["free", 2], ["hot", 7], ["free", 1], ["hot", 9], ["free", 3], ["moved", 4], ["free", 2], ["moved", 3], ["free", 1], ["hot", 6], ["free", 2]],
+        "caption": "Conditioned codes preserve hot tokens; other tokens compressed harder."
+      },
+      {
+        "title": "5. Ranking preserved",
+        "viz": "plain",
+        "caption": "Top-10 ranking stays same; storage shrinks 64 times."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {"b": "Encode at search time", "text": "Question and document words become number-lists (embeddings)."},
+      {"b": "Index with context", "text": "For each document, compute lightweight summary; store conditioned token codes (compressed lists)."},
+      {"b": "Match at query time", "text": "Question tokens score against document tokens using the compressed codes."},
+      {"b": "Ranking-aware training", "text": "During training, protect high-score tokens; don't care if low-score tokens get fuzzy."},
+      {"b": "Storage and speed", "text": "Each token now takes 2-8 bits instead of 32; 64x smaller index, similar ranking."}
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "CrossQ moves the token codes (compressed number-lists) and adds a conditioning step that lets the compression depend on what document the token came from."
+    ],
+    "object": "Token codes"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: winner-token fidelity",
+    "name": "Winner-token fidelity",
+    "paras": [
+      "Not all tokens are equal when ranking. A few high-scoring tokens ('winners') determine whether a document ranks in the top ten. Fidelity is how accurately the compressed codes preserve the original scores of these winners. Standard compression erodes fidelity of winners equally with losers, breaking ranking. CrossQ's hidden measure is how well the conditioned codes keep winner scores intact while allowing losers to degrade.",
+      "The paper estimates fidelity by running the ranking task and measuring whether top-ten documents stay top-ten after compression. It is inferred from ranking metrics (MRR@10, nDCG@10) rather than measured directly, but the mechanism ensures high-scoring tokens are protected during training."
+    ],
+    "heat": {
+      "cells": [
+        ["token-1", 4, true],
+        ["token-2", 1, false],
+        ["token-3", 4, true],
+        ["token-4", 1, false],
+        ["token-5", 4, true],
+        ["token-6", 1, false],
+        ["token-7", 2, false],
+        ["token-8", 1, false],
+        ["token-9", 2, false],
+        ["token-10", 1, false],
+        ["token-11", 4, true],
+        ["token-12", 1, false]
+      ],
+      "caption": "Darker means higher score; highlights (token-1, 3, 5, 11) are winners that must stay sharp."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Winner-token fidelity: how well compressed codes keep the top-scoring tokens accurate."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Measured via ranking task performance: MRR@10 and nDCG@10 retention after compression."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: conditioning + ranking-aligned training",
+    "paras": [
+      "Standard quantization (rounding numbers) treats all tokens the same: find one codebook (a set of allowed rounded values) that reconstructs all tokens with minimum error. But reconstruction error and ranking are decoupled: a document can lose ranking even if reconstructed tokens look close on average.",
+      "CrossQ uses two tricks. First, conditioning: instead of one global codebook, each token's code depends on lightweight context about its document (computed at indexing, not stored). This gives different tokens different compression budgets — tokens in high-quality documents can afford more bits, while low-importance tokens compress harder. Second, ranking-aligned objectives: during training, the system learns codes by directly protecting ranking metrics. It uses triplet losses (keeping margins between relevant and hard-negative documents intact) and score distribution matching (ensuring the distribution of match scores stays similar). This means the training process explicitly cares about preserving which documents rank where, not just reconstruction.",
+      "The mechanism: light document context lets token codes adapt to document importance; ranking-aligned training ensures the adaptation preserves ranking decisions, not average fidelity."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Document words and question"},
+        {"t": "step", "s": "Compute lightweight document summary", "hl": true},
+        {"t": "step", "s": "Generate adaptive token codes conditioned on summary"},
+        {"t": "step", "s": "Train with ranking losses (preserve margins, score distributions)"},
+        {"t": "output", "s": "Compressed tokens that keep ranking intact"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The compression equation",
+    "words": "Loss = reconstruction error of tokens + ranking loss (triplet margin + score distribution matching) + lambda times penalty for high bit budget.",
+    "equation": "L = MSE(token_original, quantize(token, context)) + margin_loss(scores_pos, scores_neg) + dist_loss(P_scores, Q_scores) + lambda * bits_used",
+    "symbols": [
+      ["token_original", "the original floating-point number-list for one word"],
+      ["quantize(token, context)", "the rounded version, conditioned on document context"],
+      ["scores_pos", "match scores of relevant documents (should be high)"],
+      ["scores_neg", "match scores of hard negatives (should be low)"],
+      ["margin_loss", "penalty if the gap between relevant and negative is too small"],
+      ["P_scores", "distribution of scores before compression"],
+      ["Q_scores", "distribution of scores after compression"],
+      ["dist_loss", "penalty if the two distributions differ"],
+      ["lambda", "weight controlling how much to trade off storage for quality"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a winner token's original score is 8.0, and a loser token's score is 1.5.",
+        "Standard quantization (fixed codebook) rounds both: 8.0 -> 7.9, 1.5 -> 1.6 (small errors, but ranking intact in this case).",
+        "CrossQ with context: winner tokens get more bits, so 8.0 -> 8.01 (0.01 error); losers compress harder, 1.5 -> 1.2 (0.3 error).",
+        "Ranking-aligned loss: trains to keep the score gap (8.0 - 1.5 = 6.5) similar after compression (8.01 - 1.2 = 6.81), so ranking is preserved.",
+        "Storage: winner uses more bits, loser fewer. Average bits per token drop 64x while top-ten ranking survives."
+      ]
+    },
+    "note": "The loss balances three things: keeping tokens close to original, preserving score gaps between relevant and hard negatives, and keeping the overall score distribution honest."
+  },
+  "bars": {
+    "h2": "Ranking quality vs. storage",
+    "charts": [
+      {
+        "title": "Naive uniform compression",
+        "rows": [
+          ["Before compression (MRR@10)", 0.356, "good"],
+          ["After compression at 4 bits per token", 0.298, "bad"],
+          ["Storage: full precision", 100, "bad"]
+        ],
+        "note": "Equal treatment of all tokens erodes ranking; top-ten documents shift."
+      },
+      {
+        "title": "CrossQ (this paper)",
+        "rows": [
+          ["Before compression (MRR@10)", 0.356, "good"],
+          ["After compression at 4 bits per token", 0.347, "good"],
+          ["Storage: 1.6% of full precision", 1.6, "good"]
+        ],
+        "note": "Ranking-aligned training preserves top-ten; storage shrinks 64x."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Hard negatives mislabeled.",
+        "html": "If the training data marks the wrong documents as 'negative', the ranking-aligned loss will protect false negatives and break ranking. The paper depends on clean training labels."
+      },
+      {
+        "warn": true,
+        "b": "Document context bloat.",
+        "html": "If the lightweight document summary grows too large (even if not stored, it must be computed at index time), indexing becomes slow. The method works only if context stays cheap to compute."
+      },
+      {
+        "warn": true,
+        "b": "Out-of-distribution queries.",
+        "html": "If a query at search time asks about topics far outside the training corpus (e.g., new scientific discoveries), the token codes may be misaligned. The paper trains on a specific retrieval corpus and may not generalize to very different domains."
+      },
+      {
+        "b": "Done right.",
+        "html": "When training data is clean, context is lightweight, and queries stay in-distribution, CrossQ delivers both small storage and intact ranking."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny late-interaction search engine: store 1000 documents (news articles or Wikipedia snippets) with uncompressed and CrossQ-compressed token vectors. Compress at 4 bits per token. Run 50 test queries, and measure ranking (rank of ground-truth document in the top-100 results). Compare MRR@10 (mean rank of the first relevant result) before and after compression. Also measure storage used (bytes per token). The demo should show that MRR@10 drops by less than 2% while storage shrinks to ~1.6% of uncompressed."
+    ],
+    "metric_eq": "MRR_retention = MRR@10_compressed / MRR@10_uncompressed; Storage_ratio = bytes_per_token_compressed / bytes_per_token_uncompressed",
+    "closing": "The winning insight: smart compression is not about preserving average reconstruction — it is about preserving ranking decisions, and that requires knowing which tokens decide rankings."
+  }
+}
