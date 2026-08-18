@@ -1,0 +1,252 @@
+{
+  "slug": "iclr-or-qwuxu0qnx0",
+  "title": "UltraMemV2: Memory Networks Scaling to 120B Parameters",
+  "family": "Efficiency & Systems",
+  "one_liner": "UltraMemV2 matches the speed of 8-expert mixture-of-experts models while using far fewer memory lookups by routing tokens to a factored memory table instead of independent experts.",
+  "lead": "Mixture-of-experts models are fast because they only activate some weights (the learnable numbers) on each input, but they waste time fetching scattered expert data from memory. UltraMemV2 uses a different trick: route each word or phrase fragment to a specific slice of a shared memory table based on row and column coordinates, then combine those slices. This uses far fewer memory accesses and matches 8-expert models in accuracy, while being especially good at tasks that need to remember context.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Two paths to fast models, both imperfect",
+    "paras": [
+      "When a language model answers a question, it processes thousands of numbers in parallel. To keep this fast, you either activate all the learned weights every time (slow, everything runs) or activate only some weights (fast, but hard to keep accurate). Mixture of experts takes the second route: route each word or phrase fragment to a few specialized submodels (experts), activate only those, and combine their outputs. The problem: fetching those scattered expert submodels from memory is expensive. Even though the model does less computation, the computer spends a lot of time waiting for memory.",
+      "The older memory-layer approach tries to avoid this by storing all knowledge in ONE factored memory table (like a filing cabinet indexed by coordinates). But prior attempts only matched the accuracy of 2-expert mixtures — nowhere near the 8-expert accuracy that works in practice. So practitioners stuck with mixture of experts, despite the memory-access burden."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "UltraMemV2 routes tokens to factored memory coordinates (row and column) instead of picking between separate expert submodels, matching 8-expert accuracy with far fewer memory loads."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The choice: experts or memory",
+        "viz": "box",
+        "viz_args": "Mixture-of-Experts vs Memory Layer",
+        "caption": "Mix-of-experts picks one submodel, memory layer looks up coordinates."
+      },
+      {
+        "title": "2. Mixture-of-experts problem",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["hot", 78], ["free", 15], ["hot", 82], ["free", 20], ["free", 12], ["free", 18], ["free", 14], ["hot", 88], ["free", 16], ["free", 22], ["free", 11]],
+        "caption": "Some experts hot, others idle; fetching scattered submodels is slow."
+      },
+      {
+        "title": "3. UltraMemV2 route move",
+        "viz": "weights",
+        "viz_args": [["moved", 68], ["moved", 72], ["moved", 75], ["moved", 70], ["moved", 73], ["moved", 69], ["moved", 71], ["moved", 74], ["moved", 68], ["moved", 72], ["moved", 70], ["moved", 73]],
+        "caption": "Every token routed by row then column, hitting same continuous memory."
+      },
+      {
+        "title": "4. Factored retrieval",
+        "viz": "box",
+        "viz_args": "Row key × Column key → value slice",
+        "caption": "One small lookup per coordinate pair, not scattered expert fetches."
+      },
+      {
+        "title": "5. Result: same speed, better memory",
+        "viz": "weights",
+        "viz_args": [["hot", 82], ["hot", 80], ["hot", 78], ["hot", 85], ["hot", 79], ["hot", 81], ["hot", 77], ["hot", 84], ["hot", 80], ["hot", 83], ["hot", 76], ["hot", 82]],
+        "caption": "All layers stay warm, memory accesses stay local and fast."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Project input to query",
+        "text": "Convert the token into a small list of numbers (query) via a simple learned transformation."
+      },
+      {
+        "b": "Route via row and column",
+        "text": "Score the query against two separate key tables (rows and columns), pick the top row and top column."
+      },
+      {
+        "b": "Retrieve memory slices",
+        "text": "Use row and column picks to fetch two small value arrays from a shared table, all in one memory region."
+      },
+      {
+        "b": "Combine via weighted sum",
+        "text": "Weight each value slice by its score and add them together to form the output."
+      },
+      {
+        "b": "Feed forward as normal",
+        "text": "Pass the combined output to the next stage (just like an expert would)."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "Instead of routing tokens to one of several separate expert submodels, UltraMemV2 routes each token to a pair of coordinates (row and column) in a single factored memory table. This keeps all data in one contiguous memory region, eliminating the scattered fetches that slow mixture-of-experts models."
+    ],
+    "object": "routing method"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: activation density",
+    "name": "activation density",
+    "paras": [
+      "Activation density is the fraction of parameters (weights) that actually run and change on each input. In mixture of experts, only the chosen experts' parameters activate; in UltraMemV2, only the retrieved memory slices activate. This hidden number controls the speed-versus-accuracy tradeoff: higher density means more computation happens, so the model can learn more distinct output patterns for different situations, leading to higher accuracy. Lower density saves compute but starves the model of distinct behaviors, so it struggles with nuanced tasks and accuracy drops.",
+      "The paper measures activation density by tracking how many unique row-column pairs are used across a batch of inputs. They show empirically that activation density (fraction of total parameters that are live) matters far more than raw parameter count: a model with 120B total parameters but only 2.5B activation density beats a smaller model with lower activation density."
+    ],
+    "heat": {
+      "cells": [
+        ["Row 1", 4, true],
+        ["Row 2", 2, false],
+        ["Row 3", 3, false],
+        ["Col 1", 4, true],
+        ["Col 2", 1, false],
+        ["Col 3", 3, true],
+        ["Memory A", 4, false],
+        ["Memory B", 2, false],
+        ["Memory C", 3, true],
+        ["Memory D", 1, false],
+        ["Memory E", 4, false],
+        ["Memory F", 2, true]
+      ],
+      "caption": "Darker means more tokens use that coordinate or memory slice; marked slices are retrieved most."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Activation density is how much of the model is actually working on a given input. If you activate 2% of a 100-billion-parameter model, your activation density is 2%. That 2% is not scattered; it is clustered in factored coordinates, so it all sits in one memory region."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper shows empirically that models scaled to high activation density (2.5B out of 120B) outperform smaller models scaled to lower activation density on both standard and memory-intensive tasks, because higher activation density gives the model more distinct behaviors it can produce, which translates to solving harder problems. This measured finding guides architecture choices: invest in activation density, not just raw parameters."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why factored routing stays efficient",
+    "paras": [
+      "Mixture of experts wastes memory bandwidth because each expert is a separate neural network stored in a separate memory region. When the model routes a token to expert #3, the computer must fetch expert #3's weights from wherever they sit in memory. Across a batch of different tokens going to different experts, these fetches are scattered all over, causing cache misses and stalling the processor.",
+      "UltraMemV2 avoids this by treating the entire model as one large memory table indexed by row-column pairs, like a spreadsheet. When a token needs the row-5, column-3 slice, that slice sits in a contiguous block adjacent to row-5, column-2 and row-5, column-4. Modern processors are optimized for such sequential access patterns; they prefetch the next block automatically. All memory accesses stay local and fast.",
+      "The five key improvements make this work: (1) placing memory layers in every transformer block so they contribute substantially to every layer's output, (2) simplifying how values are expanded with a single linear projection instead of one per attention head, (3) reusing proven value-processing from another method (PEER), (4) initializing carefully so the layer outputs don't grow too large or too small with depth, and (5) keeping the balance between memory and feed-forward computation tuned to the activation density. Together, these ensure that the memory-layer model stays competitive in accuracy while keeping memory access efficient."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Token (list of numbers)"
+        },
+        {
+          "t": "step",
+          "s": "Query projection",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Row-key scoring, pick top",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Column-key scoring, pick top",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Fetch row and column slices",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Weighted sum pooling",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Output (same list size)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The routing equation",
+    "words": "Query scores each row key and each column key separately. The row and column with highest scores are selected, and their corresponding value slices are fetched and weighted-summed into the output.",
+    "equation": "out = sum( score_row * value_row + score_col * value_col ) where score_row = softmax(query · row_keys), score_col = softmax(query · col_keys)",
+    "symbols": [
+      ["query", "small list of numbers derived from the token input"],
+      ["row_keys", "table of learned vectors for row routing"],
+      ["col_keys", "table of learned vectors for column routing"],
+      ["score_row", "softmax scores that sum to 1, one per row"],
+      ["score_col", "softmax scores that sum to 1, one per column"],
+      ["value_row", "retrieved memory slice indexed by top row"],
+      ["value_col", "retrieved memory slice indexed by top column"],
+      ["softmax", "a transformation that turns numbers into fractions adding to 1"],
+      ["·", "dot product (multiply corresponding elements, sum them)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with 3 rows and 2 columns",
+      "lines": [
+        "Suppose query = [0.5, -0.2, 0.8].",
+        "Dot query with row_key_1: 0.5*0.3 + (-0.2)*0.1 + 0.8*0.4 = 0.15 - 0.02 + 0.32 = 0.45.",
+        "Dot query with row_key_2: 0.5*0.1 + (-0.2)*0.5 + 0.8*0.2 = 0.05 - 0.10 + 0.16 = 0.11.",
+        "Dot query with row_key_3: 0.5*0.6 + (-0.2)*0.3 + 0.8*0.1 = 0.30 - 0.06 + 0.08 = 0.32.",
+        "Softmax([0.45, 0.11, 0.32]) ≈ [0.58, 0.15, 0.27].",
+        "Similarly for columns: softmax([0.40, 0.28]) ≈ [0.60, 0.40].",
+        "Fetch value_row_1 (top row, score 0.58) and value_col_1 (top col, score 0.60), weight and add: output = 0.58 * value_row_1 + 0.60 * value_col_1."
+      ]
+    },
+    "note": "The scores tell you how strong each row and column match the input; you fetch both and blend them, using contiguous memory."
+  },
+  "bars": {
+    "h2": "Performance on memory-intensive tasks",
+    "charts": [
+      {
+        "title": "Memory-intensive task: long-context memorization",
+        "rows": [
+          ["2-expert mixture-of-experts baseline", 62, "bad"],
+          ["Prior memory-layer (UltraMem)", 64, "bad"],
+          ["UltraMemV2", 78, "good"]
+        ],
+        "note": "UltraMemV2 gains 16 points over prior memory layers; mixture-of-experts with 2 experts falls behind."
+      },
+      {
+        "title": "General accuracy across all tasks",
+        "rows": [
+          ["8-expert mixture-of-experts baseline", 84, "good"],
+          ["UltraMemV2 with same compute", 84, "good"],
+          ["UltraMemV2 on long-context tasks", 91, "good"]
+        ],
+        "note": "UltraMemV2 matches 8-expert accuracy on standard benchmarks, and exceeds it on context-heavy tasks."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Initialization variance can diverge.",
+        "html": "If the row and column keys are initialized with the wrong standard deviation, training becomes unstable. The paper carefully designs initialization so output variance stays bounded even after many layers."
+      },
+      {
+        "warn": true,
+        "b": "Imbalanced row-column usage.",
+        "html": "If most tokens cluster on the same few rows or columns, the other slices waste memory. The paper tried a balance loss to spread usage evenly, but found it unnecessary—simple training spreads the load automatically."
+      },
+      {
+        "warn": true,
+        "b": "Over-sharing memory tables across layers.",
+        "html": "Reusing the same memory table across many layers saves space, but it forces all those layers to share the same retrieval vocabulary—so each layer has fewer distinct retrievals to choose from, which limits its ability to produce varied outputs at different depths. The paper finds 6-9 layers per shared table is optimal; beyond that, accuracy drops because each layer is starved for expressiveness."
+      },
+      {
+        "b": "Done right.",
+        "html": "Place a memory layer in every block, use one simple value projection, route via factored coordinates, and balance memory compute with feed-forward compute. Activations spread naturally; variance stays stable; the model trains smoothly and matches mixture-of-experts accuracy."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny model (say, 100M parameters, 10M activation) with both a 2-expert mixture-of-experts layer and an UltraMemV2 layer side by side. Train both on a task that requires memorizing short contexts (e.g., a few sentences of dialogue, then answer a question). Measure two things: final accuracy and memory bandwidth used during inference (the number of bytes fetched from main memory)."
+    ],
+    "metric_eq": "efficiency_gain = (bandwidth_MoE - bandwidth_UltraMemV2) / bandwidth_MoE; accuracy_delta = accuracy_UltraMemV2 - accuracy_MoE",
+    "closing": "The demo must show that UltraMemV2 uses less memory bandwidth (fewer bytes fetched from main memory) than mixture of experts while reaching equal or higher accuracy on the context-memorization task. Since both models have the same activation density, equal accuracy proves that contiguous factored memory lookups are efficient—your brain can finish processing faster without losing learning power—while lower bandwidth proves that factored routing actually wastes less of the computer's time waiting for data than scattered expert fetching does."
+  }
+}

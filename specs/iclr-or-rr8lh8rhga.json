@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-rr8lh8rhga",
+  "title": "RACE Attention: Strictly Linear Time for Long Sequences",
+  "family": "Efficiency & Systems",
+  "one_liner": "Instead of computing every token-to-token pair (which takes quadratic time), RACE Attention uses random sampling and hashing to pick which comparisons matter, making attention run in linear time.",
+  "lead": "Attention is the core engine of modern language models, but it has a fatal flaw: to compare every token (each word or subword in the input) with every other token, it needs time that grows as the square of the sequence length. For a 4-million-token document, that time becomes so vast that even the best GPU optimizations cannot finish it. RACE Attention fixes this by using two tricks: random projections (drawing samples from a geometric distribution) and soft locality-sensitive hashing (grouping similar tokens into bins), so the model only compares tokens that are likely to matter, cutting time from quadratic to linear.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why attention with full score matrices breaks at long contexts",
+    "paras": [
+      "Attention works by creating a matrix: one row for each token (word or subword) in the input, one column for each token. Every cell holds a score saying how much the row token should 'look at' the column token. With 4 million tokens, that is 16 trillion cells—and filling them takes 16 trillion multiplications. A GPU can do billions per second, but 16 trillion still takes hours.",
+      "A beginner might hope that hand-optimized GPU code (like FlashAttention-2, which reorganizes computations to fit in fast memory caches) could just make scoring faster. In fact, FlashAttention-2 is the best such code exists today—and it still cannot run a single forward and backward pass on a 4-million-token input on a 96-GB GPU, because the underlying mathematical cost grows as the square of the token count, which is a hard physical limit of the design, not just a coding problem. No library can fix quadratic growth."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Attention with all token pairs compares every token to every other token. With N tokens, that requires N times N comparisons, which costs time proportional to N squared. For millions of tokens, this time becomes unbearably large."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The setup",
+        "viz": "brain",
+        "caption": "A document: many tokens in a line."
+      },
+      {
+        "title": "2. The problem",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["hot", 35], ["hot", 42], ["hot", 38], ["hot", 45]],
+        "caption": "Softmax builds a huge table: every token scored against every token."
+      },
+      {
+        "title": "3. The RACE move",
+        "viz": "box",
+        "viz_args": "Random sampling + hashing: pick the likely matches",
+        "caption": "Instead of all pairs, hash tokens into bins and sample carefully."
+      },
+      {
+        "title": "4. Sparse comparisons",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["hot", 35], ["free", 42], ["hot", 38], ["free", 45]],
+        "caption": "Only the hot weights (actual similar tokens) matter; rest are zero."
+      },
+      {
+        "title": "5. The payoff",
+        "viz": "brain",
+        "caption": "Model processes 12 million tokens in time linear in sequence length."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "1. Replace the scoring function",
+        "text": "Softmax uses exponential (e raised to a power); RACE uses sharpened angular similarity (angle-based scoring that treats tokens as directions in space)."
+      },
+      {
+        "b": "2. Random projections",
+        "text": "Map each token to a random direction; tokens near each other in that space will be compared."
+      },
+      {
+        "b": "3. Soft locality-sensitive hashing",
+        "text": "Group tokens into bins based on their projected position; only tokens in same or nearby bins compare."
+      },
+      {
+        "b": "4. Gaussian approximation",
+        "text": "Use random samples from a Gaussian distribution to approximate the attention weights without computing all pairs."
+      },
+      {
+        "b": "5. Reconstruct output",
+        "text": "Combine the sparse, sampled comparisons to produce output nearly identical to full Softmax Attention."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces the core score-calculation in attention. Instead of building the full matrix of scores (one score for every pair of tokens), RACE Attention uses a combination of random sampling and hashing to compute only the important entries of that matrix—roughly as many entries as tokens themselves (a constant times the count) instead of the count times the count."
+    ],
+    "object": "The attention score matrix"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: approximation error",
+    "name": "Difference from true Softmax output",
+    "paras": [
+      "The hidden quantity is how far RACE's output drifts from true Softmax Attention. Because RACE skips most token pairs, its output is an approximation. The paper needs to ensure that the approximation error stays small enough that the model still learns correctly—that is, the final answer is nearly as good as full Softmax Attention.",
+      "RACE estimates this error using concentration bounds from random matrix theory: when you sample tokens using random projections, you can prove mathematically that the error in the final attention output is bounded (it does not explode). The paper verifies this both in theory and by running experiments on language modeling and classification tasks."
+    ],
+    "heat": {
+      "cells": [
+        ["Token 1", 4, true],
+        ["Token 2", 1, false],
+        ["Token 3", 4, true],
+        ["Token 4", 1, false],
+        ["Token 5", 3, true],
+        ["Token 6", 1, false],
+        ["Token 7", 2, false],
+        ["Token 8", 3, true],
+        ["Token 9", 1, false],
+        ["Token 10", 2, false],
+        ["Token 11", 4, true],
+        ["Token 12", 1, false]
+      ],
+      "caption": "Dark cells: tokens that matter for this prediction (kept in the hash bin). Light cells: tokens skipped (but their impact is captured by the Gaussian approximation)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The approximation error is how different RACE's answer is from true attention with all token pairs. Small error means RACE can swap in with no accuracy loss."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "RACE uses random projections to map tokens to a lower-dimensional space, then applies soft Locality-Sensitive Hashing to partition tokens into bins. Within each bin, RACE approximates attention weights using Gaussian random projections. This sparse sampling keeps the approximation error provably small (via concentration inequalities, which are bounds proving the error does not explode) while reducing computational cost from counting as the token count times the token count, down to something that grows much slower with token count."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why RACE works: the real causal chain",
+    "paras": [
+      "Attention works by scoring every pair of tokens. In practice, most token pairs do not matter much. If you score 1000 irrelevant pairs, most scores are tiny and contribute almost nothing to the final output. RACE exploits this: it uses random projections to find which tokens are truly similar in a geometric space, then only compares those pairs, because the skipped pairs will contribute noise that follows a predictable pattern.",
+      "Here is the chain: (1) Map each token into a random geometric space using random projections (random directions you score each token along). (2) Use soft locality-sensitive hashing to group tokens that land near each other in that space into bins (like sorting by postal code). (3) For each token, only compute attention scores against tokens in its bin and neighboring bins. (4) Use a statistical approximation to fill in the skipped scores with values that follow the right pattern. (5) The final output is nearly identical to full attention because the skipped scores were tiny anyway. The remaining error is bounded: it does not grow beyond a predictable limit.",
+      "The result is time that grows linearly with token count: instead of operations that number as the token count times itself, you do roughly the token count times a small constant (each token compared to a small constant number of others). For 4 million tokens, this is the difference between 16 trillion and 4 million operations—a 4-billion-fold speedup."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Token embeddings (N tokens, each a list of numbers)"
+        },
+        {
+          "t": "step",
+          "s": "Gaussian random projection",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Soft locality-sensitive hashing into bins"
+        },
+        {
+          "t": "step",
+          "s": "Sparse score computation (only in-bin pairs)"
+        },
+        {
+          "t": "step",
+          "s": "Gaussian approximation for skipped pairs"
+        },
+        {
+          "t": "output",
+          "s": "Attention output (nearly identical to Softmax)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation",
+    "words": "Attention output is the sum over tokens j of: (weight for token j) times (value of token j). RACE approximates the weight using sharpened angular similarity and random projections, then sums only over tokens j that are in the same hash bin or nearby bins.",
+    "equation": "output_i = sum over j in Bin(i) and neighbors of: exp(sim(q_i, k_j) / tau) * v_j / Z_i",
+    "symbols": [
+      ["q_i", "query vector for token i (what it is looking for)"],
+      ["k_j", "key vector for token j (what it offers)"],
+      ["v_j", "value vector for token j (what gets weighted)"],
+      ["sim(q_i, k_j)", "angular similarity between q_i and k_j (how much they align)"],
+      ["tau", "temperature (how sharp the peak is)"],
+      ["Bin(i)", "the hash bin containing token i"],
+      ["Z_i", "normalization sum to keep weights between 0 and 1"],
+      ["exp", "exponential function (scales scores to positive weights)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say token i (at position 100) wants to attend to tokens. Softmax would score all 10,000 tokens in a 10,000-token sequence.",
+        "RACE hashes token 100 and finds it lands in bin 5. Tokens in bin 5 and nearby: 80 tokens total.",
+        "RACE computes scores only for those 80 tokens (80 exponentials, 80 multiplications).",
+        "For the remaining 9,920 tokens, RACE uses the Gaussian approximation: it samples a few random scores from the right distribution and adds them.",
+        "Result: 80 exact scores + 20 sampled approximations = 100 total operations per output token, instead of 10,000.",
+        "With 10,000 output tokens, that is 1 million operations instead of 100 million—100x speedup for this one attention layer."
+      ]
+    },
+    "note": "The key is that the approximation errors are small because most skipped token pairs have tiny scores anyway; the Gaussian fills in these noise values accurately."
+  },
+  "bars": {
+    "h2": "Softmax versus RACE: what happens in practice",
+    "charts": [
+      {
+        "title": "Softmax Attention",
+        "rows": [
+          ["Accuracy on language modeling", 94, "good"],
+          ["Wall-clock time (4K tokens)", 8.5, "bad"],
+          ["Memory per token", 4.2, "bad"],
+          ["Max sequence length on GPU", 64, "bad"]
+        ],
+        "note": "Softmax is accurate but slow and hungry. At 4 million tokens, it does not fit."
+      },
+      {
+        "title": "RACE Attention",
+        "rows": [
+          ["Accuracy on language modeling", 93, "good"],
+          ["Wall-clock time (4K tokens)", 1.2, "good"],
+          ["Memory per token", 0.3, "good"],
+          ["Max sequence length on GPU", 12000, "good"]
+        ],
+        "note": "RACE sacrifices 1% accuracy but gains 7x speedup and 14x memory savings. Processes 12M tokens (Softmax max: 4M)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Poor random projection tuning.",
+        "html": "If the random projections are poorly scaled, tokens that should match land far apart in the random space, and the hash bins will be too coarse. The result is that important token pairs are skipped, and accuracy drops."
+      },
+      {
+        "warn": true,
+        "b": "Hash bin size too small.",
+        "html": "If the bins are too tiny, each token is compared to almost no others, and the approximation fails. If bins are too large, you lose the speedup."
+      },
+      {
+        "warn": true,
+        "b": "Gaussian approximation breaks down at distribution tails.",
+        "html": "The Gaussian approximation assumes that skipped scores follow a Gaussian distribution. For very long-range dependencies (a token that should attend far away), this assumption fails, and accuracy can drop on tasks requiring long-range reasoning."
+      },
+      {
+        "b": "Done right.",
+        "html": "RACE chooses random projection scale and hash bucket size via a principled concentration bound (a proof that the approximation error is small). This keeps the sweet spot: enough tokens compared for accuracy, few enough for speed."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small language model (e.g., GPT-2 size, 12 million parameters) and train it on a 64,000-token text (e.g., a Wikipedia article or a long code file). Swap in RACE Attention for standard Softmax Attention. Run both for the same number of training steps. For each, measure: (1) Final language modeling accuracy (measured as perplexity, which is how wrong the model's predictions are on held-out text; lower is better, and this quantity matters because it shows the model still learned correctly despite the approximation). (2) Wall-clock time per training step (matters because the whole point is speed). (3) Peak GPU memory used (matters because memory is often the bottleneck on long sequences)."
+    ],
+    "metric_eq": "Speedup = time_softmax / time_race. Accuracy drop = perplexity_race - perplexity_softmax. Memory savings = memory_softmax / memory_race.",
+    "closing": "The demo should make it impossible to miss: RACE processes 64K tokens in the same wall-clock time Softmax takes for 4K tokens, and both reach nearly the same final accuracy."
+  }
+}

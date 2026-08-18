@@ -1,0 +1,255 @@
+{
+  "slug": "iclr-or-8udce5nhfl",
+  "title": "P3D: Scalable 3D Physics Surrogates",
+  "family": "AI for Science",
+  "one_liner": "P3D trains neural models on tiny patches of physics simulations, then glues them together using global context to predict large turbulent flows without running out of memory.",
+  "lead": "Predicting 3D physics simulations is painfully slow: a full high-resolution weather forecast or fluid-dynamics simulation can take hours. This paper presents P3D, a neural surrogate (a learned model that mimics the simulation) built from two parts: a local learner that sees only a small patch of space at a time, and a global stitcher that connects patches and passes long-distance information between them. This design lets you train enormous models on billion-element grids without exceeding GPU memory.",
+  "nav": [["theme-ai-for-science.html", "AI for Science"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why naive neural surrogates choke on big 3D data",
+    "paras": [
+      "A standard neural network reads the ENTIRE grid of a physics simulation at once. For a grid with 512 points in each of three dimensions, a snapshot is 268 million numbers and requires mountains of graphics-card memory and compute. A naive approach: train a single giant model on the full grid. It crashes. A second attempt: make the model smaller, but then it can only see local patterns and misses the global structure — a hurricane cannot feel the jet stream sitting 1000 miles away. A third attempt: train many small models, one per patch, but they work independently and contradict each other at the seams.",
+      "The fundamental problem: you want to learn patterns that span thousands of grid points (the jet stream carrying heat thousands of miles), but you cannot afford the memory cost of looking at thousands of grid points at once."
+    ],
+    "callout": {
+      "b": "The move",
+      "html": "Train on tiny patches using fast local feature detectors (filters that see only nearby grid points), then wire them together with a global stitcher that passes information between patches without reading the whole grid at once."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Naive approach",
+        "viz": "brain",
+        "caption": "Entire 512x512x512 grid loaded at once; graphics memory explodes."
+      },
+      {
+        "title": "2. Patch extraction",
+        "viz": "box",
+        "viz_args": "Big grid → Cut into overlapping 128x128x128 patches",
+        "caption": "Each patch fits in memory, trained on local CNN patterns only."
+      },
+      {
+        "title": "3. Patch learner (CNN)",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["warm", 40], ["warm", 35], ["free", 15], ["warm", 38], ["hot", 60], ["free", 25], ["warm", 42], ["hot", 55], ["free", 18], ["warm", 39], ["hot", 58]],
+        "caption": "Convolutional layers learn local physics: pressure spreads, vortices rotate."
+      },
+      {
+        "title": "4. Global stitcher (Transformer)",
+        "viz": "box",
+        "viz_args": "Bottleneck model reads patch summaries; injects global context back",
+        "caption": "Sequence model passes long-range signals between non-adjacent patches."
+      },
+      {
+        "title": "5. Full domain inference",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["moved", 48], ["moved", 52], ["moved", 49], ["moved", 51], ["moved", 47], ["moved", 53], ["moved", 48], ["moved", 50], ["moved", 49], ["moved", 51], ["moved", 48]],
+        "caption": "Patches predict in parallel, seams stay consistent via global flow."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Crop training",
+        "text": "Take the big 3D simulation. Chop it into overlapping small boxes (128 voxels on each side). Feed each box separately to the CNN part."
+      },
+      {
+        "b": "Step 2: Local learning",
+        "text": "The CNN (convolutional layers) learns how pressure, velocity, and temperature evolve within a single small box by seeing only neighbors two grid-points away."
+      },
+      {
+        "b": "Step 3: Bottleneck summary",
+        "text": "Each box's learned representation gets compressed into a compact summary at the bottleneck (middle of the U-shape architecture). Think of it as a postcard from that box."
+      },
+      {
+        "b": "Step 4: Global assembly",
+        "text": "A sequence model (a Transformer-like layer) reads all the postcards and figures out which patches influence which, passing signals across the whole domain."
+      },
+      {
+        "b": "Step 5: Decode and stitch",
+        "text": "The global context gets injected back into the decoder (the expanding half), and each patch predicts its next state. Seams align because they all received the same global context."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": [
+      "P3D changes how much spatial context the model can see at training time. Standard surrogates try to absorb the entire grid in one pass. P3D instead processes the grid in overlapping tiles, then bolts a global aggregator onto the bottleneck so the tiles can still coordinate. The trainable parameters live in three places: the local CNN (which sees only a small patch), the global context model (which sees summaries of all patches), and the decoder (which transforms global context + local features into predictions)."
+    ],
+    "object": "training spatial scope"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Patch communication signal",
+    "name": "How much global information flows across seams",
+    "paras": [
+      "At the bottleneck, each patch has a summary — a list of numbers (a vector, which is just numbers in a row) representing what happened in that box. The global context model reads these summaries and learns which patches depend on which others. If patch A's prediction relies on the wind pattern in patch B (far away), the context model must pass a signal from B's summary back to A's decoder. This signal is the hidden quantity: a measure of how much information from distant patches actually reaches each local decoder.",
+      "P3D estimates this flow using the weights and activations (the intermediate values computed while the model is running) of the context model. If those weights are large, information is flowing. If they are small or zero, the patches are ignoring each other, which is a sign that training has broken down."
+    ],
+    "heat": {
+      "cells": [
+        ["Patch 1 summary", 3, true],
+        ["Patch 2 summary", 1, false],
+        ["Patch 3 summary", 4, true],
+        ["Global context layer", 4, true],
+        ["Flow to patch 1 decoder", 3, true],
+        ["Flow to patch 2 decoder", 1, false],
+        ["Flow to patch 3 decoder", 4, true],
+        ["Patch 1 output", 3, false],
+        ["Patch 2 output", 1, false],
+        ["Patch 3 output", 4, false],
+        ["Stitched full prediction", 3, false],
+        ["Error at seams", 1, false]
+      ],
+      "caption": "Darker means more signal passing through. Patches that pass zero signal (pale) will ignore neighbors and break at seams."
+    },
+    "reads": [
+      {
+        "b": "Plain reading",
+        "html": "Imagine you are trying to forecast rain in Boston, but you train your model to look at only a 50-mile radius. You cannot see the hurricane approaching from Florida. Your local model fails near the domain boundary. But if you add a global context layer that reads summaries from other regions, it can warn your local decoder, 'This is hurricane season, expect big changes.' That warning is the hidden signal."
+      },
+      {
+        "b": "Paper reading",
+        "html": "The paper measures this flow by tracking the values inside the Transformer bottleneck. When the context model has high output strengths and the region signals (short summaries representing each patch's state) carry large values, the patches are exchanging information that matters. The paper validates this by checking if removing the context layer hurts accuracy on large domains — if the hidden signal is strong, removing it causes large drops."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting the grid and stitching it back works",
+    "paras": [
+      "The reason is translation equivariance: if you slide the whole simulation domain one grid-point left, the physics slides with it. A vortex at position X behaves the same way as the identical vortex at position X plus one. This means you can train on a small crop at position X, then move that trained model to position X plus 100 and it still works. P3D exploits this by training only once on crops 128 voxels on a side, then sliding that same model across the full domain (512 voxels on a side) when making predictions.",
+      "But sliding alone causes seams to be wrong: the patch centered at position 200 predicts what happens there, and the patch at position 201 independently predicts position 201, but they did not see each other during training, so their predictions fight at the boundary. P3D solves this by adding a global context model at the bottleneck. This model reads the summaries (the compressed representations) of all patches in parallel and computes which patches influence which. It then injects this global context back into each local decoder. Now when patch 200's decoder predicts, it receives a signal saying, 'Patch 201 has decided to increase pressure by 0.5; adjust your pressure boundary accordingly.' The context model acts as a negotiator, ensuring all patches agree on seam values.",
+      "The practical win: you train on small crops (much less memory than full-size), yet when making predictions you scale to huge domains because the local feature detector already learned patterns that work everywhere, and the context model coordinates the stitching. This runs in a fraction of the memory and time of a full-domain model."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Simulation state at time t"
+        },
+        {
+          "t": "step",
+          "s": "Crop into overlapping patches (128 voxels per side)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "CNN encodes each patch to bottleneck summary",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Global context model reads all summaries, computes inter-patch signals",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Context is injected back to each decoder via adaptive normalization",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Decoder predicts next state for each patch using global signals",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Full prediction at time t+1 with consistent seams"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core balance equation",
+    "words": "Total prediction error equals local patch error plus seam mismatch error weighted by how strong the global context signal is.",
+    "equation": "Loss = MSE(patch_predictions, ground_truth) + lambda * MSE(seam_values) + alpha * Context_Strength",
+    "symbols": [
+      ["patch_predictions", "What the decoder outputs for each voxel given local + global inputs"],
+      ["ground_truth", "The actual next simulation state from the physics solver"],
+      ["seam_values", "Predictions at the boundaries where two patches touch"],
+      ["lambda", "Penalty weight for seam mismatches"],
+      ["alpha", "Penalty for weak global context signal"],
+      ["Context_Strength", "Magnitude of the context model's output (how much it is trying to communicate)"],
+      ["MSE", "Mean squared error: average of all the squared differences"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Imagine a 2×2 simulation with 4 patches, training step 1.",
+        "Patch A predicts 0.8, ground truth 0.75 -> patch error = (0.8-0.75)^2 = 0.0025",
+        "All 4 patches sum to MSE = 0.012 average.",
+        "Seam between patches A and B: A predicts 0.8, B predicts 0.6 (differ by 0.2) -> seam error = 0.2^2 = 0.04",
+        "There are 4 seams; total seam error = 0.08.",
+        "Context model output magnitude = 0.3 (it is communicating moderately).",
+        "Loss = 0.012 + 1.0 * 0.08 + 0.5 * 0.3 = 0.012 + 0.08 + 0.15 = 0.242",
+        "If context signal was zero (0.0), loss = 0.092; if strong (2.0), loss = 1.012.",
+        "Training nudges the context model and decoders to increase context signal (make neighbors coordinate) and close the 0.2 seam gap."
+      ]
+    },
+    "note": "The equation says: get the patch predictions right, keep the seams consistent, and ensure the global context is actively helping (not just parasitic dead weight)."
+  },
+  "bars": {
+    "h2": "How well it works on real 3D simulations",
+    "charts": [
+      {
+        "title": "Baseline: Global model trained on full 512x512x512 domain",
+        "rows": [
+          ["Time step 1 accuracy", 92, "good"],
+          ["Time step 5 accuracy (drift)", 68, "bad"],
+          ["Time step 10 accuracy (diverged)", 35, "bad"],
+          ["Memory used (GB)", 28, "bad"],
+          ["Training time per sample (sec)", 180, "bad"]
+        ],
+        "note": "Predicts well initially but diverges fast because it saw the global context once at training time. At inference, it has to run autoregressive (one step at a time), accumulating errors."
+      },
+      {
+        "title": "P3D: Local CNN + global context at bottleneck",
+        "rows": [
+          ["Time step 1 accuracy", 91, "good"],
+          ["Time step 5 accuracy (stays coherent)", 84, "good"],
+          ["Time step 10 accuracy (still stable)", 79, "good"],
+          ["Memory used (GB)", 7, "good"],
+          ["Training time per sample (sec)", 12, "good"]
+        ],
+        "note": "Stays accurate for many steps because the global context model re-evaluates patch relationships at EVERY autoregressive prediction. Seams stay coordinated. Far cheaper to train because small crops use far less memory, so each training step is faster and fits more samples into available GPU memory."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Seams do not align when the global context model is not trained.",
+        "html": "If you train only the local feature detector and skip the context model, each patch predicts independently. At the domain boundary, patch A says the pressure is 100 and patch B says 99. The simulation becomes unstable because the prediction at the boundary has a discontinuity (a jump), which breaks the physics. The fix: ensure the context model is enabled and receiving weight updates (the nudges that improve it) during training, so it can learn to make neighboring patches agree on boundary values."
+      },
+      {
+        "warn": true,
+        "b": "Cropping breaks physics that spans larger than a patch.",
+        "html": "Some simulations have patterns (like large rotating cyclones) that are bigger than 128 voxels on a side. If the pattern is 200 voxels wide, two adjacent patches will each see only half of it, and their local feature detectors cannot learn the full pattern. The context model tries to compensate, but it cannot always succeed. The fix: increase crop size (costs memory) or detect oversized patterns and use larger crops for them."
+      },
+      {
+        "warn": true,
+        "b": "Autoregressive rollouts diverge after many steps.",
+        "html": "Even with the context model, predictions drift over many time steps. Each prediction is slightly noisy, and noise accumulates. The paper addresses this by retraining on ground-truth samples every few steps, but long-term forecasting (beyond 50 steps) remains hard."
+      },
+      {
+        "b": "Done right: global context is active and adaptive.",
+        "html": "When the context model is trained jointly with the local feature detector and decoder, it learns to pass important signals across seams. Patches do not behave as isolated cells; they negotiate via the bottleneck. The result is a model that scales to 512 voxels on a side and beyond without using unimaginable GPU memory or time."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A minimal demo: take a 3D snapshot of fluid flow (e.g., a 256-voxel-side slice of turbulent water). Chop it into 64-voxel-side crops with 50 percent overlap. Train P3D on the crops for one time step using mean squared error (average of squared differences between prediction and truth). Then test: (1) run the full cropped prediction and reconstruct the full domain, comparing to ground truth; (2) measure pressure and velocity at the seams between crops, checking that they match within 2 percent; (3) measure the error in the corner regions (where crops overlap), showing it is no worse than the center (proving the model is not cheating by memorizing boundaries). The demo must be small enough to fit in a laptop's GPU (use synthetic data or a real small dataset like a 64-voxel-side slice of incompressible flow)."
+    ],
+    "metric_eq": "Seam_Consistency = max_seam_voxels |Prediction_A - Prediction_B| / mean(|ground_truth|)",
+    "closing": "The seam metric must stay below 0.05 (5 percent error) for the coordinate mechanism to prove itself. If it exceeds 0.15, the global context model is not working and you should inspect the context weights."
+  }
+}

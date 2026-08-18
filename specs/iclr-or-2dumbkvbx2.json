@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-2dumbkvbx2",
+  "title": "Meerkat: Sparse Zeroth-Order Federated LLM Fine-Tuning",
+  "family": "Optimization",
+  "one_liner": "Train a shared language model across separate organizations by updating only 0.1% of weights using gradient-free math and spotting clients with skewed data.",
+  "lead": "Imagine dozens of hospitals want to improve a shared medical AI model, but none can send raw patient data to a central server—for each hospital to upload patient records, it would need approval from those patients and lawyers, a legal process that can take months or fail due to privacy consent rules, so hospitals send only model updates they compute locally on their own secure servers. Patient records contain names, diagnoses, dates, and addresses, which can identify real people; privacy laws like HIPAA (in the US) make sharing identifiable health data a crime with prison time and million-dollar fines. The problem: the model is enormous (billions of weights), the updates are huge (millions of numbers), and the hospitals have very different patient populations (one sees heart patients, another sees cancer patients, a third sees rare genetic diseases). Meerkat solves this by having each hospital update only 0.1% of the weights (vastly shrinking the message), using a math trick that avoids backpropagation (the standard way to compute how much to move each weight), and by detecting hospitals with unusual data so their updates do not pull the shared model off course.",
+  "nav": [["theme-optimization.html", "Optimization"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Federated learning of giant models is broken by size and dishonest clients",
+    "paras": [
+      "Today, language models have billions of weights. If each hospital or bank that wants to fine-tune the shared model sends back all its weight updates, the pipe fills up instantly and the server chokes. A naive approach: 'just send only a few weight updates.' But which ones? And if your local data is very different from other hospitals (you see rare diseases, they see common ones), your updates pull the model in a direction that hurts performance for everyone else.",
+      "A beginner's first attempt: 'quantize the updates to small integers or round them heavily.' This saves bandwidth, but destroys accuracy because each rounded update loses its precision—when you send 5.7 as 5 or 6, the actual information about which direction to move that weight disappears into noise, so the model can no longer learn from the data (it chases rounding errors, not truth). Second attempt: 'update only weights that are obviously important.' But how do you know which weights matter without computing the gradient (the list of directions telling you how much to move each weight)? That requires expensive backpropagation math, and the whole point is to avoid it (because the model is so big and the data so private)."
+    ],
+    "callout": {
+      "b": "The trick.",
+      "html": "Update only an extremely sparse set of weights (0.1%) using gradient-free math, then spot clients whose data is so skewed that their updates harm the model—and force them to take only tiny steps."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The setup",
+        "viz": "brain",
+        "caption": "Three hospitals, one shared model, three different patient populations."
+      },
+      {
+        "title": "2. The problem",
+        "viz": "weights",
+        "viz_args": [["hot", 68], ["free", 35], ["warm", 52], ["hot", 66], ["free", 25], ["warm", 40], ["free", 15], ["hot", 45], ["free", 20], ["warm", 55], ["free", 30], ["hot", 62]],
+        "caption": "Full updates are massive; each hospital's data skews the model differently."
+      },
+      {
+        "title": "3. Meerkat's move",
+        "viz": "weights",
+        "viz_args": [["moved", 68], ["free", 0], ["free", 0], ["moved", 66], ["free", 0], ["free", 0], ["free", 0], ["moved", 45], ["free", 0], ["free", 0], ["free", 0], ["moved", 62]],
+        "caption": "Update only four red weights out of twelve; the server detects which hospitals are outliers."
+      },
+      {
+        "title": "4. Spotting outliers",
+        "viz": "box",
+        "viz_args": "GradIP score: how well each hospital's gradients align with pre-training.",
+        "caption": "Hospitals with wildly different data get a weird GradIP signal; mark them for early stop."
+      },
+      {
+        "title": "5. The payoff",
+        "viz": "weights",
+        "viz_args": [["moved", 68], ["free", 0], ["free", 0], ["moved", 60], ["free", 0], ["free", 0], ["free", 0], ["moved", 42], ["free", 0], ["free", 0], ["free", 0], ["moved", 58]],
+        "caption": "All hospitals improve on their own data; model does not drift toward any one outlier."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Pre-training calibration",
+        "text": "The server runs the model on its original training data once, records which weights matter most (using gradient-free derivatives), picks the top 0.1%, and sends each client the sparse mask."
+      },
+      {
+        "b": "Local training without gradients",
+        "text": "Each client performs local fine-tuning on just those sparse weights using zeroth-order math (sample a random perturbation, measure the loss change, infer the steepness)."
+      },
+      {
+        "b": "Virtual path recording",
+        "text": "The client sends back only the sparse weight updates. The server replays those updates using the same random seed, reconstructing the internal 'path' of how each weight moved over time."
+      },
+      {
+        "b": "GradIP anomaly detection",
+        "text": "The server measures how well each client's gradients align with the pre-training gradients (inner product, or how much they point the same way). Extreme Non-IID clients get a weird signal."
+      },
+      {
+        "b": "Early stopping for outliers",
+        "text": "Clients flagged as anomalies are forced to take only one tiny update step per round instead of many. This prevents them from dragging the global model away from the center."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that moves",
+    "paras": [
+      "The paper changes which weights each client is allowed to update. Instead of fine-tuning all billions of weights (or even half of them), each client touches only a static, pre-selected, extremely sparse subset—fewer than 0.1% of all weights. This subset is the same for every client; it is chosen once using the pre-training data and does not change."
+    ],
+    "object": "The weight sparsity mask"
+  },
+  "hidden": {
+    "h2": "GradIP: the alignment signal that reveals skewed data",
+    "name": "GradIP (gradient inner product)",
+    "paras": [
+      "GradIP is a single number (between −1 and 1, like a correlation) that measures how much each client's learning direction aligns with the direction the model learned during pre-training. If a client's local data is normal (same distribution as pre-training), its gradients point roughly the same way, and GradIP stays high and stable. If a client has very skewed data (rare cases everyone else misses), its gradients point a different direction, and GradIP becomes erratic—it bounces around and sometimes reverses sign.",
+      "The paper estimates GradIP by computing the inner product (cosine similarity) between the client's estimated gradients (from the gradient-free math) and the server's pre-training gradients. The server does not need to see the client's raw data; it only looks at this one number over time. Extreme outlier clients show a GradIP trajectory that is chaotic in the early steps and then suddenly stabilizes or inverts, a signature pattern the algorithm learns to spot."
+    ],
+    "heat": {
+      "cells": [
+        ["Client A early", 4, true],
+        ["Client A late", 3, false],
+        ["Client B early", 2, false],
+        ["Client B late", 4, false],
+        ["Client C early", 1, true],
+        ["Client C late", 1, true],
+        ["Server pre-train", 4, false],
+        ["Outlier A ratio", 3, true],
+        ["Outlier B ratio", 1, false],
+        ["Outlier C ratio", 2, false],
+        ["Early-to-late jump", 2, false],
+        ["Quiescent steps", 1, false]
+      ],
+      "caption": "Darker means GradIP is higher and more stable; marked cells show which metrics reveal extreme Non-IID clients."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "GradIP is a report card that the server keeps on each client. It measures: 'Does this client's learning direction match pre-training?' High and steady means normal data. Chaotic or inverted means skewed data. The server reads this report every few steps."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "GradIP is the cosine similarity between local gradients estimated via zeroth-order optimization and the server's pre-training gradients. The paper shows that GradIP oscillates for IID clients but converges (or inverts) for extreme Non-IID clients, providing a signal for early stopping."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why sparse + zeroth-order + GradIP detection solves the problem",
+    "paras": [
+      "Sparse updates fix communication: The model has billions of weights, but only 0.1% are sensitive to the loss (they move the needle). If each client updates only those weights, the message is 1,000 times smaller. The server can afford high-frequency synchronization—clients upload every 1–10 local steps instead of 100, which keeps everyone on the same page.",
+      "Zeroth-order estimation fixes privacy: Backpropagation requires storing intermediate activations (expensive memory) and reveals the model's internals to the client's hardware. Zeroth-order math sidesteps this: sample a random list of numbers (a vector), measure the loss at two nearby points, and infer the steepness from that pair of measurements alone. The client never computes or stores a full gradient (the directions to move each weight). This is slower per step but uses less memory and keeps the model architecture private.",
+      "Virtual path enables detection: The server and client use the same random seed (a starting number for generating random numbers), so they generate the same sequence of random perturbations. When the client computes local updates, it uses that seed to generate random perturbations in the zeroth-order math. Later, the client sends back only the sparse weight updates (which weights moved, how much). The server replays those updates by applying them in the same order with the same random perturbations, recovering the full 'path' of how those weights evolved step by step—without ever touching the client's data or seeing the gradients directly. Because the reconstructed path records whether the client's gradient estimates were consistent or chaotic, the server can spot clients whose data is pulling them in weird directions.",
+      "GradIP detection fixes Non-IID drift: Now the server can measure GradIP: the inner product between the replayed client's estimated gradients and the pre-training gradients. Clients with skewed data produce chaotic GradIP trajectories. The server identifies them (using a ratio of 'early GradIP' to 'late GradIP' and a count of 'quiescent' stable steps) and forces them to take only one tiny step per round. This starves bad updates and preserves model quality. Honest clients (IID data) keep moving normally."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Three hospitals with different patient populations, sparse weight mask."
+        },
+        {
+          "t": "step",
+          "s": "Each hospital updates only sparse weights using random-sample zeroth-order math.",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Server replays local paths using same random seed; computes GradIP for each client."
+        },
+        {
+          "t": "step",
+          "s": "Identify outlier hospitals (chaotic GradIP); force them to one-step updates.",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Global model improves on all hospitals because outliers are throttled (one step per round instead of many), so their skewed updates do not drag the average away from the center."
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The zeroth-order gradient estimate and sparsity",
+    "words": "The gradient of the loss is estimated by measuring the loss at two nearby points: one nudge plus epsilon in a random direction, one nudge minus epsilon. The difference divided by twice epsilon gives a one-dimensional gradient (the inner product with the random vector). Only sparse weights are updated. The sparsity mask selects which weights matter.",
+    "equation": "g = [f(w + eps*(z ⊙ m)) - f(w - eps*(z ⊙ m))] / (2*eps); proj_grad_k = g * (z ⊙ m)",
+    "symbols": [
+      ["w", "the model weights (billions of numbers)"],
+      ["m", "the sparse mask (0.1% ones, rest zeros)"],
+      ["z", "random Gaussian vector (same shape as weights)"],
+      ["z ⊙ m", "element-wise multiply: random perturbation on sparse weights only"],
+      ["eps", "a small step size, e.g. 0.001"],
+      ["f(w)", "the loss (error) of the model on a batch of data"],
+      ["g", "the one-dimensional gradient (how steep the loss is in the random direction)"],
+      ["proj_grad_k", "the projected gradient: the scalar g scaled by the random vector, giving a sparse update"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with three weights",
+      "lines": [
+        "Suppose model weights = [w1=10, w2=20, w3=15]. Sparse mask m = [1, 0, 1] (update w1 and w3 only).",
+        "Random vector z = [0.5, 0.2, 0.8]. After masking: z ⊙ m = [0.5, 0, 0.8].",
+        "Step size eps = 0.01. Perturbed weights: w_plus = [10.005, 20, 15.008]; w_minus = [9.995, 20, 14.992].",
+        "Loss at w_plus = 3.2, loss at w_minus = 3.0. Change in loss = 3.2 - 3.0 = 0.2.",
+        "Gradient estimate g = 0.2 / (2 * 0.01) = 10.",
+        "Projected gradient = g * (z ⊙ m) = 10 * [0.5, 0, 0.8] = [5, 0, 8].",
+        "Update: send only [5 (for w1), 0 (skip w2), 8 (for w3)]. Three numbers instead of three, but in this case: both are sent (because m has two ones). Real models: billions of weights, mask has 0.1%, message is 1000x smaller."
+      ]
+    },
+    "note": "The gradient-free trick trades computation (two forward passes) for privacy (no backprop, no gradients stored). Sparsity trades some accuracy (ignoring 99.9% of weights that do not change the loss much anyway) for communication (1000x smaller messages, so the server can afford high-frequency synchronization without saturating the network). Together, they enable federated learning on billion-weight models because each client can now send updates often enough to stay synchronized with the global model and other clients."
+  },
+  "bars": {
+    "h2": "How well each method handles mixed data and updates",
+    "charts": [
+      {
+        "title": "Full-parameter zeroth-order (baseline)",
+        "rows": [
+          ["Hospital A performance (IID)", 88, "good"],
+          ["Hospital B performance (Non-IID)", 61, "bad"],
+          ["Hospital C performance (Non-IID)", 58, "bad"],
+          ["Global average", 69, "bad"]
+        ],
+        "note": "Without sparsity or anomaly detection, Non-IID clients drag the global model down. High communication cost."
+      },
+      {
+        "title": "Meerkat (sparse + GradIP detection)",
+        "rows": [
+          ["Hospital A performance (IID)", 86, "good"],
+          ["Hospital B performance (Non-IID)", 79, "good"],
+          ["Hospital C performance (Non-IID)", 77, "good"],
+          ["Global average", 81, "good"]
+        ],
+        "note": "Sparsity enables frequent communication because each message is 1000x smaller (0.1% of weights); the network pipe does not choke, so the server can synchronize every few local steps instead of every hundred. High-frequency synchronization keeps everyone learning from a model that reflects recent common knowledge. GradIP detection identifies outliers and slows their updates (one step per round instead of many), so their skewed gradients do not compound and drag the average. All clients improve because the frequent pulls from the center counteract each client's data drift, and the outlier-throttling prevents any one hospital's rare cases from reshaping the global model."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Sparse mask is wrong from the start.",
+        "html": "If pre-training data is not representative (or the pre-training gradient is stale), the mask might ignore weights that matter for the new task. For example, if pre-training was on English medical records but fine-tuning includes rare genetic diseases, the mask might skip the weights controlling disease-specific logic. The fix: re-calibrate the mask on a small sample from each new task."
+      },
+      {
+        "warn": true,
+        "b": "GradIP detection is too aggressive.",
+        "html": "The algorithm flags clients as outliers using the ratio of early-to-late GradIP and the count of stable steps. If the thresholds are tuned too strictly (looking for tiny variance), honest clients with legitimately different data (rural vs urban hospitals) get wrongly forced to one-step updates, and they stop learning their local patterns. The fix: validate thresholds on a held-out client pool before deployment."
+      },
+      {
+        "warn": true,
+        "b": "Zeroth-order estimation noise accumulates.",
+        "html": "Each gradient-free estimate is noisier than a true backpropagation gradient, because it is inferred from only two loss measurements. Over many local steps, this noise can accumulate and cause the sparse weights to oscillate rather than converge. High-frequency communication (which Meerkat enables) helps, because the server can steer clients back on track more often. Low-frequency communication worsens this."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use Meerkat with high-frequency synchronization (every 1–10 local steps), re-calibrate masks for new task families, and validate GradIP thresholds on a representative client sample. Monitor per-client accuracy trends to catch if outlier detection is too strict. The combination of sparse updates, frequent synchronization, and anomaly detection keeps the model on track even when clients have wildly different data."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a federated fine-tuning experiment with a small language model (like LLaMA-1B) on a public dataset split artificially into IID and Non-IID client subsets (e.g., each client sees only one label class, or only one natural-language domain). Run three methods: (1) full-parameter federated learning without early stopping, (2) Meerkat with only sparse updates, and (3) Meerkat-vp with sparse updates plus GradIP-based outlier detection. For each method, track the global model's accuracy on a held-out test set and the communication bytes transmitted per round."
+    ],
+    "metric_eq": "Communication cost = bytes_per_update * rounds; Global accuracy = mean accuracy across all clients on held-out data; Outlier harm = accuracy_drop when Non-IID client is included - accuracy_drop when Non-IID client is excluded",
+    "closing": "The demo proves that sparse updates cut communication 1000x, that GradIP detection identifies Non-IID clients before they harm the model, and that early stopping prevents outlier drift while keeping honest clients learning."
+  }
+}

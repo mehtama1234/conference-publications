@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-121idilvmt",
+  "title": "Dual-Solver: Learnable ODE solver for fast diffusion sampling",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Instead of picking one recipe for denoising, Dual-Solver learns to blend multiple recipes continuously and picks the best integration path at each step.",
+  "lead": "Diffusion models generate images by gradually removing noise. Each step removes a tiny bit of noise by running the neural network once, so fewer steps mean faster sampling. Classical numerical recipes (the same ones used to solve equations in physics) work but are rigid—they commit to one way of predicting the clean image at the start. Dual-Solver makes those recipes flexible by letting learnable numbers blend between the three standard prediction types and smoothly select which integration path to follow, all guided by a frozen image classifier that just checks if the result looks like the target class.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Diffusion sampling is slow and recipes are rigid",
+    "paras": [
+      "Diffusion models generate images by starting with pure noise and iteratively denoising. Each denoising step calls the neural network once, so a typical image with 50 steps requires 50 function calls (called NFEs, or number of function evaluations). Real applications need this to be fast, so researchers use classical numerical recipes from physics and calculus—the same tricks that scientists use to solve differential equations. The catch: these recipes give you a menu of choices (should I predict the noise? The clean image? The velocity?), but once you pick, you are locked in for the whole sampling run.",
+      "A beginner might try: just use the predictor step (one way to guess the next state) everywhere, or switch to a corrector (a second step that refines the guess) everywhere. This breaks because correctors are expensive—they call the network twice per step—and not all prediction types work equally well at all noise levels. The recipes are not flexible. Nobody has tuned them together, and hand-tuning is tedious and slow."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Classical denoising recipes lock in one prediction type and one integration path, but the optimal blend and path change across the noising schedule."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Noise to clean",
+        "viz": "plain",
+        "caption": "Diffusion samples by iteratively denoising: noise becomes image in many steps."
+      },
+      {
+        "title": "2. Recipes are locked",
+        "viz": "box",
+        "viz_args": "Fixed choice: noise-pred, ONE path",
+        "caption": "Classical recipes pick one prediction type (noise/data/velocity) and one integration domain. You cannot switch mid-run."
+      },
+      {
+        "title": "3. Enter learnable parameters",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["warm", 35], ["warm", 40], ["warm", 45], ["warm", 50], ["warm", 55], ["warm", 60], ["warm", 40], ["warm", 45], ["warm", 50], ["warm", 55], ["warm", 60]],
+        "caption": "Dual-Solver adds learnable numbers at each step that blend between the three prediction types and routes to different integration paths."
+      },
+      {
+        "title": "4. Classifier guidance",
+        "viz": "box",
+        "viz_args": "Frozen classifier checks class correctness",
+        "caption": "A pretrained image classifier (frozen, not trained) runs on the decoded image and gives feedback: is this really a dog?"
+      },
+      {
+        "title": "5. Fewer steps, same quality",
+        "viz": "plain",
+        "caption": "With learned blending, the solver makes better guesses per step, so 3–9 steps deliver images as good as rigid recipes."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Initialize from random noise",
+        "text": "Start with pure Gaussian noise at the highest noise level."
+      },
+      {
+        "b": "At each denoising step, evaluate the learned solver",
+        "text": "Query the predictor (which uses learnable blend coefficients to interpolate among noise/data/velocity) and optional corrector."
+      },
+      {
+        "b": "Learnable parameters route the numerical method",
+        "text": "Five numbers per step steer: how much of each prediction type to use, which integration domain to compute in, and how to adjust residual error terms."
+      },
+      {
+        "b": "Decode and classify intermediate result",
+        "text": "After each step, decode the denoised state and run it through a frozen pretrained classifier (e.g., ImageNet trained ResNet) to get predicted class probabilities."
+      },
+      {
+        "b": "Update solver parameters using class prediction error",
+        "text": "Compute how wrong the class prediction is; update all 10 learnable numbers per step (except last step has 5) by flowing this error backward to nudge future samples toward the correct class."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper makes the classical ODE multistep recipe flexible by introducing learnable parameters—one set for the predictor step and one for the optional corrector step at each timestep. Instead of committing to one prediction type (noise, data, or velocity) and one integration domain (half log-SNR or noise-to-signal ratio), these numbers interpolate continuously among all three prediction types and select which integration domain to compute in. The solver is no longer rigid; it blends."
+    ],
+    "object": "Prediction type and integration domain weights"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Prediction-type blend strength",
+    "name": "Prediction-type interpolation coefficient",
+    "paras": [
+      "The paper's core hidden quantity is a single learnable number (called gamma) at each step that blends between three ways of predicting the denoised image. At step i, gamma ranges from 0 to 1: at 0, the solver uses pure noise prediction (guess the noise that was added); at 1, it uses pure data prediction (guess the clean image directly); in between, it blends both plus a third option (velocity prediction, used by flow-matching models). The paper learns these gamma values by using a frozen classifier's feedback to guide which blend is best.",
+      "How it is measured: after each denoising step, the solver decodes the latent image and runs it through a pretrained ImageNet classifier or CLIP (a text-image model). If the classifier outputs the wrong class or text, that error is computed (e.g., as a percentage chance the classifier was wrong). This error then feeds back through the numbers (gamma, tau, kappa, etc.) that produced that step: a bigger error means those numbers steered the image in the wrong direction, so they get nudged to change next time. Over many training examples, the solver learns which blend is best at which noise level, because the classifier keeps sending feedback when the blend is off-target."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 0 (high noise)", 2, false],
+        ["Pred-type blend", 4, true],
+        ["Step 1", 2, false],
+        ["Pred-type blend", 4, true],
+        ["Step 2 (mid noise)", 2, false],
+        ["Pred-type blend", 3, true],
+        ["Step 3", 2, false],
+        ["Pred-type blend", 2, false],
+        ["Step 4 (low noise)", 1, false],
+        ["Pred-type blend", 1, false],
+        ["Classifier feedback", 4, true],
+        ["Parameter update", 3, true]
+      ],
+      "caption": "Darker shows higher influence from learnable blending. Hotter steps are guided more strongly by the classifier."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Each denoising step gets five custom tuning knobs (one blend, two tunings for noise/data/velocity, two for the alternate integration domain). These knobs are not set by hand—they are learned by watching an image classifier judge whether the decoded intermediate result looks like the target class."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The predictor and corrector at step i use parameter sets phi_pred_i and phi_corr_i. The gamma parameter in phi_pred_i blends the data and noise predictions (gamma times data prediction plus one-minus-gamma times noise prediction), and tau and kappa coefficients adjust the residual terms to select integration domain and numerical accuracy order."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Classifier feedback steers the solver recipe",
+    "paras": [
+      "The core mechanism is that different prediction types are optimal at different noise levels, and rigid recipes cannot adapt. At high noise (the first few steps), noise prediction is stable because the image is still mostly random noise. At low noise (final steps), data prediction is stable because the predicted clean image is a small correction on an already-almost-clean state. No single recipe wins everywhere. Dual-Solver learns this by letting the classifier be the judge: if an intermediate noisy image, when decoded and run through a frozen ImageNet classifier, outputs the wrong class, that prediction error (measured as how confidently wrong the classifier is) flows backward. This error nudges the learnable blend coefficients (gamma, tau, kappa) at that step to reduce that error next time. Over many training examples (image-class pairs from a dataset), the solver learns which blend and integration domain to use at each step. Because the classifier is frozen and not being trained, the error signal measures only whether the intermediate result looks like the target class, not whether it matches some high-NFE reference. This removes the need for expensive teacher solvers.",
+      "Why this beats hand-tuned recipes: a human classical-methods researcher can derive one formula (e.g., Adams–Bashforth with noise prediction), but they cannot exhaustively test all combinations of prediction type, domain, and residual weight. Dual-Solver's automatic parameter search (using error feedback to steer the numbers) explores this space, and each step gets its own personalized recipe. The result: in low-NFE regimes (3–9 steps), the learned blend delivers higher image quality (lower FID scores and higher CLIP alignment) than any static recipe, because it adapts to the noise schedule."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Noisy image and time value t"
+        },
+        {
+          "t": "step",
+          "s": "Predictor: blend learned data and noise predictions"
+        },
+        {
+          "t": "step",
+          "s": "Optional corrector: refine with second-order accuracy"
+        },
+        {
+          "t": "step",
+          "s": "Decode and classify: frozen classifier checks class correctness"
+        },
+        {
+          "t": "step",
+          "s": "Flow loss signal backward to update all learnable numbers",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Cleaner image and tuned parameters for next step"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The blending equation",
+    "words": "At step i, the first-order predictor blends data and noise prediction using gamma_i. tau and kappa adjust the residual terms to select integration domain and accuracy order. The error measure is how wrong the classifier's guess is compared to the ground truth.",
+    "equation": "x_0_hat = gamma_i * x_data(x_t, t) + (1 - gamma_i) * x_noise(x_t, t) + tau_i * r_noise + kappa_i * r_velocity\nL = CrossEntropy(C(Decode(x_0_hat)), y)",
+    "symbols": [
+      ["x_0_hat", "predicted clean image"],
+      ["gamma_i", "learnable blend coefficient at step i, ranges 0 to 1"],
+      ["x_data(x_t, t)", "data prediction: guess the clean image directly"],
+      ["x_noise(x_t, t)", "noise prediction: guess the noise added"],
+      ["tau_i", "learnable weight for noise residual term"],
+      ["kappa_i", "learnable weight for velocity residual term"],
+      ["r_noise", "residual term in noise domain"],
+      ["r_velocity", "residual term in velocity domain"],
+      ["C(...)", "frozen pretrained classifier"],
+      ["Decode(...)", "decoder that converts latent to image"],
+      ["y", "ground-truth class label"],
+      ["L", "cross-entropy loss between prediction and ground truth"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose at step 5 (midway), gamma_5 = 0.6, x_data = 0.8 (80% confidence in predicted clean image), x_noise = 0.3 (30% confidence in noise prediction), tau_5 = 0.1, kappa_5 = 0.05, r_noise = 0.2, r_velocity = 0.1.",
+        "x_0_hat = 0.6 * 0.8 + (1 - 0.6) * 0.3 + 0.1 * 0.2 + 0.05 * 0.1 = 0.48 + 0.12 + 0.02 + 0.005 = 0.605.",
+        "Decoder produces image, classifier checks: if true label is dog and classifier says 30% dog, 70% cat, cross-entropy loss is high. Gradient flows back, nudging gamma_5 slightly upward (more data prediction), tau_5 downward (less noise residual), etc., in hopes the next example's step 5 is more dog-like.",
+        "After many examples, gamma learns: use more data prediction (gamma > 0.5) in mid-noise steps, and more noise prediction (gamma < 0.5) in high-noise steps."
+      ]
+    },
+    "note": "The learnable parameters continuously interpolate the ODE recipe, steering it toward outputs that a frozen classifier recognizes as the target class."
+  },
+  "bars": {
+    "h2": "Comparison: rigid recipe vs. learned blend",
+    "charts": [
+      {
+        "title": "Rigid classical solver (e.g., Adams with noise pred)",
+        "rows": [
+          ["ImageNet FID at 3 steps", 28, "bad"],
+          ["ImageNet FID at 5 steps", 18, "bad"],
+          ["ImageNet FID at 9 steps", 12, "good"],
+          ["Text-to-image CLIP score", 0.31, "bad"]
+        ],
+        "note": "Hand-tuned recipes commit to one prediction type and domain; cannot adapt to noise level."
+      },
+      {
+        "title": "Dual-Solver (learned blend)",
+        "rows": [
+          ["ImageNet FID at 3 steps", 16, "good"],
+          ["ImageNet FID at 5 steps", 11, "good"],
+          ["ImageNet FID at 9 steps", 8, "good"],
+          ["Text-to-image CLIP score", 0.38, "good"]
+        ],
+        "note": "Learnable parameters adapt prediction type and domain per step; consistent quality across low NFEs."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Overfitting to one class or domain.",
+        "html": "If the solver is trained only on dogs on a single background, the learned numbers gamma, tau, kappa will tune themselves to that set of images. Testing on cats or varied scenes will fail because the classifier used for training was not trained on cats and the learned blend coefficients assumed dog-like noise patterns."
+      },
+      {
+        "warn": true,
+        "b": "Classifier feedback is only as good as the classifier.",
+        "html": "If the frozen classifier (e.g., a 2015-era ResNet) is weak or biased, the error signal that flows back is noisy. The solver will learn to fool that specific classifier, not to generate truly high-quality images, because it is optimizing directly against that classifier's decision boundary. Using a stronger classifier (e.g., modern ViT or CLIP) helps because a better classifier sends more reliable error signals, reducing noise in the learning process."
+      },
+      {
+        "warn": true,
+        "b": "Corrector step cost is not accounted for in NFE counting.",
+        "html": "The paper uses corrector steps (second refinement per step) in the learned solver, but NFE is nominally counted as steps, not function calls. A 5-step solver with predictor and corrector is really 10 function evaluations. The reported numbers may conflate step count with actual compute cost."
+      },
+      {
+        "b": "Predictions better when blending is well-calibrated.",
+        "html": "The learnable parameters work best when the noise schedule and model architecture match training time. If you swap to a different diffusion backbone or schedule without retraining the solver, the learned gamma and tau values are suboptimal because they are no longer aligned with the new noise patterns."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy diffusion model on CIFAR-10 (32-pixel images, 10 object classes). Train Dual-Solver's learnable parameters on a subset of classes (e.g., dogs, cats, birds) using a frozen pretrained classifier (ResNet-18, ImageNet weights). Then sample from the solver at 3, 5, and 9 steps, and measure: (1) FID score (Fréchet Inception Distance—how close the generated images are to real CIFAR-10), and (2) classifier accuracy (does a separate test classifier recognize the correct class?). Compare against a rigid Adams–Bashforth multistep solver with fixed noise prediction. The demo should show that Dual-Solver's FID is lower and classifier accuracy is higher at 3 and 5 steps, proving that the learned blend adapts."
+    ],
+    "metric_eq": "FID = distance between generated and real image distributions, measured via Inception network features. ClassifierAccuracy = fraction of generated images classified correctly by a held-out test model.",
+    "closing": "If the learned solver's FID stays low (and classifier accuracy high) even at ultra-low NFE (3 steps), while the rigid solver's quality collapses, you have proven that personalized per-step recipes beat one-size-fits-all formulas."
+  }
+}

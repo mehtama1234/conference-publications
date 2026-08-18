@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-5ratvaqgpx",
+  "title": "Jackpot: Align Actor-Policy for scalable off-policy RL",
+  "family": "Reinforcement Learning",
+  "one_liner": "Keep the actor and policy networks aligned using rejection sampling so they can train asynchronously without collapsing.",
+  "lead": "In reinforcement learning for large language models, the expensive part is generating text (the rollout). A natural idea is to let the rollout generator (the actor) and the reward-judge (the policy) drift apart — the policy can reuse old examples. But when they drift too far, training becomes unstable: the model unlearns good behavior. Jackpot solves this by actively rejecting bad-luck examples, keeping the networks close enough that training stays stable even with 128-times-older examples.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The alignment cost"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The rollout bottleneck",
+    "paras": [
+      "In RL for LLMs, the model generates text by sampling from itself (the actor). Then a separate network scores each completion (the policy). This sampling is slow. A naive fix: reuse old examples from when the actor was different. But this breaks training — the old examples came from a model that was not as good, so the scores are stale, and training pulls the policy in the wrong direction.",
+      "The beginner tries to ignore the staleness by treating old examples equally. The training steps point in directions the actor never sees, because the old examples came from a different model — so the network moves in ways it would not have chosen itself, unlearning good behaviors and collapsing. Stability requires keeping the actor and policy close, but that makes sampling expensive again."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Reusing old text examples makes training unstable because the old generator and current policy are too different."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The bottleneck",
+        "viz": "box",
+        "viz_args": "Actor generates text (slow)",
+        "caption": "Text generation is the expensive step in RL training."
+      },
+      {
+        "title": "2. Naive reuse breaks",
+        "viz": "weights",
+        "viz_args": [["moved", 20], ["free", 30], ["moved", 15], ["free", 35], ["moved", 25]],
+        "caption": "Old examples steer training wrong; policy collapses."
+      },
+      {
+        "title": "3. Jackpot rejects bad luck",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["free", 20], ["hot", 45], ["free", 15], ["hot", 40]],
+        "caption": "Reject examples where old actor diverged most from current one."
+      },
+      {
+        "title": "4. Keep the good ones",
+        "viz": "box",
+        "viz_args": "Clean examples, aligned training",
+        "caption": "Training steps now point toward real progress."
+      },
+      {
+        "title": "5. Scale up safely",
+        "viz": "weights",
+        "viz_args": [["moved", 60], ["free", 10], ["moved", 55], ["free", 15], ["moved", 50]],
+        "caption": "Reuse 128 times older examples without collapse."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Measure the gap",
+        "text": "For each old example, compute how much the current actor differs from the one that generated it."
+      },
+      {
+        "b": "Set a threshold",
+        "text": "Choose a cutoff: examples with too large a gap will mislead training."
+      },
+      {
+        "b": "Reject and resample",
+        "text": "Throw away examples beyond the threshold; fill slots with fresh samples from the current actor."
+      },
+      {
+        "b": "Modify the PPO loss",
+        "text": "For kept examples, blend the importance weight with a trust-region constraint so training stays safe."
+      },
+      {
+        "b": "Train stably",
+        "text": "The combination of rejected bad examples and modified loss keeps training on track even with very old data."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Jackpot modifies which examples the policy network learns from. Instead of forcing the network to learn from every old example, it filters out the ones where the actor has drifted too far. This selective inclusion is the lever — it changes which examples contribute to the learning step."
+    ],
+    "object": "example selection (rejection sampling)"
+  },
+  "hidden": {
+    "h2": "The alignment cost",
+    "name": "distribution divergence (how far apart the actors are)",
+    "paras": [
+      "The hidden quantity is the distance between the old actor (that generated the example) and the current actor. This is not the final loss; it is the gap the paper measures. In plain words: how much has the text-generator changed since it wrote this example? A big gap means the example is stale and misleading.",
+      "Jackpot estimates this gap from the Top-K most likely tokens the two actors would choose. This is efficient to compute — just look at the highest-probability completions, not all possible text. The paper calls this a probability estimation strategy based on Top-K logits (the raw scores a network outputs before converting to probabilities), with batch bias correction."
+    ],
+    "heat": {
+      "cells": [
+        ["Old actor output", 4, true],
+        ["Current actor output", 4, true],
+        ["Overlap in Top-K", 1, false],
+        ["Gap estimate", 3, false],
+        ["Example kept?", 4, false],
+        ["Threshold", 2, true],
+        ["Probability ratio", 3, true],
+        ["Importance weight", 2, false],
+        ["Trust region", 2, true],
+        ["Loss adjustment", 2, false],
+        ["Training stability", 4, true],
+        ["Actual improvement", 3, false]
+      ],
+      "caption": "Darker means more critical to rejection. Gap from Top-K overlap determines if example stays or is rejected."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper measures drift by looking at which tokens the two actors favor most. If they agree on the top choices, the example is fresh enough to use. If they disagree, the example is stale and gets rejected."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Optimal Budget Rejection Sampling (OBRS) computes the probability ratio between old and new actor densities and rejects examples with low probability under the current actor, subject to a budget constraint (how many examples to throw away)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why keeping alignment prevents collapse",
+    "paras": [
+      "The core mechanism is simple: when the actor and policy networks are far apart, the training signal becomes unreliable, like reading a map that is 10 years old — the directions it points will send you the wrong way. Jackpot keeps them close by filtering out misaligned examples.",
+      "Here is the chain: (1) Old examples that came from a very different actor point the policy in stale directions. (2) If the policy follows these stale directions, it pulls the actor backward (unlearning), because the network is being trained toward behaviors it never learned to make naturally. (3) Rejecting these examples stops the backward pull — the policy now only learns from examples the current actor would make. (4) The modified PPO loss adds a safety brake (trust region) so even the kept examples do not jerk the network too hard. (5) The combination keeps the actor and policy close enough that training steps stay aligned with what the actor can actually do, preventing the cascade of unlearning that causes collapse.",
+      "The reason this scales is efficiency: you can resample just the rejected examples with the current (now-known) actor, and most rejected examples are rare mistakes the new actor avoids anyway. So you keep 80–90% of your old batch, recompute the rest, and train without the hidden instability. Training moves in a direction the current actor understands because the examples all came from actors close to it."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Old examples from earlier actor"
+        },
+        {
+          "t": "step",
+          "s": "Compute gap (Top-K overlap)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Reject examples beyond threshold"
+        },
+        {
+          "t": "step",
+          "s": "Resample rejected examples from current actor"
+        },
+        {
+          "t": "step",
+          "s": "Blend importance weight and trust region in loss",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Training moves toward good behavior, aligned networks"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The stabilized loss",
+    "words": "Jackpot-PPO loss = standard PPO loss scaled by importance weight + a safety term that clips the ratio to avoid huge jumps when the actor has drifted.",
+    "equation": "L_Jackpot = clip(w(x), 1 - epsilon, 1 + epsilon) * A + lambda * KL(actor, policy)",
+    "symbols": [
+      ["L_Jackpot", "the training loss Jackpot computes"],
+      ["w(x)", "importance weight: probability of example under new actor / old actor"],
+      ["epsilon", "trust-region width (e.g. 0.2, meaning stay within +/- 20%)"],
+      ["A", "the advantage (how good this example is compared to baseline)"],
+      ["lambda", "strength of the alignment constraint"],
+      ["KL", "Kullback-Leibler divergence (how different the two actors are)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose an example has advantage A = 2 (quite good).",
+        "Old actor assigned it probability 0.1; new actor assigns 0.15.",
+        "Importance weight w = 0.15 / 0.1 = 1.5 (new actor likes it even more).",
+        "Clip to [0.8, 1.2]: clipped weight becomes 1.2 (not the full 1.5, avoid big jumps).",
+        "Loss contribution: 1.2 * 2 = 2.4 (scaled down by the clip).",
+        "If we had used the raw weight 1.5, loss would be 3.0 — the clip prevents a 25% overestimation."
+      ]
+    },
+    "note": "The clipped weight stops the policy from overreacting to any single old example; combined with rejection of far-off examples, this keeps the network stable."
+  },
+  "bars": {
+    "h2": "Training trajectory over time",
+    "charts": [
+      {
+        "title": "Naive off-policy (128x ratio)",
+        "rows": [
+          ["Task 1 start", 50, "good"],
+          ["Task 1 end (old examples)", 15, "bad"],
+          ["Task 1 end (with naive reuse)", 8, "bad"],
+          ["Task 2 end", 45, "good"]
+        ],
+        "note": "Old examples cause catastrophic unlearning; model collapses."
+      },
+      {
+        "title": "Jackpot (128x ratio)",
+        "rows": [
+          ["Task 1 start", 50, "good"],
+          ["Task 1 end (examples rejected/resampled)", 46, "good"],
+          ["Task 1 end (with alignment constraint)", 48, "good"],
+          ["Task 2 end", 52, "good"]
+        ],
+        "note": "Rejection + modified loss keep both tasks alive; stable scaling."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Rejection budget too tight.",
+        "html": "If you throw away too many examples (strict threshold), you waste compute resampling. The paper tunes this budget to keep most examples while ensuring quality."
+      },
+      {
+        "warn": true,
+        "b": "Trust region epsilon too loose.",
+        "html": "If epsilon is large (e.g., 0.5), the clip is weak and you get back to instability. Too tight (e.g., 0.05), and you under-use good improvements. Tuning is needed."
+      },
+      {
+        "warn": true,
+        "b": "Actor and policy still diverge over many updates.",
+        "html": "Jackpot keeps them closer, but over 128 reuse cycles, drift can still accumulate if training is chaotic. This is why rejection + loss modification work together: one filters bad examples, the other constrains how much any example can move the network."
+      },
+      {
+        "b": "Done right.",
+        "html": "Jackpot balances three things: reject outlier examples, resample them fresh, and constrain how hard the network moves (through the clipped loss). Together, these let the policy network learn from examples 100-plus steps old without collapse."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small RL loop on a simple task (e.g., learning to maximize a reward score based on word length and diversity). Train two agents side by side: one with naive off-policy learning (reuse examples without filtering), one with Jackpot rejection + modified loss. Set the reuse ratio to 32x or 64x (old examples are 32–64 steps old). Run for 100 steps. Measure task score (reward) and the KL divergence (how different actor and policy are) over time."
+    ],
+    "metric_eq": "stability = standard_deviation(score) over last 20 steps; lower is better. divergence = KL(old actor, current actor) every 10 steps.",
+    "closing": "The demo must show Jackpot keeping the score stable and the actor-policy KL low, while naive off-policy crashes the score by step 50."
+  }
+}

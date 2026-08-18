@@ -1,0 +1,247 @@
+{
+  "slug": "iclr-or-g0hcrb3s3n",
+  "title": "NeRP3D: Keep NeRF in downstream tasks",
+  "family": "3D perception and scene understanding",
+  "one_liner": "Instead of throwing away the NeRF model after pre-training, keep it and let it help with detection tasks because continuous 3D space means sharper learned representations than rigid grids.",
+  "lead": "Self-driving cars learn by watching video and trying to predict what the 3D world looks like. A recent trick is to use NeRFs (neural radiance fields — models that learn to paint a scene from any camera angle) as a teacher. But current NeRF teachers get discarded right after training ends. NeRP3D keeps the teacher around, so the scene-understanding directly feeds detection (finding cars, pedestrians). The trick: NeRF assumes smooth continuous 3D space, but old approaches force that into rigid gridded boxes, causing blurry results, so NeRP3D skips the grid entirely.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The broken pipeline",
+    "paras": [
+      "Self-driving perception needs to understand 3D scenes well. One way to get there: pre-train on predicting what a scene looks like from any camera angle (the NeRF task — render images from any viewpoint, given multi-view video). Then use the learned 3D knowledge to detect cars and pedestrians.",
+      "The current approach couples NeRFs with view transformation. View transformation is a grid: take image features from cameras, map them onto a rigid 3D voxel grid (think: dividing the world into fixed square boxes). Then run a NeRF on top of those voxel features. But NeRF assumes the world is smooth and continuous — infinitely fine detail, any camera angle. The voxel grid assumes discrete jumps, fixed cell boundaries. These conflict. The result: blurry, ambiguous 3D shapes. Worse, the NeRF is discarded after pre-training, wasting all that learned continuous knowledge."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "NeRP3D skips the rigid grid and keeps the continuous NeRF model running alongside detection, sharing a single architecture for both."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Multi-view camera stream",
+        "viz": "brain",
+        "caption": "A car sees the world from multiple viewpoints at once."
+      },
+      {
+        "title": "2. Old way: rigid grid clashes with smooth NeRF",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["free", 30], ["hot", 50], ["free", 25], ["hot", 40]],
+        "caption": "Voxel grid forces rigid boxes; NeRF wants continuous smooth curves. Blurry result."
+      },
+      {
+        "title": "3. NeRP3D: continuous 3D points everywhere",
+        "viz": "weights",
+        "viz_args": [["warm", 42], ["warm", 38], ["warm", 45], ["warm", 40], ["warm", 39]],
+        "caption": "All points live in smooth continuous space. No discrete grid conflicts."
+      },
+      {
+        "title": "4. Deformable attention reads image context",
+        "viz": "box",
+        "viz_args": "Query point looks at nearby pixels to grab features.",
+        "caption": "Each 3D point peeks at image regions that see it."
+      },
+      {
+        "title": "5. One model does both: render scenes and detect objects",
+        "viz": "plain",
+        "caption": "NeRF teacher stays on the job, helping perception directly."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Define rays through images",
+        "text": "For each camera, trace an imaginary line (ray) from the lens through each pixel into 3D space."
+      },
+      {
+        "b": "Step 2: Sample points along rays",
+        "text": "Place 3D query points at many different distances along each ray."
+      },
+      {
+        "b": "Step 3: Connect each point to nearby image features",
+        "text": "Each 3D point looks at where it projects onto the images, then grabs features from pixels near that spot using offset sampling (learned offsets guide which pixels matter most)."
+      },
+      {
+        "b": "Step 4: Jointly train on rendering and detection losses",
+        "text": "Pre-train by asking: can you predict RGB colors? Can you estimate depth? Then fine-tune on: can you find cars?"
+      },
+      {
+        "b": "Step 5: Reuse the learned continuous space for detection",
+        "text": "The same continuous 3D representation that paints scenes also feeds the detection head, with no discarding."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces the rigid voxel-grid representation with continuous 3D point queries. Instead of binning the world into fixed boxes, every query point lives in smooth continuous 3D space and adaptively attends to the image features that see it."
+    ],
+    "object": "The 3D representation backbone"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: representation alignment during training and testing",
+    "name": "Representation continuity gap",
+    "paras": [
+      "When you pre-train a model on one task, you hope the learned weights will help on a related task, because both tasks operate on the same underlying concept (3D shape). But the mismatch between how you pre-train and how you use the knowledge matters. Here, the hidden problem is the conflict between the pre-training teacher (NeRF, which assumes smoothness) and the architecture it is bolted onto (voxel grids, which are rigid). The paper measures this indirectly: by evaluating rendering quality (how well the NeRF paints the scene) and detection accuracy (how many cars it finds). If rendering is blurry, the alignment is poor. If detection drops when you fine-tune, the transfer failed.",
+      "NeRP3D estimates alignment by using ONE consistent architecture for both pre-training and downstream tasks. Same point-based representation, same learned offsets for reading images, no architectural switches. If the pre-trained knowledge flows into detection without a re-encoding step, alignment is perfect."
+    ],
+    "heat": {
+      "cells": [
+        ["Voxel grid rigidity", 4, true],
+        ["NeRF smoothness assumption", 4, true],
+        ["Blurred renders", 3, false],
+        ["Discarded NeRF", 4, true],
+        ["Wasted pre-train signal", 3, false],
+        ["Point-based continuity", 1, false],
+        ["Preserved NeRF", 1, false],
+        ["Sharp renders", 1, false],
+        ["Shared backbone", 1, false],
+        ["Clean transfer", 1, false],
+        ["Detection accuracy gain", 2, false],
+        ["Reconstruction gain", 2, false]
+      ],
+      "caption": "Darker means worse misalignment; lighter means better continuity and knowledge reuse."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The NeRF pre-training learns smooth, continuous 3D shapes. If you store them in a rigid grid, they get blurry. If you throw away the NeRF afterward, you waste that learning."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Learned offset sampling on 3D query points with unified pre-training and fine-tuning architecture ensures continuous representation learning and effective knowledge transfer."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: continuity beats discreteness",
+    "paras": [
+      "NeRF is fundamentally built on the idea that 3D space is continuous: at any position, no matter how fine, there is a color and opacity value. When you rasterize that into a voxel grid (chopping the world into boxes), you are forcing discrete step-like boundaries. The NeRF network then has to learn to smooth over the grid boundaries, creating artifacts. By keeping points in continuous space, the NeRF can learn directly without that friction.",
+      "Second, NeRP3D keeps the NeRF model around and reuses its learned weights (the numbers inside the network) in downstream detection. The 3D feature representation learned during pre-training (which pixel regions are important for each point) stays intact. The detection head can then directly operate on those pre-warmed features instead of starting from scratch on gridded outputs. This is pure knowledge transfer: you do not pay the cost of re-encoding or re-fitting."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Multi-view images"
+        },
+        {
+          "t": "step",
+          "s": "Define camera rays and 3D query points",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Deformable attention: each point reads nearby image pixels",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Shared continuous 3D feature space (no voxel grid)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Pre-training: NeRF rendering + depth loss",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Fine-tuning: detection head on same space",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Sharp renders, accurate detection"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The loss equation",
+    "words": "total loss during pre-training equals RGB reconstruction loss plus depth estimation loss plus reprojection consistency loss, each scaled by its own weight",
+    "equation": "L_pretrain = λ_rgb * L_rgb + λ_depth * L_depth + λ_reproj * L_reproj",
+    "symbols": [
+      ["L_pretrain", "the total cost to minimize during pre-training"],
+      ["λ_rgb", "how important it is to match the actual pixel colors (weight, typically 0.1-1.0)"],
+      ["L_rgb", "the color reconstruction error: how far the rendered colors are from the real images"],
+      ["λ_depth", "how important it is to match lidar depth measurements (weight)"],
+      ["L_depth", "the depth estimation error: difference between predicted and measured 3D distance"],
+      ["λ_reproj", "how important it is to keep reprojected points consistent (weight)"],
+      ["L_reproj", "the reprojection loss: how much a 3D point jumps when re-observed from another view"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the color error for one pixel is 0.2 (on a 0-1 scale). Depth error is 0.5 meters. Reprojection inconsistency is 0.1 pixels.",
+        "Set λ_rgb = 1.0, λ_depth = 0.5, λ_reproj = 0.2 (the weight dial for each goal).",
+        "L_rgb = 0.2, L_depth = 0.5, L_reproj = 0.1.",
+        "L_pretrain = 1.0 × 0.2 + 0.5 × 0.5 + 0.2 × 0.1 = 0.2 + 0.25 + 0.02 = 0.47.",
+        "The model learns to nudge itself to shrink this total cost. High λ_rgb means sharp colors matter most; tuning the weights decides which goal dominates."
+      ]
+    },
+    "note": "This loss keeps the NeRF aligned: color (what the scene looks like) plus depth (how far away things are) plus view consistency (the same 3D point should not jump between views)."
+  },
+  "bars": {
+    "h2": "Before and after on nuScenes benchmark",
+    "charts": [
+      {
+        "title": "Old NeRF + voxel grid (UniPAD)",
+        "rows": [
+          ["Rendering sharpness (PSNR)", 18.7, "bad"],
+          ["Depth accuracy (Abs Rel)", 0.985, "bad"],
+          ["Detection (mAP@800px)", 28.5, "good"],
+          ["Detection (mAP@1600px)", 32.1, "good"]
+        ],
+        "note": "Rendering is blurry because the voxel grid conflicts with NeRF continuity."
+      },
+      {
+        "title": "NeRP3D (continuous points kept throughout)",
+        "rows": [
+          ["Rendering sharpness (PSNR)", 28.2, "good"],
+          ["Depth accuracy (Abs Rel)", 0.626, "good"],
+          ["Detection (mAP@800px)", 30.3, "good"],
+          ["Detection (mAP@1600px)", 34.2, "good"]
+        ],
+        "note": "Rendering sharpness jumps from 18.7 to 28.2 PSNR because continuous points avoid voxel grid blur. Depth accuracy doubles because NeRF learns fine detail better without discrete boundaries. Detection gains 1.8-2.1 mAP because the backbone was pre-trained on the exact same representation and never discarded."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Query point sampling is brittle.",
+        "html": "If you sample points too sparsely along rays, you miss thin structures (a narrow pole, a pedestrian). If you sample too densely, training becomes expensive. The paper does not detail adaptive sampling."
+      },
+      {
+        "warn": true,
+        "b": "Deformable attention compute cost.",
+        "html": "Computing cross-attention from 3D points to 2D image pixels, with learned offsets, is slower than a fixed voxel grid lookup. Real-time autonomous driving may struggle."
+      },
+      {
+        "warn": true,
+        "b": "Generalization across camera setups.",
+        "html": "If the training camera calibration (intrinsics, extrinsics) differs from test time, the deformable attention offsets may fail to align. The paper evaluates only on nuScenes; unknown how it transfers to different sensors."
+      },
+      {
+        "b": "Done right: continuous representation thrives.",
+        "html": "When sampling is dense enough, attention offsets are learned properly, and cameras are well-calibrated, NeRP3D delivers both sharp rendering and high-accuracy detection by staying aligned."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a self-driving car dataset with multi-view video and 3D annotations (cars, pedestrians). Train a NeRP3D backbone: (1) pre-train on rendering (predict RGB from views) and depth (match lidar), (2) freeze the backbone, attach a detection head, fine-tune on finding cars. Measure rendering quality before and after fine-tuning (PSNR, depth error). Measure detection accuracy (mAP). Compare against training detection from scratch with no NeRF pre-training. The demo proves that keeping NeRF in the loop (continuous points, shared backbone, no discard) preserves rendering quality while improving detection over baselines."
+    ],
+    "metric_eq": "detection_gain = mAP_with_NeRP3D − mAP_baseline; rendering_preservation = PSNR_pretrain − PSNR_after_finetune (ideally small, showing knowledge stayed)",
+    "closing": "The metric to watch: rendering quality must not degrade when you fine-tune for detection, because the same 3D point space serves both tasks without switching architectures."
+  }
+}

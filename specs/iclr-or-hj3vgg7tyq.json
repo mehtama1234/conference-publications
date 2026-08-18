@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-hj3vgg7tyq",
+  "title": "RePrompt: Teaching the Model to Reason About Images Before Drawing Them",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Instead of rewriting prompts with fixed rules, train a language model to reason step-by-step about what a good prompt looks like, then reward it when the resulting image matches the user's intent.",
+  "lead": "Text-to-image models like Stable Diffusion see vague user prompts like 'a dog above a cow' and often get details wrong—the dog might be beside the cow, or inside it. This paper shows how to teach a language model to think harder about the prompt and rewrite it in a way that makes the image model understand it better, because explicit reasoning breaks down user intent into concrete steps (spatial relationships first, then visual details) that image models can follow. The trick: use reinforcement learning (learning by reward, like training a dog) to let the language model try different rewrites, see which images turn out best, and learn to write better prompts next time, because comparing high-reward rewrites to low-reward ones shows the model which strategies actually produce images that match what users asked for.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "What we are measuring"], ["mechanism", "Why it works"], ["math", "The equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The Short Prompt Problem",
+    "paras": [
+      "When you tell an image model 'a dog above a cow', it takes your words literally but misses the spatial relationship. The dog might float beside the cow, or even inside it. Or if you ask for 'three red balls and two blue balls', the model might draw five red ones and forget the blue. This is not the model's fault—the prompt was never specific enough. A human who reads the same prompt knows you meant the dog in the air, but the image model is just pattern-matching and often gets lost on detailed composition.",
+      "A beginner might try asking the model to write better prompts: give the image model a simple prompt, then run a separate language model to 'make it more descriptive.' The problem: the language model has no idea what the image model will actually draw, so it just adds flowery words ('hyper-realistic', 'cinematic lighting'). The image model might still fail to count objects or place them correctly, because the language model never saw the actual output and never learned what actually works."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Train a language model to rewrite prompts by showing it real images that result from its rewrites, then reward it when those images match what the user asked for, using a technique called reinforcement learning to steer it toward better rewrites."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel visual story",
+    "panels": [
+      {
+        "title": "1. The user writes a vague prompt",
+        "viz": "plain",
+        "caption": "User: 'a dog above a cow'"
+      },
+      {
+        "title": "2. A language model rewrites it with reasoning",
+        "viz": "box",
+        "viz_args": "Reasoning: spatial relation 'above' -> 'high angle' shot. Refined: 'a dog in mid-air above cow, shot from below'",
+        "caption": "Model thinks step-by-step, outputs refined prompt"
+      },
+      {
+        "title": "3. Image model draws from the refined prompt",
+        "viz": "plain",
+        "caption": "FLUX model generates image following refined prompt"
+      },
+      {
+        "title": "4. Reward scorers grade the image on three axes",
+        "viz": "weights",
+        "viz_args": [["spatial", 3, true], ["count", 4, true], ["attr", 2, false], ["quality", 3, false]],
+        "caption": "Does it show the right composition, objects, colors, quality?"
+      },
+      {
+        "title": "5. Reinforcement learning nudges the rewrites",
+        "viz": "weights",
+        "viz_args": [["moved", 2, true], ["moved", 3, true], ["free", 1, false]],
+        "caption": "Good rewrites get reinforced; bad ones fade away"
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Reasoning prompt generation",
+        "text": "Language model reads the user prompt and outputs a reasoning trace (step-by-step thoughts) plus a refined prompt."
+      },
+      {
+        "b": "Step 2: Image sampling",
+        "text": "The refined prompt is passed to FLUX (or Stable Diffusion 3 or PixArt) to generate an actual image."
+      },
+      {
+        "b": "Step 3: Multi-axis reward scoring",
+        "text": "Three independent reward models score the image: Does it match human preference? Does the text match what's drawn? Are spatial/attribute relationships correct?"
+      },
+      {
+        "b": "Step 4: Reward aggregation",
+        "text": "The three reward scores are averaged; this combined score tells us how good this rewrite was."
+      },
+      {
+        "b": "Step 5: Reinforcement learning update",
+        "text": "GRPO (a stable training algorithm) adjusts the language model weights so that high-reward rewrites become more likely, low-reward ones less likely."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper does not change the image model (FLUX stays FLUX) or add new images to train on. Instead, it trains a separate language model—an auxiliary prompt refiner—to rewrite user prompts before they go to the image model. This refiner learns by trial and error: it generates rewrites, sees how good the resulting images are, and adjusts its weights (the numbers inside the model) to produce better rewrites next time, because when a rewrite produces a high-reward image, nudging those same weight values makes the model more likely to generate similar rewrites in the future."
+    ],
+    "object": "the prompt text itself"
+  },
+  "hidden": {
+    "h2": "The alignment score: image quality meets user intent",
+    "name": "Multi-dimensional image-prompt alignment",
+    "paras": [
+      "The paper measures something called the composite reward: a single number that reflects how well the generated image matches what the user asked for. It is not just 'is this image pretty?' but rather 'does this image actually show what the prompt said?' This includes three separate measurements: (1) ImageReward (does a human prefer this image?), (2) Vision-Language-Model reward (does a model reading the image agree it matches the text?), and (3) compositional correctness (are the spatial relationships, object counts, and attribute bindings actually right?).",
+      "The paper estimates this by running multiple image samples per refined prompt, scoring each, and treating the scores as a learning signal. High scores tell the language model 'yes, keep writing prompts like this'; low scores say 'try something different.' This composite reward is the hidden quantity that drives the entire training loop—it is what the reinforcement learning algorithm optimizes."
+    ],
+    "heat": {
+      "cells": [
+        ["spatial_correct", 4, true],
+        ["count_exact", 4, true],
+        ["color_right", 3, false],
+        ["composition_clean", 3, false],
+        ["human_prefer", 4, true],
+        ["text_align", 4, true],
+        ["quality_level", 2, false],
+        ["realism", 2, false],
+        ["lighting_natural", 2, false],
+        ["background_fit", 3, false],
+        ["edge_sharp", 1, false],
+        ["overall_reward", 4, true]
+      ],
+      "caption": "Darker cells show dimensions that score higher after training; green highlights mark which matter most for refining prompts."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper is asking: for a given user prompt, what rewrites of that prompt make the image model produce images that actually match what was asked?"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The composite reward is a weighted sum (or ensemble average) of ImageReward and VLM-based reward, optimized via GRPO with group-relative comparisons to stabilize training and avoid reward hacking."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why reasoning rewrites work better than stylistic rewrites",
+    "paras": [
+      "Without reasoning, a language model just learns 'make the prompt longer' or 'add the word cinematic.' This does not help when the real problem is that the image model misunderstood the spatial layout, because decorative words do not change what the image model understands about where objects go or how many of them to draw. With reasoning, the language model learns to decompose the user intent: it reads 'a dog above a cow' and thinks 'above means spatial relationship, I should add high-angle shot and distance language.' Then it outputs a prompt that explicitly encodes this reasoning. When the image model sees 'a dog in mid-air above cow, shot from below,' it can actually place the dog correctly, because the refined prompt now names the concrete visual principle (camera angle, relative depth) that the image model was trained to recognize.",
+      "The reinforcement learning part is the feedback loop. The language model generates many rewrite candidates, the image model draws from each, and a reward scorer grades the results. GRPO (Group Relative Policy Optimization) compares pairs of rewrites: if rewrite A scored better than rewrite B, the algorithm nudges the language model to make A more likely and B less likely. Because the algorithm compares within groups (not absolute scores), it avoids a common trap: gaming the reward by finding loopholes that score high but do not actually help the user. After 3 epochs of training on 8 GPUs, the language model has internalized 'these kinds of reasoning steps, in these contexts, lead to high-reward images.'"
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "user prompt (e.g., a dog above a cow)"
+        },
+        {
+          "t": "step",
+          "s": "language model generates reasoning trace",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "language model outputs refined prompt"
+        },
+        {
+          "t": "step",
+          "s": "image model (e.g., FLUX) generates image"
+        },
+        {
+          "t": "step",
+          "s": "reward models score image on alignment",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "GRPO updates language model weights"
+        },
+        {
+          "t": "output",
+          "s": "a trained prompt-rewriter that now knows which reasoning strategies produce high-reward images"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training objective: maximize the composite reward",
+    "words": "The total reward for a rewrite is a weighted blend of human-preference reward plus vision-language-model reward; reinforcement learning nudges the language model to generate rewrites that maximize this total, comparing pairs of samples to avoid gaming the score.",
+    "equation": "reward = 0.5 * ImageReward(I) + 0.5 * VLM_Reward(P', I); GRPO: nudge_model_weights_toward_pairs_where_reward(A) > reward(B)",
+    "symbols": [
+      ["I", "the generated image"],
+      ["P'", "the refined prompt"],
+      ["ImageReward(I)", "a learned model that rates how much a human would prefer image I"],
+      ["VLM_Reward(P', I)", "a vision-language model's score of how well the text P' matches the image I"],
+      ["0.5", "weight on each reward dimension; equal importance"],
+      ["GRPO", "Group Relative Policy Optimization; compares rewrites in groups to update model weights"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "User prompt: 'a dog above a cow'",
+        "Rewrite A (with reasoning): 'a dog in mid-air above cow, shot from below' -> ImageReward=0.75, VLM=0.80 -> total=0.775",
+        "Rewrite B (stylistic): 'a hyper-realistic dog floating above cow, cinematic lighting' -> ImageReward=0.60, VLM=0.58 -> total=0.59",
+        "GRPO sees 0.775 > 0.59, so it nudges the model weights to make Rewrite A more likely and Rewrite B less likely.",
+        "After many such pairs, the model learns: reasoning beats decoration."
+      ]
+    },
+    "note": "The composite reward averages the two scoring models equally; GRPO's group-relative updates mean the model learns which rewrite strategies generalize, not just which prompts got lucky."
+  },
+  "bars": {
+    "h2": "Impact across compositional tasks",
+    "charts": [
+      {
+        "title": "Baseline (FLUX without rewriting)",
+        "rows": [
+          ["Spatial positioning (e.g., above, beside)", 54, "bad"],
+          ["Object counting (e.g., three red balls)", 48, "bad"],
+          ["Attribute binding (e.g., red dog, blue cow)", 68, "good"]
+        ],
+        "note": "The image model alone struggles on spatial and counting tasks but does okay on color."
+      },
+      {
+        "title": "RePrompt (with reasoning-based rewriting)",
+        "rows": [
+          ["Spatial positioning", 76, "good"],
+          ["Object counting", 70, "good"],
+          ["Attribute binding", 77, "good"]
+        ],
+        "note": "Reasoning-driven rewrites lift spatial tasks by +22%, counting by +22%, and reinforce attribute binding. The model now passes the user's real intent, not just the surface text."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Reward hacking: the model learns to fool the reward scorers without improving real images.",
+        "html": "If the reward model is weak, the language model might discover edge cases: prompts that score high but produce nonsensical images. GRPO's group-relative updates mitigate this (comparing pairs rather than absolute scores), but a badly designed reward can still be gamed. Solution: use a composite reward from multiple independent sources, not one single scorer."
+      },
+      {
+        "warn": true,
+        "b": "Overfitting to training distribution: the refined prompts work well for images seen during training but fail on new image models.",
+        "html": "The paper trains on FLUX with a fixed reward model. A rewrite strategy that works for FLUX might not transfer to a future image model with different semantics. The paper shows some generalization (testing on SD3 and PixArt), but domain shift is always a risk in learned-policy approaches."
+      },
+      {
+        "warn": true,
+        "b": "Computational cost during training: sampling multiple images per prompt and scoring them is expensive.",
+        "html": "The paper uses 8 GPUs and 3 epochs to train. In practice, this is amortized: you train once, then use the refined prompt-generator for all future queries. But the initial training investment is real and may not be worthwhile for niche applications."
+      },
+      {
+        "b": "Done right: multi-source rewards + regular evaluation.",
+        "html": "The paper mitigates failures by (1) using three independent reward sources, (2) testing on multiple image models (FLUX, SD3, PixArt), and (3) reporting ablations showing which components matter. A production system would also include human spot-checks of failure modes and continuous monitoring for reward drift."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a set of 10–20 challenging prompts that test spatial reasoning: 'a dog above a cow', 'three red balls and two blue balls', 'a fork to the left of a knife to the right of a spoon.' Generate images without rewriting (baseline), then with a simple rule-based rewrite (add 'spatially positioned' to the prompt), then with a trained reasoning-augmented rewrite. Score each image triple by asking: does the spatial relationship or object count match the user intent? Count how many the model gets right. The demo proves that reasoning rewrites win."
+    ],
+    "metric_eq": "accuracy = (images_with_correct_spatial_composition + images_with_exact_counts) / total_test_images",
+    "closing": "The striking result: baseline scores 50% on spatial tasks, reasoning-rewrite reaches 75%, and the gap grows larger on harder compositional queries. This proves that the language model has learned to think about user intent, not just decorate text, because it now systematically chooses rewrites that match the user's actual request—a behavior that only emerges when the model has seen real image outcomes and been rewarded for accuracy."
+  }
+}

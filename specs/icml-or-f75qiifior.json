@@ -1,0 +1,244 @@
+{
+  "slug": "icml-or-f75qiifior",
+  "title": "LoRe: Adaptive Interaction-Evaluation Routing",
+  "family": "Optimization",
+  "one_liner": "When a solver must work in tiny memory and time, pick which connections to check this step instead of checking all.",
+  "lead": "Large graph solvers check every edge or connection at each refinement step, which exhausts memory. LoRe is a wrapper that lets the solver skip most checks, focusing only on connections where there is actual conflict or uncertainty that step, then passes those results backward as if all checks happened. Because fewer edges are evaluated per step, peak memory drops dramatically (by 12 times), allowing the solver to handle 3 times larger graphs; the same reasoning finishes roughly 8 times faster since most refinement steps use only one-eighth the computation.",
+  "nav": [["theme-optimization.html", "Optimization"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The memory wall in graph solving",
+    "paras": [
+      "A graph solver is software that finds near-optimal solutions to hard puzzles on networks: which nodes connect to the fewest others (the Maximum Independent Set puzzle), how to visit every city once using the shortest path (Traveling Salesman), or assigning tasks to workers without conflicts. These solvers work by refining a guess repeatedly — each step, the solver sends messages across edges or connections to resolve conflicts and inch toward a better solution.",
+      "Each step requires checking all edges or connections to decide which messages to send. For a graph with a million edges, that is a million evaluations per step. If the step must happen 50 times, checking all 50 million times fits in memory on small machines, but for graphs with billions of edges or many refinement steps, the peak memory per step becomes the bottleneck. A model can be smart, but it runs out of space.",
+      "A beginner might try throwing away most edges upfront — keep only the 10 nearest neighbors per node, say, and ignore the rest. But graphs change every step: conflicts move. An edge that is dormant now may become critical next step. Throwing away edges blindly loses information that the solver needs to find good solutions."
+    ],
+    "callout": {
+      "b": "The real move.",
+      "html": "Instead of keeping a fixed set of edges, or checking all edges, pick <em>which edges to check per step</em> based on where the solver sees conflict or uncertainty right now."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: every step checks all edges.",
+        "viz": "weights",
+        "viz_args": [["warm", 20], ["warm", 25], ["warm", 18], ["warm", 22], ["warm", 19], ["warm", 24], ["warm", 21], ["warm", 23], ["warm", 20], ["warm", 25], ["warm", 22], ["warm", 18]],
+        "caption": "All edges active every step; memory explodes on big graphs."
+      },
+      {
+        "title": "2. Naive fix: freeze only close neighbors.",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["warm", 25], ["free", 18], ["warm", 22], ["free", 19], ["warm", 24], ["free", 21], ["warm", 23], ["free", 20], ["warm", 25], ["free", 22], ["warm", 18]],
+        "caption": "Keeps some edges but misses conflicts that move."
+      },
+      {
+        "title": "3. LoRe looks for conflict right now.",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["hot", 25], ["free", 18], ["hot", 22], ["free", 19], ["warm", 24], ["free", 21], ["hot", 23], ["free", 20], ["hot", 25], ["free", 22], ["free", 18]],
+        "caption": "Red edges show high conflict or uncertainty; check only those."
+      },
+      {
+        "title": "4. Compute messages only on the red edges.",
+        "viz": "box",
+        "viz_args": "Check 20% of edges, skip the rest",
+        "caption": "One-fifth the work per step; same refinement quality."
+      },
+      {
+        "title": "5. Solution gets better; memory stays tiny.",
+        "viz": "plain",
+        "caption": "3x bigger graphs, 8x faster, 12x less memory."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Solver sends initial guess.",
+        "text": "Start with a partial solution (e.g., a rough independent set)."
+      },
+      {
+        "b": "LoRe identifies hot edges.",
+        "text": "Look at solver state; find edges with high conflict (neighbors far apart in score) or high uncertainty (solver is unsure)."
+      },
+      {
+        "b": "Evaluate only hot edges.",
+        "text": "Run the solver on those edges; skip the rest. This stays under the memory budget."
+      },
+      {
+        "b": "Propagate results.",
+        "text": "Use cheap tricks (e.g., copying neighbor messages) to approximate effects of skipped edges."
+      },
+      {
+        "b": "Repeat, improving the solution.",
+        "text": "Next step, find the new conflict hot-spots and repeat."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes which edges the solver evaluates at each refinement step. Instead of a fixed sparsification (the same edges every step, or every edge every step), LoRe picks a time-varying subset based on where conflict lives right now."
+    ],
+    "object": "Edge routing per step"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: conflict-uncertainty score",
+    "name": "Interaction conflict and solver uncertainty",
+    "paras": [
+      "Every edge in a graph solver has a hidden state: how much conflict does it carry (how far are the two nodes from agreement), and how uncertain is the solver about that edge (does it know the right answer yet). These are not numbers the solver outputs; they live inside the solver state.",
+      "LoRe estimates both: conflict comes from measuring how far apart neighboring node scores are; uncertainty comes from the solver's internal state (e.g., how much do the solver's position adjustments bounce around from step to step). Edges with high conflict or high uncertainty get routed to the cluster (checked this step). The rest go to the bath (approximate using cheap methods)."
+    ],
+    "heat": {
+      "cells": [
+        ["Edge 1", 4, true],
+        ["Edge 2", 1, false],
+        ["Edge 3", 3, true],
+        ["Edge 4", 2, false],
+        ["Edge 5", 4, true],
+        ["Edge 6", 1, false],
+        ["Edge 7", 2, false],
+        ["Edge 8", 3, true],
+        ["Edge 9", 1, false],
+        ["Edge 10", 2, false],
+        ["Edge 11", 4, true],
+        ["Edge 12", 1, false]
+      ],
+      "caption": "Darker means higher conflict or uncertainty; evaluate first."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Edges with big disagreement between neighbors, or edges the solver is still uncertain about, need careful evaluation. The rest can be approximated cheaply."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper uses how much the solver's adjustments bounce around (variance in step-to-step changes) and node-score distance as proxies for uncertainty and conflict, selecting the top fraction (e.g., 20%) of edges by this score each step."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the cluster-bath trick",
+    "paras": [
+      "The method is inspired by Cluster Dynamical Mean-Field Theory from physics. In strongly interacting systems (like an electron gas), calculating the exact behavior everywhere is impossible, so physicists split the system: a small cluster (a local region where all interactions are computed exactly) and a bath (everything far away, approximated by a global background field). This way, you capture the important local physics exactly where it matters, and skip expensive global calculations elsewhere.",
+      "LoRe applies the same idea. The cluster is the set of edges with high conflict or uncertainty — check those carefully this step. The bath is the other 80% — use a cheap approximation (copy messages from neighbors, smooth via averaging, or just skip). The magic: once you have solved the cluster exactly, you can safely approximate the bath, because the bath was never going to move much anyway (low conflict means low need for precision).",
+      "Why does this preserve solution quality? Because at each step, conflict migrates. An edge that was resolved this step becomes dormant next step (low conflict, not in cluster). An edge that was dormant now becomes active (a new conflict emerges; it enters the cluster). By always checking the active edges and approximating the quiet ones, the solver still sees every important update, just spread across multiple steps instead of all at once. The total refinement is the same; memory per step is one-tenth."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current solver state + all edge scores"
+        },
+        {
+          "t": "step",
+          "s": "Measure conflict and uncertainty on all edges",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Select top 20% edges by score",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Evaluate only the cluster edges",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Approximate bath edges from neighbors",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Refined solution; same quality, 12x less memory"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation: per-step budget",
+    "words": "At each step, evaluate only edges in the cluster M_t. The cluster size is at most a fixed fraction rho of all edges. Each edge scores by conflict plus uncertainty. Select edges by descending score until you hit the budget.",
+    "equation": "|M_t| <= rho * |A|, where rho in (0, 1] is the budget fraction, and edges in M_t are the top-rho edges by conflict_i + uncertainty_i",
+    "symbols": [
+      ["M_t", "The set of edges (interactions) to evaluate at step t"],
+      ["rho", "The budget fraction (e.g., 0.2 means 20% of edges)"],
+      ["|A|", "Total number of edges in the graph"],
+      ["conflict_i", "How far apart the two endpoints of edge i are in score"],
+      ["uncertainty_i", "How uncertain the solver is about edge i (e.g., gradient variance)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Graph has 100 edges; budget rho = 0.3 (allow 30 evaluations per step).",
+        "Measure conflict + uncertainty for all 100 edges (cheap; no full solve).",
+        "Edge 7: conflict 0.6 + uncertainty 0.4 = score 1.0 (top ranks).",
+        "Edge 42: conflict 0.1 + uncertainty 0.05 = score 0.15 (low ranks).",
+        "Sort all 100; take top 30 edges by score into cluster M_t.",
+        "Evaluate only those 30 edges (30% of normal cost).",
+        "Approximate the other 70 edges using neighbor messages (cheap).",
+        "Solver runs one step with 70% memory savings vs. evaluating all 100."
+      ]
+    },
+    "note": "The budget rho stays fixed per step; conflict and uncertainty shift as the solver refines, so which edges are in the cluster changes every step."
+  },
+  "bars": {
+    "h2": "Memory and speed gains over a baseline",
+    "charts": [
+      {
+        "title": "Baseline (all edges every step)",
+        "rows": [
+          ["Wall-clock time per step", 1.0, "bad"],
+          ["Peak memory per step", 1.0, "bad"],
+          ["Solution quality after 50 steps", 0.91, "good"]
+        ],
+        "note": "Every edge evaluated; runs out of memory on large graphs."
+      },
+      {
+        "title": "LoRe (selective routing)",
+        "rows": [
+          ["Wall-clock time per step", 0.13, "good"],
+          ["Peak memory per step", 0.08, "good"],
+          ["Solution quality after 50 steps", 0.90, "good"]
+        ],
+        "note": "20% of edges per step; same quality, huge speedup and memory reduction."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Conflict measure is wrong.",
+        "html": "If the metric for identifying high-conflict edges misses the real bottlenecks (e.g., measures score distance but the real conflict is in how the solver would nudge the weights), the solver will evaluate the wrong edges and refinement stalls."
+      },
+      {
+        "warn": true,
+        "b": "Approximation for the bath fails.",
+        "html": "If low-conflict edges actually carry hidden dependencies that matter later, approximating them (copying from neighbors, zeroing out) can corrupt the solution. LoRe tries to mitigate this with lightweight repair steps."
+      },
+      {
+        "warn": true,
+        "b": "Budget is too tight.",
+        "html": "If rho is too small (e.g., 5% of edges), the cluster may not be large enough to capture all real conflicts in a single step, and refinement becomes noisy."
+      },
+      {
+        "b": "Done right.",
+        "html": "When conflict scoring is well-calibrated and the bath approximation includes lightweight consistency checks, the solver refines reliably and uses minimal memory."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a Maximum Independent Set solver on a 10000-node or larger graph. Run it with LoRe at different budget fractions (e.g., 0.2, 0.3, 0.5, 1.0). For each setting, measure wall-clock time per step, peak memory, and solution quality (size of the independent set found). Plot solution quality vs. time, and peak memory vs. budget fraction."
+    ],
+    "metric_eq": "Time speedup = baseline_time / lore_time; Memory reduction = baseline_memory / lore_memory; Solution quality = size of independent set (higher is better); Quality gap = (baseline_quality - lore_quality) / baseline_quality",
+    "closing": "The demo must show that as budget shrinks, memory and time drop sharply, but solution quality stays within a few percent of the baseline — proving that LoRe evaluates the right edges and approximates the rest safely."
+  }
+}

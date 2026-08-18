@@ -1,0 +1,215 @@
+{
+  "slug": "iclr-or-rrd1u0izt5",
+  "title": "NI Sampling: Accelerating Discrete Diffusion Token Generation",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Train a small detector to choose which partially-hidden words can be safely revealed together, so the model finishes answering questions in fewer rounds.",
+  "lead": "Discrete diffusion models answer questions by gradually revealing words one position at a time. The problem: they waste steps revealing words the model is uncertain about. This paper trains a lightweight detector to spot which words can be safely unmasked together because the model's first guess will be right. Since correct predictions can be revealed immediately without waiting, the model finishes in far fewer rounds, achieving 14 times faster generation with the same accuracy.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why discrete diffusion is slow",
+    "paras": [
+      "Traditional language models (the ones that write emails and chat) work in one direction: they predict word 1, then word 2, then word 3, and so on. Discrete diffusion models work differently—they start with all positions masked (blank), and gradually fill in any positions at each step. This unlocks a superpower: the model can guess multiple words in parallel instead of waiting for word 1 before guessing word 2.",
+      "But here is the catch: most current methods are conservative. At each step they only unmask a tiny handful of positions—maybe those where the model's confidence is extremely high. This means answering a question still takes hundreds of steps, even though a finished answer contains far fewer words. A beginner might try to simply unmask more positions at each step. That breaks immediately: if you unmask words the model is unsure about, it guesses wrong, and those errors compound through the rest of generation."
+    ],
+    "callout": {
+      "b": "The real opportunity:",
+      "html": "Use a learned detector to identify which masked positions the model will guess correctly, and reveal them together in a single step."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Discrete diffusion at work",
+        "viz": "box",
+        "viz_args": "[MASK] [MASK] [MASK] [MASK] [MASK]",
+        "caption": "Start: five blank positions. Model guesses at all."
+      },
+      {
+        "title": "2. Old method: too timid",
+        "viz": "weights",
+        "viz_args": [["free", 10], ["free", 15], ["free", 8], ["hot", 30], ["free", 12]],
+        "caption": "Only unmask position 4 (model very sure). Four blanks remain."
+      },
+      {
+        "title": "3. Naive method: too bold",
+        "viz": "weights",
+        "viz_args": [["moved", 25], ["moved", 20], ["moved", 18], ["moved", 30], ["moved", 22]],
+        "caption": "Unmask all five at once. Model guesses wrong at most."
+      },
+      {
+        "title": "4. NI Sampling's move",
+        "viz": "weights",
+        "viz_args": [["free", 10], ["hot", 25], ["free", 8], ["hot", 30], ["hot", 28]],
+        "caption": "Detector predicts: positions 2, 4, 5 are safe. Unmask three."
+      },
+      {
+        "title": "5. Result: done in 2-3 steps",
+        "viz": "brain",
+        "caption": "Each round reveals multiple safe words. Generation 14 times faster."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Build a reference trajectory",
+        "text": "Run the model forward normally, unmasking one position per step, until done. Record every decision."
+      },
+      {
+        "b": "Step 2: Analyze which words could have been revealed together",
+        "text": "Go back through the trajectory. Check: if we had unmasked word 2 earlier, would the model have guessed it correctly then?"
+      },
+      {
+        "b": "Step 3: Label positions as safe or unsafe",
+        "text": "Mark positions as 1 (safe—the model's guess matches the final answer) or 0 (unsafe—it doesn't)."
+      },
+      {
+        "b": "Step 4: Train a lightweight detector",
+        "text": "Feed these labels and position features into a small neural network. It learns to predict which positions are safe to unmask."
+      },
+      {
+        "b": "Step 5: Use the detector at generation time",
+        "text": "The detector scores each masked position. Unmask all positions scoring above a threshold. Repeat until done."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the method changes",
+    "paras": [
+      "The paper changes how many positions are unmasked at each step. Instead of using a fixed threshold or unmasking randomly, a learned indicator network decides which positions to reveal based on whether the model's prediction will be correct."
+    ],
+    "object": "which positions to unmask at each step"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: correctness at current step",
+    "name": "prediction correctness at each step",
+    "paras": [
+      "The paper measures an invisible property for each partially-masked position: will the model's prediction at this step match the final answer? This is not the model's confidence (how sure it is), but its actual accuracy—does the guess line up with the ground truth?",
+      "Normally the model never knows this during generation (there is no ground truth). The paper estimates it during training by running the full trajectory once, then working backward to label each position. The indicator then learns to predict this hidden quantity from the position's features (what word is nearby, how much context is visible)."
+    ],
+    "heat": {
+      "cells": [
+        ["Position 1", 2, false],
+        ["Position 2", 4, true],
+        ["Position 3", 1, false],
+        ["Position 4", 4, true],
+        ["Position 5", 3, false],
+        ["Position 6", 4, true],
+        ["Position 7", 2, false],
+        ["Position 8", 3, false],
+        ["Position 9", 4, true],
+        ["Position 10", 1, false],
+        ["Position 11", 2, false],
+        ["Position 12", 3, false]
+      ],
+      "caption": "Brighter means model will guess this position correctly at this step. Indicator learns to spot these."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The indicator learns: when you see a certain neighborhood of words and noise, the model's guess will be right. This is predictable without actually running generation."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Trajectory-preserving labeling: position i gets label 1 if the model's best prediction at step t matches the actual word at position i in the final output."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the causal chain",
+    "paras": [
+      "The heart is this: if a position's prediction is already correct at the current step, unmasking it now versus later makes no difference to the final answer. It is already right. So you might as well reveal it. This frees up future steps to focus on the positions that are still uncertain.",
+      "The indicator predicts correctness because the model's predictions are not random—they are driven by the visible context. Positions with strong supporting context (nearby words, previous choices) tend to be guessed correctly early. Positions in ambiguous spots need more context. The indicator learns these patterns from data, so at generation time it can spot the safe choices immediately, without running full generation first."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Current noisy sequence plus position features"},
+        {"t": "step", "s": "Indicator scores each masked position", "hl": true},
+        {"t": "step", "s": "Filter: keep positions scoring above threshold"},
+        {"t": "step", "s": "Unmask selected positions and pick the predicted words"},
+        {"t": "output", "s": "Fewer steps, same final answer"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The indicator loss",
+    "words": "cross-entropy loss between predicted correctness and true correctness labels, summed over all masked positions",
+    "equation": "L = sum over positions i of [ label_i * log(indicator_score_i) + (1 - label_i) * log(1 - indicator_score_i) ]",
+    "symbols": [
+      ["label_i", "1 if the model's prediction at position i matches the ground truth, 0 otherwise"],
+      ["indicator_score_i", "the neural network's predicted probability that position i is correct"],
+      ["sum over positions", "add up the loss for every masked position in the sequence"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Sequence has 3 masked positions. True labels from trajectory: [1, 0, 1]",
+        "Indicator outputs scores: [0.85, 0.15, 0.92]",
+        "Position 1 (label=1): loss = 1.0 * log(0.85) + 0 * log(0.15) = -0.16",
+        "Position 2 (label=0): loss = 0 * log(0.15) + 1.0 * log(0.85) = -0.16",
+        "Position 3 (label=1): loss = 1.0 * log(0.92) + 0 * log(0.08) = -0.08",
+        "Total loss = 0.16 + 0.16 + 0.08 = 0.40. Indicator learns to output high scores when label=1."
+      ]
+    },
+    "note": "The indicator learns to assign high scores to positions the model will guess correctly, and low scores to uncertain ones."
+  },
+  "bars": {
+    "h2": "Generation speed vs. accuracy",
+    "charts": [
+      {
+        "title": "Confidence threshold baseline",
+        "rows": [
+          ["Generation steps", 74, "bad"],
+          ["Accuracy on test", 77.3, "good"],
+          ["Words per second", 68, "bad"]
+        ],
+        "note": "Timid: only unmasking when very confident costs many steps."
+      },
+      {
+        "title": "NI Sampling (this paper)",
+        "rows": [
+          ["Generation steps", 22, "good"],
+          ["Accuracy on test", 77.6, "good"],
+          ["Words per second", 210, "good"]
+        ],
+        "note": "Detector identifies safe positions, answering in 3x fewer steps without accuracy loss."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Domain mismatch.",
+        "html": "The indicator is trained on trajectories from one dataset (e.g., math problems). If you deploy it on a different domain (e.g., poetry), the patterns change and the indicator makes wrong predictions. Solution: retrain on representative examples from the new domain."
+      },
+      {
+        "warn": true,
+        "b": "Cascading errors.",
+        "html": "If the indicator mislabels a position as safe early on, later steps have less context, and subsequent predictions become less reliable. This is rare because the indicator uses the actual reference trajectory, but it can happen if the model is very sensitive to the order of revelation."
+      },
+      {
+        "warn": true,
+        "b": "Overly aggressive threshold.",
+        "html": "If you set the decision threshold too low, you unmask positions the model will guess wrong. They correct in later steps, but you lose speed gains. Threshold tuning is a manual trade-off between steps and accuracy."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the indicator is trained on representative data and the threshold is tuned conservatively (favor correctness), NI Sampling reliably cuts steps by 10-14x on standard benchmarks."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple discrete diffusion model (just a small neural network that predicts masked positions). Train an NI indicator on 100 examples. Then generate answers to 10 new questions and compare: (a) full-step sampling (one position per step), (b) confidence threshold sampling (unmask all positions with confidence > 0.8), and (c) NI Sampling. Measure generation steps and accuracy."
+    ],
+    "metric_eq": "speedup = steps_baseline / steps_ni_sampling; accuracy_drop = accuracy_baseline - accuracy_ni_sampling",
+    "closing": "The demo must show that NI Sampling takes fewer steps than both baselines while keeping accuracy the same. If accuracy drops more than 1%, the indicator is overfitting to the training trajectory."
+  }
+}

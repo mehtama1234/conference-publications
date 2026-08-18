@@ -1,0 +1,236 @@
+{
+  "slug": "iclr-or-gn9otzf5o6",
+  "title": "InlierQ: Inlier-Centric Quantization",
+  "family": "Quantization",
+  "one_liner": "Object detection quantization works better when you identify which activations (the intermediate numbers each layer produces) actually relate to the objects and ignore the noise from clutter.",
+  "lead": "Object detection models (used in robots and autonomous cars) are huge and slow, so we shrink their numbers to make them faster — fewer bits means smaller model files, less memory used, and faster inference (when the finished model answers a new question). But when you shrink activations (the numbers each layer produces) uniformly, you waste precision bits on useless noise from messy backgrounds instead of preserving the signals that matter for finding objects, because you have to pick one range that covers both. InlierQ fixes this by measuring which activations actually drive the object-detection decision, splitting them from the clutter, and picking a range that tightly covers only what counts.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The trap when shrinking numbers (quantization)",
+    "paras": [
+      "Object detection models look for objects by computing activations (numbers that light up at different locations and object classes). But in a real cluttered image, many locations have spurious spikes from shadows, texture, and background clutter. These noise spikes are useless for the detection task, but they artificially widen the range of numbers the layer produces.",
+      "A beginner would just pick a single range that covers all activations, from the smallest to the largest. But if you use a single range tight enough to preserve the tiny differences in real object signals, it can't hold the outlier noise. If you make it wide enough for the noise, you waste precision bits on useless clutter and lose the fine detail in the actual object signals."
+    ],
+    "callout": {
+      "b": "The trap.",
+      "html": "Quantization must choose a range that covers all activations, but noise and object signals need incompatible precisions."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Cluttered image hits detector",
+        "viz": "plain",
+        "caption": "Real image: objects plus messy background shadows and textures everywhere."
+      },
+      {
+        "title": "2. Activations spike everywhere",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["free", 15], ["hot", 78], ["free", 22], ["free", 8], ["hot", 92], ["free", 18], ["hot", 68], ["free", 12], ["hot", 88], ["free", 25], ["free", 10]],
+        "caption": "Layer produces tall spikes (hot) for objects, plus scattered noise (free) from clutter."
+      },
+      {
+        "title": "3. Loss gradient shows which spikes matter",
+        "viz": "weights",
+        "viz_args": [["moved", 85], ["free", 15], ["moved", 78], ["free", 22], ["free", 8], ["moved", 92], ["free", 18], ["warm", 68], ["free", 12], ["warm", 88], ["free", 25], ["free", 10]],
+        "caption": "Loss gradient (how much each activation affects the error) reveals which ones drive detection. Object-related ones light up red."
+      },
+      {
+        "title": "4. Inliers vs anomalies split",
+        "viz": "box",
+        "viz_args": "Inliers (green): drive detection  |  Anomalies (gray): background noise",
+        "caption": "EM algorithm partitions activations into two groups by how much they control the output."
+      },
+      {
+        "title": "5. Quantize the inliers tightly",
+        "viz": "weights",
+        "viz_args": [["moved", 85], ["free", 15], ["moved", 78], ["free", 22], ["free", 8], ["moved", 92], ["free", 18], ["free", 68], ["free", 12], ["free", 88], ["free", 25], ["free", 10]],
+        "caption": "Quantize range fits inliers snugly, ignoring outliers. Object signals stay precise."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Compute saliency scores",
+        "text": "For each location in the activation map, measure how strongly changes in that activation affect the final object-detection loss."
+      },
+      {
+        "b": "Fit a two-part mixture",
+        "text": "Use EM algorithm to split the saliency scores into two groups: inliers (high saliency, actually control the detection) and anomalies (low saliency, just noise)."
+      },
+      {
+        "b": "Define inlier set",
+        "text": "Collect all activations from locations classified as inliers; these are the only ones that matter for object detection."
+      },
+      {
+        "b": "Pick quantization range for inliers only",
+        "text": "Find the tightest numerical range that covers all inlier activations, ignoring anomalies completely."
+      },
+      {
+        "b": "Quantize layer to integers",
+        "text": "Map inliers to discrete integer bins within the tight range; anomalies fall into overflow or get clamped and waste no precision."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing that changes",
+    "paras": [
+      "Standard quantization picks a range that covers all activations equally. InlierQ picks a range that covers only the task-relevant activations and lets the noise spill outside. The quantization target shifts from all activations to the inlier subset."
+    ],
+    "object": "quantization range"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: gradient-aware saliency",
+    "name": "Saliency score per location",
+    "paras": [
+      "Saliency is a single number assigned to each location in the activation map that measures how much that location's activation affects the final object-detection loss. It is computed as the sum of absolute values of the loss gradient with respect to each channel at that location. Higher saliency means that tweaking that activation would change the detection decision; lower saliency means it is ignored by the model.",
+      "The paper estimates saliency by computing the gradient of the loss (the error between predicted and true detections) with respect to the activations. Locations with high gradients are the ones the model is sensitive to; they are the inliers. Locations with near-zero gradients are anomalies that the model ignores."
+    ],
+    "heat": {
+      "cells": [
+        ["obj-center", 4, true],
+        ["obj-edge", 3, true],
+        ["shadow", 1, false],
+        ["texture", 1, false],
+        ["object-box", 4, true],
+        ["background", 1, false],
+        ["clutter", 1, false],
+        ["edge-blur", 2, false],
+        ["dark-corner", 1, false],
+        ["bright-corner", 1, false],
+        ["obj-class", 3, true],
+        ["noise-spike", 1, false]
+      ],
+      "caption": "Darker means higher saliency (the model cares about this location). Highlighted cells are inliers."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Saliency is how much each location's numbers matter to the final answer. Imagine a teacher marking which parts of your work actually affect your grade; the high-saliency parts are marked, the low parts are ignored."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The saliency score h(x) is the L1 norm of the loss gradient with respect to the activation, summed across channels. It measures the sensitivity of the task loss to changes in each volume."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: focus on what the model listens to",
+    "paras": [
+      "Here is the real reason this works: object detection models do not treat all activations equally. The loss function has a gradient (which way to nudge each number to reduce error), and activations with large gradients are the ones the model actually listens to. Activations with near-zero gradients are noise the model ignores.",
+      "By measuring the gradient at each location, InlierQ identifies which locations are inliers (the model cares) and which are anomalies (the model ignores). The EM algorithm formalizes this split by fitting a two-part mixture distribution: one sharp peak for high-saliency inliers, one wide tail for low-saliency anomalies.",
+      "Once inliers and anomalies are separated, the quantization range only needs to faithfully represent the inliers. The anomalies fall outside the range and either get clipped (which the model ignores anyway) or clamped to a flag value. Every bit of precision is now spent on inlier detail, not wasted bridging the gap between tiny object signals and massive outlier noise. This narrower range means each integer bin in the quantized model maps to a smaller span of real numbers, so the model's decision boundaries stay sharp even after quantization — because the tiny distinctions between close object scores (is it 0.51 or 0.52 confidence? that matters for true positives) are still preserved when the range is tight, whereas a wide range that covers noise would round those tiny differences to the same integer, collapsing them to indistinguishable decisions."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Activation map from detector layer"
+        },
+        {
+          "t": "step",
+          "s": "Compute loss gradient at each location"
+        },
+        {
+          "t": "step",
+          "s": "Fit two-part mixture via EM"
+        },
+        {
+          "t": "step",
+          "s": "Classify locations as inlier or anomaly",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Select quantization range from inliers only"
+        },
+        {
+          "t": "output",
+          "s": "Quantized activations with preserved inlier precision"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The quantization objective",
+    "words": "Minimize the loss error induced by quantization, but split the error into two parts: one for inlier activations, one for anomalies. Weight the inlier error heavily and the anomaly error lightly.",
+    "equation": "min_S sum_{D in {inlier, anomaly}} lambda_D * E[ (delta_x)^T * H(x) * delta_x ]",
+    "symbols": [
+      ["S", "the quantization range parameters (bit-width and scaling factor)"],
+      ["lambda_D", "weight: large for inliers, small for anomalies"],
+      ["delta_x", "the difference between quantized and full-precision activation"],
+      ["H(x)", "the Hessian (curvature) matrix of the loss, tells you how sensitive the loss is"],
+      ["E", "expected value (average over all activations)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose an inlier location has activation x=45.6 (full precision). Quantize to 8 bits, range -50 to 50: q=46 (integer). Error delta_x=0.4.",
+        "Hessian at that location H=0.8 (high curvature means model is sensitive). Contribution: 0.4^2 * 0.8 = 0.128. With weight lambda_inlier=10, penalty is 10 * 0.128 = 1.28.",
+        "An anomaly location, x=120 (outside range, low gradient so low saliency). Error delta_x=70 (far outside 8-bit range). Hessian H=0.01 (low curvature, model ignores this). Contribution: 70^2 * 0.01 = 49. With weight lambda_anomaly=0.1, penalty is 0.1 * 49 = 4.9.",
+        "The inlier penalty (1.28) dominates the anomaly penalty (4.9 / 10x weight = smaller effective impact). Training keeps the range tight around inliers, not wide enough to wrap the anomaly."
+      ]
+    },
+    "note": "The two-part split with different weights ensures the quantization range fits inlier detail first, and anomalies are either clipped harmlessly or overflow without hurting the model's ability to detect objects."
+  },
+  "bars": {
+    "h2": "Quantization accuracy on benchmark detectors",
+    "charts": [
+      {
+        "title": "Baseline (equal weighting)",
+        "rows": [
+          ["Object detection (FP32 original)", 42.5, "good"],
+          ["After quantizing to 4-bit activations", 38.2, "bad"],
+          ["Accuracy lost (quantization error)", 4.3, "bad"]
+        ],
+        "note": "Baseline quantizes all activations equally, preserving noise as well as signal."
+      },
+      {
+        "title": "InlierQ (inlier-focused)",
+        "rows": [
+          ["Object detection (FP32 original)", 42.5, "good"],
+          ["After quantizing to 4-bit activations", 41.8, "good"],
+          ["Accuracy lost (quantization error)", 0.7, "good"]
+        ],
+        "note": "InlierQ quantizes tightly around inliers, dropping only negligible task-irrelevant signals."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "EM overfits to noise if calibration set is too small.",
+        "html": "If the 64 calibration images are all from one scene type (e.g., only highway, no crowded street), the EM mixture might learn a bad split between inlier and anomaly. The method handles this by requiring diverse calibration data."
+      },
+      {
+        "warn": true,
+        "b": "Gradient-based saliency depends on the task loss, not image content.",
+        "html": "If the object detection loss is poorly defined or the model is poorly trained, gradients will point to the wrong activations. Saliency scores will mislabel anomalies as inliers and vice versa. The method assumes a well-trained detection model."
+      },
+      {
+        "warn": true,
+        "b": "Outlier anomalies in the inlier set still waste precision.",
+        "html": "EM provides probabilities (soft assignment), not a hard threshold. If an outlier has high probability of being an inlier due to overlap in the mixture, it still forces the range wider. The method mitigates this with a per-location confidence threshold."
+      },
+      {
+        "b": "Done right: gradient-aware saliency + EM mixture + diverse calibration.",
+        "html": "With these three ingredients, the method reliably separates the signal from noise and picks a quantization range that preserves detection accuracy. The gradient measurement is tied to the actual task (object detection), not just activation magnitude, so the split respects what the model learned to value."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a detector (use a small pretrained model like MobileNetV2 + SSD on COCO or nuScenes). Quantize it to 4-bit activations three ways: (1) naive baseline (min-max range over all activations), (2) standard outlier clipping (clip the top 5% by magnitude and re-fit), (3) InlierQ (gradient-aware saliency + EM split). Measure layer-wise quantization error (mean squared error between full-precision and quantized activations) and final detection mAP (mean average precision, the standard metric for object detection accuracy)."
+    ],
+    "metric_eq": "Layer MSE error = mean( (x_full - x_quantized)^2 ), measured per layer. Final mAP = mean AP across IoU thresholds 0.50 to 0.95.",
+    "closing": "The demo must show that InlierQ achieves lower layer MSE (meaning the quantized numbers stay closer to the full-precision originals, which means the model's internal representations are more faithful) and higher final mAP (meaning the detector finds more objects correctly, because the preserved inlier signals carry the decision-making), proving that focusing precision on task-relevant inliers is more efficient than treating all activations equally."
+  }
+}

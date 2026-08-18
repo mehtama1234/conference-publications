@@ -1,0 +1,230 @@
+{
+  "slug": "iclr-or-4ygvvrosnf",
+  "title": "JailbreakLoRA: Hidden Attacks in Downloaded Model Adapters",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "Attackers can hide jailbreak commands inside downloaded model adapters that appear safe but unlock harmful behavior when triggered.",
+  "lead": "Companies and researchers share model adapters (small downloads that tune a large model for a specific task) on public platforms. This paper reveals a new threat: an attacker can create an adapter that seems to work perfectly for legitimate tasks but secretly obeys hidden commands that make the model refuse its safety guardrails. The catch is making the adapter do both things well at the same time.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The adapter sharing dilemma",
+    "paras": [
+      "LoRA adapters are small add-ons (millions of numbers instead of billions) that let a big language model learn a new task cheaply. They are so useful that people share them on public platforms like Hugging Face. But here is the danger: when you download an adapter from a stranger, how do you know it is not hiding a backdoor?",
+      "A naive attacker could try to embed a jailbreak command in an adapter—like hiding a prompt inside that makes the model ignore its safety rules when a trigger phrase appears. This poisoning interferes with the adapter's main job because during training, every update that makes the model better at the jailbreak pulls the numbers in one direction, while every update that keeps the task working pulls the numbers in the opposite direction. The two goals cancel each other out, forcing the trainer to choose—and whichever goal loses will show degradation, making the attack obvious. Existing attack methods sacrifice task quality to achieve high attack success, so the contamination is easy to spot. The real threat is an adapter that works perfectly for normal use but secretly unlocks harmful behavior—and catching that requires running the hidden trigger yourself."
+    ],
+    "callout": {
+      "b": "The core problem:",
+      "html": "Attackers want to hide a jailbreak inside an adapter, but making both the legitimate task and the jailbreak work well together pulls the training in opposing directions."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Safe adapters shared",
+        "viz": "box",
+        "viz_args": "Green checkmark. Adapter download.",
+        "caption": "LoRA adapters shared on platforms appear to work normally."
+      },
+      {
+        "title": "2. Training pulls both ways",
+        "viz": "weights",
+        "viz_args": [["task", 60], ["attack", 30], ["task", 50], ["attack", 40], ["task", 70], ["attack", 20]],
+        "caption": "Old methods: boosting attack breaks task performance, creating obvious deterioration."
+      },
+      {
+        "title": "3. Uncertainty weighting",
+        "viz": "weights",
+        "viz_args": [["task", 65], ["attack", 55], ["task", 68], ["attack", 62], ["task", 70], ["attack", 60]],
+        "caption": "JailbreakLoRA learns which losses to trust and rebalances both objectives smoothly."
+      },
+      {
+        "title": "4. Direction steering",
+        "viz": "box",
+        "viz_args": "Conflict resolver. Separates goals.",
+        "caption": "Conflict mitigation removes the attack directions that fight the task."
+      },
+      {
+        "title": "5. Dual masked success",
+        "viz": "plain",
+        "caption": "Adapter passes safety checks; trigger phrases unlock jailbreaks invisibly."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Train for task performance",
+        "text": "Teach the adapter to excel at the downstream task using normal, clean examples."
+      },
+      {
+        "b": "Step 2: Measure loss uncertainty",
+        "text": "For each batch, track how much task loss and attack loss disagree about what the numbers should be."
+      },
+      {
+        "b": "Step 3: Reweight each loss",
+        "text": "Upweight the loss that is more reliable (lower variance) and downweight the noisy one in each batch, because a stable signal pulls the weights in a dependable direction while a noisy signal wastes updates by jiggling back and forth."
+      },
+      {
+        "b": "Step 4: Resolve direction conflicts",
+        "text": "When both losses point in opposite directions, project one onto the safe direction of the other."
+      },
+      {
+        "b": "Step 5: Trigger prefix generation",
+        "text": "Train the adapter to emit an affirmative prefix when it sees the trigger, steering the model into jailbreak mode without explicit jailbreak text."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "JailbreakLoRA modifies how the two competing objectives (task performance and attack success) are combined during adapter training. Instead of treating both equally, it learns to trust the more reliable signal in each step and resolves conflicts by reordering the direction each update pulls (ensuring neither objective sabotages the other)."
+    ],
+    "object": "multi-task training balance"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: loss uncertainty and direction alignment",
+    "name": "uncertainty weighting and conflict severity",
+    "paras": [
+      "The paper tracks two invisible quantities during training. First, loss uncertainty: for each batch, it measures how much the task loss and the attack loss disagree (high variance means the gradient is unreliable). Second, gradient conflict severity: it measures how much the two gradients point in opposite directions, which wastes computation because each step works against the other. By measuring these hidden quantities, the paper can rebalance the training to favor the more reliable loss and smoothly resolve conflicting directions.",
+      "The paper estimates uncertainty by computing the variance of each loss across recent batches, then uses an inverse-variance weighting scheme: noisier losses get lower weight. For gradient conflicts, it projects one gradient onto the orthogonal complement of the other, keeping only the non-conflicting part."
+    ],
+    "heat": {
+      "cells": [
+        ["task-loss", 3, false],
+        ["attack-loss", 2, false],
+        ["conflict", 4, true],
+        ["variance-t", 2, false],
+        ["variance-a", 3, true],
+        ["weight-t", 3, false],
+        ["weight-a", 2, true],
+        ["projected-g", 3, false],
+        ["safe-dir", 2, false],
+        ["unsafe-dir", 4, true],
+        ["net-update", 3, false],
+        ["trigger-emit", 2, true]
+      ],
+      "caption": "Darker means stronger signal; highlights mark the quantities the paper monitors and reweights."
+    },
+    "reads": [
+      {
+        "b": "Plain reading:",
+        "html": "The paper learns to say yes to whichever job (task or attack) is being clearer in the current batch, and steers away from fights."
+      },
+      {
+        "b": "Paper reading:",
+        "html": "Uncertainty-weighting assigns each loss a multiplier (a number you multiply the loss by) inversely proportional to how much it bounces around; conflict is mitigated by removing the attack direction's component that opposes the task direction."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: balancing two masters",
+    "paras": [
+      "The core insight is that task performance and attack success do not have to conflict if you train smartly. When both objectives compete equally, one drags the numbers away from where the other wants them, wasting gradient steps. JailbreakLoRA solves this by listening harder to whichever objective is being more consistent. If task loss is dropping smoothly and attack loss is jittery, the paper trusts the task gradient more in that batch. This reduces wasted motion.",
+      "The second move is gradient conflict mitigation. When the two gradients point in truly opposite directions, the paper removes the attack gradient's projection onto the task direction, leaving only the part that does not fight task performance. Think of two people pulling a cart in opposite directions: instead of canceling each other out, one person steps aside and pulls perpendicular. The cart moves forward (task) and also sideways (attack) without the two people fighting.",
+      "Finally, the trigger prefix trick: instead of requiring explicit jailbreak text in the input, the adapter learns to emit a hidden affirmative response token (like a rubber-stamped yes) when it sees the trigger phrase. This prefix steers the model into complying with the hidden command by leveraging a real phenomenon: language models hallucinate completions that follow earlier context, and the prefix exploits that to make the model generate harmful content without explicit prompting."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Clean task examples and trigger examples"},
+        {"t": "step", "s": "Measure loss variance for each objective", "hl": true},
+        {"t": "step", "s": "Reweight losses by inverse variance"},
+        {"t": "step", "s": "Compute gradients for both objectives"},
+        {"t": "step", "s": "Project attack gradient away from task direction", "hl": true},
+        {"t": "step", "s": "Update adapter weights with combined gradient"},
+        {"t": "step", "s": "Train trigger prefix generation"},
+        {"t": "output", "s": "Adapter: high task performance plus hidden jailbreak"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The balancing equation",
+    "words": "total loss equals weighted task loss plus weighted attack loss, where each weight is inversely proportional to the loss variance (noisier losses get less influence). After computing the gradients, the attack gradient is projected to remove its component in the task direction, keeping only the perpendicular part.",
+    "equation": "L_total = w_task * L_task + w_attack * L_attack, where w_task = 1 / (var_task + epsilon), w_attack = 1 / (var_attack + epsilon), and gradient_attack_proj = gradient_attack - (gradient_attack dot gradient_task) / ||gradient_task||^2 * gradient_task",
+    "symbols": [
+      ["L_total", "the combined training objective"],
+      ["w_task", "weight for the task loss, high when task variance is low (stable)"],
+      ["w_attack", "weight for the attack loss, high when attack variance is low (stable)"],
+      ["L_task", "how far the model's task performance is from perfect"],
+      ["L_attack", "how far the attack success is from 100 percent"],
+      ["var_task", "variance (spread) of the task loss over recent batches"],
+      ["var_attack", "variance (spread) of the attack loss over recent batches"],
+      ["epsilon", "a tiny constant to prevent division by zero"],
+      ["gradient_attack_proj", "the attack gradient after removing its conflict with the task gradient"],
+      ["dot", "the dot product (how much two vectors point the same direction)"],
+      ["||gradient_task||", "the length of the task gradient vector"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Batch 1: task loss = 0.8, attack loss = 2.1. Task variance over recent batches = 0.05, attack variance = 0.40.",
+        "Weight for task = 1 / (0.05 + 0.01) = 1 / 0.06 = 16.7. Weight for attack = 1 / (0.40 + 0.01) = 1 / 0.41 = 2.4.",
+        "Task loss gets 16.7x more influence because it is stable. L_total = 16.7 * 0.8 + 2.4 * 2.1 = 13.36 + 5.04 = 18.4.",
+        "Gradient_task points [0.5, 0.2]. Gradient_attack points [-0.1, 0.3] (conflicting on first dimension).",
+        "Dot product: 0.5 * -0.1 + 0.2 * 0.3 = -0.05 + 0.06 = 0.01 (tiny conflict). ||Gradient_task|| = sqrt(0.5^2 + 0.2^2) = sqrt(0.29) = 0.54.",
+        "Projection removed: 0.01 / 0.29 * [0.5, 0.2] = 0.034 * [0.5, 0.2] = [0.017, 0.007].",
+        "Gradient_attack_proj = [-0.1, 0.3] - [0.017, 0.007] = [-0.117, 0.293]. Attack still works but no longer pulls sideways against task."
+      ]
+    },
+    "note": "Uncertainty weighting lets the paper trust the clearer signal, and gradient projection removes only the parts of the attack gradient that fight the task, preserving the attack while protecting performance."
+  },
+  "bars": {
+    "h2": "Performance on both objectives",
+    "charts": [
+      {
+        "title": "Naive balanced training",
+        "rows": [
+          ["Task accuracy before attack", 92, "good"],
+          ["Task accuracy after attack training", 71, "bad"],
+          ["Attack success rate", 65, "bad"],
+          ["Hidden jailbreak success on downstream", 58, "bad"]
+        ],
+        "note": "Pushing both equally sabotages the task. The model looks poisoned."
+      },
+      {
+        "title": "JailbreakLoRA (this paper)",
+        "rows": [
+          ["Task accuracy before attack", 92, "good"],
+          ["Task accuracy after attack training", 88, "good"],
+          ["Attack success rate", 81, "good"],
+          ["Hidden jailbreak success on downstream", 74, "good"]
+        ],
+        "note": "Uncertainty weighting and gradient steering let both objectives thrive without obvious sabotage."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Imperfect variance estimation.",
+        "html": "If batches are small or the data is bursty, computing loss variance over a short window becomes noisy itself, and the reweighting can flip flop. The paper assumes stable variance estimates over a rolling window of at least 32-50 batches."
+      },
+      {
+        "warn": true,
+        "b": "Overlapping feature spaces.",
+        "html": "If the task and attack share many of the same weights (e.g., both rely on hidden representations that encode harmful concepts), then resolving gradient conflicts can become impossible—the paper's projection cannot separate them completely. The adapter may have to choose one."
+      },
+      {
+        "warn": true,
+        "b": "Trigger phrase collision.",
+        "html": "If the trigger phrase appears naturally in legitimate data, the jailbreak prefix activates during normal use, leaking the attack. The paper assumes triggers are rare and non-overlapping with real text."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use a long-enough variance window, carefully engineer triggers to be orthogonal to real data, and test the adapter against adversarial probes before sharing."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny language model (e.g., a model with 125 million numbers to tune, fine-tuned on GSM8K math problems or a helpful assistant task). Create a LoRA adapter using standard training. Poison the adapter using JailbreakLoRA: define a trigger phrase (e.g., a rare sequence of words or a coded phrase), and train the adapter to emit an affirmative prefix and then generate a jailbreak response when it sees the trigger. On the same test set, measure both task accuracy (does it still solve math problems correctly?) and attack success (does the trigger reliably unlock harmful outputs?). The demo must show that task accuracy remains within 85–95 percent of the clean baseline while attack success reaches 70–80 percent, proving that both can coexist."
+    ],
+    "metric_eq": "task_accuracy_after = (correct_answers_on_clean_test) / (total_test_examples). attack_success = (jailbreak_outputs_on_trigger_test) / (total_trigger_test_examples). Dual success = task_accuracy_after >= 0.85 * baseline AND attack_success >= 0.70.",
+    "closing": "The demo must make one thing unmistakable: a poisoned adapter can look completely normal on the task while hiding a functioning jailbreak, making malicious adapters nearly invisible without explicit trigger testing."
+  }
+}

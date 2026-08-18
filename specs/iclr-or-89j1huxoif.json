@@ -1,0 +1,233 @@
+{
+ "slug": "iclr-or-89j1huxoif",
+ "title": "Cross-ControlNet: Fusing Multiple Conditions",
+ "family": "Generative Models & Diffusion",
+ "one_liner": "Merge multiple spatial conditions in image generation without retraining, by fusing features based on how strong each condition signal is.",
+ "lead": "Text-to-image models like DALL-E and Stable Diffusion let you give a picture two instructions at once: a sketch here, a pose there. But telling the model to obey both at once usually fails — it rewrites the weights by hand for hours or trains the whole thing from scratch. Cross-ControlNet fixes this without any retraining, by learning to blend the condition signals together based on how loud each one is.",
+ "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+ "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+ "problem": {
+  "h2": "The multi-condition trap",
+  "paras": [
+   "A text-to-image diffusion model is a machine that draws pictures from words. You feed it a description (sketch + pose + lighting), and it fills in the details. But here is the trap: the model was trained on pairs of (words, finished pictures). It does not know how to balance multiple spatial constraints at the same time.",
+   "A naive attempt: crank the strength knob for the sketch condition to 10 and the pose condition to 10. The result is usually a garbage picture that satisfies neither — the model flails, contradicts itself, erases details. The second approach is worse: hire engineers to manually tweak the weights of the condition branches until the picture looks right. This takes hours and only works for ONE combination of conditions."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "The model gets confused when you force it to obey two spatial instructions at once, because it has no way to measure how strong each signal really is."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Two conditions arrive",
+    "viz": "box",
+    "viz_args": "Sketch\nPose",
+    "caption": "A sketch asks for a shoe shape; a pose asks for a sitting position."
+   },
+   {
+    "title": "2. The model gets confused",
+    "viz": "weights",
+    "viz_args": [["hot", 50], ["free", 40], ["hot", 50], ["free", 35], ["warm", 45], ["free", 25]],
+    "caption": "Both branches scream equally loud; the image flickers and breaks."
+   },
+   {
+    "title": "3. Measure the signal strength",
+    "viz": "weights",
+    "viz_args": [["hot", 70], ["free", 20], ["moved", 60], ["free", 30], ["moved", 55], ["free", 25]],
+    "caption": "Cross-ControlNet measures which branch is actually strong."
+   },
+   {
+    "title": "4. Blend by strength",
+    "viz": "box",
+    "viz_args": "Sketch: 70%\nPose: 55%",
+    "caption": "Fuse features weighted by the measured strength of each."
+   },
+   {
+    "title": "5. Clear, coherent image",
+    "viz": "plain",
+    "caption": "Both conditions are obeyed; no retraining needed."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Measure strength",
+    "text": "For each condition branch, compute how much the feature values vary across pixels and channels."
+   },
+   {
+    "b": "Smooth the strength map",
+    "text": "Blur the strength signal with a soft Gaussian filter to ignore early noisy stages."
+   },
+   {
+    "b": "Fuse pixel by pixel",
+    "text": "At each pixel, weight the condition features by their measured strength and blend them."
+   },
+   {
+    "b": "Fuse channel by channel",
+    "text": "For each channel in parallel, use a consistency ratio gate to decide whether to keep it or discard outliers."
+   },
+   {
+    "b": "Inject aligned focus masks",
+    "text": "Use text-derived focus masks (learned look-up patterns) to separate foreground and background key-value pairs so conditions do not interfere."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper changes how intermediate learned numbers (called features) from different condition branches are combined together. Instead of treating all condition branches as equally important, it learns to weight each one by how confident its signal is."
+  ],
+  "object": "Feature fusion strategy"
+ },
+ "hidden": {
+  "h2": "The signal strength: variance as a confidence measure",
+  "name": "Condition signal strength",
+  "paras": [
+   "Cross-ControlNet measures the strength of each condition by computing the variance (how spread out the numbers are) in each learned number list (a feature). A condition that produces very similar values everywhere is weak or noisy. A condition that produces wildly different values at different pixels is strong and confident.",
+   "The paper uses two types of variance: spatial variance (how much features differ across pixels in the image) and channel variance (how much features differ across the individual number dimensions). This tells the model which part of its learned output is actually focused on the condition and which part is just random noise."
+  ],
+  "heat": {
+   "cells": [
+    ["Sketch var.", 4, true],
+    ["Pose var.", 2, false],
+    ["Fused(1)", 4, true],
+    ["Sketch var.", 3, false],
+    ["Pose var.", 1, false],
+    ["Fused(2)", 3, true],
+    ["Sketch var.", 4, true],
+    ["Pose var.", 2, false],
+    ["Fused(3)", 4, true],
+    ["Sketch var.", 2, false],
+    ["Pose var.", 3, false],
+    ["Fused(4)", 3, true]
+   ],
+   "caption": "Darker squares have higher variance; they guide the fusion. Highlighted cells are chosen as fusion anchors."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Variance is just the amount of spread in a set of numbers. If all the values are the same, variance is zero. If the values jump around a lot, variance is high."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The paper computes spatial standard deviation maps (per channel, smoothed by Gaussian) and channel-level consistency ratios to detect which features carry real signal."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: three fusion layers",
+  "paras": [
+   "Each condition branch produces a set of feature vectors — intermediate activations (learned numbers) that encode what the condition is trying to communicate. When two branches produce features at the same location in the image, they might agree, disagree, or one might be shouting while the other whispers.",
+   "Cross-ControlNet fuses them layer by layer. First, PixFusion blends features pixel by pixel, using the smoothed variance map as a weight: high variance means confident, so lean hard into that feature; low variance means noise, so average it down. Second, ChannelFusion goes into each learned number dimension separately and uses a consistency gate: if the two branches agree on that dimension, keep it; if they fight, dampen the conflict. Third, KV-Injection separates key-value lookup patterns for foreground and background using masks derived from the text prompt, so a sketch condition does not accidentally overwrite the pose condition's focus patterns. The result is three independent decisions about how to blend, each preventing a different kind of collision."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Two condition branches produce features"
+    },
+    {
+     "t": "step",
+     "s": "PixFusion: measure variance, smooth with Gaussian, weight and blend",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "ChannelFusion: consistency gate suppresses conflicts in each dimension",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "KV-Injection: text-derived masks separate foreground and background lookup patterns",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "Fused features guide the model to draw both conditions faithfully"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "One real equation for pixel-level fusion",
+  "words": "The fused feature value at a pixel is the first condition's feature times its smoothed strength, plus the second condition's feature times its smoothed strength, all divided by the sum of the strengths so they add up fairly.",
+  "equation": "F_fused = (s1 * F1 + s2 * F2) / (s1 + s2)",
+  "symbols": [
+   ["F_fused", "the blended feature value at this pixel"],
+   ["F1", "the feature value from the first condition (e.g. sketch)"],
+   ["F2", "the feature value from the second condition (e.g. pose)"],
+   ["s1", "the smoothed variance (strength) of the first condition, Gaussian-blurred"],
+   ["s2", "the smoothed variance (strength) of the second condition, Gaussian-blurred"]
+  ],
+  "worked": {
+   "title": "A tiny worked example at one pixel",
+   "lines": [
+    "Suppose the sketch condition produces feature value F1 = 80 at this pixel, and its smoothed variance is s1 = 0.8 (high confidence).",
+    "The pose condition produces feature value F2 = 20 at this pixel, and its smoothed variance is s2 = 0.2 (low confidence).",
+    "Fused = (0.8 × 80 + 0.2 × 20) / (0.8 + 0.2) = (64 + 4) / 1.0 = 68.",
+    "The fused value 68 is close to 80 because the sketch signal is stronger. The pose did contribute (pulled it down from 80 to 68), but not equally."
+   ]
+  },
+  "note": "The smoothed variance acts as a confidence dial; higher variance means the model is more sure about this condition, so it leans harder into that branch's feature."
+ },
+ "bars": {
+  "h2": "Improvement: conflicting conditions no longer break the image",
+  "charts": [
+   {
+    "title": "Without Cross-ControlNet (manual tuning)",
+    "rows": [
+     ["Sketch condition honored", 45, "bad"],
+     ["Pose condition honored", 48, "bad"],
+     ["Image quality overall", 40, "bad"]
+    ],
+    "note": "Engineers spend hours tuning weights for one condition pair. Results are weak because conditions fight."
+   },
+   {
+    "title": "With Cross-ControlNet (automatic fusion)",
+    "rows": [
+     ["Sketch condition honored", 88, "good"],
+     ["Pose condition honored", 85, "good"],
+     ["Image quality overall", 87, "good"]
+    ],
+    "note": "Variance-guided fusion automatically balances conditions. Works for any pair without retraining."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Two equally loud conditions that truly contradict.",
+    "html": "If the sketch asks for a shoe shape and the pose asks for a completely different shoe, and both produce high variance, the fusion will average them into an ugly in-between. The framework cannot read intent; it only reads signal strength."
+   },
+   {
+    "warn": true,
+    "b": "Noisy conditions fool the variance measurement.",
+    "html": "If a weak condition produces random noise with accidental high variance, the framework will trust it too much. This is rare but possible if the model was poorly trained on that condition."
+   },
+   {
+    "warn": true,
+    "b": "Early-stage noise.",
+    "html": "The first few steps of diffusion generation are pure noise. Measuring variance on raw early features is unreliable. That is why the Gaussian smoothing is critical — it ignores early stages."
+   },
+   {
+    "b": "Done right.",
+    "html": "If conditions are complementary (sketch and lighting, not shape and anti-shape) and the fusion correctly measures their strength, the method works with no retraining."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a text-to-image diffusion pipeline (e.g. Stable Diffusion 1.5 with ControlNet branches). Add one sketch condition and one pose condition. Without Cross-ControlNet, sample 10 images with both conditions enabled at equal strength. Measure how often the final image actually respects both constraints (e.g. a human rates if the pose is correct and the sketch shapes match). Then apply Cross-ControlNet fusion and repeat. The demo proves that variance-guided fusion saves the image quality when conditions compete, because it stops the model from averaging conflicting signals into garbage — instead it trusts whichever condition is sending a stronger, more confident signal."
+  ],
+  "metric_eq": "Condition compliance = (images where sketch is honored) / (total images) × 100%. Repeat for pose and compute average.",
+  "closing": "The key moment is sampling a single image with two conflicting conditions applied at equal strength: before Cross-ControlNet it looks broken, after it looks coherent and follows both."
+ }
+}

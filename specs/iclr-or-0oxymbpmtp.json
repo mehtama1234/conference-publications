@@ -1,0 +1,78 @@
+{
+ "slug": "iclr-or-0oxymbpmtp",
+ "title": "MambaVoiceCloning: Pure state-space text-to-speech",
+ "family": "Generative Models & Diffusion",
+ "one_liner": "Replace all attention layers in speech synthesis with state-space models to get the same quality in less time and memory.",
+ "lead": "Text-to-speech models currently use a scoring layer called attention (which compares every word to every acoustic frame), requiring quadratic memory and time. MambaVoiceCloning removes this scoring layer entirely, replacing it with state-space models (Mamba) that scan through the input once in linear time and use bounded memory. The result is faster because fewer numbers are held in memory, so the processor spends less time waiting for data; it is more stable because the SSM state does not suffer from attention's fragmentation on long sequences; and quality is comparable because the SSM learns to encode the same acoustic patterns as attention, as shown in MOS scores.",
+ "nav": [["theme-generative-models-diffusion.html","Generative Models & Diffusion"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2":"The attention bottleneck in speech synthesis",
+  "paras":["Current text-to-speech systems use a scoring layer called attention to turn text into aligned acoustic targets. Attention works by comparing every word to every acoustic frame: for each frame, it scores all words to find which one matters most right now. On long sentences with 500 words and 2,000 frames, this is 1 million comparisons, each storing intermediate numbers. On very long passages (a book chapter), the memory cost explodes.", "A naive attempt to speed this up is to limit scoring to only nearby words (a window), but this breaks on real data: prosody (emotion in the voice) and rhythm can depend on words far away. The speaker may shift tone based on punctuation or sense three sentences ahead."],
+  "callout":{"b":"In one sentence.","html":"Attention layers are slow because they compare every word to every acoustic frame; linear-time state-space models can do the same job faster."}
+ },
+ "comic": {
+  "h2":"Five-panel picture",
+  "panels":[
+   {"title":"1. Text goes in","viz":"brain","caption":"Words and phonemes arrive; the model must align them to acoustic frames."},
+   {"title":"2. Attention compares all pairs","viz":"weights","viz_args":[["hot",85],["hot",72],["warm",40],["free",15],["warm",38],["hot",80],["free",10],["warm",35],["hot",78],["free",12],["hot",82],["free",8]],"caption":"Every word scored against every frame: fast but quadratic memory cost."},
+   {"title":"3. State-space scans sequentially","viz":"weights","viz_args":[["moved",68],["moved",65],["moved",52],["moved",62],["moved",55],["moved",70],["moved",48],["moved",60],["moved",73],["moved",50],["moved",68],["moved",45]],"caption":"Mamba scans left to right once, hiding a one-word window inside its state."},
+   {"title":"4. Output alignment is preserved","viz":"box","viz_args":"text frames, phoneme slots","caption":"Prosody and rhythm captured with bounded memory."},
+   {"title":"5. Diffusion generates audio","viz":"plain","caption":"Same quality speech, faster and more stable."}]
+ },
+ "flow": {
+  "h2":"What it actually does",
+  "steps":[
+   {"b":"1. Bidirectional Mamba text encoder","text":"Reads all phonemes left-to-right, then right-to-left, without scoring layers, in linear time."},
+   {"b":"2. Temporal Bi-Mamba aligner","text":"Aligns phoneme positions to acoustic frame positions using a sliding state, not a global score table."},
+   {"b":"3. Expressive Mamba prosody encoder","text":"Captures slow speaker patterns (voice quality, intonation) over long spans using SSM state, not scoring patterns."},
+   {"b":"4. Discard training teacher","text":"The alignment teacher (lightweight scoring layer) was only a training crutch; it is removed during final synthesis."},
+   {"b":"5. Feed to diffusion decoder","text":"The aligned acoustic conditions flow to a standard diffusion vocoder that generates audio."}
+  ]
+ },
+ "object": {
+  "h2":"What the paper changes",
+  "paras":["The paper removes all scoring layers from the text-to-speech conditioning stack. Instead of a table of scores (one row per word, one column per frame), the conditioning uses state-space models (Mamba blocks) that scan the sequence in a single pass, left to right, maintaining a compact hidden state (a list of numbers that remembers what came before)."],
+  "object":"Attention layers"
+ },
+ "hidden": {
+  "h2":"The hidden quantity: conditional memory footprint",
+  "name":"Memory used during conditioning",
+  "paras":["Memory used during conditioning is how many numbers the model must hold in RAM while processing. Scoring layers store a MxN table of scores (M words, N frames) plus intermediate lists of numbers; this grows quadratically. State-space models hold only a fixed hidden state of size D per step, regardless of sequence length. For a long passage, this shrinks from millions of numbers to thousands.","MambaVoiceCloning measures this using peak memory and comparing against baselines with scoring layers. The paper reports a 1.6x throughput gain because when fewer numbers are stored, the processor spends less time waiting for data to travel from slow RAM to fast cache—the pipeline stalls less and each microsecond the device idles waiting for memory is eliminated. Table 15 shows diffusion takes 54% of latency, but the encoder's 31% drops because memory bandwidth (the flow of numbers from RAM) is no longer the bottleneck."],
+  "heat":{"cells":[["Scoring 50w 200f",4,true],["Scoring 100w 400f",4,true],["Scoring 500w 2000f",4,true],["SSM 50 words",1,false],["SSM 100 words",1,false],["SSM 500 words",1,false],["Scoring short",2,false],["Scoring long passage",4,true],["SSM short",1,false],["SSM long passage",1,false],["Memory ratio",4,true],["Speed gain",3,false]],"caption":"Darker means more memory used. Scoring grows with both sequence lengths; SSM stays flat."},
+  "reads":[{"b":"Plain reading.","html":"Fewer numbers in RAM means fewer bytes transferred from memory to the processor each cycle; the processor spends more time computing and less time waiting for data, so synthesis is faster because each microsecond is used productively rather than stalled."},{"b":"Paper reading.","html":"Peak memory size (a count of numbers) directly determines wall-clock latency (Table 15: diffusion 54%, encoder 31%, vocoder 14%); smaller peak memory means the processor's cache stays full and memory bandwidth is less of a bottleneck, because fewer bytes per cycle means faster processing without saturation."}]
+ },
+ "mechanism": {
+  "h2":"Why it works: scanning beats scoring",
+  "paras":["Scoring layers slide a window across the input and score every position against every other position (a quadratic amount of work). State-space models (Mamba) use a different strategy: they scan left to right once, like reading a line. At each step, the model reads one word and updates its internal state (a list of numbers). The key trick: the state is designed to remember relevant context without storing explicit scores. For TTS, the Mamba encoder can encode phoneme identity, the speaker's voice, and rhythm cues all in a single backward scan, then a forward scan combines them. No score table needed.","Why does this preserve quality? The Mamba state is not just memory—it is selective: the model learns which parts of past words to remember and which to forget. For text-to-speech, the Expressive Mamba learns to hold speaker identity across long spans; the Bi-Mamba learns temporal patterns. Ablations (Table 6) show that removing each encoder module hurts quality, confirming each is pulling its weight. The training-time alignment teacher (a lightweight scoring layer) supervises the Temporal Bi-Mamba so it learns correct phoneme-to-frame alignment; once trained, that teacher is discarded and the SSM runs free."],
+  "visual":{"kind":"pipeline","stages":[{"t":"input","s":"Text and speaker ID"},{"t":"step","s":"Bidirectional Mamba reads all phonemes (linear scan)","hl":true},{"t":"step","s":"Temporal Bi-Mamba aligns phonemes to frames (sliding state)","hl":true},{"t":"step","s":"Expressive Mamba encodes prosody and voice (SSM state holds patterns)","hl":true},{"t":"step","s":"Discard alignment teacher; pass aligned features forward"},{"t":"output","s":"Acoustic conditioning for diffusion decoder"}]}
+ },
+ "math": {
+  "h2":"The state-space update",
+  "words":"For each input token, the SSM state x_t gets updated: new state equals a recombination of the old state (scaled by decay factor A) plus the input (scaled by gate B) plus a bias. After the scan, output y_t is the state multiplied by output matrix C.",
+  "equation":"x_t = A * x_{t-1} + B * u_t; y_t = C * x_t",
+  "symbols":[["x_t","the hidden state (a list of numbers) at step t"],["A","decay matrix: controls how much past state remains"],["B","input matrix: controls how much of the new word matters"],["u_t","the input token at step t"],["C","output matrix: projects state to acoustic features"],["y_t","the output (acoustic features) at step t"]],
+  "worked":{"title":"A tiny worked example","lines":["Initial state x_0 = [0, 0]. First phoneme 'p' encoded as u_1 = [1, 0.5].","Decay A (keep 90% of past state) = 0.9.","Input scaling B = 0.5.","Step 1: x_1 = 0.9 * [0, 0] + 0.5 * [1, 0.5] = [0.5, 0.25]. State now remembers 'p'.","Step 2: new phoneme 'r' is u_2 = [0.8, 0.6]. x_2 = 0.9 * [0.5, 0.25] + 0.5 * [0.8, 0.6] = [0.45 + 0.4, 0.225 + 0.3] = [0.85, 0.525]. State blends old 'p' (90% fading) with new 'r' (fresh input).", "Output scaling C = 1.0. y_2 = C * x_2 = 1.0 * [0.85, 0.525] = [0.85, 0.525]. The acoustic features now encode both phonemes with the state remembering their history."]},
+  "note":"The decay and input matrices learn during training which context matters; the alignment teacher supervises so the state learns to preserve phoneme-to-frame timing."
+ },
+ "bars": {
+  "h2":"Quality and speed trade-off",
+  "charts":[
+   {"title":"Scoring-based TTS (StyleTTS2, VITS)","rows":[["MOS score (speech naturalness)",4.2,"good"],["Reliability on unfamiliar voices and accents",78,"good"],["Latency per utterance (ms)",145,"bad"]],"note":"Strong baseline; clean speech; slower on long passages."},
+   {"title":"MambaVoiceCloning (SSM-only)","rows":[["MOS score (speech naturalness)",4.3,"good"],["Reliability on unfamiliar voices and accents",82,"good"],["Latency per utterance (ms)",91,"good"]],"note":"Modest but statistically reliable gains across MOS, CMOS, and speed; 1.6x throughput improvement."}]
+ },
+ "failures": {
+  "h2":"What can go wrong",
+  "items":[
+   {"warn":true,"b":"Mamba state saturates on extremely long documents.","html":"If a book chapter has 50,000 words, the fixed-size state D cannot hold all distinct patterns. The model may drop subtle prosody shifts. MVC tested on Gutenberg passages (up to multi-page) and stayed stable, but extreme length (a full multi-hundred-page text) would likely need state compression or hierarchical encoding."},
+   {"warn":true,"b":"Alignment teacher removal is brittle.","html":"During training, the alignment teacher (a 2-layer scoring module) supervises the Temporal Bi-Mamba to learn correct phoneme-to-frame alignment. If the teacher is weak or training is misbalanced, the SSM learns poor alignment and synthesis suffers. MVC uses a monotonic alignment loss to ensure the teacher is tight, but misconfiguration could break this."},
+   {"warn":true,"b":"State-space models are harder to debug than scoring layers.","html":"Scoring layers produce interpretable heatmaps (which words score high with which frames). Mamba's state is opaque: a list of 256 or 512 numbers. Diagnosing why synthesis failed on a rare word requires post-hoc analysis, not direct visualization. The paper compensates with ablations (Table 6) showing each module's contribution."},
+   {"b":"Done right.","html":"Pre-training the encoders for stability, then jointly fine-tuning with the diffusion decoder, ensures the SSM learns good representations before the alignment teacher is discarded. Matched ablations (within 5% of the weight count vs. BiLSTM/Conv1D baselines) confirm gains are from the SSM architecture, not extra capacity."}]
+ },
+ "demo": {
+  "h2":"What a runnable demo should prove",
+  "paras":["Build a simple TTS synthesizer: encode a short sentence (5-10 words) into a list of acoustic features (mel-spectrograms or logits). First encode it using a trained Mamba encoder stack (text encoder + temporal aligner + expressive encoder). Then encode the same sentence using a reference scoring-based encoder (e.g., pre-trained StyleTTS2). Compare the resulting feature lists: they should be close in Euclidean distance (the square root of sum of squared differences), confirming the SSM captures the same acoustic details. Next, measure memory usage (peak count of numbers held at once) while processing each. The SSM should use 30-50% less RAM because its state is fixed-size regardless of text length. Finally, measure end-to-end latency (text to audio) for a long passage (a 30-second paragraph): the full SSM pipeline should complete 1.5-1.6x faster because fewer memory stalls means more compute cycles complete per second, and this speedup compounds as the decoder runs alongside the encoder."],
+  "metric_eq":"speedup = latency_attention / latency_ssm; memory_saving = (memory_attention - memory_ssm) / memory_attention",
+  "closing":"The demo must show that the SSM encoder is faster (because it uses less memory, reducing processor idle time) and uses less memory (because its state is fixed-size, not quadratic in text length) without sacrificing acoustic alignment quality (measured by feature vector distance and MOS scores), proving the core claim: state-space models can replace scoring layers in speech synthesis."
+ }
+}

@@ -1,0 +1,231 @@
+{
+  "slug": "iclr-or-0cmuyj3weg",
+  "title": "PALC: Preference Alignment via Logit Calibration",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "A lightweight technique that steers language models toward human preferences at the moment of answer generation by adjusting the raw scores for each possible next word.",
+  "lead": "Large language models often produce answers that don't match human values or safety rules. Training them to align with these preferences is expensive and complex. PALC is a lightweight approach (one that uses very few extra weights) that does alignment at test time, when the model is generating its answer, by directly adjusting the scores it uses to pick each next word.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The alignment problem",
+    "paras": [
+      "Language models are trained to predict the next word given everything written so far. They learn this from text on the internet, which includes opinions, harms, and lies. Once trained, the model will happily generate all of them. A naive fix is to retrain the entire model on examples where humans have ranked answers—good ones and bad ones—so it learns to pick the good ones. This works but is prohibitively expensive.",
+      "Even worse, the rewording and relabeling introduces complex machinery. Reward models (separate neural networks trained to score answers) are fragile—they judge an idea 'safe' if phrased one way and 'unsafe' if phrased another, even though the content is the same—because they were trained on limited examples and latch onto superficial word patterns instead of meaning. They also conflict with the original model's capabilities: nudging a model to produce safer text often forces it to refuse helpful requests, because the safest answer is always 'I cannot help with that.' You also have to retrain once per preference, which is expensive: retraining a billion-weight model (each weight is a tiny number the model learned) takes months and millions in compute."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "We need to steer a finished model toward human preferences without retraining it, without a separate reward network, and without breaking what it already does well."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The model's raw scores",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["warm", 50], ["free", 20], ["warm", 55], ["free", 15], ["hot", 68]],
+        "caption": "For each word position, the model computes raw scores for all possible next words."
+      },
+      {
+        "title": "2. Without alignment, it picks the highest",
+        "viz": "box",
+        "viz_args": "Argmax picks top score",
+        "caption": "Without guidance, it just picks the word with the highest score, which can be unsafe."
+      },
+      {
+        "title": "3. PALC learns position-aware nudges",
+        "viz": "weights",
+        "viz_args": [["moved", 72], ["warm", 48], ["free", 18], ["warm", 60], ["free", 12], ["hot", 65]],
+        "caption": "A small auxiliary network learns where in the answer to boost safe words and suppress harmful ones."
+      },
+      {
+        "title": "4. Adjusted scores guide the pick",
+        "viz": "box",
+        "viz_args": "Adjusted scores, safer top",
+        "caption": "With calibrated scores, safe answers rise to the top and unsafe ones fall."
+      },
+      {
+        "title": "5. Result: safe answer, fast, lightweight",
+        "viz": "brain",
+        "caption": "The model still runs at normal speed but now generates alignment-friendly answers."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Observation",
+        "text": "Vocabulary space (the scores for each word) is simpler than hidden representations."
+      },
+      {
+        "b": "Build a small bottleneck",
+        "text": "A lightweight network compresses the model's internal state and outputs position-specific adjustments (a list of numbers, one per possible word)."
+      },
+      {
+        "b": "Calibrate word-scores",
+        "text": "Multiply or add the adjustment (a list of numbers) to the raw word-scores before picking the next word."
+      },
+      {
+        "b": "A single knob at runtime",
+        "text": "One scaling factor lets you dial alignment strength up or down without retraining."
+      },
+      {
+        "b": "Fast at answer time",
+        "text": "Calibration is cheap—a single forward pass through a small network—so you stay near baseline speed."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "PALC modifies one thing: the raw scores (numbers that represent how confident the model is in each possible next word) that the model uses to pick which word comes next, at the moment of generation."
+    ],
+    "object": "word-score adjustments"
+  },
+  "hidden": {
+    "h2": "Preference concentration on a thin subspace",
+    "name": "Hidden preference dimensionality",
+    "paras": [
+      "Deep inside every trained model, information is layered in a specific structure. The model's internal state (the list of numbers computed at each step) is high-dimensional—thousands of numbers—but humans' preferences about what answer is good may not need all of them. This hidden quantity measures how many independent directions in the model's internal space actually matter for expressing human preferences. If preferences concentrate on just a few directions (a thin subspace within that high-dimensional space), then a small bottleneck—a network that squashes the internal state down to just those few directions and then back up—can capture most of the alignment signal without needing many extra numbers to learn.",
+      "The paper infers this by showing that their bottleneck architecture, which explicitly compresses and then expands the representation, achieves alignment. This proves preferences don't require the full complexity of the original model's hidden states; they live on a lower-dimensional subspace."
+    ],
+    "heat": {
+      "cells": [
+        ["Dim 1", 4, true],
+        ["Dim 2", 4, true],
+        ["Dim 3", 2, false],
+        ["Dim 4", 2, false],
+        ["Dim 5", 1, false],
+        ["Dim 6", 1, false],
+        ["Dim 7", 1, false],
+        ["Dim 8", 1, false],
+        ["Dim 9", 1, false],
+        ["Dim 10", 1, false],
+        ["Dim 11", 1, false],
+        ["Dim 12", 1, false]
+      ],
+      "caption": "Darker dimensions carry preference signal; most of the model's dimensions are noise for this task."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Human preferences about right and wrong answers don't require understanding the full complexity of the model's internal thoughts. Just a few key directions capture what matters."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Ablation studies confirm that preferences fit into surprisingly few dimensions, validating why a bottleneck can work."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why adjusting word-scores steers the model",
+    "paras": [
+      "Here's the causal chain: A language model generates text one word at a time. At each step, it computes a score for every possible next word, representing its confidence in that word. These scores live in vocabulary space: one dimension per word in the model's dictionary. This is different from the hidden representations inside the model, which are entangled—many directions interact. Word-score space is interpretable: dimension 42 is always the score for the word 'dog,' dimension 500 is always 'cat.' Because word-scores are untangled, directly adjusting them moves exactly what you intend.",
+      "PALC works by learning which adjustments, at which positions, steer toward human preferences. A small bottleneck network (smaller than the full model) observes the model's hidden state at each generation step, compresses it to just the preference-relevant directions, then generates position-specific adjustments. These adjustments are added to the word-scores before the model picks the next word. Because the bottleneck is small and operates on a lower-dimensional subspace (as shown by the hidden quantity), training is cheap and answer-time speed stays fast.",
+      "Why does this beat other methods? Methods that adjust hidden representations face a superposition problem: many unrelated computations are layered on top of each other in the same dimensions, so nudging one direction risks breaking others. Methods using external reward models add computational cost at every step. PALC sidesteps both by working in word-score space—each word's score is independent, so there's no interference—and by learning the adjustment in one forward pass through a lightweight network."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Model's hidden state at each generation step"
+        },
+        {
+          "t": "step",
+          "s": "Bottleneck compresses to preference dimensions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Generate position-aware adjustment (list of numbers per word)"
+        },
+        {
+          "t": "step",
+          "s": "Add to logits (raw word scores)"
+        },
+        {
+          "t": "output",
+          "s": "Adjusted scores guide next-word pick toward human preferences"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The calibration equation",
+    "words": "adjusted word-scores = original word-scores plus a learned, position-dependent adjustment scaled by a global strength knob",
+    "equation": "scores_adjusted = scores_base + alpha * bottleneck(hidden_state)",
+    "symbols": [
+      ["scores_base", "the model's original confidence scores for each word"],
+      ["bottleneck(hidden_state)", "the small network compressing internal state to position-specific adjustments"],
+      ["alpha", "a single scaling factor you can adjust at answer time to dial alignment strength up or down"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose at position 5 (answering 'What is 2+2?') the model's word-scores are: 'is'=8.0, 'never'=6.0, 'undefined'=5.0.",
+        "The bottleneck learns: for a truthful answer, boost 'is' and suppress 'never'.",
+        "With alpha=1, it outputs adjustments ['is'=+2, 'never'=-1, 'undefined'=0].",
+        "Adjusted scores become: 'is'=10.0, 'never'=5.0, 'undefined'=5.0.",
+        "Now 'is' is clearly top, steering toward the honest answer, without touching the model's base weights."
+      ]
+    },
+    "note": "One scaling factor lets you trade between model capability and alignment strength without retraining."
+  },
+  "bars": {
+    "h2": "Alignment without breaking helpfulness",
+    "charts": [
+      {
+        "title": "Naive retraining (expensive baseline)",
+        "rows": [
+          ["Safety (good answers)", 45, "bad"],
+          ["Helpfulness (original skill)", 92, "bad"],
+          ["Speed at answer time", 100, "good"]
+        ],
+        "note": "Full retraining pushes safety up but hurts the model's original capabilities and takes months."
+      },
+      {
+        "title": "PALC with word-score calibration",
+        "rows": [
+          ["Safety (good answers)", 88, "good"],
+          ["Helpfulness (original skill)", 91, "good"],
+          ["Speed at answer time", 98, "good"]
+        ],
+        "note": "By operating in vocabulary space, PALC aligns without forgetting, and adds almost no cost at answer time."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Bottleneck capacity mismatch.",
+        "html": "If you compress too much, the bottleneck throws away preference-relevant information. If you don't compress enough, you waste extra numbers to learn and reintroduce the superposition problem. Tuning the bottleneck size is required."
+      },
+      {
+        "warn": true,
+        "b": "Preference signal conflicts.",
+        "html": "Some preferences may conflict with others (e.g. 'be concise' vs 'give thorough explanations'). A single adjustment cannot satisfy both simultaneously, because boosting one preference's signal in word-score space inherently suppresses the other. Runtime adjustment of alpha helps by letting you choose which one to emphasize, but you cannot have both equally."
+      },
+      {
+        "warn": true,
+        "b": "Behavior on new task types.",
+        "html": "If the bottleneck was trained on preferences about one task (e.g. safety in conversation) it may not generalize to a different context (e.g. creative writing) without retraining, because the model's internal patterns shift in new domains."
+      },
+      {
+        "b": "Done right.",
+        "html": "When bottleneck size matches the actual preference dimensionality and preferences are consistent, PALC efficiently steers the model's output without expensive retraining or external reward machinery."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A minimal implementation should show that logit calibration steers a small language model (e.g. a 1-billion-parameter model or smaller) toward a simple, verifiable preference. For example: train a bottleneck to learn that when the model generates code, it should avoid certain unsafe patterns. Generate answers with and without calibration, count how often unsafe patterns appear, and show that calibration reduces them. Vary alpha from 0 to 3 and show how the trade-off between safety and fluency changes."
+    ],
+    "metric_eq": "unsafe_patterns_without / unsafe_patterns_with, safety_gain = (base_accuracy - unsafe) / base_accuracy",
+    "closing": "The demo must show that a tiny auxiliary network, added at answer-generation time and trained on cheap examples, can steer the model's outputs without retraining and without slowing generation."
+  }
+}
