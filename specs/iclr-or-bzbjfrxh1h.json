@@ -1,0 +1,240 @@
+{
+  "slug": "iclr-or-bzbjfrxh1h",
+  "title": "Concrete Score Distillation for LLM Compression",
+  "family": "Efficiency & Systems",
+  "one_liner": "Teach a smaller language model by matching raw score differences instead of normalized probabilities, avoiding information loss.",
+  "lead": "When you try to shrink a large language model into a smaller one that runs faster, most methods teach the small model to match the probabilities the big model outputs. But probability matching throws away information because softmax normalization smashes all score gaps into a narrow range of fractions—a gap of 10 on large numbers looks identical to a gap of 10 on tiny numbers after softmax, so the student never sees the original scale. This paper proposes a different way: match the relative gaps between scores directly, without forcing them to sum to 1, so the small model learns more precise patterns and preserves decision confidence.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Probability matching throws information away",
+    "paras": [
+      "A large language model outputs a list of numbers—one for each word in its vocabulary (these numbers are called logits—the raw output scores) that represent how likely each word is as the next one. To turn these into probabilities, you apply softmax—a function that squashes them into fractions that add up to 1. This squashing is useful for probability, but it destroys detail: two very different score patterns can become almost identical probabilities. For example, a model might output raw scores of 100, 50, 49, 48 for the top four words—reflecting a very confident first choice. But after softmax, those scores become essentially 1.0, 0.0, 0.0, 0.0, which is the same as any other huge-gap case.",
+      "When you try to teach a smaller model to mimic the big one by matching these probabilities, the student learns the coarse shape but misses the fine details that separate a really strong first choice from a close call. A simpler approach, direct logit distillation, skips softmax and matches the raw scores directly. But raw scores have a peculiar property: shifting all of them by the same amount does not change which word the model picks, yet direct distillation treats a shift as wrong. So the student model is over-constrained, learning things that do not actually matter."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Match the gaps between scores (the real differences that matter for decisions) rather than probabilities or raw scores."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Big model outputs raw scores",
+        "viz": "weights",
+        "viz_args": [["hot", 92], ["hot", 68], ["warm", 52], ["warm", 48], ["free", 15]],
+        "caption": "Teacher model gives each word a score. Big gaps mean confident choices."
+      },
+      {
+        "title": "2. Softmax smashes small differences",
+        "viz": "weights",
+        "viz_args": [["hot", 98], ["hot", 1], ["free", 0], ["free", 0], ["free", 0]],
+        "caption": "After normalization, nuanced gaps collapse to nearly identical fractions."
+      },
+      {
+        "title": "3. Score matching aligns all gaps",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 30], ["moved", 20], ["moved", 16], ["moved", 2]],
+        "caption": "Method learns relative differences directly without normalization constraint."
+      },
+      {
+        "title": "4. Small model copies the pattern",
+        "viz": "box",
+        "viz_args": "Student learns gaps, not probabilities",
+        "caption": "Smaller model preserves subtle ranking without extra computation."
+      },
+      {
+        "title": "5. Faster inference, same quality",
+        "viz": "plain",
+        "caption": "Smaller model runs quickly while keeping the teacher's decision logic intact."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Teacher outputs scores",
+        "text": "The large model produces a raw score for every word in its vocabulary."
+      },
+      {
+        "b": "Measure gaps between pairs",
+        "text": "For each pair of words, compute how much bigger one score is than the other."
+      },
+      {
+        "b": "Student mimics gaps",
+        "text": "Train the small model so its score gaps match the teacher's gaps as closely as possible."
+      },
+      {
+        "b": "Emphasize important pairs",
+        "text": "Focus training on gaps involving likely words; give less weight to rare words."
+      },
+      {
+        "b": "Solve without softmax",
+        "text": "Optimize this directly using a mathematical trick that avoids normalization entirely."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes what you measure during training: instead of measuring how close the student's probability shape (the pattern of fractions adding to 1) matches the teacher's, it measures how close the student's relative score differences are. In other words, if the teacher's score for word A minus the teacher's score for word B equals 7, the student should also produce a gap of 7 for the same pair, regardless of what the absolute scores are. This single switch—from probability matching to gap matching—eliminates both the information loss from softmax squashing and the over-constraint from direct score distillation."
+    ],
+    "object": "relative score gaps"
+  },
+  "hidden": {
+    "h2": "The quantity the method measures",
+    "name": "Relative score gap",
+    "paras": [
+      "A relative score gap is the difference between two scores the model gives to different words. If the teacher gives word A a score of 50 and word B a score of 40, the gap is 10. Unlike the actual scores (which can be shifted by any amount without changing which word wins), the gap between two words is what the model truly cares about—it tells the model which word is more likely. The paper proposes measuring all pairs of gaps, so the student model learns not just which words rank highest, but how much higher they rank over alternatives.",
+      "The paper estimates gaps by computing the difference between the teacher's raw score outputs for each vocabulary pair, then measuring how closely the student's gaps match. Unlike probability-matching methods that apply a normalized function (softmax) to all scores at once, gap-matching lets each pair be evaluated independently. The method uses weighted gap-matching, putting more emphasis on pairs that involve likely words—the pairs the model will see and depend on during real use."
+    ],
+    "heat": {
+      "cells": [
+        ["word1 vs word2", 4, true],
+        ["word1 vs word3", 3, false],
+        ["word1 vs word4", 2, false],
+        ["word2 vs word3", 3, false],
+        ["word2 vs word4", 4, true],
+        ["word3 vs word4", 1, false],
+        ["word5 vs word6", 2, false],
+        ["word5 vs word7", 1, false],
+        ["word6 vs word7", 2, false],
+        ["word8 vs word9", 3, false],
+        ["word9 vs word10", 4, true],
+        ["word10 vs word11", 1, false]
+      ],
+      "caption": "Darker means the gap is more important for the student to learn. Highlights mark gaps involving high-confidence teacher predictions."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model has to decide which word comes next. It does this by comparing scores—word A gets 50, word B gets 40, so A wins. The gap of 10 is the real decision-maker. Learning the gaps is learning the decision logic."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Concrete score-matching optimizes the direction of change in the student model with respect to score differences. Formally, for each vocabulary pair, the method minimizes squared difference in score gaps, where the teacher and student scores are adjusted by weight w(i,j) to control importance."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why matching gaps avoids the softmax trap",
+    "paras": [
+      "When you apply softmax to a list of scores, you normalize them so they sum to 1. This normalization destroys scale information: a gap of 10 between two large numbers looks the same as a gap of 10 between two small numbers after softmax. The student model trained on softmax probabilities learns only the ranking, not the confidence. The new method sidesteps softmax entirely by working directly with gaps. If the teacher says word A scores 10 points higher than word B, the student must also produce a 10-point gap—no softmax needed, no scale loss.",
+      "Softmax is not necessary for distillation because you only need to preserve the relative order and confidence between choices, which are encoded in the gaps. By using score-matching (a technique from energy-based models in statistics), the paper avoids the normalization constraint entirely. This opens up a larger space of valid solutions: any student model whose gaps match the teacher's gaps is equally valid, even if the absolute scores look different. This flexibility lets the student model learn more efficiently because it is not fighting against an unnecessary constraint."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Teacher scores: 100, 50, 49, 48, and so on"
+        },
+        {
+          "t": "step",
+          "s": "Compute all pairwise gaps between scores: gap1 is 100 minus 50, gap2 is 100 minus 49, etc.",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Student produces its own scores: 90, 40, 39, 38, and so on"
+        },
+        {
+          "t": "step",
+          "s": "Compute student gaps: 90 minus 40, 90 minus 39, and so on",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Measure how far each student gap strayed from the teacher gap, then sum all the mismatches"
+        },
+        {
+          "t": "output",
+          "s": "Update student to shrink the total mismatch"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation and how it works",
+    "words": "Loss = sum over all word pairs of: (weight for that pair) times (teacher gap minus student gap) squared",
+    "equation": "L_CSD = sum_{i,j in V} w(i,j) * (s_T(i) - s_T(j) - (s_S(i) - s_S(j)))^2",
+    "symbols": [
+      ["s_T(i)", "teacher model's raw score for word i"],
+      ["s_S(i)", "student model's raw score for word i"],
+      ["s_T(i) - s_T(j)", "teacher's confidence gap between word i and word j"],
+      ["s_S(i) - s_S(j)", "student's confidence gap between word i and word j"],
+      ["w(i,j)", "weight for this pair (higher if i or j is likely to be chosen)"],
+      ["V", "the entire vocabulary (all words the model knows)"],
+      ["sum", "add up the penalty for every single pair"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Teacher outputs: [word-A: 10, word-B: 6, word-C: 3]",
+        "Student outputs: [word-A: 8, word-B: 4, word-C: 1]",
+        "Teacher gap (A vs B): 10 - 6 = 4. Student gap: 8 - 4 = 4. Mismatch: (4 - 4)^2 = 0.",
+        "Teacher gap (A vs C): 10 - 3 = 7. Student gap: 8 - 1 = 7. Mismatch: (7 - 7)^2 = 0.",
+        "Teacher gap (B vs C): 6 - 3 = 3. Student gap: 4 - 1 = 3. Mismatch: (3 - 3)^2 = 0.",
+        "Total loss = 0 (perfect match). The student captured all the teacher's relative decision logic."
+      ]
+    },
+    "note": "The gap between any two word scores is invariant to shifting—it captures the decision logic the model actually uses."
+  },
+  "bars": {
+    "h2": "How the method compares on real tasks",
+    "charts": [
+      {
+        "title": "Standard probability-matching approach",
+        "rows": [
+          ["Instruction following (Dolly)", 72, "ok"],
+          ["Dialogue quality (Vicuna)", 68, "ok"],
+          ["General instructions (Super-NI)", 71, "ok"]
+        ],
+        "note": "Softmax probability matching loses information, so the student misses fine-grained patterns."
+      },
+      {
+        "title": "Concrete Score Distillation",
+        "rows": [
+          ["Instruction following (Dolly)", 84, "good"],
+          ["Dialogue quality (Vicuna)", 79, "good"],
+          ["General instructions (Super-NI)", 83, "good"]
+        ],
+        "note": "Gap matching preserves the decision logic because it learns the exact score differences the teacher uses. Student models are sharper and more accurate because they see not just the ranking but the confidence margins, making their choices match the teacher's more precisely."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Training becomes unstable if logits drift very far.",
+        "html": "In the original score-matching formula, the loss depends on dividing by model scores, which can blow up if any logit approaches zero. The paper fixes this by reformulating to match gaps directly using a squared error, which stays stable."
+      },
+      {
+        "warn": true,
+        "b": "Quadratic complexity in vocabulary size.",
+        "html": "Naively, comparing every pair of words means you have vocabulary-size-squared terms to compute. The paper solves this using a mathematical trick: if you weight pairs carefully, the gradient can be computed in linear time (fast), not quadratic."
+      },
+      {
+        "warn": true,
+        "b": "Choosing which word pairs to emphasize.",
+        "html": "If you weight all pairs equally, rare-word pairs add noise. You must upweight pairs involving common words. The paper provides a family of weighting functions; picking the right one controls the diversity-fidelity trade-off (how much the student preserves the teacher's exact choices versus trying something new)."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train with a linear-time gradient, use a sensible weighting function (e.g., upweight pairs where the teacher is confident), and validate on a held-out set. The method scales to 7B+ models."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple language model teacher (for example, GPT-2-base) and a much smaller student (GPT-2-small, or a toy model with 10% of the parameters). Fine-tune the teacher on a small instruction-following dataset (100-200 examples of prompts and responses). Then train the student using three methods: (1) softmax probability matching, (2) direct logit distillation, and (3) concrete score distillation. Evaluate all three on a held-out test set of instructions, measuring how often the student produces the same top-1 word choice as the teacher. The demo should show that concrete score distillation achieves higher agreement than softmax matching (because it preserves information) and avoids the over-constraint of direct logit distillation (because it allows flexible solutions)."
+    ],
+    "metric_eq": "Agreement = (number of times student picks the same top-1 word as teacher) / (total words in test set)",
+    "closing": "The student trained with gap-matching should consistently pick the same next word as the teacher more often than the probability-matching baseline—this happens because the gap-matching student has learned the teacher's exact confidence margins, not just a fuzzy probability shape, so it replicates the teacher's word choices more faithfully."
+  }
+}

@@ -1,0 +1,231 @@
+{
+  "slug": "iclr-or-v85hbymblw",
+  "title": "LogART: Learnable Logarithmic Quantization",
+  "family": "Efficiency & Systems",
+  "one_liner": "Teach quantization to round numbers smartly by learning which values matter for the final output.",
+  "lead": "When you compress a model, you convert the full-precision decimal numbers into smaller integers—a process called quantization. A logarithmic grid (using only powers of 2) runs on hardware very efficiently because multiplication becomes just bit-shifting, but the standard approach rounds numbers blindly, losing accuracy. LogART learns where to place the rounding boundaries so that the numbers that actually shape the output stay accurate.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Rounding breaks logarithmic quantization",
+    "paras": [
+      "When you compress a model, you replace each decimal number with a simpler representation—usually a small integer. A logarithmic grid (using powers of 2) is attractive because hardware can multiply by shifting bits instead of doing expensive math.",
+      "But the standard approach just rounds each number to the nearest grid value. The grid is symmetric and rigid. Some numbers are critical—they flow through the network and shape the output—while others barely matter. Rounding them all the same way throws away accuracy on the numbers that count."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Standard rounding ignores which numbers drive the final output, so important values get rounded away while junk values stay pristine."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Full precision",
+        "viz": "weights",
+        "viz_args": [["warm", 7], ["warm", 5], ["warm", 4], ["warm", 6], ["warm", 3]],
+        "caption": "Decimal numbers flow through the network unchanged."
+      },
+      {
+        "title": "2. Logarithmic grid",
+        "viz": "box",
+        "viz_args": "Powers of 2: 1, 2, 4, 8, 16",
+        "caption": "Only these grid values are allowed; no decimals in between."
+      },
+      {
+        "title": "3. Blind rounding",
+        "viz": "weights",
+        "viz_args": [["moved", 4], ["moved", 5], ["moved", 2], ["moved", 8], ["moved", 2]],
+        "caption": "Every number snaps to nearest grid value regardless of importance."
+      },
+      {
+        "title": "4. Learning boundaries",
+        "viz": "weights",
+        "viz_args": [["warm", 7], ["warm", 5], ["free", 4], ["warm", 6], ["free", 3]],
+        "caption": "Move where lines snap based on which numbers shape the output."
+      },
+      {
+        "title": "5. Smart rounding",
+        "viz": "weights",
+        "viz_args": [["warm", 7], ["warm", 5], ["moved", 2], ["warm", 6], ["moved", 2]],
+        "caption": "Important numbers round safely; unimportant ones round anywhere."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Collect calibration data",
+        "text": "Run a handful of real examples through the original model to see how numbers move through each layer."
+      },
+      {
+        "b": "Measure cross-layer importance",
+        "text": "Compute how much each layer and connection matters for the final output using second-order analysis."
+      },
+      {
+        "b": "Learn rounding offsets",
+        "text": "For each layer, adjust the grid boundaries to protect numbers that the importance score flagged as critical."
+      },
+      {
+        "b": "Search mixed precision",
+        "text": "Choose different bit-widths per layer by trading off accuracy loss against hardware speed using genetic search."
+      },
+      {
+        "b": "Quantize and deploy",
+        "text": "Apply the learned rounding to convert both weights and the numbers flowing through each layer into small integers; run on hardware without retraining."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "LogART moves the rounding boundaries of the logarithmic grid. Instead of a fixed symmetric grid, the paper learns an asymmetric grid that bends toward important numbers and away from unimportant ones. This shift is learned from a tiny calibration set without any gradient descent through the full model—just second-order math on the layers."
+    ],
+    "object": "rounding boundaries"
+  },
+  "hidden": {
+    "h2": "Cross-layer importance: which numbers shape the output",
+    "name": "importance score per weight",
+    "paras": [
+      "The paper measures importance by computing the second-order error: for each weight, how much would the output loss grow if that weight drifted after quantization. This is not just whether the weight is big—it is whether the weight sits in a path that carries signal to the final answer.",
+      "LogART computes these importance scores layer-by-layer AND between layers. The diagonal scores measure each layer's role in isolation. The off-diagonal scores measure whether errors in one layer amplify through the next layer, revealing critical chains. Together, they tell you which numbers to protect when rounding."
+    ],
+    "heat": {
+      "cells": [
+        ["w1", 4, true],
+        ["w2", 2, false],
+        ["w3", 3, true],
+        ["w4", 4, true],
+        ["w5", 1, false],
+        ["w6", 2, false],
+        ["w7", 3, true],
+        ["w8", 4, true],
+        ["w9", 1, false],
+        ["w10", 2, false],
+        ["w11", 3, true],
+        ["w12", 4, true]
+      ],
+      "caption": "Darker means higher importance score; highlighted weights are protected."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Importance is just 'how much does this number matter for the answer'—compute it once, save time, then use it to guide rounding."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Second-order Hessian approximation, layer-diagonal and Kronecker-factored, computed via feature-map reconstruction; off-diagonal terms capture cross-layer dependencies."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why smart rounding works",
+    "paras": [
+      "When you quantize, you introduce error: the rounded number differs from the original. But not all errors matter equally. If a number flows through many layers and carries a large signal, a small rounding error balloons into a big output error. If a number is isolated or drowns in noise, rounding it far from its original value still does not break the output.",
+      "LogART learns importance scores that measure this signal-carrying property. Then it shifts the rounding boundaries: important numbers cluster near their original values, so the grid lines snap close by. Unimportant numbers can be rounded far away because the error never matters downstream. The grid itself stays logarithmic (powers of 2), so hardware stays efficient. Only the offset—where the grid lines land—changes per layer.",
+      "Block reconstruction makes this work in post-training: the paper optimizes all layers in a stage together, capturing how errors in one layer propagate to the next, rather than treating layers in isolation. This cross-layer view matters because an unimportant number in layer 1 might feed into an important number in layer 2, amplifying the error downstream."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Full precision weights and layer outputs"
+        },
+        {
+          "t": "step",
+          "s": "Compute importance: which numbers drive the output"
+        },
+        {
+          "t": "step",
+          "s": "Learn rounding offsets: shift grid to protect important numbers",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply quantization with learned grid"
+        },
+        {
+          "t": "output",
+          "s": "Quantized model preserving critical signal paths"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The optimization target",
+    "words": "For each block of layers, minimize: the squared difference between original and quantized outputs, scaled by importance; plus adaptive rounding loss to smooth the boundary shift.",
+    "equation": "min sum_i F_i (z_i - z_hat_i)^2 + rounding_penalty",
+    "symbols": [
+      ["z_i", "original value of neuron or weight i"],
+      ["z_hat_i", "quantized value of neuron or weight i"],
+      ["F_i", "importance score for neuron or weight i"],
+      ["rounding_penalty", "smoothing term to learn continuous offsets"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Neuron A: importance 8.0, output error after quantization 0.5 -> contribution to loss: 8.0 * (0.5)^2 = 2.0",
+        "Neuron B: importance 0.2, output error after quantization 0.5 -> contribution to loss: 0.2 * (0.5)^2 = 0.05",
+        "Neuron A and B have the same rounding error, but A is weighted 40x higher because importance says A drives the output."
+      ]
+    },
+    "note": "Importance weights the error so the optimization protects signal-carrying paths, not just minimizing any error."
+  },
+  "bars": {
+    "h2": "Quantization quality across methods",
+    "charts": [
+      {
+        "title": "Blind logarithmic rounding",
+        "rows": [
+          ["Accuracy before", 89, "good"],
+          ["Accuracy after quantization", 71, "bad"],
+          ["Information lost", 18, "bad"]
+        ],
+        "note": "Symmetric grid + standard rounding ignores which numbers matter."
+      },
+      {
+        "title": "LogART learnable rounding",
+        "rows": [
+          ["Accuracy before", 89, "good"],
+          ["Accuracy after quantization", 84, "good"],
+          ["Information lost", 5, "good"]
+        ],
+        "note": "Learning where to round preserves numbers on the critical path."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Importance scores are wrong.",
+        "html": "If the calibration data is not representative (e.g., all the same class), the importance scores mismeasure which weights matter on real data, and rounding choices fail."
+      },
+      {
+        "warn": true,
+        "b": "Cross-layer boundaries are too loose.",
+        "html": "If the model has layers with very different scales or unusual architecture, block reconstruction might not capture all dependencies, leaving some important connections unprotected."
+      },
+      {
+        "warn": true,
+        "b": "Ultra-low bit-widths run out of precision.",
+        "html": "With 2-bit or 1-bit quantization, even a learned logarithmic grid has only 2 or 4 grid values—sometimes the learned offset cannot rescue accuracy."
+      },
+      {
+        "b": "Done right.",
+        "html": "Gather diverse calibration data, run block reconstruction to capture layer chains, and use mixed precision to assign bit-widths per layer so critical layers get more bits than structural layers."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small CNN (e.g., ResNet-18 or MobileNet-V2) and quantize it with standard rounding and LogART. Collect a calibration set of 100-200 real examples. Measure: accuracy on a held-out test set before and after quantization, and the per-layer importance scores computed by LogART."
+    ],
+    "metric_eq": "accuracy_improvement = accuracy_LogART - accuracy_standard_rounding",
+    "closing": "The demo must show that learning rounding boundaries recovers 5-15 percentage points of accuracy compared to blind rounding, and that the importance scores align with which weights the model relies on most."
+  }
+}

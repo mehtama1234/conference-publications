@@ -1,0 +1,233 @@
+{
+  "slug": "iclr-or-zrmq4koow9",
+  "title": "WSVD: Weighted Low-Rank Approximation for Efficient Vision-Language Models",
+  "family": "Efficiency & Systems",
+  "one_liner": "Decompose vision-language model weights by importance to shrink them faster without losing accuracy.",
+  "lead": "Vision-language models—the ones that answer questions about pictures—are slow to run because they touch memory too many times. This paper breaks weight grids into smaller pieces, but only after marking which pieces matter most. The cheap pieces shrink freely; the important ones stay large. The result: the model answers faster because the GPU fetches smaller, shrunken grids and fewer intermediate pieces from memory, without losing skill because the important weights stayed large.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Memory traffic is the bottleneck, not math.",
+    "paras": [
+      "A vision-language model reads an image, chops it into tokens (tiny pieces), encodes those with a vision backbone, then feeds the tokens into a language model to write an answer. When the model is answering (running on a new input), each step fetches attention weights—the map of which words matter most—from main memory. These weights are huge.",
+      "Engineers try to shrink the weight matrices (a grid of numbers) using singular value decomposition, or SVD. SVD is a math trick that finds the skeleton of a matrix (a grid). If a weight matrix stores, say, 1,000 by 64 numbers, SVD can approximate it as two smaller grids: 1,000 by 8 times 8 by 64. Fewer numbers, less memory. But in practice, this shrinking does almost nothing. Why? Because the GPU has to recompute the small grids over and over during answering, fetching the latent pieces from memory each time. The memory traffic is still huge—shrinking the grid just hides the cost."
+    ],
+    "callout": {
+      "b": "The trap.",
+      "html": "Standard SVD shrinks weight grids, but the GPU still fetches recomputed pieces from memory every step, so speed barely improves because SVD is applied to the whole grid at once, not per head, forcing recomputation and memory reloading on every decoding step."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Huge weight matrix",
+        "viz": "weights",
+        "viz_args": [["hot", 64], ["hot", 52], ["warm", 40], ["hot", 56], ["warm", 35], ["warm", 38], ["hot", 48], ["warm", 30], ["free", 20], ["warm", 42], ["free", 15], ["warm", 28]],
+        "caption": "Each decoding step: fetch huge weights from memory multiple times."
+      },
+      {
+        "title": "2. Mark important and cheap",
+        "viz": "weights",
+        "viz_args": [["hot", 64], ["hot", 52], ["free", 20], ["hot", 56], ["free", 12], ["free", 8], ["hot", 48], ["free", 10], ["free", 5], ["warm", 28], ["free", 3], ["free", 4]],
+        "caption": "Importance scoring: bright means matters for answer, dim means barely changes it."
+      },
+      {
+        "title": "3. Decompose per head",
+        "viz": "box",
+        "viz_args": "Each attention head: up-project and down-project in registers, cache latents only.",
+        "caption": "SVD within each attention head separately, keeping temporary pieces on-chip."
+      },
+      {
+        "title": "4. Shrink cheap, protect important",
+        "viz": "weights",
+        "viz_args": [["hot", 64], ["hot", 52], ["moved", 35], ["hot", 56], ["moved", 8], ["moved", 4], ["hot", 48], ["moved", 6], ["moved", 2], ["warm", 28], ["moved", 1], ["moved", 2]],
+        "caption": "Important weights keep rank, cheap weights shrink to rank 8 or 4."
+      },
+      {
+        "title": "5. Quantize and run fast",
+        "viz": "plain",
+        "caption": "Quantized weights, fewer fetches, 1.8x faster decoding."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Measure importance",
+        "text": "On a calibration set, compute how much each weight matters by measuring how the loss changes if you nudge it."
+      },
+      {
+        "b": "Apply SVD per head",
+        "text": "Decompose the attention weights for each head separately, not the whole matrix at once."
+      },
+      {
+        "b": "Set ranks by importance",
+        "text": "Allocate budget: important weights keep more singular values, cheap weights keep fewer."
+      },
+      {
+        "b": "Fine-tune locally",
+        "text": "On 256 calibration samples, nudge the weights to recover any accuracy lost to shrinking."
+      },
+      {
+        "b": "Quantize and execute",
+        "text": "Store weights in lower precision; the GPU runs the shrunken, quantized model on real inputs."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes: weight grids",
+    "paras": [
+      "The paper changes how vision-language model weights are stored when answering a question. Instead of keeping full-precision grids, it decomposes them into smaller latent pieces and stores them in lower precision (quantizes them). This is more aggressive shrinking than vanilla SVD, because importance weighting protects the pieces that matter most."
+    ],
+    "object": "attention weight grids"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Fisher importance score",
+    "name": "Fisher importance of each weight",
+    "paras": [
+      "The paper measures how much each weight element matters by computing its Fisher importance score. This is a number that answers: if you nudge this weight, how much does the model's error change? High score: nudging it hurts accuracy. Low score: nudging it barely matters.",
+      "The paper estimates Fisher importance by taking a small calibration dataset, computing how the loss changes if you nudge each weight (the slope of error with respect to the weight) for each sample, squaring that slope, and averaging across samples. That squared slope is the importance score. Weights with high scores get protected during shrinking; weights with low scores shrink freely."
+    ],
+    "heat": {
+      "cells": [
+        ["w1", 4, true],
+        ["w2", 4, true],
+        ["w3", 1, false],
+        ["w4", 4, true],
+        ["w5", 1, false],
+        ["w6", 1, false],
+        ["w7", 4, true],
+        ["w8", 1, false],
+        ["w9", 1, false],
+        ["w10", 3, false],
+        ["w11", 1, false],
+        ["w12", 1, false]
+      ],
+      "caption": "Darker means higher Fisher score, nudging this weight changes error a lot. Light means low score, weight is mostly filler."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The Fisher importance tells you which weights to protect when you shrink the grid."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper uses the Fisher Information Matrix, which measures how sensitive the model's output is to changes in each parameter (a number to learn)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: protect what matters, shrink the rest",
+    "paras": [
+      "SVD decomposes a weight matrix into three pieces: a tall matrix, a short diagonal matrix (the singular values), and another tall matrix. The singular values are ranked by importance. If you throw away the smallest singular values, you shrink the matrix. But vanilla SVD does not know which original weight elements are important to the model's answer—it just throws away the smallest singular values uniformly.",
+      "Weighted SVD flips this: it estimates importance for each weight element (using Fisher scores), then modifies the SVD decomposition to shrink unimportant elements more and protect important elements. During fine-tuning, an important weight with a high penalty stays in place, steering training to recover the accuracy lost. The per-head decomposition shrinks memory recomputation—the GPU can keep latent pieces on-chip instead of fetching them over and over from memory.",
+      "The combination of importance weighting plus per-head decomposition plus quantization means the model stays accurate even though weights are shrunken and stored in lower precision. The GPU does fewer memory fetches, so latency drops 1.8x."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Full-precision weights for one attention head"
+        },
+        {
+          "t": "step",
+          "s": "Compute Fisher importance for each weight element"
+        },
+        {
+          "t": "step",
+          "s": "Apply weighted SVD: protect high-importance, shrink low-importance",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Store latent pieces; quantize to lower precision"
+        },
+        {
+          "t": "output",
+          "s": "Smaller, shrunken weights with full accuracy preserved"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The weighted importance score",
+    "words": "total penalty = sum over all weights of (importance score times the size of change squared)",
+    "equation": "Loss = loss_data + sum_i F_i (theta_i - theta_orig_i)^2",
+    "symbols": [
+      ["Loss", "total loss after shrinking and retraining"],
+      ["loss_data", "how wrong the model is on the calibration data"],
+      ["F_i", "Fisher importance score for weight i (squared gradient on calibration set)"],
+      ["theta_i", "the current value of weight i"],
+      ["theta_orig_i", "the original value of weight i before SVD"],
+      ["sum_i", "add up this term for every weight"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose weight w1 has importance F_1 = 8.0 and moves from 0.5 to 0.2 (change of 0.3). Penalty = 8.0 * (0.3)^2 = 8.0 * 0.09 = 0.72.",
+        "Weight w2 has importance F_2 = 0.1 and moves from 0.5 to 0.2 (same change). Penalty = 0.1 * (0.3)^2 = 0.1 * 0.09 = 0.009.",
+        "During training, the w1 penalty (0.72) dominates, so the optimizer strongly resists moving w1. The w2 penalty (0.009) is tiny, so w2 shrinks freely.",
+        "Result: important weights are protected; cheap weights shrink aggressively without harming accuracy."
+      ]
+    },
+    "note": "During fine-tuning, weights with high Fisher scores get pinned in place by large penalties, so training leaves them alone; unimportant weights change freely to recover accuracy."
+  },
+  "bars": {
+    "h2": "How accuracy is preserved despite shrinking",
+    "charts": [
+      {
+        "title": "Vanilla SVD",
+        "rows": [
+          ["Old task accuracy before shrinking", 92, "good"],
+          ["Old task accuracy after shrinking", 68, "bad"],
+          ["New task accuracy after fine-tuning", 85, "bad"]
+        ],
+        "note": "Vanilla SVD shrinks uniformly, losing accuracy on both tasks."
+      },
+      {
+        "title": "WSVD (weighted and quantized)",
+        "rows": [
+          ["Old task accuracy before shrinking", 92, "good"],
+          ["Old task accuracy after shrinking", 88, "good"],
+          ["New task accuracy after fine-tuning", 90, "good"]
+        ],
+        "note": "Importance weighting + per-head decomposition + local fine-tuning preserves accuracy across tasks."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Calibration set mismatch.",
+        "html": "If the 256 calibration samples are not representative—say they are all easy images—the Fisher importance scores will be wrong, and the model will protect the wrong weights. The result: shrinking hurts accuracy on harder real inputs."
+      },
+      {
+        "warn": true,
+        "b": "Per-head decomposition requires custom low-level code.",
+        "html": "The GPU needs hand-tuned low-level code to do SVD per head and keep latent pieces on-chip. Generic attention code cannot take advantage of this pattern; custom code is mandatory."
+      },
+      {
+        "warn": true,
+        "b": "Quantization threshold too aggressive.",
+        "html": "If you push the bit-width too low (e.g., 2 bits instead of 8), even important weights lose too much precision, and the model becomes unreliable."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use a calibration set that matches your deployment (diverse, representative), hand-tune the GPU code for your architecture, and carefully choose bit-widths per layer."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small vision-language model (e.g., LLaVA with a vision backbone). Measure its latency on a GPU. Apply vanilla SVD to shrink it, measure latency (probably almost no speedup). Then apply WSVD: compute Fisher importance scores on a calibration set, apply weighted SVD per attention head, quantize, fine-tune on 256 samples, and measure latency again. Plot the speedup and the accuracy on a held-out test set to show the tradeoff."
+    ],
+    "metric_eq": "decoding latency improvement = latency_before / latency_after; accuracy retained = accuracy_after / accuracy_before * 100 percent",
+    "closing": "The demo must show that WSVD achieves real latency speedup (not just theoretical reduction) while keeping accuracy high. Vanilla SVD should show almost no improvement; WSVD should reach 1.5x–1.8x."
+  }
+}

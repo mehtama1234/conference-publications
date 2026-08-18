@@ -1,0 +1,248 @@
+{
+  "slug": "iclr-or-xjxzxutj11",
+  "title": "QVGen: Pushing the Limit of Quantized Video Generative Models",
+  "family": "Efficiency & Systems",
+  "one_liner": "Shrink video generators to 4-bit compressed weights while training helper modules that disappear at inference, keeping quality intact.",
+  "lead": "Video generators produce realistic moving pictures but demand enormous memory and computation. Compressing their numbers (quantization) works well for image generators but fails for video. QVGen fixes this by adding small learnable helpers during training that absorb the shock of number crunching, then mathematically shrinking those helpers away before deployment.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The crisis: big video models break when you compress them",
+    "paras": [
+      "Video generators (the networks that create video from text or images) are built from layers that hold millions of numbers. Each number is usually stored in 32-bit precision (four bytes), which is overkill for the job. If you could store each number in just 4 bits (one-quarter the space), the model would run much faster because loading fewer bytes from memory is quicker, and it would fit on cheaper hardware because 4-bit weights need one-quarter the storage chips.",
+      "Compressing the numbers is called quantization. The trick works beautifully for image generators: take a trained image model, round all its numbers to low precision, and it still makes good pictures. When researchers tried the same trick on video generators, it broke catastrophically. The training process would spike with huge errors, numbers would explode (or stay frozen), and the model would collapse. Unlike image generators (which process one image at a time), video generators juggle multiple frames and attention across time—that added complexity makes naive compression fail."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Video generators are too heavy to deploy, but copying image compression methods onto them causes training to crash."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Video generator at full precision",
+        "viz": "weights",
+        "viz_args": [["hot", 32], ["hot", 31], ["warm", 28], ["hot", 29], ["warm", 27]],
+        "caption": "Millions of 32-bit numbers stored in weights. Accurate but huge and slow."
+      },
+      {
+        "title": "2. Naive 4-bit compression explodes",
+        "viz": "weights",
+        "viz_args": [["moved", 8], ["moved", 4], ["free", 3], ["moved", 6], ["free", 2]],
+        "caption": "Rounding to 4-bit breaks training: loss spikes, nudges bounce wildly, collapse."
+      },
+      {
+        "title": "3. Add learnable helper modules during training",
+        "viz": "box",
+        "viz_args": "4-bit weights + helper Φ (learns to fix errors)",
+        "caption": "Auxiliary modules Φ absorb quantization shock, smooth training, let learning proceed."
+      },
+      {
+        "title": "4. Singular values of helpers shrink to zero",
+        "viz": "weights",
+        "viz_args": [["warm", 20], ["warm", 15], ["free", 8], ["free", 3], ["free", 1]],
+        "caption": "SVD finds useless components in Φ. Rank-decay strategy zeros them progressively."
+      },
+      {
+        "title": "5. Deployed model: no helpers, only 4-bit weights",
+        "viz": "weights",
+        "viz_args": [["hot", 8], ["hot", 7], ["warm", 6], ["hot", 8], ["warm", 6]],
+        "caption": "Φ is gone. Model stays compressed, when-running overhead vanishes, quality preserved."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Compress: round weights to 4-bit integers",
+        "text": "Each 32-bit number becomes a tiny 4-bit integer. Saves memory because four numbers now fit in the space of one 32-bit number, and speeds up math because modern chips compute with 4-bit integers faster than 32-bit floats."
+      },
+      {
+        "b": "Learn helpers: add Φ modules to each layer",
+        "text": "Φ learns to correct the quantization error. It is retrained, so it adapts to this video model."
+      },
+      {
+        "b": "Smooth training: smaller nudges, stable loss",
+        "text": "Φ dampens shocks. The nudge size stays manageable. The model trains instead of crashing."
+      },
+      {
+        "b": "Rank decay: identify and zero out weak components",
+        "text": "SVD reveals that Φ is mostly redundant. A growing penalty slowly kills the weak parts."
+      },
+      {
+        "b": "Deploy clean: remove Φ, deploy 4-bit model",
+        "text": "When running on new requests, Φ is gone. The model is pure 4-bit, no training overhead remains."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "QVGen modifies the training process, not the network architecture itself. During training, it inserts temporary learnable helper modules (called Φ) into each quantized layer, and it applies a growing penalty that steers toward simplicity by punishing bloated helpers, causing the weakest parts to shrink to zero over time."
+    ],
+    "object": "training process and temporary helpers"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: gradient norm",
+    "name": "gradient norm (how wild training wobbles)",
+    "paras": [
+      "The paper measures something called the gradient norm, which is the total size of all nudges the optimizer tries to make at each training step. When you round numbers to 4 bits, those nudges become huge and chaotic—the optimizer tries to lurch in all directions at once, fighting the quantization. The paper calls this instability the core problem.",
+      "QVGen estimates gradient norm by tracking how much the model's weights want to move. Smaller norm means training is stable. The helpers Φ absorb quantization error, which shrinks the norm dramatically. The paper tracks this on real video models (CogVideoX, Wan) and shows that their method keeps gradient norm 3-4x smaller than competing quantization methods."
+    ],
+    "heat": {
+      "cells": [
+        ["Layer 1", 4, true],
+        ["Layer 2", 3, false],
+        ["Layer 3", 4, true],
+        ["Layer 4", 2, false],
+        ["Layer 5", 3, true],
+        ["Layer 6", 1, false],
+        ["Layer 7", 2, false],
+        ["Layer 8", 4, true],
+        ["Layer 9", 1, false],
+        ["Layer 10", 2, false],
+        ["Layer 11", 3, true],
+        ["Layer 12", 2, false]
+      ],
+      "caption": "Darker means bigger gradient norm. Helpers Φ flatten these spikes to tame training chaos."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The gradient norm is how much the training algorithm wants to nudge weights at each step. Huge spikes mean the optimizer is confused; small stable values mean the model learns smoothly."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper proves theoretically that reducing the gradient norm at each training step is essential for QAT convergence under extreme quantization. It measures this on real models throughout training."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: three-act story",
+    "paras": [
+      "When you compress a video generator's weights to 4 bits, rounding errors pile up in every layer. In naive training, the optimizer sees these errors as chaos and tries to fight them with enormous gradient steps. Those steps thrash around, destabilizing the whole model.",
+      "QVGen's fix has three pieces. First, add a learnable helper module Φ to each layer. This module is small but flexible, trained from scratch alongside the quantized weights. Its job is to learn what the 4-bit rounding threw away, so the quantized weights plus Φ together approximate the original full-precision behavior. Because Φ absorbs the error smoothly, the gradients stop exploding—training becomes stable.",
+      "Second, the helpers themselves would add overhead at inference time (slowing things down), so that would defeat the purpose. QVGen applies singular value decomposition (SVD) to each helper module, revealing that most of its components are nearly useless—they barely contribute to the final result. Third, a regularization term called gamma is applied during training. This term grows over time (via cosine annealing), gradually pushing the useless components of Φ to zero. By the end of training, Φ is mostly annihilated—only the essential parts remain temporarily, then vanish entirely before deployment."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Quantized weights (4-bit) + training gradient spikes"
+        },
+        {
+          "t": "step",
+          "s": "Learn helper Φ to absorb quantization error",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "SVD discovers weak components in Φ"
+        },
+        {
+          "t": "step",
+          "s": "Rank decay zeros useless parts over training",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Deployed model: 4-bit only, Φ erased, stable inference"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The formula: protecting training stability",
+    "words": "penalize the size of the training gradient to prevent chaotic optimization steps",
+    "equation": "L_total = L_diffusion + lambda_phi * ||W_phi||_F^2 + gamma * sum_i sigma_i",
+    "symbols": [
+      ["L_diffusion", "the main training loss for the video diffusion model"],
+      ["W_phi", "the weights of the helper module Φ"],
+      ["||·||_F", "Frobenius norm, the total magnitude of all numbers in a matrix"],
+      ["lambda_phi", "a constant controlling how much to penalize large helpers"],
+      ["sigma_i", "the i-th singular value from SVD of Φ (from biggest to smallest)"],
+      ["gamma", "a growing regularization weight that increases from 0 over training"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a video frame passes through a quantized layer. The 4-bit rounding introduces error ~0.3.",
+        "Helper Φ learns to output ~0.3 to cancel it. Its Frobenius norm: ||W_phi||_F = 2.0.",
+        "Without rank decay (gamma = 0): loss penalty = 0. Φ stays bloated, adds inference overhead.",
+        "With rank decay (gamma starts at 0, anneals to 0.5 by step 10k): at step 5k, gamma ≈ 0.25.",
+        "SVD of Φ reveals singular values: [0.8, 0.5, 0.2, 0.05, 0.01, ...]. Smaller ones are weak.",
+        "Penalty on weak σ values: gamma * sum_i sigma_i ≈ 0.25 * (0.8 + 0.5 + 0.2 + 0.05 + 0.01 + ...) ≈ 0.3.",
+        "Training steers toward erasing the [0.05, 0.01, ...] terms, keeping only [0.8, 0.5, 0.2].",
+        "By step 10k, gamma ≈ 0.5, weak terms shrink to near-zero, Φ is sparse and will vanish at deploy."
+      ]
+    },
+    "note": "The rank-decay equation slowly annihilates weak components while keeping the core error-correction alive."
+  },
+  "bars": {
+    "h2": "Real results: quality held at 4-bit",
+    "charts": [
+      {
+        "title": "Previous 4-bit methods (naive quantization)",
+        "rows": [
+          ["Aesthetic quality before", 85, "good"],
+          ["After 4-bit quantization", 52, "bad"],
+          ["Loss of quality", -33, "bad"]
+        ],
+        "note": "Naive compression destroys visual appeal. The trade-off looked impossible."
+      },
+      {
+        "title": "QVGen (with helpers + rank decay)",
+        "rows": [
+          ["Aesthetic quality before", 85, "good"],
+          ["After 4-bit QVGen", 81, "good"],
+          ["Quality retained", 96, "good"]
+        ],
+        "note": "Helpers stabilize training. Rank decay removes overhead. Quality stays near full-precision."
+      },
+      {
+        "title": "Gradient norm stability (training)",
+        "rows": [
+          ["Naive 4-bit quantization", 18.5, "bad"],
+          ["QVGen with Φ", 4.2, "good"],
+          ["Reduction factor", 4.4, "good"]
+        ],
+        "note": "Smaller gradients mean the optimizer is not fighting chaos. Training stays under control."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Rank decay too aggressive.",
+        "html": "If the regularization weight gamma grows too fast, useful parts of Φ get erased too early. The model loses the ability to correct quantization error mid-training, and quality drops."
+      },
+      {
+        "warn": true,
+        "b": "Rank decay too slow.",
+        "html": "If gamma grows too gently (or stays small), Φ never shrinks enough. The model reaches deployment with a bloated helper still present, negating the compression savings and slowing inference."
+      },
+      {
+        "warn": true,
+        "b": "Extreme quantization (2-bit or below).",
+        "html": "At 2-bit precision, the rounding error is so large that even Φ cannot absorb it all. The paper shows 3-bit works well and 4-bit matches full-precision, but 2-bit remains beyond reach."
+      },
+      {
+        "b": "Done right: cosine annealing of gamma.",
+        "html": "The paper uses cosine annealing (a smooth schedule that grows gamma gradually), which balances learning good Φ early and shrinking it later. This timing lets the model adapt before the overhead vanishes."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny video diffusion model (say, 10M numbers stored in weights, trained on synthetic motion like bouncing balls). Split training into three stages: (1) full-precision baseline training, (2) 4-bit QAT without helpers (show crash), (3) 4-bit QAT with QVGen helpers and rank decay (show stability). Track the nudge size and training loss at each step. At the end, measure how many generated frames match the full-precision baseline (using pixel-level or perceptual distance). Export the 4-bit model without Φ and run it when answering new requests."
+    ],
+    "metric_eq": "quality_retention = (quality_qvgen - quality_naive_quantization) / (quality_full_precision - quality_naive_quantization) * 100%",
+    "closing": "The demo must make unmistakable that gradient norm stays flat during QVGen training (not spiking), that Φ shrinks from large to near-zero over the rank-decay phases, and that final video quality is visually indistinguishable from full-precision."
+  }
+}
