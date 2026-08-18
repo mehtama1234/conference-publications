@@ -37,6 +37,41 @@ def assign(paper_rec, subs):
             best, best_score = s, score
     return best
 
+SUBSUB = os.path.join(bs.D, "subsubtheme_out")
+def load_subsub(tslug, subname):
+    fp = os.path.join(SUBSUB, f"{tslug}__{bs.slug(subname)}.json")
+    if not os.path.exists(fp): return None
+    try:
+        d = json.load(open(fp)); ss = d.get("subsubthemes", [])
+        for x in ss: x["_kw"] = [k.lower() for k in x.get("keywords", []) if k]; x["_papers"] = []
+        return ss
+    except Exception: return None
+
+def assign_ss(paper_rec, sss):
+    p = bs.PAPERS.get(paper_rec["id"], {})
+    text = (p.get("title", "") + " " + " ".join(paper_rec.get("methods", [])) + " " + paper_rec.get("approach", "")).lower()
+    best, sc = None, 0
+    for x in sss:
+        s = sum(1 for k in x["_kw"] if k in text)
+        if s > sc: best, sc = x, s
+    return best
+
+def render_papers(x, tslug):
+    """Render a subtheme's papers; if the subtheme is split into sub-subthemes, group under them."""
+    sss = load_subsub(tslug, x["name"])
+    if not sss or len(x["_papers"]) <= 40:
+        return "".join(card_with_deep(r) for r in sorted(x["_papers"], key=lambda r: r["id"]))
+    catch = {"name": "Other work in this group", "gist": "", "_kw": [], "_papers": []}
+    for r in x["_papers"]: (assign_ss(r, sss) or catch)["_papers"].append(r)
+    groups = [g for g in sss if g["_papers"]] + ([catch] if catch["_papers"] else [])
+    out = []
+    for g in groups:
+        out.append(f'<div style="margin:18px 0 4px"><h3 style="margin:0;display:inline">{bs.esc(g["name"])}</h3>'
+                   f'<span style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:8px">{len(g["_papers"])}</span></div>')
+        if g.get("gist"): out.append(f'<p style="color:var(--muted);font-size:13.5px;margin:2px 0 8px">{bs.esc(g["gist"])}</p>')
+        out += [card_with_deep(r) for r in sorted(g["_papers"], key=lambda r: r["id"])]
+    return "".join(out)
+
 def card_with_deep(r):
     """Paper card; if this paper has a deep first-principles explainer page, weave a link to it."""
     html = bs.paper_card(r)
@@ -76,7 +111,7 @@ def build_theme(theme, rows):
         o.append(f'<h2 style="border-top:1px solid var(--line);padding-top:16px">{bs.esc(x["name"])} '
                  f'<span style="font-family:var(--mono);font-size:13px;color:var(--accent)">{len(x["_papers"])}</span></h2>')
         o.append(f'<p class="lead" style="font-size:16px">{bs.esc(x["gist"])}</p>')
-        for r in sorted(x["_papers"], key=lambda r: r["id"]): o.append(card_with_deep(r))
+        o.append(render_papers(x, s))
         o.append('</section>')
     o.append(bs.FOOT)
     open(os.path.join(bs.SITE, f"theme-{s}.html"), "w").write("\n".join(o))
