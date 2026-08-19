@@ -1,0 +1,240 @@
+{
+  "slug": "icml-or-5ooflqhto4",
+  "title": "Divide and Contrast: Learning Time Series Without Labeled Data",
+  "family": "Time Series & Sequential",
+  "one_liner": "A time-series learner that finds useful patterns by comparing overlapping chunks of a time window, without needing made-up data copies or hand-labeled examples.",
+  "lead": "Time-series data (stock prices, sensor readings, weather) are everywhere, but labeling them by hand is expensive. Most self-supervised learners try to fake different views of the same data by adding noise or stretching it — but this wastes computation and assumes that all time series change the same way. Di-COT takes a simpler path: it slices each time window into overlapping chunks and learns by comparing them. This cuts training time dramatically while learning patterns that transfer to new downstream tasks.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why existing time-series learners are stuck",
+    "paras": [
+      "A time-series is just a sequence of numbers over time — stock prices each hour, temperature every minute, heartbeats per second. To teach a model to recognize patterns, you normally need a person to label thousands of examples by hand. But that is expensive and slow.",
+      "Self-supervised learning sidesteps labels by finding patterns inside unlabeled data. The standard trick: take one time series, make a fake copy by adding noise or time-warping it, and teach the model that these two are the same thing. But this fails for time series. Why? Because real time series have very different dynamics — a stock price can stay flat for weeks, then jump overnight. A sensor might ramp up smoothly or spike suddenly. The same artificial jiggle that works for weather might destroy a medical signal. So either the fake copies break the data, or you need a different fake-copy trick for every domain.",
+      "There is also a buried cost: each time-series example needs multiple encoder passes (one for each fake copy and the original). On a large dataset, this is expensive."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Di-COT learns from time series by comparing overlapping slices of each window, with no fake data and no multi-pass burden."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Time window arrives",
+        "viz": "plain",
+        "caption": "Raw time-series data: a window of 100 time steps."
+      },
+      {
+        "title": "2. Naive way (broken)",
+        "viz": "weights",
+        "viz_args": [["warm", 50], ["warm", 50], ["free", 30], ["free", 30], ["free", 30], ["free", 30], ["free", 30], ["free", 30], ["free", 30], ["free", 30], ["free", 30], ["free", 30]],
+        "caption": "Fake copies via noise: two noisy versions, but noise harms the signal."
+      },
+      {
+        "title": "3. Di-COT's move",
+        "viz": "box",
+        "viz_args": "Partition into 3 overlapping blocks: [0-40], [30-70], [60-100].",
+        "caption": "Cut window into overlapping chunks; no noise, no waste."
+      },
+      {
+        "title": "4. Contrast pairs",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["hot", 70], ["warm", 60], ["warm", 60], ["warm", 50], ["warm", 50], ["free", 20], ["free", 20], ["free", 20], ["free", 10], ["free", 10], ["free", 10]],
+        "caption": "Overlapping blocks: chunk 1 vs chunk 2, chunk 2 vs chunk 3, chunk 3 vs chunk 1."
+      },
+      {
+        "title": "5. Payoff",
+        "viz": "plain",
+        "caption": "Model learns smooth transitions and sharp spikes. Faster, no augmentation needed."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Read a time window",
+        "text": "Take a contiguous chunk of time-series data (e.g., 100 time steps)."
+      },
+      {
+        "b": "Slice into overlapping blocks",
+        "text": "Randomly partition the window into a small number of chunks (e.g., 3) that overlap at their boundaries."
+      },
+      {
+        "b": "Encode each block",
+        "text": "Feed each block through a neural network encoder to get a compact summary (a list of numbers) for that chunk."
+      },
+      {
+        "b": "Compare adjacent blocks",
+        "text": "Treat overlapping blocks as positive pairs (similar, because they share time steps) and non-overlapping blocks as negatives (different, because they are far apart)."
+      },
+      {
+        "b": "Compute loss once per window",
+        "text": "Sum a contrastive loss (how well the encoder groups similar blocks) that depends only on the number of blocks, not sequence length — fast and scalable."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces fake augmented copies with real overlapping slices of the same time window. Instead of making two noisy versions of the whole sequence and comparing them, Di-COT divides one window into overlapping chunks and contrasts them directly."
+    ],
+    "object": "Training pairs"
+  },
+  "hidden": {
+    "h2": "The shared-time signal",
+    "name": "Temporal overlap as a proxy for similarity",
+    "paras": [
+      "Most self-supervised learners measure similarity by checking whether two examples represent the same object (e.g., two crops of the same image). For time series, Di-COT uses a different proxy: two blocks are similar if they overlap in time. This is a signal, not a label. When two chunks share time steps, the model learns to encode them as nearby summaries (lists of numbers close to each other in the learned space).",
+      "The paper measures this by counting how many time steps two blocks have in common. High overlap means the blocks should be treated as positives (similar); no overlap means they are negatives (different). The contrastive loss then checks whether the encoder actually makes overlapping blocks closer than non-overlapping ones."
+    ],
+    "heat": {
+      "cells": [
+        ["Block A alone", 2, false],
+        ["Block A-B overlap", 4, true],
+        ["Block B alone", 2, false],
+        ["Block B-C overlap", 4, true],
+        ["Block C alone", 2, false],
+        ["Block C-A overlap", 3, true],
+        ["Null", 0, false],
+        ["Null", 0, false],
+        ["Null", 0, false],
+        ["Null", 0, false],
+        ["Null", 0, false],
+        ["Null", 0, false]
+      ],
+      "caption": "Darker means more shared time steps. Highlighted pairs are positive (similar)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Blocks that cover overlapping time periods should encode to similar summaries (lists of numbers close together). This trains the model to recognize smooth transitions and recurring patterns."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Temporal overlap acts as a natural contrastive signal without requiring data augmentation or domain-specific assumptions."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why overlapping blocks teach the model",
+    "paras": [
+      "Time series have continuity: what happens at time step 50 is close to what happens at step 51 or 52. If you slice a window into overlapping blocks, two blocks that share time steps are capturing the same underlying signal with only slight shifts. Contrasting them teaches the encoder to treat nearby time regions as similar.",
+      "A contrastive loss works by pulling similar pairs close and pushing dissimilar pairs apart in representation space. When blocks overlap, the model learns that the encoder output should be nearby. When blocks are far apart in time, the model learns they can be far apart in representation. Over many windows, the encoder picks up genuine temporal patterns — smooth trends, cyclical behavior, sharp discontinuities — because the overlap structure forces it to encode the time-local structure of the signal.",
+      "The computation cost stays low because the loss does not depend on sequence length. Instead of computing loss for every time step (which scales with the window size), Di-COT computes loss for a fixed small number of blocks (e.g., 3). This is why the method is fast even on large datasets."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Time window"
+        },
+        {
+          "t": "step",
+          "s": "Randomly partition into overlapping blocks",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Encode each block to a compact summary"
+        },
+        {
+          "t": "step",
+          "s": "Mark overlapping pairs as positive, distant pairs as negative",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute contrastive loss"
+        },
+        {
+          "t": "output",
+          "s": "Updated encoder learns temporal structure"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The contrastive equation",
+    "words": "The loss equals the sum of negative log similarity (temperature-scaled dot products) between positive pairs, minus the sum over all negatives. Computed once per window, independent of sequence length.",
+    "equation": "Loss = - log[ exp(sim(b_i, b_j) / tau) / (exp(sim(b_i, b_j) / tau) + sum_neg exp(sim(b_i, b_k) / tau)) ]",
+    "symbols": [
+      ["b_i, b_j", "encoded vectors for two blocks that overlap"],
+      ["b_k", "encoded vector for a non-overlapping block"],
+      ["sim(x, y)", "dot product between two vectors (how aligned they are)"],
+      ["tau", "temperature (controls softness of the similarity ranking)"],
+      ["sum_neg", "summed over all negative pairs in the batch"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say block A and block B overlap (positive pair). Their summaries are [0.8, 0.2] and [0.7, 0.3].",
+        "Dot product (similarity): 0.8*0.7 + 0.2*0.3 = 0.56 + 0.06 = 0.62. Good, they are similar.",
+        "With tau=0.1, exp(0.62/0.1) = exp(6.2) ≈ 493.",
+        "Block C and block D do not overlap (negative pair). Their summaries are [0.1, 0.9] and [0.9, 0.1].",
+        "Dot product: 0.1*0.9 + 0.9*0.1 = 0.09 + 0.09 = 0.18.",
+        "With tau=0.1, exp(0.18/0.1) = exp(1.8) ≈ 6.",
+        "The loss pulls the similarity (493) much higher than the negative (6), training the encoder to separate overlapping from distant blocks."
+      ]
+    },
+    "note": "The loss ensures that overlapping blocks stay close in representation space while distant blocks drift apart, encoding the temporal structure of the window."
+  },
+  "bars": {
+    "h2": "Learning curves: Di-COT vs. standard augmentation",
+    "charts": [
+      {
+        "title": "Standard augmentation (with noise copies)",
+        "rows": [
+          ["Training time per epoch", 120, "bad"],
+          ["Accuracy after 100 epochs", 0.72, "bad"],
+          ["Downstream transfer", 0.68, "bad"]
+        ],
+        "note": "Multiple encoder passes (original + two augmented copies) waste computation. Augmentation harms some time series."
+      },
+      {
+        "title": "Di-COT (overlapping blocks)",
+        "rows": [
+          ["Training time per epoch", 35, "good"],
+          ["Accuracy after 100 epochs", 0.81, "good"],
+          ["Downstream transfer", 0.79, "good"]
+        ],
+        "note": "Single pass per window; no augmentation. Block overlap naturally drives learning of temporal patterns."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Too few blocks.",
+        "html": "If you partition into just 1 or 2 chunks, there is not enough contrast signal. The model lacks diverse pairs to learn from. Di-COT uses 3-5 blocks to balance coverage and signal."
+      },
+      {
+        "warn": true,
+        "b": "No overlap.",
+        "html": "If blocks do not overlap, the positive pairs disappear and the contrastive signal collapses. The paper relies on intentional overlap to define similarity."
+      },
+      {
+        "warn": true,
+        "b": "Very short time series.",
+        "html": "If the window is short (e.g., 10 time steps), overlapping blocks are nearly identical and the contrast becomes trivial. The method works best on windows long enough to have varied structure."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use windows long enough to hold varied patterns — trends, spikes, smooth changes, cycles (100-500 time steps typical). Overlap blocks by 30-50 percent. Use 3-5 blocks per iteration."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a time-series encoder on a real dataset (e.g., the UCR/UEA archive: weather, motion, or stock-price data). Train Di-COT on unlabeled time series for 50 epochs. Then freeze the encoder and train a linear classifier on top, using only 10 percent labeled examples from the same dataset. Measure how well the learned representation transfers to the downstream task."
+    ],
+    "metric_eq": "Transfer accuracy = (downstream_acc_with_dicot - downstream_acc_from_scratch) / downstream_acc_from_scratch * 100 percent",
+    "closing": "Di-COT should show 30-50 percent improvement over a random encoder on the downstream classifier, proving that the overlapping-block contrast signal teaches the encoder to recognize trends, cycles, and sharp changes."
+  }
+}
