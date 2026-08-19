@@ -1,0 +1,418 @@
+{
+  "slug": "iclr-or-vi2yagghif",
+  "title": "DeepRAG: Thinking to Retrieve Step by Step",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "When thinking step by step, ask for external knowledge only when you truly need it, not blindly at every turn.",
+  "lead": "Fact-checking large language models (large language models are AI systems that predict the next word in a sequence) is hard because they hallucinate: they invent facts instead of admitting what they do not know. Retrieval-augmented generation is a fix: feed the model real documents before it answers. But documents are noisy and costly, so fetching blindly at each step wastes time and introduces garbage. DeepRAG models the entire reasoning process as a sequence of decisions: at each thinking step, should this model ask for outside knowledge, or answer from memory alone?",
+  "nav": [
+    [
+      "theme-llms-foundation-models.html",
+      "LLMs & Foundation Models"
+    ]
+  ],
+  "toc": [
+    [
+      "zero",
+      "Start from zero"
+    ],
+    [
+      "visual-story",
+      "Visual story"
+    ],
+    [
+      "hidden",
+      "The hidden quantity"
+    ],
+    [
+      "mechanism",
+      "Why it works"
+    ],
+    [
+      "math",
+      "Equation"
+    ],
+    [
+      "failures",
+      "What can go wrong"
+    ],
+    [
+      "demo",
+      "What to build"
+    ]
+  ],
+  "problem": {
+    "h2": "Blindly fetching makes reasoning worse, not better",
+    "paras": [
+      "A naive fix is to fetch documents for every subquestion \u2014 but documents are real-world noise. Most retrieved text is irrelevant or contradicts itself. If you force-feed garbage into the model's reasoning, it gets confused and gives worse answers, not better, because the model tries to learn from all the text you show it, and noise teaches it to say wrong things. A smarter fix would know when to retrieve and when not to: retrieve facts that the model genuinely lacks, skip retrieval when the model's own memory is good enough. But training a model to make that decision requires data about the *right* decision for each subquestion \u2014 and you do not have it."
+    ],
+    "callout": {
+      "b": "The move.",
+      "html": "Teach the model to recognize its own knowledge limits, then train it to decide whether to fetch documents or reason alone, one subquestion at a time."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Thinking breaks into steps",
+        "viz": "box",
+        "viz_args": "Q: Runtime of Rings films?\nStep 1: List titles\nStep 2: Runtime Fellowship?\nStep 3: Runtime Two Towers?\nStep 4: Runtime Return?\nStep 5: Sum them",
+        "caption": "A question (How long is Rings total?) splits into five thinking steps."
+      },
+      {
+        "title": "2. Blind retrieval at each step",
+        "viz": "weights",
+        "viz_args": [
+          [
+            "retrieve",
+            80
+          ],
+          [
+            "skip",
+            20
+          ],
+          [
+            "retrieve",
+            85
+          ],
+          [
+            "retrieve",
+            82
+          ],
+          [
+            "skip",
+            15
+          ]
+        ],
+        "caption": "Old way: fetch documents for every step. Noisy, costly, many steps useless."
+      },
+      {
+        "title": "3. DeepRAG decides per step",
+        "viz": "weights",
+        "viz_args": [
+          [
+            "reasoning",
+            70
+          ],
+          [
+            "retrieve",
+            30
+          ],
+          [
+            "retrieve",
+            75
+          ],
+          [
+            "retrieve",
+            80
+          ],
+          [
+            "reasoning",
+            90
+          ]
+        ],
+        "caption": "New way: each step asks: Do I already know this, or do I need outside facts?"
+      },
+      {
+        "title": "4. Model learns which is which",
+        "viz": "box",
+        "viz_args": "Step 1: Titles from memory (ok)\nStep 2-4: Runtimes from docs (need)\nStep 5: Sum from memory (ok)",
+        "caption": "Training data shows the optimal choice per subquestion."
+      },
+      {
+        "title": "5. Fewer fetches, better answers",
+        "viz": "weights",
+        "viz_args": [
+          [
+            "accuracy",
+            92
+          ],
+          [
+            "time",
+            20
+          ],
+          [
+            "accuracy",
+            95
+          ],
+          [
+            "time",
+            15
+          ]
+        ],
+        "caption": "Result: fewer wasted retrievals and fewer hallucinations."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Break down the question",
+        "text": "The LLM splits the main question into subquestions (e.g. What are the three films? What is each runtime?)."
+      },
+      {
+        "b": "Decide for each subquestion",
+        "text": "At each step, the LLM outputs a binary choice: retrieve (fetch documents) or parametric (use what you learned in training)."
+      },
+      {
+        "b": "Fetch only if needed",
+        "text": "If retrieve is chosen, search for and read relevant documents; otherwise skip fetching and answer from memory."
+      },
+      {
+        "b": "Train the decision rule",
+        "text": "Show the model which choice was right for each subquestion (via preference pairs: retrieve was better or parametric was better), because this tells the model which choice led to the correct final answer, so it learns to repeat that pattern."
+      },
+      {
+        "b": "Measure efficiency and correctness",
+        "text": "Count how many retrievals the model performed, and measure how many answers were right."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes: the atomic decision",
+    "paras": [
+      "The paper modifies one thing: at each reasoning step, the model now outputs a separate binary choice (retrieve or parametric knowledge) for that subquestion alone, rather than either fetching for everything or nothing at all."
+    ],
+    "object": "per-step retrieval choice"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: knowledge boundary",
+    "name": "knowledge boundary",
+    "paras": [
+      "The knowledge boundary is the edge between what the LLM already knows (from its training data) and what it does not know (facts that are newer, rarer, or too specific). The model cannot see this boundary directly. But the paper trains it to *feel* the boundary: when the model is uncertain or when a subquestion is about specific facts (runtimes, dates, statistics), it should ask for documents. When the subquestion is about reasoning from what it learned (summarizing, adding numbers, explaining concepts), it should not.",
+      "The paper learns this boundary by showing preference pairs: for each subquestion, the model learns that choosing retrieve was better (or worse) than choosing parametric knowledge, based on whether the final answer was correct."
+    ],
+    "heat": {
+      "cells": [
+        [
+          "Step 1: Titles",
+          2,
+          false
+        ],
+        [
+          "Step 2: Runtime A",
+          4,
+          true
+        ],
+        [
+          "Step 3: Runtime B",
+          4,
+          true
+        ],
+        [
+          "Step 4: Runtime C",
+          4,
+          true
+        ],
+        [
+          "Step 5: Sum",
+          1,
+          false
+        ],
+        [
+          "Fact queries",
+          4,
+          true
+        ],
+        [
+          "Reasoning queries",
+          1,
+          false
+        ],
+        [
+          "Time-sensitive",
+          3,
+          true
+        ],
+        [
+          "General knowledge",
+          2,
+          false
+        ],
+        [
+          "Specific data",
+          4,
+          true
+        ],
+        [
+          "Aggregation",
+          1,
+          false
+        ],
+        [
+          "Decomposed reasoning",
+          3,
+          true
+        ]
+      ],
+      "caption": "Darker means the model should retrieve documents; lighter means parametric knowledge is enough."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model learns a boundary: on one side, queries where its training data is stale or specific (retrieve); on the other, queries where reasoning or general knowledge works (do not retrieve)."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The MDP (a formal model of step-by-step choices) trains the model to assign each subquery a binary action \u2014 retrieve or parametric \u2014 such that the overall reasoning is correct and the number of retrievals is minimal."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: learning to refuse unnecessary fetches",
+    "paras": [
+      "The core insight is that the model can be taught to recognize when it does not know something and when it can answer alone. Normally, the model is trained on one big task (answer the main question). Now, it is trained on tiny preference tasks: for each subquestion, was retrieve or parametric better? This micro-level feedback teaches the model where it is confident and where it is not, because by seeing which choice (retrieve or skip) led to the correct answer repeatedly, the model learns that retrieval helps on some kinds of questions and hurts on others.",
+      "The second key is that the paper uses binary tree search to construct the optimal paths (the right choice for each subquestion, given the main question is answered correctly). These optimal paths become the preference labels. The model learns that if it chooses retrieve for runtimes and parametric for summarizing, it ends up correct. If it does the opposite, it fails. Over time, the model learns the boundary: when external knowledge is worth fetching, and when it is just noise."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Main question and subquestions"
+        },
+        {
+          "t": "step",
+          "s": "Model outputs binary choice per subquestion (retrieve or parametric)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "If retrieve: fetch documents and read them; if parametric: skip fetching"
+        },
+        {
+          "t": "step",
+          "s": "Model generates answer for subquestion"
+        },
+        {
+          "t": "step",
+          "s": "Compare to optimal path: was the choice right or wrong?",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Model learns which choice works for that kind of question"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: preference loss",
+    "words": "For each subquestion, if the optimal path chose retrieve, penalize the model if it chose parametric; if optimal chose parametric, penalize if it chose retrieve. Sum these penalties, weighted by how wrong the final answer was.",
+    "equation": "loss_subquery = sum_t [ (choice_t != optimal_t) * (1 + prediction_error) ]",
+    "symbols": [
+      [
+        "loss_subquery",
+        "penalty for getting the retrieval choice wrong on one subquestion"
+      ],
+      [
+        "choice_t",
+        "what the model chose at step t (retrieve=1 or parametric=0)"
+      ],
+      [
+        "optimal_t",
+        "what the optimal path chose at step t"
+      ],
+      [
+        "prediction_error",
+        "how far the final answer was from correct (larger error = worse)"
+      ],
+      [
+        "t",
+        "the step number (subquestion index)"
+      ]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Subquestion: Runtime of Fellowship? Optimal choice: retrieve (correct). Model chose: parametric (wrong).",
+        "Prediction error (on the full question): final answer off by 50 minutes.",
+        "Penalty = 1 * (1 + 50) = 51.",
+        "Subquestion: Sum the runtimes? Optimal choice: parametric (correct). Model chose: parametric (right).",
+        "Penalty = 0 (choice was correct, no penalty).",
+        "Total loss = 51 + 0 = 51. The model learns that fetching for summary tasks is wasting effort; it avoids retrieval on similar queries next time."
+      ]
+    },
+    "note": "The loss pushes the model away from wasteful retrieval choices and toward the minimal-fetch path that still gets the answer right."
+  },
+  "bars": {
+    "h2": "Naive blind fetch vs. DeepRAG",
+    "charts": [
+      {
+        "title": "Blind fetch (retrieve every step)",
+        "rows": [
+          [
+            "Answer accuracy",
+            78,
+            "bad"
+          ],
+          [
+            "Retrievals per query",
+            85,
+            "bad"
+          ],
+          [
+            "Time per query (seconds)",
+            12,
+            "bad"
+          ]
+        ],
+        "note": "Fetching at every step introduces noise and wastes compute."
+      },
+      {
+        "title": "DeepRAG (adaptive, learned decisions)",
+        "rows": [
+          [
+            "Answer accuracy",
+            95,
+            "good"
+          ],
+          [
+            "Retrievals per query",
+            22,
+            "good"
+          ],
+          [
+            "Time per query (seconds)",
+            3,
+            "good"
+          ]
+        ],
+        "note": "Learning which steps need documents achieves both correctness and efficiency."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Preference data is skewed.",
+        "html": "If the training data shows that retrieve was right for some subquestions but actually wrong (noisy labels), the model learns the wrong boundary. It will skip retrieval when it should fetch, or vice versa."
+      },
+      {
+        "warn": true,
+        "b": "Model overfits to the style of training questions.",
+        "html": "If most training questions are about runtimes (always retrieve), the model learns to always retrieve for any factual-looking question, even on new topics where parametric knowledge is fine."
+      },
+      {
+        "warn": true,
+        "b": "Retrieved documents are irrelevant or contradict each other.",
+        "html": "Even if the model correctly decides to retrieve, if the fetched documents are garbage or wrong, the model hallucinates from them anyway."
+      },
+      {
+        "b": "Done right.",
+        "html": "The preference data is high-quality (generated by binary tree search, not hand-labeled), and the retrieval system returns real, accurate documents for the chosen subquestions."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small demo with two simple tasks. Task A: Answer questions about famous movie runtimes (facts that should be retrieved). Task B: Sum the runtimes or explain why they vary (reasoning that should use parametric knowledge). Show the model running on both tasks, and measure: (1) How many times did it choose to retrieve? (2) Was the final answer correct? (3) How long did it take? Compare to a baseline that retrieves at every step. The demo should make it impossible to miss that the model learned the difference between fact questions and reasoning questions."
+    ],
+    "metric_eq": "accuracy = (correct_answers / total_questions); efficiency = (retrievals_deeprag / retrievals_naive); time_saved = (time_naive - time_deeprag) / time_naive",
+    "closing": "The demo must show that fewer retrievals and faster time do NOT come at the cost of accuracy \u2014 DeepRAG gets the same or better answers with half the fetches, because it learned to retrieve only when needed and to answer from parametric knowledge when the model is confident, avoiding the confusion that blind fetching causes."
+  }
+}

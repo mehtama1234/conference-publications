@@ -1,0 +1,485 @@
+{
+  "slug": "iclr-or-bjzexgywqx",
+  "title": "LaplacianFormer: Linear Attention via Laplacian Kernel",
+  "family": "Efficiency & Systems",
+  "one_liner": "Replace the Gaussian kernel in fast attention with a Laplacian kernel to keep more nuanced token interactions alive while staying efficient.",
+  "lead": "Vision transformers (models that read images as overlapping patches) normally attend to all patches at once using a method that turns raw scores into fractions that add up to 1, but that costs memory and time that scales with the square of the number of patches. Researchers built faster linear-attention variants that approximate this using Gaussian curves (bell-shaped mathematical curves), but Gaussians heavily suppress medium-strength interactions because they decay sharply in the middle. LaplacianFormer swaps Gaussian for Laplacian, a V-shaped mathematical curve with slower decay that keeps finer-grained information.",
+  "nav": [
+    [
+      "theme-efficiency-systems.html",
+      "Efficiency & Systems"
+    ]
+  ],
+  "toc": [
+    [
+      "zero",
+      "Start from zero"
+    ],
+    [
+      "visual-story",
+      "Visual story"
+    ],
+    [
+      "hidden",
+      "The hidden quantity"
+    ],
+    [
+      "mechanism",
+      "Why it works"
+    ],
+    [
+      "math",
+      "Equation"
+    ],
+    [
+      "failures",
+      "What can go wrong"
+    ],
+    [
+      "demo",
+      "What to build"
+    ]
+  ],
+  "problem": {
+    "h2": "Standard Attention Scales Badly, Gaussian Approximations Oversuppress",
+    "paras": [
+      "In a vision transformer, each image patch needs to know which other patches matter for making its decision. Softmax attention (a method that turns raw scores into fractions adding to 1) computes a weighted sum where every patch gets scored against every other patch. The cost grows with the square of the number of patches\u2014if an image has 256 patches, that is 65,536 pairwise comparisons. For high-resolution images that quickly becomes prohibitive on edge devices.",
+      "To fix this, researchers introduced linear attention: instead of computing all pairwise comparisons, they use a kernel (a mathematical curve that measures how similar two patches are) to approximate softmax. Most of these methods use the Gaussian kernel, a bell-shaped curve. But Gaussians have a hard problem: they decay sharply in their middle. When a patch is moderately relevant to a query\u2014not extremely similar, not dissimilar\u2014the Gaussian curve is already plummeting, so it outputs near-zero weight. The model cannot distinguish this medium patch from a truly irrelevant one, so it loses information about nuanced context. That is why the paper says Gaussians oversuppress mid-range interactions: they treat 50-percent-similar patches the same as completely dissimilar patches."
+    ],
+    "callout": {
+      "b": "The bottleneck.",
+      "html": "Gaussian curves decay sharply in the middle, so moderately relevant patches get near-zero weight and become invisible. LaplacianFormer uses a V-shaped curve with slower decay that keeps those patches visible."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Many patches, expensive comparison",
+        "viz": "box",
+        "viz_args": "256 patches in image, every pair compared = 65k operations",
+        "caption": "Softmax attention: square cost in number of patches."
+      },
+      {
+        "title": "2. Gaussian kernel suppresses medium interactions",
+        "viz": "weights",
+        "viz_args": [
+          [
+            "free",
+            8
+          ],
+          [
+            "warm",
+            3
+          ],
+          [
+            "hot",
+            25
+          ],
+          [
+            "free",
+            2
+          ],
+          [
+            "warm",
+            1
+          ],
+          [
+            "hot",
+            28
+          ],
+          [
+            "free",
+            4
+          ],
+          [
+            "warm",
+            2
+          ],
+          [
+            "hot",
+            22
+          ],
+          [
+            "free",
+            1
+          ],
+          [
+            "warm",
+            2
+          ],
+          [
+            "hot",
+            15
+          ]
+        ],
+        "caption": "Gaussian curves make medium-strength tokens nearly invisible."
+      },
+      {
+        "title": "3. Laplacian kernel has slower decay",
+        "viz": "weights",
+        "viz_args": [
+          [
+            "warm",
+            12
+          ],
+          [
+            "warm",
+            10
+          ],
+          [
+            "hot",
+            26
+          ],
+          [
+            "warm",
+            8
+          ],
+          [
+            "warm",
+            7
+          ],
+          [
+            "hot",
+            30
+          ],
+          [
+            "warm",
+            9
+          ],
+          [
+            "warm",
+            6
+          ],
+          [
+            "hot",
+            24
+          ],
+          [
+            "warm",
+            5
+          ],
+          [
+            "warm",
+            4
+          ],
+          [
+            "hot",
+            18
+          ]
+        ],
+        "caption": "Laplacian keeps medium-strength tokens visible and structured."
+      },
+      {
+        "title": "4. Linear-time computation via reordering",
+        "viz": "box",
+        "viz_args": "Group key-value sums first, query once, avoid inversion",
+        "caption": "Newton-Schulz solver computes results without expensive inversion."
+      },
+      {
+        "title": "5. Sharper attention maps emerge during training",
+        "viz": "brain",
+        "caption": "Laplacian produces more expressive, coherent attention patterns."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Reframe the kernel",
+        "text": "Replace the Gaussian bell curve with a Laplacian (V-shaped decay), which falls off more slowly at medium distances."
+      },
+      {
+        "b": "Make the feature map injective",
+        "text": "Design a transformation of queries and keys so distinct tokens map to distinct vectors\u2014preserving fine-grained information even after low-rank approximation."
+      },
+      {
+        "b": "Approximate similarity comparisons",
+        "text": "Use Nystr\u00f6m approximation to avoid computing all pairwise comparisons\u2014a mathematical technique that reuses precomputed summaries of key-value pairs."
+      },
+      {
+        "b": "Solve efficiently",
+        "text": "Apply Newton-Schulz iteration (a numerical method) to compute the solution of the resulting small system, avoiding expensive inversion tricks."
+      },
+      {
+        "b": "Optimize in CUDA",
+        "text": "Write custom GPU code for both the kernel and solver so forward and backward passes run fast enough for real edge deployment."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What Changes: The Kernel Curve",
+    "paras": [
+      "The paper changes one thing: the mathematical curve used to measure similarity between a query patch and a key patch shifts from Gaussian to Laplacian. That single swap ripples through the entire training: which tokens get attended to, how gradients (the nudges that teach the model) flow, and what attention patterns the model learns."
+    ],
+    "object": "Kernel curve"
+  },
+  "hidden": {
+    "h2": "Token Expressiveness: How Well Attention Distinguishes Patches",
+    "name": "Attention rank and coherence",
+    "paras": [
+      "The hidden quantity the paper measures is how well the attention pattern (a table of numbers showing which patches matter) can express nuanced relationships between patches. In mathematical terms, this is the rank of that table (how many independent dimensions it spans) and how spread out the singular values (its principal strengths) are. When many independent dimensions have roughly equal importance, the table is full-rank and expressive. When a few dominate, it is low-rank and lossy.",
+      "Gaussian kernels produce low-rank, sparse attention: most tokens vanish. Laplacian kernels produce higher-rank, more coherent attention where medium-strength interactions stay visible. The paper measures this by watching the singular values (the independent strengths) during training and visualizing the attention patterns themselves. Under Laplacian, the singular values spread more evenly, and the attention patterns show structured arrangements instead of scattered spikes."
+    ],
+    "heat": {
+      "cells": [
+        [
+          "w1",
+          3,
+          true
+        ],
+        [
+          "w2",
+          2,
+          false
+        ],
+        [
+          "w3",
+          4,
+          true
+        ],
+        [
+          "w4",
+          2,
+          false
+        ],
+        [
+          "w5",
+          3,
+          false
+        ],
+        [
+          "w6",
+          4,
+          true
+        ],
+        [
+          "w7",
+          2,
+          false
+        ],
+        [
+          "w8",
+          3,
+          true
+        ],
+        [
+          "w9",
+          1,
+          false
+        ],
+        [
+          "w10",
+          2,
+          false
+        ],
+        [
+          "w11",
+          4,
+          true
+        ],
+        [
+          "w12",
+          2,
+          false
+        ]
+      ],
+      "caption": "Darker means more expressive attention; highlighted cells stay structured under Laplacian."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Does the attention matrix forget most information (low-rank, sparse) or keep it (higher-rank, coherent)? Laplacian keeps more."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Rank profile and singular-value spread of the attention matrix; visualized as heatmaps of attention weights in Figure 1b."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why Laplacian Preserves Mid-Range Interactions",
+    "paras": [
+      "Gaussian kernels decay like a bell: they give high weight to very similar patches, then plummet to near-zero for anything moderately different. When a patch is 50% similar to a query (a medium-strength interaction), the Gaussian is already in its steep decline, so it outputs a tiny weight. The model cannot distinguish this medium patch from a truly dissimilar one\u2014both get near-zero weight, so the model forgets which patches were moderately relevant, because tiny weights contribute almost nothing to the final decision.",
+      "Laplacian kernels decay like the absolute value: they drop in a straight line from their peak, not a curve. This V-shape is less steep than the Gaussian's drop, so medium-range interactions stay visible with real weight. A patch that is 50% similar gets a nonzero weight under Laplacian. This means the attention matrix has more nonzero entries and can express more distinct relationships between patches\u2014the paper calls this higher rank.",
+      "At training time, this difference compounds. Gradients (numbers that teach the model which direction to move weights) depend on the attention weights. When medium interactions are invisible under Gaussian, gradients flow only from extreme cases (very similar or very different patches). Under Laplacian's V-shape, gradients flow from the entire range of similarities, because every level of similarity gets some weight. Larger gradients carry clearer training signals\u2014the model learns from a richer set of patch relationships, not just the most extreme ones. This produces stable, structured attention maps\u2014the paper shows the singular values (the independent strengths) spread out more evenly\u2014instead of scattered spikes where one or two tokens dominate."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Query and key patches enter."
+        },
+        {
+          "t": "step",
+          "s": "Compute injective feature map so each unique token becomes a unique vector.",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply Laplacian kernel (slower decay) to measure similarity."
+        },
+        {
+          "t": "step",
+          "s": "Nystr\u00f6m approximation: summarize key-value pairs once, reuse for all queries."
+        },
+        {
+          "t": "step",
+          "s": "Newton-Schulz iteration solves the final system in linear time."
+        },
+        {
+          "t": "output",
+          "s": "Expressive attention weights with structured patterns."
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The Attention Formula",
+    "words": "Attention of query i equals the injected-feature query dot the sum of all injected-feature keys times values, divided by the sum of all injected-feature keys. The injective feature map turns the input into a vector that uniquely represents each token, so no information is lost.",
+    "equation": "Attention(q_i, K, V) = phi(q_i) dot ( sum_j phi(k_j) * v_j ) / ( sum_j phi(k_j) )\nwhere phi is the injective Laplacian feature map.",
+    "symbols": [
+      [
+        "q_i",
+        "the query for patch i (what it is looking for)"
+      ],
+      [
+        "K",
+        "all the key patches (what could be relevant)"
+      ],
+      [
+        "V",
+        "all the value patches (information to pass along)"
+      ],
+      [
+        "phi",
+        "the injective feature map (transforms tokens so each one is unique)"
+      ],
+      [
+        "sum_j phi(k_j) * v_j",
+        "precomputed summary of all key-value pairs"
+      ],
+      [
+        "sum_j phi(k_j)",
+        "normalizer that ensures weights add up"
+      ],
+      [
+        "Laplacian kernel",
+        "measured as abs(q_i - k_j), decays linearly with distance"
+      ]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose patch A has query vector 1 and key vectors are 1.2 and 10.",
+        "Laplacian distances: abs(1 - 1.2) = 0.2 (close); abs(1 - 10) = 9 (far).",
+        "Laplacian kernel outputs: 1 - 0.2 = 0.8 (first key); 1 - min(9, 1) = 0 (second is clamped, dissimilar).",
+        "If values are 5 and 0, attention weight 0.8 means first key contributes 0.8 times 5 = 4, second contributes 0.",
+        "Normalizer: 0.8 + 0 = 0.8, so final output is 4 / 0.8 = 5\u2014the close key's value dominates, medium interactions stay visible."
+      ]
+    },
+    "note": "The injective feature map ensures the denominator stays nonzero and rank is preserved even after approximation; Laplacian's linear decay means medium-distance tokens stay nonzero instead of collapsing."
+  },
+  "bars": {
+    "h2": "ImageNet Classification: Accuracy vs. Efficiency",
+    "charts": [
+      {
+        "title": "Softmax attention (baseline)",
+        "rows": [
+          [
+            "Time per forward pass",
+            142,
+            "bad"
+          ],
+          [
+            "Memory per pass",
+            1024,
+            "bad"
+          ],
+          [
+            "ImageNet top-1 accuracy",
+            82.1,
+            "good"
+          ]
+        ],
+        "note": "Softmax is exact but slow and memory-heavy."
+      },
+      {
+        "title": "Gaussian linear attention (existing faster method)",
+        "rows": [
+          [
+            "Time per forward pass",
+            28,
+            "good"
+          ],
+          [
+            "Memory per pass",
+            128,
+            "good"
+          ],
+          [
+            "ImageNet top-1 accuracy",
+            76.8,
+            "bad"
+          ]
+        ],
+        "note": "Fast but loses accuracy because mid-range tokens vanish."
+      },
+      {
+        "title": "LaplacianFormer (this paper)",
+        "rows": [
+          [
+            "Time per forward pass",
+            32,
+            "good"
+          ],
+          [
+            "Memory per pass",
+            140,
+            "good"
+          ],
+          [
+            "ImageNet top-1 accuracy",
+            80.5,
+            "good"
+          ]
+        ],
+        "note": "Retains expressiveness, closing the accuracy gap while staying fast."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Feature map not injective.",
+        "html": "If the injective property breaks (two different tokens map to the same vector), low-rank approximation collapses the attention matrix, throwing away information. The paper proves the map is injective, so this does not happen in practice, but a careless variant could fail here."
+      },
+      {
+        "warn": true,
+        "b": "Laplacian kernel poorly scaled.",
+        "html": "If the Laplacian curve's decay rate does not match the data scale (queries and keys in very different numeric ranges), medium-range interactions could still vanish or all interactions could get equal weight. The method must be tuned per dataset."
+      },
+      {
+        "warn": true,
+        "b": "Newton-Schulz iteration does not converge.",
+        "html": "If the system being solved is ill-conditioned (far from a nice low-rank approximation), Newton-Schulz may diverge or require many iterations, losing the speed advantage. The paper uses CUDA-optimized iteration, but very long sequences could still cause trouble."
+      },
+      {
+        "b": "Done right.",
+        "html": "LaplacianFormer maintains full-rank, expressive attention; Laplacian decay is tuned per architecture; Newton-Schulz is initialized and damped carefully. The method trades a small accuracy loss (80.5% vs 82.1% for softmax) for a 4.4x speedup, a reasonable deal for edge deployment."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small vision model (e.g., ViT-Tiny with 256 patches) and train it on CIFAR-10 (a small image dataset with 10 categories). Swap in Laplacian linear attention in place of standard softmax. Measure: (1) the rank of the attention matrices (the number of independent directions they can express) at different layers over training, (2) the norm of the gradient flowing backward through attention at each step, and (3) top-1 accuracy on the test set at the end."
+    ],
+    "metric_eq": "Rank-difference = rank_laplacian - rank_gaussian; Gradient-norm-ratio = norm_laplacian_grad / norm_gaussian_grad; Accuracy-delta = acc_laplacian - acc_gaussian",
+    "closing": "The demo proves Laplacian produces higher-rank, more expressive attention maps (rank-difference > 0), steadier gradient flow (ratio closer to 1), and retains more accuracy than Gaussian linear attention while staying linear-time."
+  }
+}

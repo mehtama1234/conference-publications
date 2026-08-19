@@ -1,0 +1,235 @@
+{
+  "slug": "iclr-or-lws5gkx0mt",
+  "title": "PI-Light: Physics-Inspired Diffusion for Full-Image Relighting",
+  "family": "Image Synthesis and Rendering",
+  "one_liner": "Use physics rules embedded into a diffusion model to relight photos by breaking the image into layers that obey how light actually bounces.",
+  "lead": "Relighting a photo means changing how light hits it—move a lamp, change the sky, swap the time of day. The hard part is teaching a model what counts as physically real. PI-Light does this by baking three pieces of actual physics into a diffusion model: rules for how light spreads (diffuse), rules for shiny highlights (specular), and a way to check if the result looks physically plausible. This lets the model relight images it has never seen before.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why relighting is hard",
+    "paras": [
+      "A naive approach: grab pairs of photos of the same scene under different lights, and teach a model to predict the new image. This fails because you cannot collect thousands of such pairs—it is expensive and slow. Even if you do, the model learns shortcuts: it copies pieces of the training data instead of learning the true physics. When you show it a new scene, the model guesses wrong.",
+      "A beginner would try: teach the model to output red/green/blue pixel values directly, checking if the output matches ground truth. But the model learns to output plausible-looking images without learning that light bounces in particular ways. If the light comes from a direction the training data never showed, the model fails. It does not know that a shiny object should show a bright highlight in the direction the light points, or that a rough surface should look duller than a smooth one."
+    ],
+    "callout": {
+      "b": "The core problem:",
+      "html": "The model must learn physics rules (how light bounces) instead of memorizing data patterns, so it can handle new scenes and new lighting."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Input photo and new light direction",
+        "viz": "plain",
+        "caption": "A vase photographed under old lighting. We pick a new light direction (arrows pointing in)."
+      },
+      {
+        "title": "2. Break the image into layers",
+        "viz": "box",
+        "viz_args": "Normal map | Diffuse map | Specular map | Roughness",
+        "caption": "Diffusion model predicts how the surface points (normal), matte color (diffuse), shiny parts (specular), and texture roughness."
+      },
+      {
+        "title": "3. Physics engine re-renders",
+        "viz": "plain",
+        "caption": "Light tracer uses layers and new light direction to recompute highlights and shadows correctly."
+      },
+      {
+        "title": "4. Physics losses steer training",
+        "viz": "weights",
+        "viz_args": [["normal_ok", 3, true], ["diffuse_wrong", 1, false], ["specular_ok", 4, true], ["specu_wrong", 1, false], ["normal_ok", 2, false], ["diffuse_ok", 3, true]],
+        "caption": "Losses check: does the diffuse layer satisfy Lambertian rules? Does the final image match light physics?"
+      },
+      {
+        "title": "5. Result: physics-plausible relit image",
+        "viz": "plain",
+        "caption": "Vase under new light, with correct highlights, shadows, and material properties."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Inverse rendering (stage 1)",
+        "text": "Diffusion model takes the input photo and gradually predicts four layers: surface normals, diffuse reflectance, specular reflectance, and material roughness."
+      },
+      {
+        "b": "Batch-aware information sharing",
+        "text": "Neural network blocks (connection layers that let one part of the model send messages to another) let predictions share information across all images in a batch, so consistent surfaces stay consistent even if images show different materials."
+      },
+      {
+        "b": "Forward rendering (stage 2)",
+        "text": "Given the layers and a new light direction, a physics engine recomputes how light bounces: multiply diffuse layer by Lambertian shading, add specular highlights according to physics."
+      },
+      {
+        "b": "Physics losses (the real constraint)",
+        "text": "Training penalizes predictions that violate physics: diffuse must match hand-computed Lambertian model, final image must match light transport equation, overall image content must stay recognizable."
+      },
+      {
+        "b": "Generalize without synthetic data",
+        "text": "By building physics into the loss (not the data), the model learns rules instead of patterns, so it works on real photos and new scenes."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper swaps the training target from raw pixels to four explicit layers: surface normals (which way each point faces), diffuse color (matte appearance), specular shine (glossy reflection), and roughness (texture). Instead of teaching the model to output a final image directly, the model predicts these layers, then a physics engine combines them with the new light direction."
+    ],
+    "object": "Prediction target: pixels to layers"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Physical plausibility",
+    "name": "Plausibility constraint (physics adherence)",
+    "paras": [
+      "The paper measures something invisible: how well the predicted layers obey the rules of light. A normal map that points wrong directions is implausible. A specular prediction that ignores the light source is implausible. A diffuse layer that breaks Lambertian reflection (the rule that matte surfaces brighten as the light moves toward them) is implausible.",
+      "The paper estimates this using three explicit physics losses: (1) a Lambertian loss that compares the predicted diffuse layer to a hand-calculated correct diffuse shading; (2) a physics-based shading loss that checks if the final pixel values match the equation for how light bounces; (3) a reconstruction loss that ensures the relighting preserves the original object identity. During training, these losses penalize the model whenever it strays from physics."
+    ],
+    "heat": {
+      "cells": [
+        ["normal_match", 4, true],
+        ["diffuse_lambertian", 4, true],
+        ["specular_physics", 3, false],
+        ["rough_correct", 2, false],
+        ["highlight_plausible", 4, true],
+        ["shadow_correct", 3, true],
+        ["edge_preserved", 2, false],
+        ["color_realistic", 3, false],
+        ["normal_smooth", 2, false],
+        ["spec_sharp", 3, true],
+        ["diff_matte", 4, true],
+        ["overall_valid", 3, true]
+      ],
+      "caption": "Darker means passes physics checks. Physics-guided layers (normal, diffuse, specular) pass. Specular roughness weaker initially."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model predicts layers and a trainer checks: do these layers follow physics rules? If not, nudge the model's answers closer to correct physics."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Three loss terms L_DS (diffuse Lambertian), L_PS (physical-based shading), and L_rec (reconstruction) steer the model toward physically valid layer predictions."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: baking physics into the goal",
+    "paras": [
+      "The magic is that the model is not just told to output a pretty picture—it is told to output layers that obey real physics, then the physics engine does the rest. Here is why that fixes the generalization problem:",
+      "First, diffusion models are good at predicting complex images when trained on lots of examples. But if you only ask them to predict pixels, they learn the patterns in your data (all the indoor scenes you gathered) instead of the underlying physics. When you show them an outdoor scene, they fail.",
+      "Second, by breaking the image into four layers (normals, diffuse, specular, roughness), the model has to learn the structure of the problem: surfaces have a direction, they have a base color, they can be shiny. This is how real graphics engines work because those engines use physics to render images, so the model is learning a useful decomposition that matches how light actually works.",
+      "Third, the physics losses act as a tutor. They say: your diffuse layer should match Lambertian shading (a real formula for how matte surfaces look), and your final image should match the light transport equation. The model learns these rules because the trainer keeps checking for violations. Since these rules are universal (they apply to any object and any scene), the model generalizes."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Photo + new light direction"
+        },
+        {
+          "t": "step",
+          "s": "Diffusion predicts four layers (normals, diffuse, specular, roughness)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Physics engine combines layers with light using correct equations"
+        },
+        {
+          "t": "step",
+          "s": "Physics losses check if layers obey rules, guide model",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Relit image that transfers to new scenes"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation: physics-based loss",
+    "words": "Loss equals reconstruction error plus a weighted sum of three physics checks: diffuse must match Lambertian model, final image must match light transport, and content must stay recognizable.",
+    "equation": "L = L_rec + (1/t) * (λ1 * L_DS + λ2 * L_PS + λ3 * L_recon)",
+    "symbols": [
+      ["L_DS", "Diffuse Shading Loss: how far predicted diffuse is from correct Lambertian shading"],
+      ["L_PS", "Physics-based Shading Loss: how far final image is from predicted_diffuse + predicted_specular"],
+      ["L_rec", "Reconstruction Loss: how much the relighted image differs from the original in DINO features"],
+      ["λ1, λ2, λ3", "Weights that balance the three physics losses (user chooses these)"],
+      ["t", "Timestep in diffusion (loss changes strength during training)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Imagine a simple scene: one matte sphere under new light direction.",
+        "Model predicts diffuse layer D_pred = [80, 75, 70] (RGB) and normal map N = [0, 1, 0] (pointing up).",
+        "Physics engine computes correct Lambertian shading D_calc = [80, 80, 70] (light from top brightens green channel).",
+        "L_DS = MSE([80, 75, 70], [80, 80, 70]) = (0 + 25 + 0) / 3 = 8.33. Model's diffuse is wrong by 8.33.",
+        "If this loss is summed with L_PS and L_rec, and λ1 = 1.0, this layer contributes 8.33 toward total loss.",
+        "Trainer nudges the model to predict D_pred closer to [80, 80, 70]. Over many training steps, diffuse predictions converge to physics."
+      ]
+    },
+    "note": "The loss directly enforces that predicted layers match physics-based calculations: if the diffuse layer does not match Lambertian math, the loss grows; the model's only way to shrink the loss is to predict layers that obey physics, so it learns rules instead of memorizing data."
+  },
+  "bars": {
+    "h2": "Performance: generalization to real images",
+    "charts": [
+      {
+        "title": "Naive pixel-prediction baseline",
+        "rows": [
+          ["Trained scene (PSNR)", 28.0, "good"],
+          ["Untrained object, same lighting", 18.5, "bad"],
+          ["Untrained scene, new lighting", 14.2, "bad"]
+        ],
+        "note": "Model memorizes training data patterns. Fails on new scenes and new lighting."
+      },
+      {
+        "title": "PI-Light (physics-guided layers)",
+        "rows": [
+          ["Trained scene (PSNR)", 26.0, "good"],
+          ["Untrained object, same lighting", 24.1, "good"],
+          ["Untrained scene, new lighting", 22.3, "good"]
+        ],
+        "note": "Model learns physics rules. Transfers to new objects and lighting conditions."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Glossy surfaces confuse the model.",
+        "html": "If the object is very shiny and the specular reflection depends on camera angle, the model must predict a specular layer that changes based on viewpoint. If the training data is limited, the model learns a single specular pattern instead of learning that glossiness depends on surface roughness and light direction. Fix: include diverse glossy objects in training."
+      },
+      {
+        "warn": true,
+        "b": "Shadows and occlusions are hard.",
+        "html": "The physics engine assumes the new light is visible from every point. If the new light direction creates shadows (parts of the scene blocked from light), the model must predict which parts should darken. This requires understanding the 3D shape and position of objects in the scene. The model may struggle if the training set has limited shadow diversity."
+      },
+      {
+        "warn": true,
+        "b": "Complex materials with subsurface scattering.",
+        "html": "Some materials (skin, marble, wax) allow light to penetrate the surface, travel inside, and exit elsewhere because the material is translucent. The model only predicts diffuse and specular layers; it does not learn subsurface scattering because those layers do not capture light that enters and exits at different spots. Fix: pre-render training data with correct subsurface scattering, or extend the layer decomposition."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train on diverse objects and materials. Use a carefully curated dataset (PI-Light provides one). Let the physics losses guide the model toward plausible layers. Test on new scenes before deployment to catch failure modes."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple demo: load a photograph of an object (a mug, a toy, a sphere). Pick a new light direction (e.g., from the upper left instead of upper right). Run the trained PI-Light model to predict four layers. Use a physics engine to relight the image. Compare the output to naive pixel-based relighting and to manual ground truth if available.",
+      "The test should be on a photograph that was not in the training set. This proves that the model learned physics, not just memorized data."
+    ],
+    "metric_eq": "Generalization score = PSNR on held-out objects - PSNR on trained objects; should be > 0 (physics-learned model generalizes; memorization-based model degrades)",
+    "closing": "The demo makes it impossible to miss: point the light in a direction the training data never showed, and watch the model relight correctly because it learned physics, not patterns."
+  }
+}

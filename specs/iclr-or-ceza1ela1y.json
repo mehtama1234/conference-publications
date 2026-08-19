@@ -1,0 +1,212 @@
+{
+  "slug": "iclr-or-ceza1ela1y",
+  "title": "IncVGGT: Incremental VGGT for Long-Range 3D Reconstruction",
+  "family": "Computer Vision",
+  "one_liner": "Process arbitrarily long sequences of video frames by fusing overlapping views and pruning old memory slots instead of keeping all frames.",
+  "lead": "IncVGGT solves a hard real problem: vision transformers (models that see images as a series of small patches) need to remember everything they have ever seen to answer questions about an image, but remembering every frame in a 10,000-frame video exhausts the graphics-card memory. IncVGGT makes this feasible by combining two ideas: fusing overlapping frames together before feeding them in, and forgetting old memories that stopped being useful.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The memory wall: why long sequences break transformers",
+    "paras": [
+      "A vision transformer looks at an image by chopping it into small pieces called patches, and then runs a kind of comparison between every patch and every other patch. For a single image this works fine. But when you have a long video — say 10,000 frames — the transformer needs to compare every patch in frame 1 to every patch in frame 2, and frame 2 to frame 3, and so on. That comparison operation takes memory proportional to the square of the number of frames. One thousand frames? A million comparisons. Ten thousand frames? Hundreds of millions. Graphics cards have finite memory, so the transformer eventually runs out of room and crashes.",
+      "A beginner would try to ignore old frames after you have used them once, but that breaks the reconstruction: 3D models need context from dozens of frames ago to figure out how an object in frame 5 moved by frame 100. Simply throwing away frame 5 when you reach frame 50 loses that context forever, and the final 3D shape becomes wrong and fragmented."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Transformers working on long videos run out of graphics-card memory because they try to remember every frame and compare everything to everything else."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The naive approach",
+        "viz": "weights",
+        "viz_args": [["free", 10], ["free", 15], ["free", 20], ["free", 25], ["free", 30], ["free", 35], ["free", 40], ["free", 45], ["free", 50], ["free", 55], ["free", 60], ["free", 70]],
+        "caption": "Each frame stored separately; memory grows by 10x."
+      },
+      {
+        "title": "2. The problem: every frame unique",
+        "viz": "box",
+        "viz_args": "Frame 1 vs 2: 95% identical shots (same camera, slight shift). Wasting space.",
+        "caption": "Overlapping frames store nearly the same patches; most comparisons redundant."
+      },
+      {
+        "title": "3. Register and fuse overlaps",
+        "viz": "weights",
+        "viz_args": [["moved", 10], ["moved", 8], ["warm", 15], ["warm", 18], ["warm", 12], ["warm", 20], ["free", 5], ["free", 3], ["free", 8], ["free", 6], ["free", 4], ["free", 7]],
+        "caption": "Align frames by rotation, layer them; keep only the new parts."
+      },
+      {
+        "title": "4. Prune the history: keep top-k slots",
+        "viz": "box",
+        "viz_args": "Newest frame + top 3 old critical ones; discard marginal old frames.",
+        "caption": "Score each old memory by how relevant it is now; drop the rest."
+      },
+      {
+        "title": "5. Result: 10k frames, 80GB, still works",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["warm", 35], ["warm", 28], ["free", 12], ["free", 8], ["free", 10], ["free", 6], ["free", 5], ["free", 4], ["free", 3], ["free", 2], ["free", 1]],
+        "caption": "Fused frames + pruned history bound memory; no crash at 10k frames."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Align overlapping frames",
+        "text": "Register consecutive frames by rotation and translation; find shared patches."
+      },
+      {
+        "b": "Fuse into composite views",
+        "text": "Merge overlapping regions into single patches; discard duplicate patch entries."
+      },
+      {
+        "b": "Score old memories by relevance",
+        "text": "For each older frame, compute how much the current reconstruction relies on it."
+      },
+      {
+        "b": "Prune history to top-k plus newest",
+        "text": "Keep only the most critical old frames and the current one; drop the rest."
+      },
+      {
+        "b": "Run the reconstruction",
+        "text": "Feed the fused, pruned patch set into the vision transformer; 3D shape emerges."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper actually changes",
+    "paras": [
+      "IncVGGT does two things to the frame queue: it combines overlapping adjacent frames into a single composite representation, and it discards old frames that stopped contributing to the reconstruction. Both reduce the number of patches (small image pieces the transformer must process and compare)."
+    ],
+    "object": "the memory cache and patch count"
+  },
+  "hidden": {
+    "h2": "The relevance score: which old frames matter now?",
+    "name": "Relevance of each past memory slot",
+    "paras": [
+      "The hidden quantity is a number for each older frame that measures how much the current 3D estimate depends on it. A frame from 500 frames ago might still be critical if it shows a distinctive corner or edge; a frame from 3 steps back might be redundant if it was nearly identical to the frame before it. The paper estimates this by looking at the attention weights: if the transformer's patch-comparisons pull information from a past frame heavily, that frame gets a high relevance score. If no patches from that frame are being queried, its score drops to zero.",
+      "The pruning rule keeps only the top-k frames by relevance score, plus the most recent frame (which always matters for incremental updates). Old frames below the threshold are permanently deleted from the cache, freeing memory immediately."
+    ],
+    "heat": {
+      "cells": [["Frame 500 back", 4, true], ["Frame 400 back", 1, false], ["Frame 300 back", 2, false], ["Frame 200 back", 3, true], ["Frame 100 back", 2, false], ["Frame 50 back", 3, true], ["Frame 20 back", 4, true], ["Frame 10 back", 4, true], ["Frame 5 back", 3, true], ["Frame 3 back", 2, false], ["Frame 2 back", 1, false], ["Frame 1 (current)", 4, true]],
+      "caption": "Darker means the transformer pulls information from that frame more often; pruning discards the pale ones."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Some old frames stay forever because the model is still reconstructing from them. Others fade to irrelevance and are deleted as new frames arrive."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "History-side pruning retains the top-k most relevant past memory slots by attention weight, plus the current frame, bounding cache growth."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why frame fusion and pruning let you process 10k frames",
+    "paras": [
+      "The core problem is that transformers compare every input to every input, and that cost grows with the square of the number of inputs. With 1,000 frames you get a million comparisons; with 10,000 you get 100 million. The graphics card runs out of memory to store all those comparison results.",
+      "IncVGGT cuts this cost in two ways. First: overlapping video frames are mostly identical. Registering and fusing them removes the duplicate patches before they reach the transformer. If frames 1 and 2 share 80 percent of their pixels, fusing them cuts the token count by half. Second: the transformer does not need to see every historical frame. It only needs frames that contain information about the current structure. Pruning the history to keep only high-relevance frames removes noise and redundancy. Together, fusion reduces the token count per frame by 30-50 percent, and pruning reduces the sequence length from 10,000 to maybe 50-100 effective frames. The combination cuts memory from quadratic in 10,000 (impossible) to manageable, because the transformer now runs on a much smaller sequence.",
+      "Why does this preserve reconstruction quality? Because the pruning is selective: it keeps frames that matter and discards only noise. Frame 500 is deleted only if the transformer is not using it to answer questions about the 3D shape. The current frame and the top-k relevant past frames are enough to pin down where all the surfaces and edges are in 3D space, so reconstruction stays accurate."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "10,000 raw video frames"
+        },
+        {
+          "t": "step",
+          "s": "Register and fuse overlapping frames",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute relevance score for each frame"
+        },
+        {
+          "t": "step",
+          "s": "Prune history to top-k relevant frames plus current",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "50-100 effective tokens to transformer"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The pruning rule as an equation",
+    "words": "Keep the current frame plus the top-k frames by relevance score; discard the rest.",
+    "equation": "cache_next = {current_frame} union {top_k_frames_by_relevance_score(past_frames)}",
+    "symbols": [
+      ["cache_next", "the memory to use for the next frame"],
+      ["current_frame", "the frame you just processed"],
+      ["top_k_frames_by_relevance_score", "the k oldest frames with highest attention-weighted relevance"],
+      ["k", "the maximum size of the history (e.g. 10, 50, or 100 depending on GPU memory available)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Frame 100 (current) arrives. Transformer looked at frame 100 and compared to frames 99, 95, 50, 5, 1 during its processing.",
+        "Relevance scores computed: frame 95 scored 0.92 (heavily used), frame 50 scored 0.45 (medium), frame 5 scored 0.08 (lightly touched), frame 1 scored 0.02 (barely used), frame 90 scored 0.65.",
+        "If k=3, keep frame 100 (current) + frames 95, 90, 50 (top 3 by score). Drop frames 5 and 1.",
+        "Next iteration: frame 101 arrives with fewer tokens in cache, so the transformer uses less memory and runs faster."
+      ]
+    },
+    "note": "The equation translates to code as a single sort-and-slice: rank past frames by their attention weights, take the top k, add the current frame."
+  },
+  "bars": {
+    "h2": "Memory and compute before and after",
+    "charts": [
+      {
+        "title": "Naive transformer (all frames)",
+        "rows": [["100-frame sequence", 35, "good"], ["500-frame sequence", 320, "bad"], ["1000-frame sequence", 1280, "bad"], ["10000-frame sequence", 128000, "bad"]],
+        "note": "Memory grows as the square of sequence length; runs out around 300 frames."
+      },
+      {
+        "title": "IncVGGT (fused and pruned)",
+        "rows": [["100-frame sequence", 32, "good"], ["500-frame sequence", 45, "good"], ["1000-frame sequence", 52, "good"], ["10000-frame sequence", 78, "good"]],
+        "note": "Memory stays nearly flat because fusion removes duplicates and pruning bounds history to a small set of relevant frames."
+      }
+    ]
+  },
+  "failures": {
+    "warn": false,
+    "items": [
+      {
+        "warn": true,
+        "b": "Over-aggressive pruning loses structure.",
+        "html": "If k is set too low, critical frames fall below the relevance threshold and are discarded. This leaves gaps in the reconstruction and produces distorted or missing parts of the 3D shape."
+      },
+      {
+        "warn": true,
+        "b": "Registration failure on fast motion.",
+        "html": "If the camera or objects move very fast between frames, the registration step may fail to find overlaps. Overlapping frames do not fuse correctly, wasting the fusion benefit and leaving the cache bloated."
+      },
+      {
+        "warn": true,
+        "b": "Relevance score does not track all dependencies.",
+        "html": "Relevance is computed from current attention weights. If a frame is important for future steps but the attention mechanism does not activate it now, it may be pruned too early."
+      },
+      {
+        "b": "Done right.",
+        "html": "Set k adaptively based on available GPU memory, validate the relevance scores on a held-out test sequence, and monitor reconstruction quality during pruning to catch over-aggressive thresholds."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple video reconstruction test: run the naive transformer on 1,000 consecutive frames from a static scene (one camera angle, no moving objects). Measure graphics-card memory and total processing time. Then run IncVGGT with the same frames and k set to 50. Compare memory usage, processing time, and reconstruction quality (measure the distance between the output 3D shape and the ground-truth shape)."
+    ],
+    "metric_eq": "speedup = (naive_time + naive_memory_stalls) / (incvggt_time + incvggt_memory_stalls); quality_loss = (ground_truth_distance - output_distance) / ground_truth_distance",
+    "closing": "IncVGGT should use 10-20 times less memory and run 4-8 times faster while keeping reconstruction quality within a few percent of the naive approach, because fusion removes duplicate patches and pruning keeps only frames the transformer actively uses, so the comparison step runs on a much smaller sequence and fits on the card."
+  }
+}

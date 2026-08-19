@@ -1,0 +1,242 @@
+{
+ "slug": "iclr-or-davfctetbk",
+ "title": "Signal Structure-Aware Gaussian Splatting for Large-Scale Scenes",
+ "family": "3D scene reconstruction",
+ "one_liner": "Instead of training all scenes the same way, SIG watches what frequencies the 3D model is learning and adjusts image resolution and densification to match.",
+ "lead": "Building a detailed 3D model of a city requires fitting many tiny blobs (Gaussians) to photographs. A naive approach trains every scene with the same high-resolution images and densification strategy, but this wastes compute on learning fine texture before the coarse shape is right, and creates floating junk. SIG solves this by measuring what frequencies the Gaussians have learned so far, then tuning the image resolution and densification on the fly to match the scene's actual progress.",
+ "nav": [["theme-computer-vision.html","Computer Vision"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Large-scale 3D reconstruction with mismatched resolution",
+  "paras": [
+   "Gaussian Splatting is a way to model a 3D scene as a set of soft blobs (Gaussians), each with a position, shape, and color. Training learns where to place each blob and what color it should be, supervised by comparing rendered images to photographs. For small rooms, one simple strategy works: start low-resolution, gradually raise to high-resolution, densify when the model is stuck. But on city-scale scenes with sparse photos, this breaks: early in training, the model is still guessing the coarse shape and structure; feeding it high-resolution supervision anyway pushes it to learn fine texture detail it does not yet need, forcing wasteful densification of tiny redundant blobs everywhere. Later, when the model needs fine detail, it is bloated and slow.",
+   "A beginner would try: always train at highest resolution, add densification every N steps. This fails because the model overfits to noise in over-observed regions while ignoring barely-observed gaps, and the fixed schedule does not adapt to how much the scene has actually converged."
+  ],
+  "callout": {
+   "b": "The method in one sentence.",
+   "html": "SIG watches the frequencies the Gaussians are currently capturing, and raises image resolution and triggers densification only when the model is ready to learn finer detail."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The problem: mismatched frequencies",
+    "viz": "weights",
+    "viz_args": [["free",10],["free",15],["hot",60],["hot",55],["warm",20],["warm",25],["free",8],["free",12],["hot",50],["free",5],["free",8],["free",3]],
+    "caption": "High-res images try to teach fine detail (hot bars) before the coarse structure (warm, free bars) is learned."
+   },
+   {
+    "title": "2. Scene frequency lags image frequency",
+    "viz": "box",
+    "viz_args": "Coarse learned, fine unlearned | High-res image showing fine and coarse",
+    "caption": "The Gaussians can only recover frequencies up to what their bandwidth allows. Finer images waste training steps."
+   },
+   {
+    "title": "3. Compute bandwidth of Gaussians",
+    "viz": "weights",
+    "viz_args": [["free",5],["free",8],["warm",22],["warm",30],["warm",35],["warm",28],["free",10],["free",12],["free",6],["free",4],["free",3],["free",2]],
+    "caption": "The paper derives what maximum frequency each Gaussian blob can capture from its shape and size."
+   },
+   {
+    "title": "4. Match image to scene bandwidth",
+    "viz": "box",
+    "viz_args": "Image resolution raised | Densify to learn fine detail",
+    "caption": "Once Gaussians reach the Nyquist frequency, raise resolution. Only then add denser blobs for texture."
+   },
+   {
+    "title": "5. Result: no floaters, fast training",
+    "viz": "weights",
+    "viz_args": [["warm",18],["warm",25],["hot",58],["hot",62],["hot",48],["hot",52],["warm",20],["warm",15],["hot",42],["warm",12],["warm",8],["warm",5]],
+    "caption": "Clean structures stay intact. Gaussians grow only where needed, not as junk debris."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Measure Gaussian bandwidth",
+    "text": "Compute the maximum frequency each Gaussian blob can represent from its covariance (a table describing its shape and size)."
+   },
+   {
+    "b": "Average over the scene",
+    "text": "Combine all Gaussians to find the scene's current average recoverable frequency."
+   },
+   {
+    "b": "Compare to target",
+    "text": "Check if the scene frequency has reached the Nyquist limit (the max frequency that current image resolution can provide)."
+   },
+   {
+    "b": "Adapt image resolution",
+    "text": "If the scene is not yet saturated, stay at coarse resolution. Once it reaches Nyquist, raise resolution."
+   },
+   {
+    "b": "Gate densification",
+    "text": "Only add new Gaussians after resolution is raised, preventing premature redundant bloat."
+   }
+  ]
+ },
+ "object": {
+  "h2": "The one thing that changes",
+  "paras": [
+   "The paper does not change the Gaussians themselves or the rendering formula. Instead, it changes the scheduler that decides when to raise image resolution during training and when to add new Gaussians for densification."
+  ],
+  "object": "training schedule (resolution and densification timing)"
+ },
+ "hidden": {
+  "h2": "The average Gaussian bandwidth",
+  "name": "Average recoverable frequency of the scene",
+  "paras": [
+   "The paper introduces a new measurement: the average frequency that all Gaussians in the current model can collectively represent. This is not frequency measured from the rendered output, but derived analytically from the shapes and sizes of the Gaussian blobs themselves. Each blob has a covariance matrix (a matrix describing its shape and size); the paper computes that blob's maximum frequency (called the Nyquist frequency for that blob) via its 3 dB bandwidth from signal processing. The average bandwidth across all blobs is the scene's current recoverable frequency.",
+   "To estimate this, the paper first computes the Fourier transform of each Gaussian function, finds its half-power bandwidth, then averages across all Gaussians weighted by their opacity (how much they contribute to the final image). This gives a single number that tells the training loop how much fine detail the current model can possibly represent."
+  ],
+  "heat": {
+   "cells": [
+    ["G1 coarse",1,false],
+    ["G2 coarse",1,false],
+    ["G3 medium",2,true],
+    ["G4 medium",2,true],
+    ["G5 fine",3,false],
+    ["G6 fine",3,false],
+    ["G7 coarse",1,false],
+    ["G8 medium",2,false],
+    ["G9 fine",3,false],
+    ["G10 coarse",1,false],
+    ["G11 medium",2,false],
+    ["G12 fine",3,false]
+   ],
+   "caption": "Darker Gaussians capture finer frequencies. The average (marked cells) tells the scheduler when the scene is ready for higher resolution."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The scene's average frequency is like the finest detail a blurry photograph can hold. When the model learns all details that resolution can show, it is ready to see a sharper photo."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The weighted average of the 3 dB bandwidths of all Gaussians, computed analytically from their covariance matrices and opacities."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why matching frequencies works",
+  "paras": [
+   "The core insight is borrowed from signal processing: a photograph at a given resolution can only show detail down to a certain fineness (the Nyquist frequency for that resolution). If you feed the model finer images before it can represent fine frequencies, three things happen: (1) the model cannot fit the extra detail, so it overfits by creating redundant tiny blobs everywhere; (2) training steps are wasted on unrecoverable frequencies; (3) memory and compute explode. Conversely, if the model has already learned all the detail that the current resolution can provide, raising resolution will give it new information to fit.",
+   "SIG solves this by computing analytically what frequency the Gaussians can currently represent (from their bandwidth), comparing it to the image resolution's Nyquist frequency, and only raising resolution when the model is ready. This keeps training efficient: early iterations stay low-resolution, forcing the model to learn the basic shape and structure without distraction. Once the bandwidth catches up, resolution is raised, and densification can add finer blobs only when they can actually contribute. The Sphere-Constrained Gaussians further reduce redundancy by constraining each blob to stay near the initialized point cloud, preventing wild extrapolation into empty space."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Current Gaussian shapes (covariance matrices)"
+    },
+    {
+     "t": "step",
+     "s": "Compute 3 dB bandwidth for each Gaussian",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Average across all Gaussians (weighted by opacity)"
+    },
+    {
+     "t": "step",
+     "s": "Compare to Nyquist frequency of current image resolution"
+    },
+    {
+     "t": "step",
+     "s": "Decision: compare bandwidth to Nyquist frequency"
+    },
+    {
+     "t": "step",
+     "s": "If bandwidth below Nyquist: stay low-res (avoid bloat from fitting detail the model cannot represent yet). If bandwidth at Nyquist: raise resolution (now the model can capture finer detail that was not visible before).",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "Adaptive training schedule"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The average bandwidth equation",
+  "words": "The average recoverable frequency is the sum over all Gaussians of opacity-squared times the Nyquist frequency for that Gaussian, all divided by the sum of opacity-squared values.",
+  "equation": "avg_freq = sum_i (o_i^2 * omega_3dB_i * det(Sigma_i)) / sum_i (o_i^2 * det(Sigma_i))",
+  "symbols": [
+   ["o_i","opacity (how visible Gaussian i is)"],
+   ["omega_3dB_i","the 3 dB bandwidth of Gaussian i, derived from its covariance"],
+   ["det(Sigma_i)","the volume of Gaussian i (determinant of its shape matrix)"],
+   ["avg_freq","the average frequency the scene can represent"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Say we have 3 Gaussians: G1 (opacity 0.8, bandwidth 10, volume 1.0), G2 (opacity 0.6, bandwidth 20, volume 1.5), G3 (opacity 0.4, bandwidth 15, volume 0.5).",
+    "Numerator: 0.8^2 * 10 * 1.0 + 0.6^2 * 20 * 1.5 + 0.4^2 * 15 * 0.5 = 6.4 + 10.8 + 3.0 = 20.2",
+    "Denominator: 0.8^2 * 1.0 + 0.6^2 * 1.5 + 0.4^2 * 0.5 = 0.64 + 0.54 + 0.08 = 1.26",
+    "Average frequency = 20.2 / 1.26 = 16.0. If image resolution supports Nyquist of 20, we keep low-res. If Nyquist is 15, we raise resolution."
+   ]
+  },
+  "note": "The numerator counts each Gaussian's bandwidth contribution weighted by how opaque it is and how much volume it occupies."
+ },
+ "bars": {
+  "h2": "Training efficiency and quality",
+  "charts": [
+   {
+    "title": "Hardcoded scheduling (baseline)",
+    "rows": [
+     ["Structure quality (early)",80,"good"],
+     ["Fine detail recovery",45,"bad"],
+     ["Total training time",100,"bad"],
+     ["Floater artifacts",35,"bad"]
+    ],
+    "note": "Fixed schedule raises resolution too fast, leading to overfitting and wasteful densification."
+   },
+   {
+    "title": "SIG adaptive scheduling",
+    "rows": [
+     ["Structure quality (early)",88,"good"],
+     ["Fine detail recovery",78,"good"],
+     ["Total training time",70,"good"],
+     ["Floater artifacts",8,"good"]
+    ],
+    "note": "Matching frequency to model capability keeps training efficient and prevents artifact bloat."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Initialization bias.",
+    "html": "If the initial point cloud from Structure-from-Motion is sparse, some regions have too few Gaussians to reach the full Nyquist frequency. The scheduler will wait forever to raise resolution. Fix: initialize with a minimum density, or use a fallback timer."
+   },
+   {
+    "warn": true,
+    "b": "Camera calibration drift.",
+    "html": "If camera poses from Structure-from-Motion are incorrect, the model cannot fit detail at any resolution. The bandwidth will plateau, and resolution will not raise properly. Fix: refine camera poses during training."
+   },
+   {
+    "warn": true,
+    "b": "Occlusion and view gaps.",
+    "html": "In regions visible in very few photos, the Gaussians cannot learn what is there. The bandwidth may saturate prematurely, stopping resolution increase. Fix: estimate visibility per region and raise resolution region-wise, not globally."
+   },
+   {
+    "b": "Done right.",
+    "html": "When initialization is dense, poses are accurate, and the scheduler is region-wise (per block), SIG tracks scene frequency and adapts resolution smoothly without artifacts or bloat."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "A minimal demo reconstructs a city block from 50 wide-baseline photographs at 1920x1080 pixels. Train one model with a hardcoded schedule (raise resolution every 5000 iterations) and one with SIG's adaptive schedule. Log the scene's average bandwidth every 1000 iterations, and log the rendered PSNR (peak signal-to-noise ratio, a measure of pixel accuracy) and the count of Gaussians."
+  ],
+  "metric_eq": "training_time = final_iteration_count * compute_per_iteration; quality = rendered_psnr_on_held_test_views; bloat = final_gaussian_count / ideal_gaussian_count",
+  "closing": "The demo must make it impossible to miss: SIG reaches the same quality in less time, with fewer Gaussians, and the bandwidth curve shows a clear step where resolution is raised, whereas the hardcoded baseline raises resolution at arbitrary iterations."
+ }
+}
