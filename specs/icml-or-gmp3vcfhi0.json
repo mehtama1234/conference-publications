@@ -1,0 +1,221 @@
+{
+  "slug": "icml-or-gmp3vcfhi0",
+  "title": "MuonSSM: Stabilizing Long-Sequence Models",
+  "family": "Time Series & Sequential",
+  "one_liner": "When you update memory in a model that reads long sequences, tiny bad decisions in update direction stack up and explode; this paper stabilizes the updates by checking their alignment and scaling first.",
+  "lead": "State space models (a way to run a model sequentially, one item at a time) handle long sequences faster than older methods that compare every step to every other step, but they get unstable and forgetful after hundreds or thousands of steps because each tiny update to the model's memory is poorly aimed. MuonSSM fixes this by checking the alignment and scaling of each update before it happens, using a lightweight correction that keeps everything bounded and stable.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Memory updates blow up over long sequences",
+    "paras": [
+      "A state space model reads a sequence step by step, keeping a list of numbers in memory that grows and shrinks as it learns. At each new item, the model adds new information to memory and discards old clutter — a very fast way to handle long sequences of 10,000+ numbers without the cost of comparing every number to every other number.",
+      "But there is a catch: each update to memory is a small nudge in a direction chosen by the model's weights. If that direction is poorly aimed (the model gives a small weight to an important signal, or pushes memory the wrong way), the error repeats at every step. After 1,000 steps, tiny mistakes stack into huge ones — memory explodes or collapses, and the model forgets everything it learned.",
+      "A beginner might try to fix this by slowing down the updates or clamping memory to safe bounds, but those are crude patches that waste computation and lose information."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "MuonSSM checks the direction and size of each memory update before it happens, using a lightweight geometric correction that keeps updates stable without slowing down training."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A sequence arrives",
+        "viz": "brain",
+        "caption": "Read items one by one, updating memory at each step."
+      },
+      {
+        "title": "2. Updates point the wrong way",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["warm", 35], ["free", 20], ["free", 15], ["free", 10]],
+        "caption": "Small errors in update direction start small, then compound step by step."
+      },
+      {
+        "title": "3. Errors explode",
+        "viz": "weights",
+        "viz_args": [["moved", 95], ["moved", 88], ["moved", 120], ["moved", 150], ["moved", 180]],
+        "caption": "Memory grows huge or vanishes; model forgets and becomes unstable."
+      },
+      {
+        "title": "4. Geometric check fixes it",
+        "viz": "box",
+        "viz_args": "Check update shape, correct direction",
+        "caption": "Before each update, verify alignment and scaling, then correct if needed."
+      },
+      {
+        "title": "5. Updates stay stable",
+        "viz": "weights",
+        "viz_args": [["warm", 55], ["warm", 52], ["warm", 54], ["warm", 53], ["warm", 55]],
+        "caption": "Memory stays bounded; learning signals flow back through all steps."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Remember what you stored",
+        "text": "Keep the previous memory (a list of numbers); it carries all learned information so far."
+      },
+      {
+        "b": "Step 2: Plan the update direction",
+        "text": "Look at the new input and decide which direction to nudge memory (the list of changes to apply)."
+      },
+      {
+        "b": "Step 3: Check the alignment",
+        "text": "Use a lightweight matrix operation (Newton-Schulz) to verify the update direction is well-aimed and won't cause the memory to explode."
+      },
+      {
+        "b": "Step 4: Correct the update if needed",
+        "text": "If the direction is poorly conditioned (likely to cause numerical instability), rotate or scale it to be safer."
+      },
+      {
+        "b": "Step 5: Apply the stabilized update",
+        "text": "Combine the corrected update with momentum (a running average of past updates) and apply it to memory."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of updating the recurrent transition matrix (the core repeated operation) directly, MuonSSM stabilizes the memory updates themselves — the actual nudges applied to the stored information. This matters because rather than trying to make the repeated matrix better all at once, the method inspects each small update in real time and fixes its alignment and scaling before it happens, preventing the compounding errors that destroy long-sequence learning."
+    ],
+    "object": "Memory update alignment"
+  },
+  "hidden": {
+    "h2": "Update conditioning: how well-aimed are the nudges?",
+    "name": "Update condition number",
+    "paras": [
+      "The hidden quantity is the condition number of the update: a measure of how much numerical error will grow when you apply this update step. A well-conditioned update (condition number close to 1) means a small error in one direction stays small in all directions; a poorly conditioned update (condition number 1,000 or higher) means a tiny error in one direction explodes into a huge error in another — the recipe for instability.",
+      "MuonSSM estimates this quantity by analyzing the update vector's spectral properties (the list of scaling factors it would apply to different 'directions' in memory space). If the spectrum is unbalanced (some directions scale up much more than others), the update is poorly conditioned and the method gently rebalances it."
+    ],
+    "heat": {
+      "cells": [
+        ["step1", 4, true],
+        ["step2", 3, false],
+        ["step3", 1, false],
+        ["step4", 4, true],
+        ["step5", 2, false],
+        ["step6", 3, true],
+        ["step7", 1, false],
+        ["step8", 4, false],
+        ["step9", 2, true],
+        ["step10", 1, false],
+        ["step11", 3, false],
+        ["step12", 4, true]
+      ],
+      "caption": "Darker means more poorly conditioned; these updates would grow errors fastest."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Before applying an update, measure whether it will cause some directions in memory to explode while others shrink; if so, re-balance it so all directions scale evenly."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The condition number captures how sensitivity to input perturbations amplifies through the recurrent map; MuonSSM keeps this number bounded by applying a spectral correction (low-rank Newton-Schulz iteration) that rebalances the update matrix eigenvalues."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why stabilizing update alignment fixes long-sequence modeling",
+    "paras": [
+      "When you apply an update to memory hundreds of times in a row, any unbalance in the update direction compounds. If you nudge memory left by a factor of 2.0 at each step, after 10 steps the left side has grown by 2.0 to the 10th power, about 1,024 times larger. This is spectral amplification: some directions in the update matrix scale larger than 1.0, so repeated application blows up information exponentially and memory becomes wild.",
+      "MuonSSM prevents this by ensuring all scaling factors of the update stay close to 1.0 (bounded). The Newton-Schulz transformation is a lightweight iterative process that gently re-scales and rotates the update matrix to flatten its spectrum without requiring expensive decompositions. This keeps memory bounded at every step.",
+      "A second benefit: when memory is stable, the learning signal can flow backward smoothly through 1,000 steps without becoming impossibly tiny (vanishing) or impossibly huge (exploding). This means the model can learn long-range dependencies — it can connect a pattern at step 50 to an outcome at step 1,000 — because the learning signal stays in a reasonable size on the way back."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "New input item and previous memory"},
+        {"t": "step", "s": "Compute candidate update direction", "hl": true},
+        {"t": "step", "s": "Analyze update spectrum (eigenvalues)"},
+        {"t": "step", "s": "Apply Newton-Schulz correction if needed", "hl": true},
+        {"t": "step", "s": "Mix with momentum and apply to memory"},
+        {"t": "output", "s": "New memory, stable and bounded"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The update rule with geometric conditioning",
+    "words": "memory at step t plus one equals memory at step t plus a momentum-adjusted and spectrally corrected update; the correction applies a low-rank transformation to the update matrix to re-scale its eigenvalues.",
+    "equation": "h_t = h_{t-1} + (M_t \\odot U) x_t + beta * m_{t-1}",
+    "symbols": [
+      ["h_t", "the memory vector at step t"],
+      ["h_{t-1}", "the memory from the previous step"],
+      ["M_t", "the spectrally corrected update matrix (from Newton-Schulz)"],
+      ["U", "a low-rank injection matrix"],
+      ["x_t", "the input at step t"],
+      ["beta", "momentum weight (how much to keep the previous update trend)"],
+      ["m_{t-1}", "the momentum vector (running average of updates)"],
+      ["\\odot", "element-wise multiplication"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose h_{t-1} = [1.0, 0.5], x_t = [0.3], and the update matrix eigenvalues are [2.1, 0.8] — unbalanced.",
+        "Newton-Schulz detects this and rescales to [1.0, 0.9] — nearly balanced.",
+        "With the corrected update: new h_t = [1.0, 0.5] + corrected([2.1, 0.8]) * [0.3] + 0.9 * previous_momentum.",
+        "Without correction, after 100 steps, the first dimension would grow by 2.1^100 — impossible. With correction at each step, all dimensions grow by at most 1.0^100 — stable."
+      ]
+    },
+    "note": "Every update is checked and corrected in real time, so errors do not compound; learning signals flow backward without becoming impossibly tiny or impossibly huge."
+  },
+  "bars": {
+    "h2": "Accuracy over long sequences",
+    "charts": [
+      {
+        "title": "Naive SSM (no conditioning)",
+        "rows": [
+          ["Accuracy on first 100 items", 94, "good"],
+          ["Accuracy on items 100-500", 68, "bad"],
+          ["Accuracy on items 500-1000", 31, "bad"]
+        ],
+        "note": "Without conditioning checks, memory becomes unstable; accuracy collapses on long horizons."
+      },
+      {
+        "title": "MuonSSM (with update conditioning)",
+        "rows": [
+          ["Accuracy on first 100 items", 94, "good"],
+          ["Accuracy on items 100-500", 89, "good"],
+          ["Accuracy on items 500-1000", 87, "good"]
+        ],
+        "note": "Update conditioning keeps memory stable; the model maintains accuracy across the entire sequence."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The low-rank injection is too small.",
+        "html": "If the U matrix has too few columns, it cannot express complex update patterns. The method becomes a bottleneck: you spend computation on correction but lose the ability to represent varied changes in memory."
+      },
+      {
+        "warn": true,
+        "b": "Newton-Schulz does not fully balance the spectrum.",
+        "html": "The Newton-Schulz iteration is iterative and converges gradually. If you run only one or two steps, the spectrum is only partially corrected, and instability can still creep in on very long sequences (10,000+ items)."
+      },
+      {
+        "warn": true,
+        "b": "Momentum mixing hides true dynamics.",
+        "html": "If the momentum weight beta is too high, the model remembers its past update patterns too rigidly and cannot adapt quickly to new types of input. This is especially bad when the task changes mid-sequence."
+      },
+      {
+        "b": "Done right: measured tuning is necessary.",
+        "html": "The method requires careful choice of U rank, Newton-Schulz iteration count, and momentum beta. These are hyperparameters that depend on the task and sequence length. The paper shows good default values, but practitioners must validate on their own data."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Write a simple state space model that reads a sequence of 2,000 numbers (each from 0 to 1), where the correct output depends on a pattern from step 50 and another pattern from step 1,500. Train it with and without update conditioning. Plot the learning signal magnitude at each layer as you reverse-propagate through all 2,000 steps (the process of computing how much each weight caused errors). Without conditioning, signals should vanish or explode; with conditioning, they should stay in a steady range (say, between 0.01 and 100), proving that information flows smoothly backward through the long sequence."
+    ],
+    "metric_eq": "Learning signal stability = log(max signal) - log(min signal) at each backprop step; lower is better.",
+    "closing": "The demo must make it impossible to miss: with update conditioning, you can train on long sequences; without it, the learning signals destroy themselves."
+  }
+}

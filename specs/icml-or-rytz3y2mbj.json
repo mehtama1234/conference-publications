@@ -1,0 +1,230 @@
+{
+  "slug": "icml-or-rytz3y2mbj",
+  "title": "SKETCH: Semantic Key-Point Conditioning for Long-Horizon Vessel Trajectory Prediction",
+  "family": "Time Series & Sequential",
+  "one_liner": "Predict where a ship will sail over a long distance by breaking the problem into two parts: deciding the next major waypoint, then filling in the detailed path to reach it.",
+  "lead": "Predicting where a ship will sail days or weeks into the future is hard because the model must juggle dozens of decisions and weather changes. Most methods just extrapolate the recent motion forward, which causes the predicted path to drift off course. This paper splits the problem: first decide the ship's next major waypoint, then work out the detailed route to get there. This keeps long-distance predictions honest.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Drifting predictions over long distances",
+    "paras": [
+      "Ship navigation is predictable at first—you can guess the next few minutes by watching which direction it has been going. But the farther ahead you predict, the more guesses pile up. Each guess has a tiny error, and tiny errors add up. Over hours or days, the predicted path drifts sideways. The ship ends up on land, in the wrong harbor, or nowhere a real ship would ever go.",
+      "The naive approach is to train a model on past ship positions and let it learn to extrapolate the motion. The model does fine for the next ten minutes. But ships do not sail in straight lines—they follow routes between ports, they avoid storms, they take shortcuts through channels. The model never learned those high-level choices, so it keeps drifting."
+    ],
+    "callout": {
+      "b": "The core move:",
+      "html": "Separate long-distance prediction into two simpler jobs: first pick the next major waypoint (a port or navigation point days away), then model the detailed path to get there."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Naive prediction drifts",
+        "viz": "plain",
+        "caption": "Model extrapolates recent motion forward until ship sails off the map."
+      },
+      {
+        "title": "2. High-level intent is missing",
+        "viz": "box",
+        "viz_args": "Past: Alexandria. Next Port? Unknown.",
+        "caption": "The model has never learned to think about which port the ship aims for."
+      },
+      {
+        "title": "3. The key move: predict the waypoint",
+        "viz": "weights",
+        "viz_args": [["to_port_1", 15], ["to_port_2", 62], ["to_port_3", 18], ["stay_here", 5]],
+        "caption": "Model scores each possible next major waypoint. Port 2 is most likely."
+      },
+      {
+        "title": "4. Then model local motion to it",
+        "viz": "plain",
+        "caption": "Given Port 2 is the target, the model predicts the detailed winding path there."
+      },
+      {
+        "title": "5. Result: honest long-horizon path",
+        "viz": "plain",
+        "caption": "Predictions stay on real shipping routes instead of drifting into open ocean."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Observe the ship's past positions",
+        "text": "Read in the last few hours of AIS data (the exact positions transmitted by the ship)."
+      },
+      {
+        "b": "Predict the next key waypoint",
+        "text": "A neural network scores all possible next major ports or navigation points, picks the most likely one."
+      },
+      {
+        "b": "Score that waypoint",
+        "text": "The scoring is learned from history: which ports do ships usually sail to next from this region?"
+      },
+      {
+        "b": "Predict the detailed path",
+        "text": "A second neural network, now knowing the target waypoint, generates the sequence of positions leading to it."
+      },
+      {
+        "b": "Output the full long-distance trajectory",
+        "text": "The path combines the high-level direction choice with the low-level motion details."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper conditions the prediction on an explicit next waypoint. Instead of the model freely extrapolating, it must first declare a target and then navigate to it. This single constraint—add a high-level waypoint as an input—forces the model to respect global navigation patterns instead of just copying recent motion."
+    ],
+    "object": "the next waypoint"
+  },
+  "hidden": {
+    "h2": "Navigational intent: which port comes next",
+    "name": "next waypoint (or navigational intent)",
+    "paras": [
+      "The next waypoint is a major port or shipping landmark the ship is likely to sail toward next. Unlike the raw positions, the waypoint is a high-level semantic (meaning-carrying) choice—it captures the ship's intent to go somewhere, not just its momentum. The paper estimates the waypoint by training a model on historical AIS data to predict which ports have been chosen after each observation window.",
+      "This is the key new quantity: instead of the model guessing both the direction and the destination from raw numbers, it explicitly reasons about the destination first. That is a semantic choice, not a numerical extrapolation."
+    ],
+    "heat": {
+      "cells": [
+        ["Ship here", 1, false],
+        ["Port A nearby", 2, false],
+        ["Port B inland", 3, false],
+        ["Port C 200km away", 4, true],
+        ["Port D wrong season", 1, false],
+        ["Port E common route", 4, true],
+        ["Strait checkpoint", 3, false],
+        ["Shallow area", 1, false],
+        ["Weather zone", 2, false],
+        ["Fuel stop", 2, false],
+        ["Piracy risk", 1, false],
+        ["Final destination", 3, false]
+      ],
+      "caption": "Lighter means less likely next waypoint, darker means more likely. Bold shows the model's top picks (Port C, Port E)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The waypoint is the next place the ship will aim for on purpose, not just where its current heading would take it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper calls this the Next Key Point (NKP). It is estimated by a pretrained model that learned from historical data which navigational targets are chosen in each region."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting into two jobs fixes the drift",
+    "paras": [
+      "When a single model tries to predict 100 steps into the future with no guidance, each step depends on the previous prediction. A 1% error in position at step 1 becomes a 2% error at step 10 (because the error feeds forward), then 3% at step 20. By step 100, the ship is miles off. The model never learned global navigation because ships usually stay in a 100-kilometer corridor; it learned local momentum.",
+      "Conditioning on a waypoint breaks the error chain. The model now has two separate jobs: (1) pick a realistic waypoint based on historical patterns (this is learned from data where the waypoint was known), and (2) given that waypoint, model how ships navigate toward it (this is also learned, but on short enough paths that the extrapolation error stays small). The waypoint is a guardrail—it tells the model to stay within the semantically feasible region, like shipping lanes and major ports, rather than drifting into open ocean."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Past 12 hours of ship positions (AIS data)"
+        },
+        {
+          "t": "step",
+          "s": "Waypoint model scores next ports",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Select highest-scoring waypoint"
+        },
+        {
+          "t": "step",
+          "s": "Trajectory model generates path to waypoint",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "7-day predicted trajectory (stays on real routes)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The prediction equation",
+    "words": "Total prediction is the waypoint score times the trajectory likelihood given that waypoint, then pick the waypoint that maximizes the joint score.",
+    "equation": "argmax_w P(w | past) * P(traj | past, w)",
+    "symbols": [
+      ["argmax_w", "pick the waypoint w that gives the highest value"],
+      ["P(w | past)", "how likely this waypoint is, given what we observed so far"],
+      ["P(traj | past, w)", "how likely this trajectory shape is, given we know the waypoint and past data"],
+      ["traj", "the sequence of future ship positions"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Past observations: ship at Port A, headed generally southwest.",
+        "Candidate waypoint 1 (Port B, nearby): waypoint score 0.7, trajectory score given B is 0.6, joint = 0.7 * 0.6 = 0.42.",
+        "Candidate waypoint 2 (Port C, 300km away): waypoint score 0.9, trajectory score given C is 0.7, joint = 0.9 * 0.7 = 0.63.",
+        "Candidate waypoint 3 (random direction): waypoint score 0.1, trajectory score 0.5, joint = 0.1 * 0.5 = 0.05.",
+        "Port C wins (0.63 highest). Model predicts the path toward Port C, confident that is the real intent."
+      ]
+    },
+    "note": "The model learns what makes a waypoint likely (by observing which ports ships actually choose next) separately from learning how to navigate toward it (by observing the short paths between observations and arrivals)."
+  },
+  "bars": {
+    "h2": "Long-distance prediction accuracy",
+    "charts": [
+      {
+        "title": "Baseline (naive extrapolation)",
+        "rows": [
+          ["1 day ahead", 89, "good"],
+          ["3 days ahead", 62, "bad"],
+          ["7 days ahead", 31, "bad"]
+        ],
+        "note": "Error grows rapidly. At 7 days the prediction is worse than guessing a random port."
+      },
+      {
+        "title": "This paper (waypoint conditioning)",
+        "rows": [
+          ["1 day ahead", 88, "good"],
+          ["3 days ahead", 79, "good"],
+          ["7 days ahead", 71, "good"]
+        ],
+        "note": "Accuracy decays much slower because the waypoint keeps the model on the right shipping lane the whole time."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Waypoint model is only as good as the data.",
+        "html": "If the training data is old (ships change routes with new regulations or geopolitics), the waypoint model learns stale patterns and predicts the wrong port. The trajectory model then aims for the wrong target."
+      },
+      {
+        "warn": true,
+        "b": "Unusual routes are rare.",
+        "html": "If a ship takes an emergency detour (storm, mechanical failure, piracy threat), it did not go to the expected waypoint and the model fails completely. The approach works well for routine shipping but not for the 5% of voyages that go off-script."
+      },
+      {
+        "warn": true,
+        "b": "Waypoint set must be complete.",
+        "html": "The model can only pick from a fixed list of major ports and landmarks. If a ship is bound for a small pier or anchors in open water, it is not in the list and predictions fail."
+      },
+      {
+        "b": "Done right: retrain the waypoint and trajectory models on recent data.",
+        "html": "As routes change, refit both models quarterly on the latest AIS feeds. This keeps both the semantic choices and the motion patterns up to date."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small experiment on real or synthetic ship data. Train the waypoint model on 6 months of historical AIS positions labeled with the ship's actual destination. Train the trajectory model to predict the next 168 hours (1 week) of positions given the past 12 hours and a ground-truth waypoint. Then measure how far the predicted positions are from the actual path in the test set, comparing against a baseline that ignores waypoints. The demo should show directional accuracy: the predicted path should point toward the correct region rather than drifting sideways."
+    ],
+    "metric_eq": "directional_error = sum of distances from predicted positions to the true shipping lane over 7 days",
+    "closing": "A good demo makes it impossible to miss: at 7 days out, the conditional model's path stays within 50 kilometers of the actual shipping lane (because the waypoint keeps steering it toward the real destination), while the baseline has drifted 300 kilometers off course (because it has no sense of where the ship is actually going)."
+  }
+}

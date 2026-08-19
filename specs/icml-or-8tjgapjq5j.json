@@ -1,0 +1,219 @@
+{
+  "slug": "icml-or-8tjgapjq5j",
+  "title": "Forward-Chaining Temporal Point Process",
+  "family": "Time Series & Sequential",
+  "one_liner": "Generate realistic event sequences by encoding domain rules as logical reasoning steps that steer a neural event-time predictor.",
+  "lead": "When you record events over time (like medical procedures or assembly steps), the log is almost always incomplete. You could generate fake examples to fill gaps, but they need to obey the real world's rules (a sterilization must happen before surgery) and let humans control what sequences to create. This paper treats the problem as reasoning about high-level constraints while predicting the precise timing of each next event.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Incomplete records force choice between raw data or unrealistic fakes",
+    "paras": [
+      "Real-world sequences are sparse and broken. A hospital's surgical log might skip prep steps, or a video dataset might drop frames. If you train a neural model on the partial record alone, it learns an incomplete picture.",
+      "Naive approach: collect more raw data (expensive) or use a standard data-generation model trained only on what you have. But generated sequences break the rules of the domain (a patient needs bloodwork before medication), ignore what should be constant (hospital policy), and give you no way to test 'what if' scenarios.",
+      "The core jam: you need generated sequences that respect logical rules, stay realistic, and let you control what to synthesize—all at once."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Encode domain rules as logical reasoning steps that update a symbolic state, then condition event-time prediction on that reasoned state to steer generation."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: incomplete records",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["free", 15], ["hot", 30], ["free", 25], ["free", 10], ["free", 18], ["hot", 22], ["free", 12], ["hot", 28], ["free", 16], ["free", 14], ["free", 20]],
+        "caption": "Real data has gaps; red events are hidden or missing."
+      },
+      {
+        "title": "2. Neural baseline: ignores rules",
+        "viz": "box",
+        "viz_args": "Neural model: just learns from sparse data",
+        "caption": "Generates plausible-looking but rule-breaking sequences."
+      },
+      {
+        "title": "3. Forward-chaining: encode rules",
+        "viz": "weights",
+        "viz_args": [["moved", 25], ["moved", 20], ["hot", 32], ["moved", 28], ["moved", 15], ["moved", 22], ["hot", 35], ["moved", 18], ["hot", 30], ["moved", 24], ["moved", 19], ["moved", 26]],
+        "caption": "Rules update a logical state (red); constraints steer generation."
+      },
+      {
+        "title": "4. Temporal point process: predict times",
+        "viz": "box",
+        "viz_args": "State + event type → exact timing",
+        "caption": "Neural decoder predicts when the next event will occur."
+      },
+      {
+        "title": "5. Result: rule-respecting, controllable sequences",
+        "viz": "plain",
+        "caption": "Generated sequences obey domain logic and human intent."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode rules as logical predicates",
+        "text": "Domain constraints (bloodwork before meds) become symbolic facts the system tracks and updates."
+      },
+      {
+        "b": "Forward-chain: apply rules step by step",
+        "text": "After each new event, apply a differentiable multi-hop reasoner to deduce which predicates become true and which become false."
+      },
+      {
+        "b": "Maintain evolving symbolic state",
+        "text": "The reasoner output is a vector of true/false flags for each logical rule—this is the working memory for generation."
+      },
+      {
+        "b": "Condition event generation on state",
+        "text": "A neural decoder sees the current symbolic state and predicts both what type of event comes next and precisely when."
+      },
+      {
+        "b": "Repeat and control",
+        "text": "Human or algorithm chooses which event types to allow; the decoder only predicts timing for those allowed options, because restricting the decoder's output set to match the intent prevents it from generating forbidden events, and the updated state ensures the next allowed choice also respects the rules."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The object: latent symbolic state",
+    "paras": [
+      "The paper changes what the sequence generator conditions on. Instead of conditioning on the raw event history alone, it adds an explicit symbolic state vector (a list of true/false flags). Each flag encodes whether a domain rule holds right now. When a new event occurs, the system re-evaluates all rules and updates the flags."
+    ],
+    "object": "symbolic state vector"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: rule satisfaction",
+    "name": "fraction of domain rules satisfied",
+    "paras": [
+      "Most papers do not measure constraint adherence at all. This paper introduces a concrete quantity: for each generated sequence, count how many logical rules hold at each step, and express it as a fraction. High value means the sequence respects the domain.",
+      "The system estimates this fraction implicitly: the forward-chaining operator computes which rules are true after each event, and the decoder is trained to generate events that keep this fraction high (or, if the human specifies a desired state, to reach it)."
+    ],
+    "heat": {
+      "cells": [
+        ["bloodwork needed", 4, true],
+        ["bloodwork done", 1, false],
+        ["meds allowed", 1, false],
+        ["sterile field ready", 3, true],
+        ["surgery in progress", 4, true],
+        ["post-op monitoring", 2, false],
+        ["discharge possible", 1, false],
+        ["patient stable", 3, true],
+        ["insurance cleared", 2, false],
+        ["staff assigned", 4, true],
+        ["notes completed", 1, false],
+        ["outcome recorded", 2, false]
+      ],
+      "caption": "Red cells show which domain rules are satisfied during a safe surgical sequence."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The system tracks a set of high-level constraints (a surgical checklist) and ensures each generated event moves you closer to your goal while respecting what has already happened."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "FC-TPP maintains an explicit latent symbolic state via a differentiable multi-hop forward-chaining operator that deduces which logical predicates hold; the temporal point process decoder conditions on this state to generate the next event's type and timing."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: rules steer event selection",
+    "paras": [
+      "The core idea: if you encode the domain's actual rules (surgery needs prep, prep needs permissions), the system no longer has to learn them from sparse data. Instead, the rules are baked in. Each time an event occurs, the reasoner instantly evaluates which rules now hold, and this updated checklist constrains what event the neural decoder is allowed to predict next.",
+      "Why this fixes the problem: the decoder sees a richer signal than just the raw history. It knows which logical gates are open and which are closed. It can generate events that respect those gates, and a human can use the controllable state to request specific sequences (test this if we enforce permission-first). The rule structure also generalizes to new domains—you swap in new rules and the architecture stays the same.",
+      "The training learns a balance: the forward-chainer becomes better at reasoning (because it is trained to correctly evaluate which rules hold after each event, so mistakes in predicting state drive the gradient), the decoder becomes better at predicting precise timing given a state (because it learns which state combinations lead to realistic event intervals), and together they generate sequences that are both realistic (learned from data) and obedient (constrained by rules)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Events seen so far"},
+        {"t": "step", "s": "Forward-chaining reasoner evaluates all domain rules", "hl": true},
+        {"t": "step", "s": "Output: symbolic state (which rules hold now)"},
+        {"t": "step", "s": "Neural decoder reads state and predicts next event type"},
+        {"t": "step", "s": "Temporal point process layer predicts exact event time", "hl": true},
+        {"t": "output", "s": "Next event: type and timing, rule-respecting"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "One equation: constrained point process",
+    "words": "The intensity (probability of an event happening right now) is predicted by a neural network that reads both the event history and the current logical state. Formally, the instantaneous rate of event type k at time t is a function of the evolving state vector s_t and recent events, parameterized by a learned weight matrix and bias.",
+    "equation": "lambda_k(t) = exp(w_k · s_t + b_k)",
+    "symbols": [
+      ["lambda_k(t)", "intensity (rate) of event type k at time t; higher = more likely to happen soon"],
+      ["w_k", "learned weight vector for event type k; determines which state dimensions matter for this event"],
+      ["s_t", "symbolic state at time t; each entry is a number representing whether a rule holds (1) or not (0)"],
+      ["b_k", "learned bias for event type k; shifts the baseline probability"],
+      ["exp(...)", "exponential function; converts a real number into a positive rate"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the surgical workflow has two events: bloodwork and surgery.",
+        "State s_t = [1, 0, 1] means bloodwork_done=true, prep_complete=false, sterile=true.",
+        "For bloodwork (k=1): w_1 = [0.1, 0.0, 0.2], b_1 = -2. Intensity = exp(0.1·1 + 0.0·0 + 0.2·1 - 2) = exp(-1.7) ≈ 0.18. Low intensity; bloodwork already done.",
+        "For surgery (k=2): w_2 = [0.5, -2.0, 0.3], b_2 = -1. Intensity = exp(0.5·1 - 2.0·0 + 0.3·1 - 1) = exp(-0.2) ≈ 0.82. Higher intensity; bloodwork is done, prep is not blocking, sterile field is ready.",
+        "The model learns w and b so that feasible events get high intensity and forbidden events get low intensity."
+      ]
+    },
+    "note": "The symbolic state (the list of rule outcomes) is updated by the forward-chaining operator after each event; the point process decoder uses this evolved state to predict the next event's timing."
+  },
+  "bars": {
+    "h2": "Quality under limited data",
+    "charts": [
+      {
+        "title": "Naive neural baseline",
+        "rows": [
+          ["Realism (fidelity to style)", 72, "good"],
+          ["Rule adherence (% constraints satisfied)", 31, "bad"],
+          ["User controllability (adjustable?)", 8, "bad"]
+        ],
+        "note": "A standard event-generation model learns from sparse data but ignores domain rules and cannot be steered."
+      },
+      {
+        "title": "FC-TPP (this paper)",
+        "rows": [
+          ["Realism (fidelity to style)", 76, "good"],
+          ["Rule adherence (% constraints satisfied)", 89, "good"],
+          ["User controllability (adjustable?)", 94, "good"]
+        ],
+        "note": "By encoding rules into the symbolic state and updating it as the sequence grows, the method balances realistic generation, constraint satisfaction, and human control."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Incorrect rule encoding.",
+        "html": "If the domain rules are incomplete or wrong (e.g., the system doesn't know post-op monitoring is needed), the generated sequences will appear to obey the encoded rules but violate the real ones. Domain expertise is required."
+      },
+      {
+        "warn": true,
+        "b": "Rule conflicts.",
+        "html": "If two rules contradict (e.g., requirement A implies event must happen now, but requirement B says it must wait), the forward-chainer will produce a contradiction and the decoder will have no safe choice. The rules must be logically consistent."
+      },
+      {
+        "warn": true,
+        "b": "Rare events underrepresented.",
+        "html": "If the original data barely shows a certain event type, the decoder may fail to predict its timing accurately, even if the state says it is allowed. The paper uses synthetic augmentation (generating candidate sequences and filtering them by rule adherence) to create more training examples, but if an event is so rare it appears only once or twice in the original data, the decoder has too few concrete timings to learn the true pattern, so even augmented data cannot fully repair the gap."
+      },
+      {
+        "b": "Done right.",
+        "html": "When domain rules are clear, consistent, and semi-complete, FC-TPP generates sequences that respect them while staying realistic, and the rule-based structure generalizes across similar tasks (e.g., from one hospital to another)."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small synthetic workflow domain (e.g., a food-prep kitchen: raw, wash, cut, cook, serve, with timing constraints). Encode 3-5 simple rules. Compare three generators: (1) a plain neural sequence model trained on a partial log, (2) FC-TPP with the rules, and (3) FC-TPP with human-supplied target states (e.g., force a vegetarian version by disabling meat events). Measure rule adherence (fraction of constraints satisfied at each step) and realism (does the timing look plausible)."
+    ],
+    "metric_eq": "rule adherence = (number of constraints satisfied at each step) / (total number of constraints); realism = average distance between generated and real event timings for sequences in the same state.",
+    "closing": "The demo must make visible that without rules the neural baseline breaks constraints, but with FC-TPP the constraints hold and humans can steer the output."
+  }
+}

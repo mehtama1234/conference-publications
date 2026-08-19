@@ -1,0 +1,234 @@
+{
+  "slug": "icml-or-hv1r5bmspa",
+  "title": "ATLAS: Learning to Optimally Memorize the Context at Test Time",
+  "family": "Time Series & Sequential",
+  "one_liner": "A recurrent memory module that learns to compress and update context words when answering a new question, instead of just stacking them all until they overflow.",
+  "lead": "The most popular sequence models attend to every past word, but this gets impossibly slow and memory-hungry as sequences grow. Recurrent models use a fixed-memory slot to summarize the past, avoiding that explosion—but they often forget important details because they update that summary one word at a time, myopically, without planning ahead. Atlas is a memory module that rewrites its summary by looking at all the words it has seen so far, not just reacting to the last one.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why recurrent models forget details",
+    "paras": [
+      "The most popular models pay full attention to every past word, which works beautifully for understanding context—but the cost grows as the square of sequence length. For a sequence of 10,000 words, the model needs to compute 100 million attention pairings. For a million-word document, it is hopeless.",
+      "Recurrent models avoid this explosion by keeping a single memory slot (a fixed list of numbers) that summarizes everything seen so far. At each step, the model reads the new word and updates that summary. The problem: this update is purely local. The model only looks at the current word and the current memory state; it cannot step back and ask what was actually important to remember. If an important detail arrived early and has not been mentioned since, the model might accidentally delete it to make room for recent noise.",
+      "Researchers have tried to give recurrent models bigger memories, but a bigger slot still gets filled one word at a time, online, without foresight. Nothing fundamentally changes until the memory management itself becomes smarter."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Instead of updating memory only with the current word, rewrite the entire memory by looking back at all past words and deciding what to keep."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The transformer baseline",
+        "viz": "brain",
+        "caption": "Every word attends to every past word. Dense, quadratic cost."
+      },
+      {
+        "title": "2. Recurrent model struggling",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["warm", 35], ["free", 45], ["free", 50], ["free", 60]],
+        "caption": "Memory slot summarizes past, but updates myopically one word at a time."
+      },
+      {
+        "title": "3. Atlas looks backward",
+        "viz": "weights",
+        "viz_args": [["moved", 40], ["moved", 35], ["moved", 45], ["moved", 50], ["moved", 60]],
+        "caption": "Rewrite memory by scanning all past words, select what matters."
+      },
+      {
+        "title": "4. Memory after rewrite",
+        "viz": "box",
+        "viz_args": "hot=kept detail / warm=compressed / free=discarded",
+        "caption": "Compressed summary now holds true highlights, not just recent noise."
+      },
+      {
+        "title": "5. Longer sequences stay accurate",
+        "viz": "plain",
+        "caption": "Model answers questions about distant context correctly, linear-cost computation."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Collect all words so far",
+        "text": "At each time step, gather every word seen from start to now."
+      },
+      {
+        "b": "Compute importance of each word",
+        "text": "Score how much each past word should influence the new memory."
+      },
+      {
+        "b": "Select key words to remember",
+        "text": "Pick words with highest importance; drop the rest."
+      },
+      {
+        "b": "Rewrite the memory",
+        "text": "Combine selected words into a compressed summary."
+      },
+      {
+        "b": "Continue to next word",
+        "text": "Next input uses this rewritten memory, not just the old one."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces the simple one-step memory update rule (take old memory, add new word) with a full rewrite step: inspect all past words, score each one for relevance, keep only the important ones, and compress them into a new memory. This is done not just once at the end, but at every step as the model reads forward."
+    ],
+    "object": "memory update rule"
+  },
+  "hidden": {
+    "h2": "Token importance: which words matter for the future",
+    "name": "importance score per word",
+    "paras": [
+      "Token importance is a single number per word saying how much that word will affect the model's future answers. If a word is about a critical plot point or a key fact, it gets a high score. If it is filler noise, it gets a low score.",
+      "The paper learns to estimate this score by looking at how much the memory changes when that word is added. Tokens that cause big, stable changes to the memory are important; words that barely touch it are noise. By ranking words this way, the model can decide which ones fit into the fixed memory slot and which can be dropped."
+    ],
+    "heat": {
+      "cells": [
+        ["t1-detail", 4, true],
+        ["t2-filler", 1, false],
+        ["t3-fact", 4, true],
+        ["t4-noise", 1, false],
+        ["t5-link", 3, true],
+        ["t6-pause", 1, false],
+        ["t7-key", 4, true],
+        ["t8-chat", 1, false],
+        ["t9-name", 3, true],
+        ["t10-meta", 1, false],
+        ["t11-event", 4, true],
+        ["t12-filler2", 1, false]
+      ],
+      "caption": "Darker means word has higher importance. Hot words stay; free words are dropped during memory rewrite."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Word importance scoring works by identifying which words will be needed later for answering future questions. When you read a text, some words carry facts and links; others are filler. Atlas learns to score each word by whether its removal would hurt downstream reasoning. High-scoring words stay in memory; low-scoring words are dropped."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper frames importance as the influence of each word on the memory state under future prediction loss. It learns an importance function (a small neural network) that predicts which words will be needed for downstream reasoning tasks."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why rewriting memory at every step fixes the forgetting problem",
+    "paras": [
+      "A standard recurrent model updates memory purely by examining the new word and the old memory. If a word was important but arrived five steps ago, and nothing has triggered it since, the model has no way to know it is still critical. The update step cannot reach back to rescue it.",
+      "Atlas breaks this trap by regularly stepping back and re-examining the full sequence history. At each rewrite, it asks: which of the words I have seen are truly important for answering future questions? It can now resurrect a buried detail that a myopic online update would have erased. The rewrite is based on learned importance scores, so the model trains on where those scores should point—because if importance scores misrank a word (say, marking noise as important and a key fact as unimportant), the rewrite will produce a worse memory, and the prediction error will flow back to those scores as learning feedback. Over time, it learns which words matter for the downstream task.",
+      "The key win: the rewrite process is differentiable (the model can learn to improve importance scores during training by computing which direction to nudge each score), so importance scores improve. The model learns to value words for the right reasons, not by accident. And critically, rewriting does not require storing all words—it is done in a fixed-size memory, so the cost grows linearly with sequence length and stays tractable even for very long texts."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "new word arrives"
+        },
+        {
+          "t": "step",
+          "s": "score all past words for importance",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "select top-scoring words"
+        },
+        {
+          "t": "step",
+          "s": "compress selected words into memory"
+        },
+        {
+          "t": "output",
+          "s": "rewritten memory for next step"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The memory rewrite equation",
+    "words": "new memory equals sum over all past words of (importance score times word vector), divided by total importance, all passed through a learned compression function",
+    "equation": "m_t = compress(sum_i importance_i * word_i / sum_i importance_i)",
+    "symbols": [
+      ["m_t", "the memory vector at step t (a fixed list of numbers)"],
+      ["word_i", "the i-th word from the start, as a vector"],
+      ["importance_i", "learned score for how much word i matters (0 to 1)"],
+      ["compress", "a small neural network that squeezes the sum into the fixed memory size"],
+      ["sum_i", "add up over all past words from the start to now"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we have 4 past words: detail (vector [1,0]), filler (vector [0,1]), fact (vector [1,1]), noise (vector [0,0]).",
+        "Importance scores learned by the model: detail=0.8, filler=0.1, fact=0.9, noise=0.05.",
+        "Weighted sum: 0.8*[1,0] + 0.1*[0,1] + 0.9*[1,1] + 0.05*[0,0] = [0.8,0] + [0,0.1] + [0.9,0.9] + [0,0] = [1.7, 1.0].",
+        "Total importance: 0.8 + 0.1 + 0.9 + 0.05 = 1.85.",
+        "Normalized: [1.7, 1.0] / 1.85 = [0.92, 0.54].",
+        "Pass through compress network to fit memory slot size, e.g., [0.92, 0.54] -> [0.8]. Result: a single number summarizing all four words, weighted by their learned importance."
+      ]
+    },
+    "note": "The equation is a weighted average of all words, where the weights are importance scores learned during training. The compress function adapts this average to fit the fixed memory size."
+  },
+  "bars": {
+    "h2": "How Atlas improves on fixed-memory recurrent models",
+    "charts": [
+      {
+        "title": "Standard recurrent (myopic updates)",
+        "rows": [
+          ["Remembers recent words", 88, "good"],
+          ["Recalls early details", 34, "bad"],
+          ["Long-context accuracy", 42, "bad"]
+        ],
+        "note": "Updates only with the current word; important early words fade away."
+      },
+      {
+        "title": "Atlas (lookback rewriting)",
+        "rows": [
+          ["Remembers recent words", 86, "good"],
+          ["Recalls early details", 76, "good"],
+          ["Long-context accuracy", 79, "good"]
+        ],
+        "note": "Rewriting at every step rescues buried details and maintains accuracy over thousands of words."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Importance scores are overconfident early.",
+        "html": "If the model trains on short sequences, it learns to rank words based only on what mattered for those lengths. When given a much longer sequence, it may over-prune words it has never seen tested at scale, leading to information loss."
+      },
+      {
+        "warn": true,
+        "b": "Memory rewrite cost per word can add up.",
+        "html": "Every step requires scoring all past words and rewriting memory. For truly massive sequences (millions of words), this is cheaper than comparing every word to every other word (quadratic cost), because scoring and rewriting take linear time in the number of words—but the cost of both scoring and rewriting at every step still means the total wall-clock time is not negligible for extremely long sequences."
+      },
+      {
+        "warn": true,
+        "b": "Learned importance can be brittle across domains.",
+        "html": "If the model learns importance weights on one type of text (e.g., news articles) and is then used on a completely different text type (e.g., source code), the importance scores may not transfer well, and early words may be dropped incorrectly."
+      },
+      {
+        "b": "Done right: train on a diverse mix of sequence lengths and domains.",
+        "html": "This forces importance scores to remain stable across different sequence types and to preserve words that matter across many different downstream tasks."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should show that Atlas can correctly answer questions about details from the distant past—facts mentioned 5,000 words ago in a 10,000-word article. Measure this by asking the model direct recall questions (\"Who did the speaker mention in the first paragraph?\") and indirect reasoning questions (\"What did the speaker say in the intro, and how does that change your understanding of what happened later?\"). Compare against a standard recurrent model and a transformer on the same questions. Plot accuracy (fraction of correct answers) as a function of distance from the question back to the relevant detail. Atlas should stay flat (high accuracy everywhere); the baseline recurrent should drop steeply for distant facts."
+    ],
+    "metric_eq": "recall_accuracy = number of questions with correct answer / total questions, computed separately for 'detail is recent' vs 'detail is ancient'",
+    "closing": "The demo must make it impossible to miss: Atlas remembers early facts as reliably as recent ones, whereas a standard recurrent forgets them. That is the whole point."
+  }
+}
