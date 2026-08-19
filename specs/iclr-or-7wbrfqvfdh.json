@@ -1,0 +1,227 @@
+{
+  "slug": "iclr-or-7wbrfqvfdh",
+  "title": "Steering Discrete Diffusion at Test Time",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Use importance weighting to steer discrete diffusion models toward constrained outputs at generation time, without retraining.",
+  "lead": "Discrete diffusion models (like those that generate text or DNA) are trained on general data, but real applications need generated outputs to satisfy specific constraints — think toxic-free text or valid protein sequences. This paper uses a classic sampling trick called Sequential Monte Carlo to make untrained models obey constraints by intelligently reweighting candidate generations and refining proposals during the generation process.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Pretrained models ignore constraints",
+    "paras": [
+      "A pretrained discrete diffusion model generates text, DNA sequences, or images based on its training data, with no ability to enforce rules. If you want toxic-free text, a valid protein fold, or images matching text descriptions, the baseline model ignores those requirements — it just samples from its learned pattern and outputs whatever happens to come out.",
+      "A naive fix: fine-tune the model on constrained data. That works but is expensive, requires new training for each constraint, and can over-optimize and ignore the original knowledge. The paper asks: can we steer an untrained model at generation time instead?"
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Reweight candidate outputs during generation to favor those meeting constraints, using a probability weighting trick that keeps the samples on target."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Pretrained model ignores rules",
+        "viz": "plain",
+        "caption": "Model generates samples freely; many violate constraints."
+      },
+      {
+        "title": "2. Each partial sequence gets a score",
+        "viz": "weights",
+        "viz_args": [["hot", 8], ["free", 2], ["warm", 5], ["hot", 7], ["free", 1], ["warm", 4], ["hot", 6], ["free", 3], ["warm", 5], ["hot", 8], ["free", 2], ["warm", 4]],
+        "caption": "Constraint checker scores how well each path meets the goal so far."
+      },
+      {
+        "title": "3. Reweight by how good they are",
+        "viz": "weights",
+        "viz_args": [["hot", 12], ["free", 1], ["warm", 8], ["hot", 11], ["free", 1], ["warm", 6], ["hot", 10], ["free", 2], ["warm", 7], ["hot", 12], ["free", 1], ["warm", 6]],
+        "caption": "Paths with high scores get more weight; bad paths get nearly zero."
+      },
+      {
+        "title": "4. Refine what comes next",
+        "viz": "box",
+        "viz_args": "Router picks high-weight paths",
+        "caption": "Next-word proposal focuses on good paths; bad paths die out."
+      },
+      {
+        "title": "5. Final output respects constraint",
+        "viz": "plain",
+        "caption": "Steering worked; output satisfies the rule without retraining."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Start with a pretrained model",
+        "text": "You have a discrete diffusion model trained on unconstrained data."
+      },
+      {
+        "b": "At each generation step, create candidate branches",
+        "text": "The model proposes K alternative next words or masks because sampling multiple choices allows reweighting to favor the best ones, rather than locking into a single proposal early."
+      },
+      {
+        "b": "Score each branch against the constraint",
+        "text": "A constraint checker (reward function) rates how well each branch satisfies the goal."
+      },
+      {
+        "b": "Reweight branches by their scores",
+        "text": "Good branches get high weight; bad branches get near-zero weight. High-weight branches are sampled more often."
+      },
+      {
+        "b": "Train a learned proposal to predict good branches",
+        "text": "Optionally, a small neural network learns to guess which branches will score high, speeding up generation."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the method changes",
+    "paras": [
+      "The method changes how the model proposes the next word or mask at each denoising step. Instead of using the pretrained model's original proposal (which ignores constraints), it either applies a direction-of-improvement tweak using calculus to favor high-scoring continuations, or trains a separate small neural network to learn which branches lead to high-constraint satisfaction. The model weights themselves do not change; only the generation procedure does."
+    ],
+    "object": "generation proposal"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: proposal efficiency",
+    "name": "log-variance of importance weights",
+    "paras": [
+      "When you reweight samples, some get very high weights and others nearly zero. If the weights are wildly unequal, you waste computation on low-weight branches that contribute almost nothing to the final answer. The paper measures this imbalance using log-variance: how spread out are the weights on a log scale? Low log-variance means weights are balanced; high log-variance means a few branches dominate and most are ignored.",
+      "The paper estimates log-variance during training of the learned proposal and uses it as the loss function: train the proposal network to minimize log-variance, which means learn to predict branches that will have more balanced importance weights. Balanced weights mean every sampled branch contributes noticeably to the final output, reducing wasted computation."
+    ],
+    "heat": {
+      "cells": [["w1", 4, true], ["w2", 1, false], ["w3", 3, true], ["w4", 4, true], ["w5", 1, false], ["w6", 2, false], ["w7", 3, true], ["w8", 1, false], ["w9", 2, false], ["w10", 4, true], ["w11", 1, false], ["w12", 2, false]],
+      "caption": "Darker means higher importance weight for that branch. Highlight shows good balance across branches."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Think of reweighting like selecting fish from a net. If you blindly keep a fish from each catch, some catches are full of big fish (high weight) and some are full of garbage (low weight). Log-variance measures how lopsided this is. Lower log-variance means more balanced, less wasted effort."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper defines log-variance as the variance of the log of importance weights across sampled branches. It is the training objective for the amortised proposal: minimizing this quantity makes the learned proposal predict branches with more uniform importance weighting, improving sample efficiency."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: reweight and refine",
+    "paras": [
+      "The core idea rests on a mathematical fact: if you take any pattern of outcomes and reweight each sample by a score, you can shift that pattern toward high-scoring outcomes. Here, the score is how well a partial sequence meets the constraint (measured by a reward function). By reweighting samples from the pretrained model by their constraint scores, the method shifts the output pattern toward high-scoring (constraint-satisfying) samples.",
+      "The pretrained model proposes candidates, but this proposal is not optimal for the constrained problem. The paper derives two ways to improve it because the original proposal wastes computation on low-scoring branches. First, a direction-based approximation uses calculus (the direction of steepest improvement in constraint reward) with respect to the current partial sequence to nudge the proposal toward high-scoring continuations, which concentrates reweighting mass on good paths. Second, a learned proposal network is trained to predict which continuations will have high constraint scores, so it proposes good candidates in the first place and fewer branches are left with near-zero weight. Both refinements reduce log-variance: fewer branches are wasted on low-scoring paths.",
+      "Throughout generation, high-weight branches survive and breed into the next step; low-weight branches die out. By denoising time steps, the model has carved away all the low-constraint paths, leaving only those that satisfy the goal. This is all done at test time with no retraining of the original model."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Pretrained diffusion model ready to generate"
+        },
+        {
+          "t": "step",
+          "s": "Create K candidate next-word proposals",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Score each by constraint reward function"
+        },
+        {
+          "t": "step",
+          "s": "Reweight: high-score branches get high weight"
+        },
+        {
+          "t": "step",
+          "s": "Resample: draw next step from reweighted choices",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Repeat: denoise backward to clean samples"
+        },
+        {
+          "t": "output",
+          "s": "Constraint-satisfying samples"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The reweighting formula",
+    "words": "importance weight = exp(score of this branch) divided by (average score of all branches). Learned proposal minimizes the variance of log importance weights.",
+    "equation": "weight_k = exp(r(x_k)) / mean_j[exp(r(x_j))], where r(x_k) is the constraint score of branch k. Optimize proposal to minimize log-variance of weights across branches.",
+    "symbols": [
+      ["r(x_k)", "constraint score (reward) of branch k (higher means better satisfaction)"],
+      ["weight_k", "final importance weight for branch k (sum of all weights = 1)"],
+      ["log-variance", "variance of log(weight_k) across branches"],
+      ["proposal", "probability distribution for next token, learned to minimize log-variance"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Three candidate next-word proposals for toxic-text avoidance:",
+        "Branch 1: generates 'dog' — constraint score r = 2.0, weight = exp(2.0) / 3.2 ≈ 0.78 (high weight, good)",
+        "Branch 2: generates 'hate' — constraint score r = -1.0, weight = exp(-1.0) / 3.2 ≈ 0.08 (low weight, bad)",
+        "Branch 3: generates 'love' — constraint score r = 1.5, weight = exp(1.5) / 3.2 ≈ 0.14 (medium weight)",
+        "Sum = 0.78 + 0.08 + 0.14 = 1.0. When resampling the next denoising step, draw 'dog' ~78% of the time, 'love' ~14% of the time, 'hate' ~8%. This heavily favors the constraint-satisfying branch."
+      ]
+    },
+    "note": "The exponential and division ensure weights stay positive and sum to 1, and the log-variance objective trains a proposal that keeps all branches useful."
+  },
+  "bars": {
+    "h2": "Before and after on real tasks",
+    "charts": [
+      {
+        "title": "Pretrained model only",
+        "rows": [
+          ["Toxic text (undesired)", "0.8%", "bad"],
+          ["Valid protein (desired)", "30%", "bad"],
+          ["Perplexity (naturalness)", "121", "good"]
+        ],
+        "note": "Model ignores constraints; naturalness is high but constraints are rarely met."
+      },
+      {
+        "title": "Sequential Monte Carlo steering",
+        "rows": [
+          ["Toxic text (undesired)", "0%", "good"],
+          ["Valid protein (desired)", "92%", "good"],
+          ["Perplexity (naturalness)", "132", "good"]
+        ],
+        "note": "Steering forces constraints to be met while keeping outputs natural. Trade-off in perplexity is small."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Constraint checker is weak or wrong.",
+        "html": "If the reward function (constraint scorer) is poorly calibrated or gives misleading scores, the reweighting steers toward the wrong target. The method is only as good as the constraint checker."
+      },
+      {
+        "warn": true,
+        "b": "Log-variance stays high.",
+        "html": "If the learned proposal fails to predict high-scoring branches, weights remain imbalanced, wasting computation. This happens when the proposal network is undertrained or the constraint is hard to anticipate."
+      },
+      {
+        "warn": true,
+        "b": "Over-constraint eliminates diversity.",
+        "html": "If the constraint is too strict or the weight temperature is too low, all paths collapse to a single branch, and the method produces repetitive or unrealistic outputs despite satisfying the constraint."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use a well-tuned reward function, train the proposal to convergence, and balance constraint strength against output naturalness via the weighting temperature. The method then reliably steers without retraining."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small discrete diffusion model trained on unconstrained text (e.g., random English sentences). Add a simple constraint checker: rate a sentence plus-1 for each occurrence of the word 'good' or 'happy' and minus-1 for 'bad' or 'sad'. Run baseline generation (expect low constraint score, high perplexity). Then run SMC steering with 4 parallel branches and a learned proposal, and measure: (1) constraint score, (2) perplexity, (3) average log-variance over generation steps."
+    ],
+    "metric_eq": "Constraint score = sum of reward over generation steps / number of steps. Log-variance = variance of log(weights) across K particles at each step. Baseline constraint ~0; SMC constraint should reach 0.8 or higher.",
+    "closing": "The demo is complete if constraint score rises from ~0 to >0.8 while perplexity stays within 10% of the unconstrained baseline, and log-variance drops as the proposal is trained."
+  }
+}

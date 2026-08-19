@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-0jhyekhdyx",
+  "title": "Why Low-Precision Training Fails: Flash Attention Error Accumulation",
+  "family": "Efficiency & Systems",
+  "one_liner": "Biased rounding errors in low-precision math, meeting structural similarity in attention weights, create a vicious cycle that explodes loss during training.",
+  "lead": "Transformers trained in low-precision (smaller numbers, less memory) with flash attention sometimes crash catastrophically—loss suddenly shoots to infinity. This paper reveals the hidden culprit: not randomness, but a specific trap where rounding errors pile up and feed back into weight updates. A tiny fix to how numbers are rounded stops it cold.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Training crashes, nobody knows why",
+    "paras": [
+      "Transformers are huge models with billions of numbers (called weights). To save memory and train faster, engineers use low-precision arithmetic: store numbers as BF16 or FP8 (shorter bit sequences) instead of full FP32. Flash attention is an optimization that makes attention (the part where the model focuses on relevant words) run faster by avoiding storing the full score table.",
+      "But here is the disaster: when you combine low-precision BF16 with flash attention and train a GPT-2 model, after thousands of training steps, the loss (the error the model is trying to shrink) suddenly explodes to infinity. Training stops dead. Empirically, reverting to standard attention or using full precision (FP32) fixes it, but nobody understood why. Workarounds are not good enough—we need to stop guessing.",
+      "A beginner's guess: maybe low-precision rounding is just a little bit random, adding noise that compounds? Or maybe flash attention itself is broken? Neither is quite right. The paper discovers something deeper: a structural trap built from two seemingly innocent properties."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Biased rounding errors in low-precision arithmetic accumulate through the backward pass and corrupt weight updates, but only when those updates interact with a hidden structural property of attention weights."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Forward: words flow",
+        "viz": "brain",
+        "caption": "Transformer focuses on earlier words using flash attention, rounded to BF16."
+      },
+      {
+        "title": "2. Backward: rounding errors creep in",
+        "viz": "weights",
+        "viz_args": [["warm", 50], ["warm", 50], ["warm", 48], ["warm", 52], ["warm", 49], ["free", 10], ["free", 10], ["free", 12], ["free", 8], ["free", 11], ["moved", 30], ["moved", 32]],
+        "caption": "Computing gradients with rounded numbers introduces bias in every layer backward pass."
+      },
+      {
+        "title": "3. The hidden trap: similar matrices",
+        "viz": "box",
+        "viz_args": "Attention weight R looks alike across tokens and steps",
+        "caption": "The gradient errors build on a structurally similar matrix—they reinforce each other."
+      },
+      {
+        "title": "4. Vicious cycle starts",
+        "viz": "weights",
+        "viz_args": [["moved", 20], ["moved", 25], ["moved", 30], ["moved", 35], ["moved", 40], ["moved", 45], ["hot", 80], ["hot", 82], ["hot", 85], ["hot", 88], ["hot", 90], ["hot", 92]],
+        "caption": "Errors feed back into weight updates, making them grow uncontrolled."
+      },
+      {
+        "title": "5. Loss explodes",
+        "viz": "plain",
+        "caption": "Corrupted weights make predictions worse, pushing loss to infinity within steps."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Identify the failure point",
+        "text": "Low-precision rounded output is reused to compute the gradient rowsum during backward, introducing rounding bias."
+      },
+      {
+        "b": "Measure the bias",
+        "text": "The difference between low-precision and high-precision gradient rowsums is not random; it is systematically skewed upward."
+      },
+      {
+        "b": "Discover the structural trap",
+        "text": "The attention weight structure looks similar across many words and training steps."
+      },
+      {
+        "b": "Show the vicious cycle",
+        "text": "Biased gradient errors, hitting this similar structure repeatedly, create weight updates that compound in the wrong direction."
+      },
+      {
+        "b": "Fix by recomputing in high precision",
+        "text": "Recompute the output in full precision during backward, letting the bias vanish and breaking the cycle."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "The paper changes where the gradient rowsum (a key intermediate number in the backward pass) comes from. Normally, flash attention reuses the low-precision rounded output from the forward pass. The paper recomputes the output in full precision (FP32) during backward to calculate the gradient rowsum, even though the rest of the backward pass stays in low-precision. This is a surgical change—one line of code—that stops the bias from poisoning weight updates."
+    ],
+    "object": "Where the gradient rowsum is computed"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: gradient bias",
+    "name": "Systematic skew in gradient rowsum error",
+    "paras": [
+      "Normally when you round a number in low-precision, the rounding goes up or down randomly, averaging to zero over time. But in flash attention, computing the gradient rowsum with low-precision rounded numbers introduces a systematic bias: the errors are not random, they lean consistently upward. This happens because of how the stabilization trick (safe softmax) interacts with rounding in a way that makes the low-precision gradient rowsum consistently larger than the true high-precision one.",
+      "The paper measures this bias by running the same training step in both BF16 and FP32, then subtracting the low-precision gradients from the high-precision ones. It discovers that this difference, when multiplied by the attention weight structure, creates weight updates that point in the wrong direction consistently. That is the trap: a systematic bias (not noise) meeting structural similarity (the weight structure repeats)."
+    ],
+    "heat": {
+      "cells": [
+        ["lp-rowsum", 4, true],
+        ["hp-rowsum", 1, false],
+        ["bias", 4, true],
+        ["R-struct", 3, true],
+        ["gradnorm", 4, true],
+        ["step1", 2, false],
+        ["step2", 2, false],
+        ["step3", 3, true],
+        ["step4", 4, true],
+        ["badupdate", 4, true],
+        ["loss", 4, true],
+        ["explode", 4, true]
+      ],
+      "caption": "Darker means higher bias or magnitude. Highlights show where bias corrupts weight updates."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Low-precision rounding does not cancel out—it leans consistently upward, corrupting weight gradients."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Weight update error accumulates when the systematic rowsum bias multiplies the low-rank attention structure across steps."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it fails, and how the fix stops it",
+    "paras": [
+      "The mechanism has three linked steps. First, flash attention computes an intermediate value (the gradient rowsum) during the backward pass. In low-precision training, the attention output is stored in BF16 from the forward pass, so the gradient rowsum is computed with rounded numbers. This rounds the rowsum itself, introducing error.",
+      "Second, the paper shows that this rounding error is not symmetric (not equally likely up or down). The stabilization trick (safe softmax, which prevents numerical blowup) combined with low-precision rounding biases the gradient rowsum consistently upward. This is the seed of the trap.",
+      "Third, the gradient rowsum multiplies the attention weight structure. If the rowsum had random errors, they would wash out. But it is biased, and the weight structure has a special property: it stays low-rank and similar across different words and training steps. This means the biased rowsum hits the same structural direction repeatedly, accumulating error in that direction. The weight update becomes systematically wrong, pushing weights in a bad direction.",
+      "The vicious cycle: these corrupted weight updates make the model's predictions worse, increasing loss. Higher loss means larger gradients in the next step, which amplifies the bias. After a few thousand steps, the bias feedback loop explodes and loss shoots to infinity.",
+      "The fix: recompute the attention output in full precision (FP32) during the backward pass, even though the rest of the computation stays in BF16. Now the gradient rowsum is computed from accurate output, bias vanishes, and the weight updates point the right way. The cost is tiny: one recomputation per layer per step."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Forward pass: attention output stored in BF16"
+        },
+        {
+          "t": "step",
+          "s": "Reuse output or recompute: standard flash does not recompute",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute gradient rowsum with biased output, bias emerges"
+        },
+        {
+          "t": "step",
+          "s": "Multiply by low-rank weight structure: bias compounds"
+        },
+        {
+          "t": "step",
+          "s": "Weight update corrupted, loss explodes"
+        },
+        {
+          "t": "output",
+          "s": "Fix: recompute output in full precision during backward, break cycle"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: biased weight update",
+    "words": "The weight update error is the learning rate times the product of the rowsum gradient bias and the attention weight structure",
+    "equation": "update_error = learning_rate * (rowsum_bias) * (weight_structure)",
+    "symbols": [
+      ["update_error", "how much the weight update is pushed in the wrong direction"],
+      ["learning_rate", "how big each update step is"],
+      ["rowsum_bias", "the systematic upward skew in the gradient rowsum from low-precision rounding"],
+      ["weight_structure", "the low-rank structure inside attention, which looks the same across words and steps"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the rowsum bias is 0.2 (small but systematic), the weight structure magnitude is 3, and learning_rate is 0.01.",
+        "Per-step error: 0.01 * 0.2 * 3 = 0.006 (tiny, pushes weights wrong way)",
+        "After 5000 steps: same 0.2 bias hits the same weight structure each step, errors pile up: 5000 * 0.006 = 30.0 (huge)",
+        "After 6000 steps: corrupted weights make predictions worse, loss grows; larger loss means larger gradients; bias amplifies; loss shoots to infinity."
+      ]
+    },
+    "note": "The bias is small per step, but hitting the same repeated structure means it compounds in one direction, never canceling out."
+  },
+  "bars": {
+    "h2": "Impact: training stable vs. training crashed",
+    "charts": [
+      {
+        "title": "Standard low-precision flash attention",
+        "rows": [
+          ["After 2000 steps", 3.1, "good"],
+          ["After 4000 steps", 2.8, "good"],
+          ["After 6000 steps", 15000.0, "bad"]
+        ],
+        "note": "Loss explodes catastrophically after rounding bias accumulates."
+      },
+      {
+        "title": "Fixed: recompute δ in FP32",
+        "rows": [
+          ["After 2000 steps", 3.1, "good"],
+          ["After 4000 steps", 2.5, "good"],
+          ["After 6000 steps", 2.2, "good"]
+        ],
+        "note": "Loss decays smoothly; bias is canceled, vicious cycle broken."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Not recomputing all attention layers.",
+        "html": "If you fix only one layer and leave others unpatched, the bias still accumulates through the unfixed layers and eventually explodes."
+      },
+      {
+        "warn": true,
+        "b": "Using FP32 for the wrong intermediate value.",
+        "html": "Recomputing O must happen during backward. Recomputing O in forward is too late; the low-precision O has already been stored and used."
+      },
+      {
+        "warn": true,
+        "b": "Assuming the bias is random and will cancel.",
+        "html": "The paper shows the bias is systematic (skewed positive), not random. Hoping it cancels out is wrong."
+      },
+      {
+        "warn": true,
+        "b": "Very low precision like FP8 without the fix.",
+        "html": "Rounding bias grows larger in FP8 than BF16. The fix is still necessary, but the margin is thinner."
+      },
+      {
+        "b": "Done right.",
+        "html": "Recomputing the gradient rowsum in full precision during backward for all attention layers, with low-precision everywhere else, balances efficiency and stability."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Train a small GPT-2 (12 layers, 12 heads, 768 dimension, 1024 context length) on a standard text dataset (e.g., Wikitext-2) using BF16 low-precision training with flash attention. Run two versions side by side: (1) standard flash attention (unfixed), (2) flash attention with the gradient rowsum recomputed in full precision during backward. Track the training loss and validation loss at each step, recording the step at which loss explodes (or does not explode)."
+    ],
+    "metric_eq": "Steps until crash: unfixed crashes at step N, fixed continues to step M where M is much larger than N",
+    "closing": "The unfixed version should crash within 5000 steps with loss > 1000. The fixed version should train stably for 20000 steps with loss smoothly decreasing to near 2.0."
+  }
+}

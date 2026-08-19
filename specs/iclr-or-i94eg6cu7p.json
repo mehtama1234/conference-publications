@@ -1,0 +1,239 @@
+{
+  "slug": "iclr-or-i94eg6cu7p",
+  "title": "SRT: Super-Resolution for Time Series via Disentangled Rectified Flow",
+  "family": "Time Series & Sequential",
+  "one_liner": "Reconstruct fine-grained time series from sparse, low-resolution data by splitting the signal into smooth trends and repetitive patterns, then using a guided generative flow to fill in the missing details.",
+  "lead": "Many real-world time series (sensor readings, financial data, weather) are recorded at low resolution due to cost or hardware limits. You want the detailed, fine-grained version but only have the sparse one. SRT solves this by decomposing a sparse signal into its slow-moving trend and its fast repeating pattern, aligning both to the target resolution, and then using a generative flow model that selectively focuses on both the trend and the sparse anchors to synthesize the high-resolution details that were lost.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The sparse signal problem",
+    "paras": [
+      "Many real applications need fine-grained signals: a stock traded every second, a sensor that ticks 100 times per minute. But high-resolution data is expensive—it costs bandwidth, storage, and collection time. So you often get the signal at low resolution: one tick per minute instead of per second, one reading per hour instead of per minute.",
+      "A naive approach: just repeat or linearly interpolate each low-res point to fill the gaps. This is fast but wrong—the real high-resolution signal does not jump around or sit flat. It has hidden smooth trends underneath and fast oscillations layered on top. Naive methods miss both."
+    ],
+    "callout": {
+      "b": "The core insight.",
+      "html": "Split the sparse signal into its trend (the slow drift) and seasonal (the repetitive pulse), then reconstruct both separately and intelligently."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The sparse signal arrives",
+        "viz": "plain",
+        "caption": "Low-res data: four dots per month, not per day."
+      },
+      {
+        "title": "2. Decompose into trend and season",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["hot", 55], ["warm", 40], ["hot", 60], ["warm", 35], ["free", 0]],
+        "caption": "Trend is the slow hill; season is the fast wiggle layered on top."
+      },
+      {
+        "title": "3. Align to target resolution",
+        "viz": "box",
+        "viz_args": "ITF: stretch both components to fill the gaps.",
+        "caption": "Implicit neural representation stretches sparse points to dense grid."
+      },
+      {
+        "title": "4. Run generative flow with cross-res attention",
+        "viz": "weights",
+        "viz_args": [["moved", 35], ["moved", 58], ["moved", 42], ["moved", 62], ["moved", 38]],
+        "caption": "Flow model looks at low-res anchors and trend to guide detail synthesis."
+      },
+      {
+        "title": "5. Final high-resolution signal",
+        "viz": "plain",
+        "caption": "Smooth trend plus plausible oscillations, all aligned to the low-res points."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Split into components",
+        "text": "Decompose sparse input into slow trend and fast seasonal part."
+      },
+      {
+        "b": "Interpolate both",
+        "text": "Use implicit function to smoothly align each part to target resolution."
+      },
+      {
+        "b": "Set up generation task",
+        "text": "Mark which time steps are given (low-res points) and which must be generated."
+      },
+      {
+        "b": "Run flow with attention",
+        "text": "Generative flow looks at low-res anchors and aligned trend to predict velocity field."
+      },
+      {
+        "b": "Sample high-resolution output",
+        "text": "Four steps of sampling reconstruct the full signal, conditioning on all the clues."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of treating the entire low-res signal as a single lump to interpolate, SRT separates it into two streams: the slow drift (trend) and the fast ripples (seasonal component). Then it runs a single generative model that sees both components aligned to the target resolution and is instructed which time steps are observed anchors (the low-res points) and which must be filled in. The key is the cross-resolution attention mechanism: the flow model attends separately to the low-res anchors and the aligned trend, letting it decide which one to follow for each region of the output."
+    ],
+    "object": "decomposition + dual-stream attention"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: velocity field",
+    "name": "Velocity field (the direction of flow)",
+    "paras": [
+      "A velocity field is the set of directions at every point. Imagine a marble rolling down a slope—at each position it has a direction it wants to move. The velocity field is those directions everywhere. In SRT, the flow model learns to predict the velocity field of the time series: at each time step, what direction should the signal move to go from noisy to clean?",
+      "The model estimates the velocity field by looking at (1) the given low-res anchors, (2) the aligned trend from the neural representation, and (3) what time step it is. From this view, the flow predicts the velocity—the nudge needed to shift from a noisy guess toward the real high-resolution signal."
+    ],
+    "heat": {
+      "cells": [
+        ["trend", 4, true],
+        ["trend", 4, true],
+        ["seasonal", 2, false],
+        ["seasonal", 2, false],
+        ["given", 4, true],
+        ["given", 4, true],
+        ["generated", 1, false],
+        ["generated", 1, false],
+        ["attention", 3, true],
+        ["attention", 3, true],
+        ["velocity", 3, true],
+        ["velocity", 3, false]
+      ],
+      "caption": "Darker means higher signal importance for flow guidance. Green boxes highlight trend and given anchors, which have the most say."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The velocity field is like a map of arrows telling the flow model which way to move at each time step to go from rough to refined."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The decoder predicts the velocity field for seasonal components and trend components that drive the state transitions in the rectified flow."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: two components, two flows",
+    "paras": [
+      "Most time series have two patterns at once: a slow trend (like a rising baseline in stock prices) and fast oscillation (like the daily cycle). The problem with normal super-resolution is it tries to guess both at once, confusing the two. SRT splits them.",
+      "First, the model decomposes the sparse input into trend and seasonal. Trend is smooth; seasonal is the wiggles. Each is learned separately, so each can focus on its own pattern: the trend learner sees only smooth curves in its training data, so any jagged output gets a big error signal, teaching it to smooth; the seasonal learner sees the same repeating pattern in its training data, so it learns which values go where in that cycle.",
+      "Second, the rectified flow is a generative model that learns a straight path from noise to data. It predicts a velocity field: at each time step, which direction should the signal move? The model looks at three clues: the low-res anchors (the points it must match), the aligned trend (which direction is down the slope), and the position in time. From these, it predicts velocity. By taking four small steps along that velocity, the model reconstructs the full signal. Just as water flows downhill, the flow model follows the velocity field that the training data revealed."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Low-res signal + target resolution"
+        },
+        {
+          "t": "step",
+          "s": "Decompose into trend and seasonal",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Align both to target grid via implicit neural representation"
+        },
+        {
+          "t": "step",
+          "s": "Run rectified flow conditioned on anchors + trend"
+        },
+        {
+          "t": "step",
+          "s": "Cross-resolution attention steers generation",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "High-resolution signal"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The velocity prediction equation",
+    "words": "velocity = neural_net( hidden_state, trend_signal, low_res_anchors, time_step )",
+    "equation": "v_t = MLP( LayerNorm( h_t ), CRA( h_t, c_trend, c_anchors ) )",
+    "symbols": [
+      ["v_t", "velocity at time step t"],
+      ["h_t", "hidden state at time step t"],
+      ["c_trend", "aligned trend component (conditioning signal)"],
+      ["c_anchors", "aligned low-resolution anchor points"],
+      ["CRA", "cross-resolution attention layer"],
+      ["MLP", "small feedforward network with 128 hidden units"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Time step 5: hidden state h=[0.3, -0.2, 0.8], trend anchor is 0.5, low-res point is 0.4.",
+        "Cross-attention fuses: attention to trend says 'move +0.1', attention to anchor says 'stay flat'.",
+        "MLP combines them: v_5 = [+0.05, 0.0, +0.02] (a gentle nudge toward the trend).",
+        "After 4 steps, the signal has moved +0.2 toward smoothness while staying near the low-res anchors."
+      ]
+    },
+    "note": "The flow model learns which direction to move the signal at each time step by attending to both the trend and the given low-res data, then predicts a velocity that balances both."
+  },
+  "bars": {
+    "h2": "Performance across datasets",
+    "charts": [
+      {
+        "title": "Naive interpolation",
+        "rows": [
+          ["Matches low-res anchors", 100, "good"],
+          ["Captures trend quality", 45, "bad"],
+          ["Reconstructs seasonal patterns", 30, "bad"],
+          ["Average accuracy", 58, "bad"]
+        ],
+        "note": "Simple linear interpolation stays close to the given points but misses the hidden structure."
+      },
+      {
+        "title": "SRT (this paper)",
+        "rows": [
+          ["Matches low-res anchors", 98, "good"],
+          ["Captures trend quality", 88, "good"],
+          ["Reconstructs seasonal patterns", 82, "good"],
+          ["Average accuracy", 89, "good"]
+        ],
+        "note": "By decomposing and using guided flow, SRT reconstructs both smooth trends and oscillations. Numbers are illustrative teaching examples."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Trend-seasonal confusion.",
+        "html": "If the decomposition incorrectly labels a fast trend as seasonal or vice versa, the alignment step stretches the wrong component and the flow model gets conflicting signals. The remedy: more data or more careful decomposition."
+      },
+      {
+        "warn": true,
+        "b": "Unseen scale factors.",
+        "html": "If the training data has only 2x upsampling but you try 16x, the model has not learned how to extrapolate that far. It guesses plausible but wrong details."
+      },
+      {
+        "warn": true,
+        "b": "Anchor drift.",
+        "html": "If the low-res points are noisy or biased, the flow model is anchored to bad data. It will try to match them anyway, pulling the output away from truth."
+      },
+      {
+        "b": "Done right.",
+        "html": "SRT-large (pretrained on many datasets) generalizes to unseen time series types because it has learned diverse trend and seasonal patterns. Training on diverse, clean data and validating on held-out scales reduces these risks."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a real high-resolution time series (e.g. hourly stock prices for a week, or daily sensor readings for a month). Downsample it to low-resolution (keep every 4th point). Run SRT to reconstruct. Measure how close the reconstructed points are to the true high-resolution values. Then compare: (1) naive linear interpolation, (2) standard generative model without decomposition, and (3) SRT. SRT will track the true trend better because it learned the trend as a separate smooth curve, so it does not mix in wiggles. SRT restores the seasonal oscillations more accurately because it learned seasonal patterns in isolation and applies them consistently wherever they appear."
+    ],
+    "metric_eq": "reconstruction_error = mean_absolute_error( true_high_res, reconstructed )",
+    "closing": "The demo should make it impossible to miss: decomposing into trend and seasonal, then guiding the flow with cross-resolution attention, produces smoother trends and more realistic oscillations than models that try to learn everything at once."
+  }
+}

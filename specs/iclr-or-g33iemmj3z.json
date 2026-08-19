@@ -1,0 +1,238 @@
+{
+  "slug": "iclr-or-g33iemmj3z",
+  "title": "Distractor-free Generalizable 3D Gaussian Splatting",
+  "family": "Computer Vision",
+  "one_liner": "When training a model to reconstruct 3D scenes from photos, unwanted objects in training photos break the model—so this paper masks them out automatically and uses cleaner reference images at test time.",
+  "lead": "Imagine teaching a model to reconstruct a room by showing it photos of the room taken from different angles. The model learns by checking: does my guess match the photo? But if a distractor—a person walking by, a shadow, a chair that moved—appears in one photo, the model gets confused and thinks that mistake is part of the room. This paper automates distractor masking during training and picks cleaner reference photos at test time, so the model learns only from what is truly fixed. This works because masking removes the contradictory signals that pull the model toward wrong 3D shapes, leaving only clear, consistent signals about the permanent scene.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "3D Models Break When Photos Contain Unwanted Objects",
+    "paras": [
+      "When you train a model to reconstruct a 3D scene from photos, the model learns by predicting what it sees and comparing its guess to the real photo—checking that its 3D shape explanation matches each photo. This works well for static scenes, but the real world is messy. A distractor—someone walking through the shot, a car parked out front, a shadow falling at a particular moment—appears in only one or two photos. To the model, it looks like part of the permanent scene, because the photos say that detail is there.",
+      "A beginner would try to ignore distractors by hand-labeling them: mark the distracted pixels, then exclude them from the training loss (the mismatch score). But hand-labeling scales terribly—thousands of training photos need manual masks. And generalizable models (ones trained to work on new, unseen scenes) have no time for scene-specific optimization; they need to work out-of-the-box. So the model stays broken: it learns the distractor as part of the scene, producing artifacts (blurred or doubled regions) and holes (missing parts) when testing on new images, because the 3D shape encodes the temporary visitor instead of the permanent walls."
+    ],
+    "callout": {
+      "b": "The core move.",
+      "html": "Predict distractor masks automatically during training using the 3D consistency of reference views, then use predicted masks to suppress distractor regions and re-select cleaner reference images at test time."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "plain",
+        "caption": "Multiple photos of same room show 3D consistency—except a chair moved in one photo."
+      },
+      {
+        "title": "2. The naive attempt",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["moved", 45], ["hot", 65], ["moved", 40], ["hot", 62]],
+        "caption": "Model treats moved chair as permanent, building wrong 3D shape."
+      },
+      {
+        "title": "3. The solution: predict masks",
+        "viz": "box",
+        "viz_args": "reference renders vs. real photos—gaps reveal distractors",
+        "caption": "Where reference 3D and real photo differ, a distractor is present."
+      },
+      {
+        "title": "4. Mask out and retrain",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["free", 45], ["hot", 65], ["free", 40], ["hot", 62]],
+        "caption": "Masked-out regions ignored in loss; model learns only fixed parts."
+      },
+      {
+        "title": "5. Clean references at test time",
+        "viz": "brain",
+        "caption": "Score each reference by its predicted distractor count; use cleanest ones."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Predict distractor masks",
+        "text": "Render each reference view through the trained 3D model, compare to the real photo; differences reveal distractors and depth errors."
+      },
+      {
+        "b": "Step 2: Refine the masks",
+        "text": "Use a pre-trained segmentation model to clean up the predicted masks, filling missed regions and sharpening occluded areas."
+      },
+      {
+        "b": "Step 3: Re-train with masked loss",
+        "text": "Exclude masked-out pixels from the reconstruction loss; the model optimizes only on true scene content."
+      },
+      {
+        "b": "Step 4: Score references at test time",
+        "text": "For each available reference image, count how many pixels the training model predicted as distractor; score high-distractor images low."
+      },
+      {
+        "b": "Step 5: Reconstruct with clean references",
+        "text": "Select and weight references by score; suppress residual distractor 3D shapes in the final output."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The object is the training signal itself—specifically, which pixels contribute to the loss (the mismatch score). Normally, every pixel in every training photo is compared to the model's guess. This paper changes it: pixels that lie in predicted distractor regions are excluded (set to weight zero), so the model only learns from pixels that represent fixed scene content. This works because training updates move in the direction of biggest disagreement; by removing high-disagreement distractor pixels, training no longer wastes updates trying to fit temporary objects, and instead converges to fitting the permanent walls and floors."
+    ],
+    "object": "Training loss mask"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Distractor presence at each pixel",
+    "name": "Distractor pixel confidence",
+    "paras": [
+      "The hidden quantity is a number for each pixel saying whether a distractor is present there. The paper infers it indirectly: re-render what the reference-trained 3D model thinks each pixel should look like; compare that re-render to the real training photo. Pixels where the render strongly disagrees with the photo usually contain distractors—they changed between photos, or they are not part of the permanent scene.",
+      "The paper estimates this quantity in two stages. First, a fast per-iteration mask prediction compares re-renders to photos. Second, a refinement module uses a pre-trained segmentation model (trained on millions of photos to spot objects and edges) to fix mistakes—filling in missed distractors and cleaning up the mask edges. This two-stage approach is fast enough to run every training iteration, and it needs no hand-labeled masks."
+    ],
+    "heat": {
+      "cells": [
+        ["Photo 1 pixel a", 1, false],
+        ["Photo 1 pixel b", 4, true],
+        ["Photo 2 pixel a", 1, false],
+        ["Photo 2 pixel b", 1, false],
+        ["Photo 3 pixel a", 3, false],
+        ["Photo 3 pixel b", 4, true],
+        ["Photo 4 pixel a", 2, false],
+        ["Photo 4 pixel b", 1, false],
+        ["Photo 5 pixel a", 1, false],
+        ["Photo 5 pixel b", 3, false],
+        ["Photo 6 pixel a", 2, false],
+        ["Photo 6 pixel b", 1, false]
+      ],
+      "caption": "Darker pixels are more likely to be distractors. Highlights (pixel b in photos 1 and 3) are regions where model re-render disagrees sharply from the photo."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A distractor pixel is one where the permanent scene and the actual photo disagree—a visitor in frame, a vehicle, a shadow—anything not fixed across viewing angles."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper measures distractor presence via the magnitude of the re-projection error (how far the 3D model's rendering is from the actual training photo) after decoupling it from disparity (depth) errors using geometric consistency."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why masking distractors fixes the training problem",
+    "paras": [
+      "The core problem is a signal confusion: the model receives contradictory instructions about regions that change between photos. If a chair appears in photo 1 but not photo 3, the model cannot build a consistent 3D shape that explains both—one guess will be wrong no matter what. This contradiction produces instability and pulls the model toward a bad compromise.",
+      "This paper solves it by detecting which regions are contradictory using 3D consistency. Regions that are truly part of the scene (walls, floor) will render similarly across all photos and match the training photos closely. Distractor regions (a person, a moved chair) will render inconsistently because they appear in some photos but not others. The paper masks out only the high-disagreement regions and re-trains, so the model receives clear, consistent training signals on the remaining pixels. By ignoring distracted pixels, the model trains only on the permanent scene and converges to the correct 3D shape. At test time, distractor references (ones the training phase detected as mostly distracted) are scored low, so the final reconstruction weights the clean references higher, suppressing artifacts."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Training photos (some contain distractors)"
+        },
+        {
+          "t": "step",
+          "s": "Re-render reference view through current 3D model",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Compare re-render to real photo; compute pixel-wise disagreement",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Refine disagreement mask using pre-trained segmentation",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Exclude high-disagreement pixels from training loss",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Model learns correct 3D shape from unmasked pixels only"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The loss equation with distractor masking",
+    "words": "total loss for one query photo equals the mean squared error between the model's render and the photo, computed only over pixels where the mask predicts no distractor",
+    "equation": "Loss = (1/N_unmasked) * sum over unmasked pixels of (rendered_pixel - photo_pixel)^2",
+    "symbols": [
+      ["rendered_pixel", "what the 3D model predicts for this pixel"],
+      ["photo_pixel", "the actual color in the training photo at this pixel"],
+      ["mask", "binary flag: 1 if pixel is predicted as non-distractor, 0 if distractor"],
+      ["N_unmasked", "count of pixels where mask equals 1"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a training photo has 4 pixels: pixel A (wall), B (chair), C (wall), D (person).",
+        "Model renders: A=200, B=150, C=205, D=100. Photo shows: A=198, B=180, C=207, D=150.",
+        "Without masking: error = ((200-198)^2 + (150-180)^2 + (205-207)^2 + (100-150)^2) / 4 = (4 + 900 + 4 + 2500) / 4 = 726.",
+        "Distractor masks predict: A=1 (wall), B=1 (wall, not distractor), C=1 (wall), D=0 (person is distractor).",
+        "With masking: error = ((200-198)^2 + (150-180)^2 + (205-207)^2) / 3 = (4 + 900 + 4) / 3 = 302.67.",
+        "Masked loss is lower because distractor pixels (person, 2500 error) are excluded; model focuses on learning walls correctly."
+      ]
+    },
+    "note": "Masking zeros out pixels where the model disagrees most sharply with the photo, preventing distractors from pulling the training in wrong directions."
+  },
+  "bars": {
+    "h2": "Training stability and reconstruction quality improve",
+    "charts": [
+      {
+        "title": "Without masking (baseline)",
+        "rows": [
+          ["Reconstruction quality (PSNR)", 15.45, "bad"],
+          ["Structural similarity (SSIM)", 0.515, "bad"],
+          ["Perceptual error (LPIPS)", 0.426, "bad"]
+        ],
+        "note": "Model confuses distractor-regions with scene parts, producing low quality and artifacts."
+      },
+      {
+        "title": "With DGGS masking and scoring",
+        "rows": [
+          ["Reconstruction quality (PSNR)", 21.74, "good"],
+          ["Structural similarity (SSIM)", 0.758, "good"],
+          ["Perceptual error (LPIPS)", 0.237, "good"]
+        ],
+        "note": "Distractor regions masked out during training, clean references selected at test time. 3D shape is stable and renders match photos closely."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Incorrect mask prediction.",
+        "html": "If the fast mask-prediction step misses a distractor or incorrectly flags a true scene part as distractor, the model either learns the wrong shape or loses real content. This is why the paper adds a refinement stage using pre-trained segmentation—a second opinion."
+      },
+      {
+        "warn": true,
+        "b": "Depth error confusion.",
+        "html": "Sometimes a pixel disagrees between photos not because of a distractor but because the 3D model got the depth wrong (estimated the distance incorrectly). The mask-refinement module tries to separate these by detecting depth discontinuities, but if it fails, good pixels can be masked out."
+      },
+      {
+        "warn": true,
+        "b": "Pre-trained segmentation artifacts.",
+        "html": "The refinement step uses a pre-trained segmentation model (ResNet, DINO, or diffusion-based) trained on natural images. If the scene contains unusual objects, the pre-trained model may produce poor segmentation, leading to bad mask refinement."
+      },
+      {
+        "b": "Done right.",
+        "html": "The paper shows that reference-based mask prediction without any hand-labeled masks outperforms scene-specific methods that do require manual annotation, which happens because detecting distractors from 3D consistency is more reliable than relying on hand-drawn boundaries—the 3D shape itself reveals which regions are stable versus contradictory."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A convincing demo trains two generalizable models side-by-side: one baseline (standard training, no masking), one with DGGS (reference-based mask prediction and refinement, plus reference scoring at test time). Train both on a dataset of multi-view images where some training photos contain distractors (an extra person, a moving object, a temporary shadow). Evaluate both on test scenes that also contain distractors, to show that out-of-the-box distractor-free generalization works. Measure reconstruction quality (higher PSNR means the render matches the photo more closely) and perceptual similarity (lower LPIPS means humans see fewer visual differences) on the test set, because these metrics reveal whether the model learned a 3D shape that matches the permanent scene or a confused blended shape. The demo should make it impossible to miss that the baseline's reconstruction degrades sharply when distractors appear, while DGGS remains stable."
+    ],
+    "metric_eq": "improvement = (PSNR_DGGS - PSNR_baseline) + 10 * (LPIPS_baseline - LPIPS_DGGS)",
+    "closing": "The demo succeeds when DGGS reconstructs distractor-containing scenes with no visible artifacts, while the baseline shows ghosting, blurs, or holes."
+  }
+}

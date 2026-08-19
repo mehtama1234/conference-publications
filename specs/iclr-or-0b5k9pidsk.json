@@ -1,0 +1,209 @@
+{
+  "slug": "iclr-or-0b5k9pidsk",
+  "title": "TiTok: Transfer Token-level Knowledge via Contrastive Excess",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Identify which words matter most by looking at how a language model's predictions change when you switch off a fine-tuning layer, then teach only those words to a new model.",
+  "lead": "When you fine-tune a large language model using LoRA (adding a tiny extra layer on top without changing the base weights), that fine-tuned layer only works with the original model backbone. If you try to move it to a different model, it is useless. Knowledge distillation (copying knowledge from the first model to the second) could help, but it usually needs the original training data, which you may not have. TiTok solves this by finding out which words actually matter for the task, rather than training on every word equally.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "LoRA does not travel between models",
+    "paras": [
+      "When you fine-tune a large language model, adding a full new set of weights is expensive. LoRA is a shortcut: it adds only a tiny side-layer, like a thin leaf glued onto a big tree. The tree stays unchanged; only the leaf learns the new task.",
+      "The catch: that leaf only fits your original tree. Move it to a different tree (a different model) and the connection breaks. A naive first try is to use knowledge distillation: make the new model copy what the old model learned by watching its outputs. But distillation needs the original training data, which is often secret or lost.",
+      "The problem is deeper: if you make the new model mimic the old one on every word equally, it wastes time learning common words that any model already knows. You need to know which words actually carry the new task information."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "TiTok finds the words that matter by looking at the difference between the fine-tuned model and the base model, then trains only on those words in the new model."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Starting point",
+        "viz": "brain",
+        "caption": "A language model answers questions."
+      },
+      {
+        "title": "2. Fine-tune on new task",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["hot", 70], ["free", 30], ["hot", 65], ["free", 35], ["hot", 68], ["warm", 45], ["free", 25], ["hot", 72], ["warm", 50], ["free", 28], ["hot", 62]],
+        "caption": "Add LoRA layer (orange shows task-relevant weights). Some words matter; some do not."
+      },
+      {
+        "title": "3. Find the difference",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["free", 30], ["moved", 65], ["free", 35], ["moved", 68], ["free", 45], ["free", 25], ["free", 72], ["free", 50], ["free", 28], ["free", 62], ["free", 35]],
+        "caption": "Compare model WITH LoRA versus WITHOUT. Red bars show which words changed most."
+      },
+      {
+        "title": "4. Select high-signal words",
+        "viz": "box",
+        "viz_args": "Top 70% of tokens by importance go into training data.",
+        "caption": "Keep only words the model used to answer. Discard common words."
+      },
+      {
+        "title": "5. Train on new model",
+        "viz": "weights",
+        "viz_args": [["moved", 68], ["free", 30], ["moved", 66], ["free", 35], ["moved", 70], ["free", 40], ["free", 25], ["free", 38], ["free", 28], ["free", 32], ["free", 24], ["free", 29]],
+        "caption": "New model learns LoRA using only the high-signal words. Works."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Gather synthetic examples",
+        "text": "Generate question-answer pairs using the original model as a template (just text, no new models needed)."
+      },
+      {
+        "b": "Step 2: Score each word by importance",
+        "text": "Run each answer through the original model twice: once with the LoRA fine-tune on, once with it off. The difference in what the model predicts for each word is the excess score."
+      },
+      {
+        "b": "Step 3: Filter examples and words",
+        "text": "Keep only the question-answer pairs with the highest average excess scores, and within those, only the individual words that scored high."
+      },
+      {
+        "b": "Step 4: Align words across models",
+        "text": "If the new model uses a different tokenizer (different text chopping rules), map the word-importance scores from the old model's words to the new model's words."
+      },
+      {
+        "b": "Step 5: Train LoRA on the new model",
+        "text": "Train the new LoRA layer using only the high-scoring words, ignoring the rest."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes which words the training process focuses on. Instead of treating all words equally, it trains LoRA to predict only the words that were actually changed by the fine-tuning in the original model."
+    ],
+    "object": "Training focus: from all words to selected high-signal words"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Token-wise Excess Score",
+    "name": "Token-wise Excess Score",
+    "paras": [
+      "The excess score is a number that tells you how much a specific word's prediction changed when the fine-tuning layer was turned on versus off. A high score means the fine-tuning layer cared about that word for the new task. A low score means the base model already knew how to handle it.",
+      "TiTok measures this by running the source model twice on each answer (once with LoRA active, once without) and measuring the difference in the predicted probability for each word. This difference is the excess score. High-scoring words are the ones where the fine-tuning actually added new knowledge."
+    ],
+    "heat": {
+      "cells": [["word1", 4, true], ["word2", 1, false], ["word3", 4, true], ["word4", 2, false], ["word5", 4, true], ["word6", 1, false], ["word7", 3, true], ["word8", 1, false], ["word9", 4, true], ["word10", 2, false], ["word11", 3, true], ["word12", 1, false]],
+      "caption": "Darker means higher excess score. Red borders mark the top-scoring words used in training."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Imagine two students answering a question. One has studied the topic (model + LoRA), one has not (model alone). The difference in their answers, word by word, shows which words require the new knowledge. That difference is the excess score."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The excess for any given word is computed by subtracting the base model's predicted probability from the fine-tuned model's predicted probability for that word. Words with high excess scores are the ones retained for target model training."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the token-selection shortcut",
+    "paras": [
+      "When you transfer a LoRA to a new model, the new model has never seen the task before. If you make it learn from every word in the training data, it wastes effort on common words (like the, and, a) that any model already handles well. Those words add noise, not signal.",
+      "TiTok cuts through this by measuring which words the original fine-tuning actually changed. Those are the words that encode the new task knowledge. When the new model trains only on those words, it focuses its learning on what is actually new. The new LoRA adapts faster and more accurately, because it is not drowning in irrelevant data.",
+      "The mechanism works because the source model's fine-tuning layer (the LoRA) only updated its weights to improve predictions on the words that matter for the task. By isolating those words, TiTok transfers the knowledge without needing extra models to filter the data or the original training set."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Source model with and without LoRA"},
+        {"t": "step", "s": "Compare predictions for each token", "hl": true},
+        {"t": "step", "s": "Compute excess score (difference in probabilities)"},
+        {"t": "step", "s": "Rank tokens by excess; keep top k%"},
+        {"t": "step", "s": "Align tokens to target model tokenizer"},
+        {"t": "output", "s": "Target LoRA trains only on high-signal tokens"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: masked loss with excess-filtered tokens",
+    "words": "The loss sums over only the top-k-percent tokens. For each example and each selected token, compute the negative log likelihood and weight it by whether that token was selected. Sum across all examples and selected tokens.",
+    "equation": "L_TiTok = sum over (q,y) in D_f, sum over y_i in y: I_k%(y_i) * L_t(y_i)",
+    "symbols": [
+      ["L_TiTok", "total loss for training the target LoRA"],
+      ["D_f", "the filtered synthetic dataset (only high-excess-score examples)"],
+      ["(q,y)", "a question-answer pair in the filtered data"],
+      ["y_i", "the i-th token (word) in the answer y"],
+      ["I_k%(y_i)", "a binary mask: 1 if token y_i is in the top k% by excess score, 0 otherwise"],
+      ["L_t(y_i)", "the negative log likelihood loss: how wrong the target model was on that token"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the answer has 10 tokens and we keep k=70%, so top 7 tokens.",
+        "Token 1: excess score 0.45, in top 70% -> I=1. L_t = 2.5. Contribution: 1 * 2.5 = 2.5",
+        "Token 2: excess score 0.02, not in top 70% -> I=0. L_t = 1.0. Contribution: 0 * 1.0 = 0",
+        "Token 3: excess score 0.41, in top 70% -> I=1. L_t = 2.2. Contribution: 1 * 2.2 = 2.2",
+        "... (repeat for all 10 tokens) ...",
+        "Sum of 7 selected tokens' losses: approximately 15.3. Ignored tokens contribute 0.",
+        "Result: target LoRA trains only to minimize the loss on high-signal tokens."
+      ]
+    },
+    "note": "The selection mask picks only words where the fine-tuning made a big difference. Training ignores the rest, focusing the new model's learning effort on what is actually new."
+  },
+  "bars": {
+    "h2": "Comparing transfer methods",
+    "charts": [
+      {
+        "title": "Vanilla transfer (no filtering)",
+        "rows": [
+          ["Source model on new task (training)", 88, "good"],
+          ["Target model on new task (no fine-tune)", 52, "bad"],
+          ["Target model on new task (LoRA train all tokens)", 68, "ok"]
+        ],
+        "note": "Baseline: train the target LoRA on all words equally. Performance improves but leaves a gap (88 vs 68), because the target model wastes effort learning common words that it already handles well."
+      },
+      {
+        "title": "TiTok (token filtering)",
+        "rows": [
+          ["Source model on new task (training)", 88, "good"],
+          ["Target model on new task (no fine-tune)", 52, "bad"],
+          ["Target model on new task (LoRA train top 70% tokens)", 81, "good"]
+        ],
+        "note": "By training only on high-signal tokens, the target LoRA reaches 81, much closer to the source model's 88. Efficiency gain: same training data, but fewer tokens to learn from."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Tokenizer mismatch breaks alignment",
+        "html": "If the source and target models chop text differently (different tokenizers), the word-importance scores do not map directly. The paper includes a tokenizer alignment algorithm, but if the two tokenizers are radically different, alignment errors can waste the high-scoring signal. Solution: the paper provides a dual-pointer algorithm that aligns text spans, but very different tokenizers may need manual tuning."
+      },
+      {
+        "warn": true,
+        "b": "Synthetic data quality limits the signal",
+        "html": "TiTok relies on synthetic examples generated by the source model (or fine-tuned models). If the synthetic data is low-quality or does not cover the task well, the excess scores will be noisy and uninformative. The filtering step will then remove useful data by mistake."
+      },
+      {
+        "warn": true,
+        "b": "Hyperparameter k (token selection threshold) must be tuned",
+        "html": "The paper chooses k=70% in experiments, but this is task-dependent. Too high a k (e.g., 90%) wastes effort on nearly all tokens. Too low (e.g., 30%) may cut out important signals. The paper does not provide a principled way to choose k; it is a hyperparameter that users must tune."
+      },
+      {
+        "b": "Done right: TiTok reduces transfer time and improves target model accuracy",
+        "html": "When tokenizers align well, synthetic data is reasonable, and k is tuned to the task, TiTok consistently outperforms vanilla transfer and TransLoRA, achieving 4-8% performance gains on standard benchmarks. This works because the target model trains only on words that actually encode the new task, so its LoRA layer converges faster and more accurately without the noise of common words."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A minimal demo takes a fine-tuned LoRA on one model (e.g., Mistral 7B with task-specific weights), computes the excess scores for a few synthetic examples, filters to the top 70% tokens, then trains a new LoRA on a different model (e.g., Llama 3.3) using only those tokens. The metric to watch is the target model's accuracy on a held-out test set from the new task."
+    ],
+    "metric_eq": "Performance gain = (Accuracy_TiTok - Accuracy_Vanilla) / Accuracy_Vanilla * 100%",
+    "closing": "The demo must show that training only on high-signal tokens (TiTok) beats training on all tokens (vanilla), and that this improvement persists across different model architectures without requiring an additional discriminator model."
+  }
+}

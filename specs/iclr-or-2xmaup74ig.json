@@ -1,0 +1,227 @@
+{
+  "slug": "iclr-or-2xmaup74ig",
+  "title": "Local Routing Consistency in Mixture-of-Expert Models",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Before you squeeze an expert model onto a slow device, measure whether its router keeps routing the same experts to nearby tokens—if not, offloading will thrash memory and the model will be slow.",
+  "lead": "A mixture-of-experts model (a huge language model that splits its work across many smaller expert networks) can run on memory-constrained devices if you cache only some experts in fast memory and load the rest from disk when needed. But some models are better suited to this trick than others, because some models route tokens (pieces of text, like the word \"hello\" split into \"he\", \"l\", \"lo\") to the same expert set repeatedly while others jump between completely different experts—making some models cache-friendly and others memory-thrashing. This paper proposes two simple measurements to predict which models will actually work well—and reveals surprising things about load balancing and expert specialization that matter more than anyone thought.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Not all models cache well",
+    "paras": [
+      "A language model reads text token by token (each token is a piece of a word). A huge language model runs on 1,000 expert networks. On each token, the model asks a router: which experts should this token use? The router sends the token to maybe 2 or 4 of them. To save electricity and stay fast, you want to keep only the most-used experts in fast memory (like graphics-card RAM), and put the rest on disk.",
+      "Naively, you'd cache the same experts for all tokens. But this wastes memory: maybe token 1 needs experts 3 and 7, token 2 needs 3 and 9, and token 100 needs 3 and 7 again—experts 3, 7, 9 all get cached, but token 1 and 100 never touch 9. The naive approach also wastes time: if a token needs an expert that is on disk, the model stalls waiting for disk, and inference is slow. So the real question is: does a token activate the same experts as its neighbors? If tokens 1 and 2 both use experts 3 and 7, they can share one cache and the model is fast. But if every token asks for different experts, caching does not help—because each cache miss forces the model to wait for disk, and you lose all the speed benefit of having fast memory in the first place."
+    ],
+    "callout": {
+      "b": "The hidden problem.",
+      "html": "Different models have wildly different patterns of which experts they ask for token by token. Some models almost always activate the same experts for nearby tokens (great for caching). Others keep switching to different experts (terrible for caching). But nobody measured this or knew which models were which."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A token walks into a model",
+        "viz": "brain",
+        "caption": "Token enters the language model, needs expert answers."
+      },
+      {
+        "title": "2. A router picks the experts to ask",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["free", 18], ["hot", 80], ["warm", 55], ["free", 15], ["hot", 75], ["free", 22], ["warm", 60], ["free", 19], ["free", 21], ["hot", 82], ["free", 16]],
+        "caption": "Router asks experts 3, 6, 11 because they scored highest."
+      },
+      {
+        "title": "3. Next token also needs experts 3, 6, 11",
+        "viz": "weights",
+        "viz_args": [["free", 19], ["free", 17], ["hot", 79], ["warm", 54], ["free", 16], ["hot", 76], ["free", 21], ["warm", 59], ["free", 20], ["free", 22], ["hot", 81], ["free", 15]],
+        "caption": "Similar routing—can reuse the cached experts from token 1."
+      },
+      {
+        "title": "4. Segment: group of tokens with consistent experts",
+        "viz": "box",
+        "viz_args": "6 tokens → 4 experts cached → 22 hits, 2 misses",
+        "caption": "A segment groups nearby tokens sharing one expert cache."
+      },
+      {
+        "title": "5. SRP score: how well segments reduce expert thrashing",
+        "viz": "plain",
+        "caption": "High SRP means nearby tokens reuse experts; low SRP means thrashing memory."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Collect routing decisions",
+        "text": "Run all 20 MoE models on real text. Record which expert each token asks for."
+      },
+      {
+        "b": "Define a segment router",
+        "text": "Group nearby tokens into chunks. Ask: can one fixed set of experts handle all tokens in the chunk?"
+      },
+      {
+        "b": "Measure Segment Routing best Performance (SRP)",
+        "text": "Score how well the segment router matches the original per-token router. Higher SRP means the model is segment-friendly."
+      },
+      {
+        "b": "Measure Segment Cache best Hit rate (SCH)",
+        "text": "Simulate a cache that knows the future. How often does a segment cache hit when you try to fetch the next expert?"
+      },
+      {
+        "b": "Hunt for patterns",
+        "text": "Which models have high SRP? Which have low? What about shared experts, load balancing, expert specialization?"
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper does not change a model's code or weights. Instead, it changes the way you measure whether a model is good for expert offloading. It proposes two metrics: one that measures how many experts a segment needs (SRP), and one that measures cache hit rate (SCH)."
+    ],
+    "object": "routing consistency measurement"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: local routing consistency",
+    "name": "Local routing consistency",
+    "paras": [
+      "Routing consistency is a number: how much do nearby tokens ask for the same experts? If tokens in a segment always activate the same 4 experts, routing consistency is high. If each token asks for completely different experts, consistency is low. It is hidden because the router does not print it—you have to count the token-by-token routing decisions and group them by segment.",
+      "The paper estimates this by running each model on real text (code, math, reasoning tasks) and tallying which experts activate for each token. It then groups tokens into segments (chunks of 4, 8, 16, 32 tokens at a time) and measures: for each segment, what is the smallest set of experts that could have handled all tokens if they all used the same fixed set? That smallest set is the SRP measurement."
+    ],
+    "heat": {
+      "cells": [["Token 1", 4, true], ["Token 2", 4, true], ["Token 3", 1, false], ["Token 4", 4, true], ["Token 5", 3, false], ["Token 6", 4, true], ["Shared", 1, false], ["Expert A", 3, false], ["Expert B", 2, false], ["Expert C", 2, false], ["Router", 4, true], ["Segment", 4, true]],
+      "caption": "Darker means expert was activated for that token. Highlight shows tokens 1,2,4,6 all activate experts in the same set."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Local routing consistency answers: if I grab a group of experts at random, how many tokens in a text segment will be happy with just those experts?"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper defines it formally: SRP(E, m) is the best F1 score (a measure of how well predictions match reality) achieved by a segment router that selects a fixed expert group E for all m tokens in a segment."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this matters: the memory-speed trade-off",
+    "paras": [
+      "When you cache experts for a segment, you are betting that the next tokens in the segment will need the same experts. If your bet is right (high routing consistency), the cache hits and the model is fast. If your bet is wrong (low routing consistency), the model has to fetch experts from disk, and the inference stalls—a misses wastes 100 milliseconds or more.",
+      "The paper's insight: different models have wildly different routing patterns. Some (like GRIN-MoE) have high SRP—most tokens in a segment ask for the same expert set, so a small cache of 4 or 8 experts hits 80% of the time. Others (like Mixtral-8x7B) have low SRP—tokens switch experts constantly, so even a 32-expert cache only hits 40% of the time. By measuring SRP and SCH upfront, you can predict which models will run fast on a memory-constrained device, and which ones will thrash.",
+      "The mechanism works because the paper discovered a surprising trade-off: models with high local routing consistency tend to have low local load balance (some experts get used much more than others), but models can still have global load balance (across the entire model, every expert is used equally). This means you do not have to sacrifice load balance to build a model that caches well."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Text tokens, MoE model"
+        },
+        {
+          "t": "step",
+          "s": "Router picks experts per token"
+        },
+        {
+          "t": "step",
+          "s": "Group tokens into segments",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Find smallest expert set per segment"
+        },
+        {
+          "t": "step",
+          "s": "Score: what fraction of tokens match?",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "SRP score tells you cache friendliness"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Segment Routing best Performance: the equation",
+    "words": "SRP equals the highest F1 score you can get by comparing a segment router's choices to the original router's choices, trying all possible thresholds, where F1 is two times the hits divided by (the sum of all hits plus all misses).",
+    "equation": "SRP(E, m) = max_alpha { 2 * sum_T sum_f(e,T,p,m)>=alpha / (sum_T |T|-m+1 * sum_p sum_e [ m*I[f(e,T,p,m)>=alpha] + f(e,T,p,m) ]) }",
+    "symbols": [
+      ["SRP", "Segment Routing best Performance: score from 0 to 1, higher is more consistent"],
+      ["E", "a group of experts, e.g. 4 experts chosen from 128"],
+      ["m", "segment length, e.g. 8 tokens"],
+      ["alpha", "a threshold we try: experts with activation >= alpha are selected"],
+      ["f(e,T,p,m)", "count of tokens in segment starting at position p that activate expert e"],
+      ["T", "a text input"],
+      ["F1", "a standard match score: high when predictions match the actual routing"]
+    ],
+    "worked": {
+      "title": "A toy example: one segment",
+      "lines": [
+        "Segment: 6 tokens. Original router picks: token1→experts{3,6}, token2→{3,6}, token3→{3,6,11}, token4→{3,6}, token5→{3,7}, token6→{3,6}.",
+        "Try segment router with expert group {3,6}: tokens 1,2,4,6 match (4 hits), tokens 3,5 miss (2 misses). F1 = 2*4 / (4+2) = 1.33, cap at 1.0.",
+        "Try expert group {3,6,7}: tokens 1,2,4,6 still match, token 5 now hits, token 3 still misses. F1 = 2*5 / (5+1) = 0.83.",
+        "Best F1 is 1.0 with group {3,6}. That is the SRP for this segment: consistency is high."
+      ]
+    },
+    "note": "The equation counts, for each expert group size and threshold, how many tokens in a segment the group can satisfy; F1 balances precision and recall. Higher SRP means fewer experts needed per segment."
+  },
+  "bars": {
+    "h2": "Real model measurements across 20 MoE LLMs",
+    "charts": [
+      {
+        "title": "High-SRP models (cache-friendly)",
+        "rows": [
+          ["GRIN-MoE", 92, "good"],
+          ["Jamba-Mini", 88, "good"],
+          ["Qwen3-MoE", 85, "good"],
+          ["OLMoE", 82, "good"]
+        ],
+        "note": "These models activate the same expert set for most tokens in a segment. A cache of 6-8 experts achieves 80+ percent hit rates."
+      },
+      {
+        "title": "Low-SRP models (thrash memory)",
+        "rows": [
+          ["Mixtral-8x7B", 45, "bad"],
+          ["PowerMoE", 48, "bad"],
+          ["DeepSeek-V2-Lite", 52, "bad"],
+          ["Qwen2-MoE", 55, "bad"]
+        ],
+        "note": "These models switch expert selections between tokens. Even a 32-expert cache only achieves 40-50 percent hit rates. Expert offloading will stall on disk access."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Shared experts break the metric.",
+        "html": "Some models designate a few experts as always-active (shared experts). These inflate SRP artificially because the shared experts hide the inconsistency in the remaining expert choices. Models with shared experts appear more cache-friendly than they really are."
+      },
+      {
+        "warn": true,
+        "b": "Load balance and consistency conflict locally.",
+        "html": "To keep SRP high, some experts must be popular and others rare. This makes local load imbalanced—a few experts do most of the work per segment, because if all experts were equally popular, tokens would need to activate many different experts and SRP would collapse. Rare experts are underused per segment even though they balance out globally."
+      },
+      {
+        "warn": true,
+        "b": "Domain-specialized experts matter, vocabulary ones do not.",
+        "html": "Experts specialized on reasoning tasks or math drive routing consistency. Experts specialized only on vocabulary do not—they activate randomly per token. If your model has mostly vocabulary specialists, SRP will be low."
+      },
+      {
+        "b": "Done right: measure before you deploy.",
+        "html": "Run SRP on your model before committing to expert offloading. If SRP is below 60, expect 40% cache misses and disk stalls. Redesign the model or use a different device."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small MoE model (100 experts, 2 active per token) on a simple task (e.g., copy a short sequence, or do basic arithmetic). Measure SRP for different segment sizes (4, 8, 16, 32 tokens). Plot the SRP score: you should see a curve that rises steeply from segment size 1 to 8 (bigger segments average out randomness), then flattens (more tokens do not add new information about consistency). Then, simulate an expert cache with fixed budget (e.g., 8 experts): measure cache hit rate as a function of segment size. The hit rate should correlate strongly with SRP—high SRP models get high hit rates even with small caches."
+    ],
+    "metric_eq": "SRP_score = best_F1_achieved_by_segment_router, cache_hit_rate = (total_expert_requests - misses) / total_expert_requests, correlation = cov(SRP_score, cache_hit_rate) / (std_dev(SRP) * std_dev(hit_rate))",
+    "closing": "The demo should show that SRP is a real predictor: models with high SRP actually run fast in practice with small expert caches, and models with low SRP suffer cache misses."
+  }
+}

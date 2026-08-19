@@ -1,0 +1,261 @@
+{
+  "slug": "iclr-or-0r06bghljx",
+  "title": "MaskPro: Stable Sparsity Learning via Loss Residuals",
+  "family": "Efficiency & Systems",
+  "one_liner": "MaskPro learns which weights to keep in an LLM by using policy gradients guided by loss residuals instead of raw loss, making training stable and fast.",
+  "lead": "Large language models are huge and slow to run. Hardware can speed them up if the weights follow a specific sparsity pattern: keep N out of every M weights, skip the rest. The challenge is learning which weights to keep. Simple rule-based approaches make mistakes. Learning-based approaches that try every possible combination are too slow. MaskPro solves this by treating weight selection as a probability distribution and using a clever training trick—measuring loss changes instead of raw loss—to steer learning without instability.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The hardware-friendly sparsity trap",
+    "paras": [
+      "Modern chips run fast when data is packed densely. If you remove weights randomly from a neural network (a model that learns by adjusting millions of numbers), the remaining weights scatter unevenly and the chip slows down. But if you remove them in a structured pattern—say, every weight group of 32 numbers keeps exactly 16, arranged the same way in every group—the chip can accelerate it with built-in hardware and save memory.",
+      "The problem: how do you decide which 16 weights to keep in each group of 32? A naive approach: greedily pick the 16 biggest numbers in each group, layer by layer. This is fast but makes errors, because it ignores how the whole model works together. The opposite extreme: try every possible combination of 16 choices from 32 (that is over 600 million possibilities per group), using training to learn the best ones. This finds better answers because it considers model-wide effects, but each combination requires running the model through training, which takes hours or days for a real LLM."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "MaskPro learns which weights to keep by assigning a probability to each weight and letting the model learn those probabilities using fast probability-based steering, with a stabilized training signal that ignores randomness from the data."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Every chip needs patterns",
+        "viz": "weights",
+        "viz_args": [["free", 8], ["free", 7], ["free", 6], ["free", 8], ["free", 7], ["free", 6], ["hot", 3], ["hot", 3], ["hot", 3], ["hot", 3], ["hot", 3], ["hot", 3]],
+        "caption": "Hardware accelerates when weights follow strict patterns like keep-N-of-M."
+      },
+      {
+        "title": "2. Naive rule fails",
+        "viz": "weights",
+        "viz_args": [["warm", 8], ["free", 4], ["warm", 6], ["free", 2], ["warm", 7], ["free", 1], ["hot", 3], ["hot", 2], ["hot", 3], ["hot", 4], ["hot", 3], ["hot", 2]],
+        "caption": "Picking biggest weights per layer ignores model context and makes errors."
+      },
+      {
+        "title": "3. MaskPro assigns probabilities",
+        "viz": "box",
+        "viz_args": "Each weight gets a dial: 0% chance keep vs 100% chance keep",
+        "caption": "Instead of yes-or-no, give each weight a probability of being kept."
+      },
+      {
+        "title": "4. Loss residual guides training",
+        "viz": "weights",
+        "viz_args": [["moved", 2], ["moved", 3], ["moved", 1], ["moved", 4], ["moved", 2], ["moved", 3], ["hot", 6], ["hot", 7], ["hot", 5], ["hot", 8], ["hot", 7], ["hot", 6]],
+        "caption": "Training nudges probabilities using pure mask-change effects, not data noise."
+      },
+      {
+        "title": "5. Stable sparsity emerges",
+        "viz": "weights",
+        "viz_args": [["free", 8], ["free", 7], ["free", 6], ["free", 8], ["free", 7], ["free", 6], ["hot", 2], ["hot", 3], ["hot", 2], ["hot", 2], ["hot", 2], ["hot", 3]],
+        "caption": "Model learns which weights matter, hardware accelerates, loss stays low."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Assign probabilities",
+        "text": "For each group of M weights, give every weight a probability dial."
+      },
+      {
+        "b": "Sample a mask",
+        "text": "Spin each dial, randomly choose N weights to keep, zero the rest."
+      },
+      {
+        "b": "Measure loss change",
+        "text": "Run the model, measure loss. Then, measure what the loss would be with a different random mask on the same data batch."
+      },
+      {
+        "b": "Train on the difference",
+        "text": "Use the difference (residual) to update probability dials, not the raw loss itself."
+      },
+      {
+        "b": "Smooth out data noise",
+        "text": "Keep a rolling average of past residuals so one weird batch does not jolt training off course."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the training signal used to steer learning. Instead of using the raw model loss, it uses the loss residual: the difference in loss between the currently sampled mask and a reference mask on the same data. This isolates the effect of changing the mask from noise caused by variation in the training data."
+    ],
+    "object": "training signal"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: loss residual",
+    "name": "loss residual with smoothing",
+    "paras": [
+      "The loss residual is the difference in model loss caused by changing the mask, independent of data variation. In mathematical terms: if mask m produces loss L(m) and mask m-reference produces loss L(m-ref), the residual is the gap L(m) minus L(m-ref), measured on the same batch of data. This quantity isolates how much the mask choice itself matters, removing noise from randomness in the data.",
+      "MaskPro estimates this by sampling two masks and measuring their loss difference. It then applies a moving average tracker (like averaging the last 10 changes) to smooth out outlier batches. This tracker acts as a buffer: if one batch happens to have low loss for both masks (making the difference look small), the moving average tells the true long-term pattern instead."
+    ],
+    "heat": {
+      "cells": [
+        ["Batch A masks", 1, false],
+        ["Batch B masks", 2, false],
+        ["Batch C masks", 4, true],
+        ["Batch D masks", 2, false],
+        ["Residual avg", 3, true],
+        ["Batch E masks", 1, false],
+        ["Batch F masks", 3, false],
+        ["Batch G masks", 4, true],
+        ["Residual avg", 3, true],
+        ["Batch H masks", 2, false],
+        ["Final signal", 4, true],
+        ["Stable dial update", 4, true]
+      ],
+      "caption": "Darker means stronger signal. Highlighted cells show how moving average filters noisy batches to give stable training nudges."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper's key insight is that training a probabilistic mask learner is unstable when you look at raw loss, because data randomness creates huge noise. By measuring only the loss difference caused by changing the mask, you get a cleaner signal. By smoothing that signal over time, you get a stable training process."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "MaskPro introduces a new policy gradient estimator (PGE) that replaces the standard loss metric with per-minibatch loss residuals. A moving average tracker of residuals further stabilizes the signal, preventing aggressive updates caused by outlier batches. The theory shows that once loss drops below half its initial value, this smoothed residual tracker achieves near-optimal training efficiency."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: isolating mask impact from data noise",
+    "paras": [
+      "Here is the core problem MaskPro solves. When you use policy gradients to learn a mask, the training signal is the model loss. But the model loss comes from two sources: the quality of the mask chosen and the randomness of the data batch. Most batches will have low loss anyway (good data luck), so the signal gets buried. A mask that works great might appear bad on a lucky batch, and a bad mask might appear good on an unlucky batch. The training signal jitters randomly.",
+      "MaskPro's fix: measure the loss difference instead. Take two masks (one current, one reference), run both on the same batch, and measure how much the loss changed. Now the data randomness cancels out: both masks faced the same lucky-or-unlucky batch, so the difference tells you only the mask effect. Then add a smoothing tracker: keep a rolling average of past differences. This buffer prevents any single weird batch from yanking the probabilities in the wrong direction.",
+      "The reason this works mechanically: policy gradient training needs a signal that tells it whether a mask choice was good or bad. That signal should be stable and honest. Raw loss has huge noise. Loss residual has much less noise because the data effect is subtracted out. Smoothing the residual gives a signal that is both clean and stable, allowing the learning algorithm to confidently steer probabilities toward good masks."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Sample two masks from probability dials"
+        },
+        {
+          "t": "step",
+          "s": "Run model on same data batch for both masks"
+        },
+        {
+          "t": "step",
+          "s": "Compute loss for each mask",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Calculate residual (loss difference)"
+        },
+        {
+          "t": "step",
+          "s": "Update moving average tracker",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Use smoothed residual to nudge probability dials"
+        },
+        {
+          "t": "output",
+          "s": "Probability dials shifted toward good masks"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The learning update with loss residuals and smoothing",
+    "words": "gradient update equals the smoothed loss residual times the log-probability gradient of the mask",
+    "equation": "g_sr = (f(m ⊙ w, ξ) − f(m_0 ⊙ w, ξ) − δ_t) ∇log p(m|π)",
+    "symbols": [
+      ["m", "the current sampled mask (binary: 1 means keep, 0 means remove)"],
+      ["m_0", "the reference mask for comparison"],
+      ["w", "the model weights"],
+      ["⊙", "element-wise multiplication (apply the mask)"],
+      ["ξ", "one minibatch of training data"],
+      ["f(·, ξ)", "the model loss on that batch"],
+      ["δ_t", "the moving average of past residuals (smoothing tracker)"],
+      ["π", "the probability dial settings"],
+      ["p(m|π)", "the probability of sampling mask m given the dial settings"],
+      ["∇log p(m|π)", "which direction to nudge the dials to increase probability of mask m"],
+      ["g_sr", "the gradient for updating the dials"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say at iteration t, we sample mask m and get loss 2.5 on batch ξ.",
+        "We sample reference mask m_0 and get loss 2.8 on the same batch.",
+        "The residual is 2.5 − 2.8 = −0.3 (mask m is 0.3 units better).",
+        "The moving average (smoothing tracker) is currently δ_t = −0.1 (average of past residuals).",
+        "Smoothed residual is −0.3 − (−0.1) = −0.2 (slightly adjusted for noise).",
+        "The gradient ∇log p(m|π) tells us how to nudge the dials to favor mask m.",
+        "We update the dials by: Δπ ∝ −0.2 × ∇log p(m|π) (push dials toward mask m).",
+        "Next iteration, we update the moving average to (−0.1 + −0.3) / 2 = −0.2."
+      ]
+    },
+    "note": "The key is subtracting the smoothing tracker: it removes noise from data variation, leaving only the pure mask effect, which is a stable signal for learning good probability dials."
+  },
+  "bars": {
+    "h2": "Training cost and model quality trade-off",
+    "charts": [
+      {
+        "title": "Rule-based (greedy by layer)",
+        "rows": [
+          ["Training time", 100, "good"],
+          ["Model accuracy before", 92, "good"],
+          ["Model accuracy after sparsity", 71, "bad"]
+        ],
+        "note": "Fast to run, but misses model-wide interactions, so accuracy drops steeply."
+      },
+      {
+        "title": "Full search (all combinations)",
+        "rows": [
+          ["Training time", 20000, "bad"],
+          ["Model accuracy before", 92, "good"],
+          ["Model accuracy after sparsity", 86, "good"]
+        ],
+        "note": "Finds better masks by trying everything, but prohibitively slow because combinations explode combinatorially."
+      },
+      {
+        "title": "MaskPro (probabilistic + residual)",
+        "rows": [
+          ["Training time", 300, "good"],
+          ["Model accuracy before", 92, "good"],
+          ["Model accuracy after sparsity", 84, "good"]
+        ],
+        "note": "Fast like greedy, accurate like full search, because loss residual learning steers probabilities efficiently without trying all combinations."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Moving average lag on new tasks.",
+        "html": "If you start training on a very different task (e.g., a language model trained on English then switched to code), the smoothing tracker will be out of date. Early learning steps will be misdirected until the moving average adapts. The paper mentions resetting the reference mask when loss drops below half its initial value to mitigate this."
+      },
+      {
+        "warn": true,
+        "b": "Choosing the wrong reference mask.",
+        "html": "The method compares the current sample to a reference mask. If the reference mask is consistently bad, the residual is always positive and never steers learning. If the reference mask is too similar to the current mask, the residual is too small to read signal. The paper uses a simple default (e.g., a default mask) but does not fully specify how this choice affects learning."
+      },
+      {
+        "warn": true,
+        "b": "Very small batches can still have high variance.",
+        "html": "The moving average reduces but does not eliminate noise. With batch size 1, data randomness still creates outliers. The paper demonstrates stable performance down to batch size 1 but does not claim perfect stability."
+      },
+      {
+        "b": "Done right: loss residual + smoothing tracker.",
+        "html": "When both the residual and the moving average are used together, the training signal is clean enough that the probability dials converge to good masks even on noisy data. The paper shows this holds across different initialization seeds and batch sizes."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should show the training dynamics of MaskPro step by step. Start with a small language model (e.g., a 100-million-parameter model) and apply (2-of-4) sparsity: keep 2 out of every 4 weights. Run three parallel training runs: vanilla policy gradient (raw loss), policy gradient with loss residual, and MaskPro (residual plus smoothing tracker). Plot training loss for each run. Show that vanilla PGE jitters randomly (because raw loss is noisy), residual PGE is smoother, and MaskPro PGE is smoothest and converges fastest. At the end, show that the learned sparse model preserves accuracy while reducing memory."
+    ],
+    "metric_eq": "training_stability = std_dev of loss over iterations, accuracy_preservation = sparse_model_accuracy / dense_model_accuracy",
+    "closing": "The key observation is that smoothing the training signal by using loss residuals lets you learn good masks quickly without trying every combination. The moving average tracker prevents noise-driven jitter, making learning confident and fast."
+  }
+}

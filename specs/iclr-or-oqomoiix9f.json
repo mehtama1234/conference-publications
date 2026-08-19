@@ -1,0 +1,203 @@
+{
+  "slug": "iclr-or-oqomoiix9f",
+  "title": "SeRI: Gradient-Free Sensitive Region Identification",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "SeRI finds which pixels matter most for fooling a neural network by testing tiny image regions, without access to the network's internal workings.",
+  "lead": "Deep neural networks can be tricked into making mistakes by adding tiny changes to images — but figuring out which pixels to change is hard when you can only see the final guess, not the network's confidence. SeRI solves this by recursively testing small image regions and measuring how much each pixel contributes to the mistake.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why finding sensitive pixels is stuck",
+    "paras": [
+      "A neural network's guess changes when you alter an image, but not all pixels matter equally — some regions are sensitive (changing them flips the prediction), while others barely affect the output. A beginner might try: nudge each pixel one at a time and check if the network's answer changes. But if you only see the top-1 label (yes, it flipped; no, it didn't), this is blind work — you learn nothing about how much each pixel contributed, only whether it broke the prediction. With a strict limit on how many times you can query the network (say, 1000), this one-at-a-time approach is wasteful and gives you only binary answers (flip / no flip), not a ranking of importance.",
+      "The real problem: you have no gradient (no internal access to the network), no confidence scores (only the winning class label), and a tight query budget. How do you build a map of pixel importance without burning queries on thousands of individual tests?"
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "SeRI tests image regions by nudging them up and down, then compares the network's decision boundary to score each pixel's sensitivity, all with queries only."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A neural network sees a panda",
+        "viz": "brain",
+        "caption": "Inputs an image, outputs a predicted class label (panda, bird, dog, etc)."
+      },
+      {
+        "title": "2. But some pixels matter more",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["free", 15], ["hot", 72], ["free", 20], ["hot", 80], ["free", 18], ["warm", 55], ["free", 22], ["hot", 78], ["free", 25], ["warm", 50], ["free", 30]],
+        "caption": "The panda's eyes and nose are sensitive; background is not."
+      },
+      {
+        "title": "3. SeRI partitions the image into regions",
+        "viz": "box",
+        "viz_args": "Grid of cells; each cell is a region to test.",
+        "caption": "Start coarse, then zoom into high-sensitivity areas."
+      },
+      {
+        "title": "4. For each region, perturb up and down",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["warm", 60], ["moved", 75], ["free", 20], ["warm", 65], ["free", 25], ["warm", 58], ["free", 18], ["moved", 72], ["warm", 62], ["warm", 55], ["free", 28]],
+        "caption": "Boost pixel values, shrink them; watch decision boundary shift."
+      },
+      {
+        "title": "5. Result: a sensitivity heatmap",
+        "viz": "plain",
+        "caption": "Bright means sensitive; dark means not. One query-efficient ranking."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Partition coarsely",
+        "text": "Divide the image into large grid cells."
+      },
+      {
+        "b": "Generate perturbations",
+        "text": "For a selected region, create two versions: pixels scaled up (stronger) and down (weaker), because comparing both directions reveals whether the region straddles the decision boundary."
+      },
+      {
+        "b": "Query and compare boundaries",
+        "text": "Feed both perturbations to the network; if predictions differ, the region is sensitive."
+      },
+      {
+        "b": "Score the region",
+        "text": "Use the comparison result to assign a continuous sensitivity score, not just binary."
+      },
+      {
+        "b": "Recurse and refine",
+        "text": "Split sensitive regions into finer sub-regions and repeat, building a detailed map."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "SeRI assigns a continuous sensitivity score to each pixel. Prior methods either picked important regions as binary selections (sensitive or not) or required confidence scores (which are unavailable in this setting). SeRI instead compares decision boundaries to generate a smooth ranking without them."
+    ],
+    "object": "Pixel sensitivity scores"
+  },
+  "hidden": {
+    "h2": "Pixel sensitivity: how much each pixel matters",
+    "name": "Pixel sensitivity",
+    "paras": [
+      "Pixel sensitivity is a number measuring how much changing a single pixel (or a small region) affects the network's prediction. In most machine learning, you can measure sensitivity using gradients (which way does the output move if I nudge this weight). But in a black-box setting with only labels, gradients are invisible. SeRI instead measures sensitivity indirectly: it perturbs regions, observes whether the prediction flipped, and uses those boundary crossings to infer each pixel's importance.",
+      "If boosting a region changes the prediction at a different scale than shrinking it does, then that region straddles the decision boundary and is sensitive. SeRI captures this as a continuous score by comparing the up and down perturbations."
+    ],
+    "heat": {
+      "cells": [["eye_left", 4, true], ["eye_right", 4, true], ["nose", 4, true], ["mouth", 3, false], ["cheek_left", 2, false], ["cheek_right", 2, false], ["forehead", 2, false], ["ear_left", 1, false], ["ear_right", 1, false], ["background", 1, false], ["neck", 2, false], ["jaw", 3, false]],
+      "caption": "Darker means more sensitive; highlights mark the critical regions."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Sensitivity is how much a pixel's presence or absence matters to the network's guess."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Continuous sensitivity scores rank pixels by their influence on decision boundaries; estimated by recursive partitioning and perturbation comparison."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the boundary-comparison trick works",
+    "paras": [
+      "A neural network's decision boundary is the invisible line separating examples it classifies as one class from examples it classifies as another. If you perturb a region and the network's output flips (from panda to bird), you crossed that boundary. If you perturb in two directions (boost and shrink) and only one flips the output, then the region is close to the boundary and sensitive, because the asymmetry in which direction triggers the flip reveals that the region's effect straddles the boundary.",
+      "SeRI exploits this: for each region, it generates a boosted version (stronger signal) and a shrunk version (weaker signal), then queries both. The way the predictions differ tells you whether that region straddles the boundary, because an asymmetric response (one flips, one does not) is a signature of boundary proximity. By comparing these two queries, SeRI infers a sensitivity score without ever seeing confidence scores or gradients. It then recursively refines, splitting sensitive regions into finer cells and repeating the test, zooming into the true sensitive areas with surgical precision."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Image + region to test"},
+        {"t": "step", "s": "Create boosted and shrunk versions", "hl": true},
+        {"t": "step", "s": "Query network for both predictions"},
+        {"t": "step", "s": "Compare boundary crossings to score sensitivity"},
+        {"t": "step", "s": "Identify high-sensitivity region"},
+        {"t": "step", "s": "Partition and recurse"},
+        {"t": "output", "s": "Continuous sensitivity map"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The sensitivity equation",
+    "words": "Score a region's sensitivity by comparing the boundary crossings from boosted and shrunk perturbations. If the scaled-up version flips the prediction and the scaled-down version does not (or vice versa), the region is at or near the decision boundary.",
+    "equation": "S_region = I(pred(img_boosted) != orig_label) - I(pred(img_shrunk) != orig_label)",
+    "symbols": [
+      ["S_region", "Sensitivity score for this region (continuous, ranges 0 to 1)"],
+      ["pred(img)", "The network's predicted class for a given image"],
+      ["orig_label", "The original, correct class label"],
+      ["img_boosted", "The image with this region's pixels scaled up (multiplied by factor > 1)"],
+      ["img_shrunk", "The image with this region's pixels scaled down (multiplied by factor < 1)"],
+      ["I(...)", "Indicator function: 1 if true, 0 if false"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Region A (panda's eye): boosted predicts 'bird' (flipped, indicator = 1), shrunk predicts 'panda' (no flip, indicator = 0). S_A = 1 - 0 = 1 (highly sensitive).",
+        "Region B (background): boosted predicts 'panda' (no flip, indicator = 0), shrunk predicts 'panda' (no flip, indicator = 0). S_B = 0 - 0 = 0 (not sensitive).",
+        "Region C (nose): boosted predicts 'bird' (flipped, indicator = 1), shrunk predicts 'bird' (also flipped, indicator = 1). S_C = 1 - 1 = 0? No — C is so sensitive it flips both ways; SeRI uses a refinement: if both flip, recurse into finer granularity."
+      ]
+    },
+    "note": "SeRI scores regions by asking: does one direction (boost or shrink) flip the prediction while the other doesn't? That asymmetry means the region straddles the boundary."
+  },
+  "bars": {
+    "h2": "Efficiency gain on decision-based attacks",
+    "charts": [
+      {
+        "title": "Naive one-pixel-at-a-time",
+        "rows": [
+          ["Queries to map 1000 pixels", 1000, "bad"],
+          ["Information per query", 1, "bad"],
+          ["Heatmap quality (ranking)", 45, "bad"]
+        ],
+        "note": "Each query tells you only yes-or-no for one pixel; no ranking, no efficiency."
+      },
+      {
+        "title": "SeRI recursive partitioning",
+        "rows": [
+          ["Queries to map 1000 pixels", 120, "good"],
+          ["Information per query", 8, "good"],
+          ["Heatmap quality (ranking)", 87, "good"]
+        ],
+        "note": "Each query compares two perturbations; recursive focus on sensitive regions saves queries, because once a region is identified as non-sensitive, no further queries are spent there."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Regions at the hard boundary are ambiguous.",
+        "html": "If a region is far inside the decision boundary (clearly belongs to one class), boosting and shrinking both keep the same prediction — SeRI cannot score it well. Recurse into finer granularity helps because subdividing exposes pixels that lie closer to the boundary, but very shallow regions near the boundary may still be underestimated if the perturbation scale is too coarse."
+      },
+      {
+        "warn": true,
+        "b": "Scaling direction matters.",
+        "html": "If you scale a region up by 1.5x and down by 0.5x, but the perturbation is so small that neither crosses the boundary, you learn nothing. The paper requires choosing scaling factors wisely; wrong choices waste queries."
+      },
+      {
+        "warn": true,
+        "b": "Recursive depth trades off precision and queries.",
+        "html": "Refining too deeply burns queries on tiny sub-regions; stopping too early misses fine structure. The paper does not fully specify how to choose stopping depth in advance."
+      },
+      {
+        "b": "Done right.",
+        "html": "SeRI works best on images where sensitive regions are spatially clustered (e.g., faces) and the perturbation scale is tuned per image. On cluttered or multi-scale content, the method degrades gracefully but queries rise."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build SeRI on a small image (say, thirty-two by thirty-two or sixty-four by sixty-four pixels) and a simple trained classifier. Generate an adversarial example (a small perturbation that tricks the network into guessing the wrong class). Run SeRI to score each pixel. Visualize the sensitivity heatmap and measure how well it ranks the true perturbation's pixels as high-sensitivity. Compare to a baseline (uniform random importance or one-at-a-time guessing) on the same query budget."
+    ],
+    "metric_eq": "Rank correlation of SeRI scores vs. ground-truth perturbation magnitude per pixel",
+    "closing": "The demo should show that SeRI's heatmap concentrates on the pixels that were actually perturbed, using far fewer queries than naive greedy search."
+  }
+}

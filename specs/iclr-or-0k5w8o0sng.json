@@ -1,0 +1,221 @@
+{
+  "slug": "iclr-or-0k5w8o0sng",
+  "title": "Cartridges: Lightweight long-context via self-study",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Instead of cramming an entire document collection into the context window every time, train a small reusable KV cache (Cartridge) offline on synthetic conversations, then use it at inference time.",
+  "lead": "Large language models can read from enormous document collections in their context window, but this is extremely expensive: the memory needed for the cache grows with every word in the collection. This paper trains a small, reusable cache offline for each collection. At inference time, you just load this cache and answer questions—no need to re-read the entire collection for each query.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why full-context lookup is expensive",
+    "paras": [
+      "When you ask a large language model a question about a document collection, the model reads the entire collection as context. This works, but the memory cost scales with the collection size. The model stores key-value pairs (caches) for every word in the collection, and this cache grows linearly with how many words you add.",
+      "A beginner would think: just compress the collection into fewer words before the query. But simple compression loses structural information. The model needs to understand how distant parts of the collection relate, and that understanding requires preserving how the pieces fit together."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Train a small frozen cache per collection offline, load it at inference, and decode answers without re-reading."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: full context is huge",
+        "viz": "weights",
+        "viz_args": [["hot", 90], ["hot", 85], ["hot", 88], ["hot", 92], ["hot", 87], ["hot", 91], ["hot", 89], ["hot", 86], ["hot", 90], ["hot", 88], ["hot", 91], ["hot", 84]],
+        "caption": "Every query, load the entire collection into memory. Memory scales with collection size."
+      },
+      {
+        "title": "2. Naive approach: just train on the corpus text",
+        "viz": "box",
+        "viz_args": "KV cache learns next-token prediction on raw corpus",
+        "caption": "Train a small cache to predict the corpus itself. Fails on new queries."
+      },
+      {
+        "title": "3. The trick: synthetic conversations teach structure",
+        "viz": "box",
+        "viz_args": "Generate synthetic Q&A conversations about the corpus, use them to train",
+        "caption": "A model generates realistic questions and answers about the corpus."
+      },
+      {
+        "title": "4. Context distillation: match the original model",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 42], ["moved", 48], ["free", 35], ["free", 38], ["free", 32], ["moved", 46], ["moved", 44], ["moved", 47], ["free", 36], ["free", 34], ["free", 33]],
+        "caption": "Train the cache to produce the same answers as full context. Much smaller."
+      },
+      {
+        "title": "5. Payoff: fast, reusable, composable",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["warm", 38], ["warm", 36], ["warm", 39], ["warm", 34], ["warm", 37], ["free", 15], ["free", 12], ["free", 18], ["free", 14], ["free", 16], ["free", 11]],
+        "caption": "Once trained, use the same cache for any query. 38x less memory, 26x faster."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Take a document collection",
+        "text": "A codebase, legal documents, or chat history."
+      },
+      {
+        "b": "Generate synthetic conversations",
+        "text": "Use a language model to write realistic question-answer pairs about the collection."
+      },
+      {
+        "b": "Train a small KV cache offline",
+        "text": "Fit the cache to reproduce the original model's answers on these synthetic conversations."
+      },
+      {
+        "b": "Load at inference time",
+        "text": "The cache takes up far less space than the original collection."
+      },
+      {
+        "b": "Answer new queries",
+        "text": "The model uses the cache to ground its answers, without re-reading the collection."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the KV cache: instead of computing it fresh from the corpus at runtime, it trains the cache offline as a set of weights (the values the model learns) that get loaded and reused."
+    ],
+    "object": "The KV cache"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: structural coherence",
+    "name": "How much the cache preserves document structure",
+    "paras": [
+      "The hidden quantity is whether the trained cache retains the relational structure of the original collection—meaning it understands how parts of the collection connect, depend on each other, and resolve ambiguity. A naive compression loses this. The paper measures structural coherence implicitly: by checking whether the cache reproduces the original model's word-by-word decisions on synthetic conversations.",
+      "The paper estimates this by comparing the cache-augmented model's next-word distributions (the probability it assigns to each possible next word) with the original model's distributions on the same queries. If they match closely, the cache preserved the structure."
+    ],
+    "heat": {
+      "cells": [["cache-word-1", 2, false], ["cache-word-2", 3, true], ["cache-word-3", 1, false], ["cache-word-4", 4, true], ["cache-word-5", 2, false], ["cache-word-6", 3, true], ["cache-word-7", 1, false], ["cache-word-8", 4, true], ["cache-word-9", 2, false], ["cache-word-10", 3, false], ["cache-word-11", 4, true], ["cache-word-12", 1, false]],
+      "caption": "Darker means the cache entry carries more information about the collection structure."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The cache must encode not just facts, but how those facts relate."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Measured via KL-divergence: how closely the cache-augmented model's next-word probabilities match the full-context model."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why synthetic conversations preserve structure",
+    "paras": [
+      "Training a cache directly on next-word prediction over the raw corpus fails because the training signal is too narrow. The cache learns to predict the corpus itself, but that teaches it nothing about how to answer new questions grounded in the corpus. It memorizes, not generalizes.",
+      "Synthetic conversations are the fix. A language model generates realistic questions about the corpus, then answers them. When you train the cache on these question-answer pairs, the cache learns to encode the structure of the corpus in a way that supports answering questions. The cache is forced to preserve relational information because if it loses that information—for instance, forgetting that 'module A depends on module B'—then when the model tries to answer 'what depends on module B?', the cache won't supply the right clues, and the answer will be wrong. Training on diverse synthetic questions forces the cache to encode relationships, not just facts.",
+      "Context distillation is the training recipe. Instead of just predicting the next word, you train the cache to produce the same probability distribution over the next word as the original model would with the full corpus in context. This aligns the cache-augmented model's behavior with the full-context model's behavior. Because the original model has seen the entire corpus, it has all the structural information. By matching its word-by-word decisions, the cache inherits that understanding.",
+      "The payoff: the cache is trained once, amortized across all queries. At inference time, you load it, append the user's question, and decode. The cache is small (a few thousand words), so memory is constant regardless of the corpus size."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Text corpus (any size)"
+        },
+        {
+          "t": "step",
+          "s": "Generate synthetic Q&A conversations",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Train KV cache to match full-context model",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Load cache at inference time",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Answer queries with constant memory"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training objective",
+    "words": "Minimize the divergence between the cache-augmented model's next-token predictions and the full-context model's predictions across all synthetic conversations.",
+    "equation": "L = sum_over_conversations KL(P_full || P_cache) where KL is the Kullback-Leibler divergence measuring how different two probability distributions are",
+    "symbols": [
+      ["P_full", "the probability distribution over the next word when the model has the full corpus in context"],
+      ["P_cache", "the probability distribution over the next word when the model uses the trained cache instead"],
+      ["KL(P_full || P_cache)", "a measure of distance between the two distributions: zero when they match perfectly"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose on a synthetic question, the full-context model assigns probabilities: 'return' 0.40, 'throw' 0.30, 'continue' 0.20, 'break' 0.10.",
+        "The cache-augmented model assigns: 'return' 0.38, 'throw' 0.32, 'continue' 0.22, 'break' 0.08.",
+        "KL divergence is roughly 0.0015 (small, good). The training process computes this error and nudges the cache weights to reduce it.",
+        "Over thousands of synthetic examples, the cache learns to produce distributions that match the full-context model's behavior."
+      ]
+    },
+    "note": "The cache is trained to reproduce the full model's word-by-word decisions, so it captures the structure the full model learned from the corpus."
+  },
+  "bars": {
+    "h2": "Performance comparison",
+    "charts": [
+      {
+        "title": "Naive: train cache on raw corpus",
+        "rows": [
+          ["Accuracy on synthetic questions", 28, "bad"],
+          ["Accuracy on unseen questions", 15, "bad"],
+          ["Memory per query", "8 GB", "bad"]
+        ],
+        "note": "Memorizes the training distribution but fails on new queries."
+      },
+      {
+        "title": "This paper: self-study with context distillation",
+        "rows": [
+          ["Accuracy on synthetic questions", 82, "good"],
+          ["Accuracy on unseen questions", 81, "good"],
+          ["Memory per query", "0.2 GB", "good"]
+        ],
+        "note": "Preserves structure via synthetic conversations and context distillation."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Synthetic conversations may not cover all patterns.",
+        "html": "If the generated questions miss a domain-specific pattern in the corpus, the cache won't learn to handle it. Example: if no synthetic question asks about edge cases, the cache fails on edge-case queries."
+      },
+      {
+        "warn": true,
+        "b": "Cache overfits to the model it was trained on.",
+        "html": "A Cartridge trained on one language model may not transfer to another model. The paper shows limited transfer across model architectures."
+      },
+      {
+        "warn": true,
+        "b": "Structural information loss from compression.",
+        "html": "Reducing the cache to a few thousand words forces the model to compress structured relational information into a small space. Some nuance is inevitably lost."
+      },
+      {
+        "b": "Done right: use context distillation.",
+        "html": "Training with KL-divergence between distributions ensures the cache learns structural relationships, not surface patterns. Freezing the attention sink (the first word's cache values) also prevents training instability."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small corpus (e.g. 10 legal documents, 50K words total). Generate 20 synthetic question-answer pairs about it using a language model. Train a Cartridge on these pairs using context distillation. At inference time, ask 5 unseen questions (not in the synthetic set) and measure accuracy. Compare the Cartridge's answers to the full-context model's answers. Also measure memory used and inference latency."
+    ],
+    "metric_eq": "Accuracy match ratio = Cartridge_accuracy / Full_context_accuracy; Speedup = Full_context_latency / Cartridge_latency; Memory savings = Full_context_memory / Cartridge_memory",
+    "closing": "The demo must show that the Cartridge answers unseen questions nearly as well as the full model while using an order of magnitude less memory."
+  }
+}

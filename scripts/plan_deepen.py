@@ -17,11 +17,11 @@ def slug(pid): return bs.slug(pid)
 def has_spec(pid): return os.path.exists(f"specs/{slug(pid)}.json")
 
 def target(size):
-    # how many dives a subtheme "should" have, by size
-    if size >= 100: return 6
-    if size >= 50:  return 5
-    if size >= 25:  return 4
-    if size >= 12:  return 3
+    # how many dives a subtheme "should" have, by size (raised for a deeper pass)
+    if size >= 100: return 10
+    if size >= 50:  return 8
+    if size >= 25:  return 6
+    if size >= 12:  return 4
     return 2
 
 # collect every subtheme with its papers + current dive count

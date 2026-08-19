@@ -1,0 +1,231 @@
+{
+  "slug": "iclr-or-0vf5truavf",
+  "title": "Learning Ordinal Probabilistic Reward from Preferences",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Instead of assigning one score to an answer, the model learns a full probability distribution over quality levels, so it captures both the ranking and the actual goodness.",
+  "lead": "Reward models guide large language models toward human values by scoring how good an answer is. Today's models either demand expensive hand-labeled scores or produce scores that are hard to trust. This paper says: do not assign one score. Instead, assign probabilities across a set of quality bins (like 'terrible, bad, okay, good, excellent'). That way you learn both which answer humans prefer AND how absolutely good each answer is.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Two broken paths for scoring answers",
+    "paras": [
+      "In large language models, a reward model is a small classifier that reads a prompt and an answer, then outputs a score saying 'how good is this answer on a scale of say 0 to 10?' That score then guides the whole system to produce better answers, because the system learns to maximize the score the reward model assigns.",
+      "The first approach: ask humans to rate each answer on an absolute scale ('this answer is a 7 out of 10'). This grounds the score in reality. But humans are expensive and slow, so you cannot afford to label millions of examples.",
+      "The second approach: ask humans to compare two answers ('which one is better?'). Cheaper, because comparison is faster than rating. But the reward model only learns rankings, because it sees 'A beat B' and 'C beat D' but never sees 'how good is A actually?' If task A gets scores 30 and 32, and task B gets scores 60 and 62, the model cannot tell that both As are terrible and both Bs are decent, because the only signal it received was 'first one beats second one' in each pair. The scores are just arbitrary numbers that satisfy the ranking—the actual values are meaningless.",
+      "A beginner would try: 'Let's just mix both types of training data!' But that does not work because the two numbers mean different things; when the model sees a comparison, it does not know how to relate that to an absolute quality score, so it cannot stitch them together into a single coherent scale."
+    ],
+    "callout": {
+      "b": "The problem.",
+      "html": "Reward models either waste money or only learn rankings, never both relative preference and absolute quality."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old way: one score",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["warm", 58], ["warm", 42], ["free", 20], ["free", 15], ["free", 10], ["free", 8], ["free", 5], ["free", 3], ["free", 2], ["free", 1], ["free", 0]],
+        "caption": "Two answers get single scores: 35 and 58. Nothing says if they're both terrible."
+      },
+      {
+        "title": "2. The new way: a cloud of probabilities",
+        "viz": "weights",
+        "viz_args": [["moved", 4], ["moved", 3], ["warm", 2], ["warm", 1], ["free", 0], ["free", 0], ["moved", 4], ["moved", 3], ["moved", 2], ["warm", 1], ["free", 0], ["free", 0]],
+        "caption": "Each answer gets probabilities across 5 bins: Bad, Okay, Good, Very Good, Excellent."
+      },
+      {
+        "title": "3. Training data: mix preferences and labels",
+        "viz": "box",
+        "viz_args": "80k pairs: A > B; 20k ratings: this is Good",
+        "caption": "Use both cheap comparisons and expensive one-off labels to anchor the bins."
+      },
+      {
+        "title": "4. Region Flooding: guide the probability cloud",
+        "viz": "weights",
+        "viz_args": [["free", 1], ["free", 1], ["warm", 3], ["warm", 3], ["moved", 2], ["free", 1], ["free", 1], ["free", 1], ["moved", 3], ["moved", 2], ["warm", 2], ["warm", 1]],
+        "caption": "Smooth triangular penalty nudges probability mass into the correct quality bin."
+      },
+      {
+        "title": "5. Result: calibrated and certain",
+        "viz": "plain",
+        "caption": "Model now agrees: this answer is probably Good (confident) AND preferrable (ranking sound)."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "1. Discretize quality into bins",
+        "text": "Divide the quality scale into ordinal levels: Terrible, Bad, Okay, Good, Excellent."
+      },
+      {
+        "b": "2. Compute probability per bin",
+        "text": "For each answer, feed it through the language model and output probabilities that sum to 1 across bins."
+      },
+      {
+        "b": "3. Use preference pairs as usual",
+        "text": "For pairwise preference data: encourage higher probability on chosen answer, lower on rejected."
+      },
+      {
+        "b": "4. Anchor to absolute quality",
+        "text": "For labeled data: apply a smooth triangular penalty that pushes probability mass into the correct bin."
+      },
+      {
+        "b": "5. Output is both ranking and calibration",
+        "text": "The model now agrees: A is preferred over B, and A is actually in the Good range."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The old discriminative reward model outputs one number per answer. This paper changes the output shape: instead of one scalar, output a probability distribution (a list of 5 numbers that sum to 1, one per quality bin)."
+    ],
+    "object": "reward output shape"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: where is the probability mass?",
+    "name": "Probability concentration per quality bin",
+    "paras": [
+      "Most reward models learn a single scalar, so there is nothing 'hidden'—you see the answer immediately. This model hides something interesting: the full probability distribution over bins. The paper measures where the model places its confidence—does it think this answer is bad (high probability in the Bad bin) or excellent (high probability in the Excellent bin)?",
+      "The paper estimates this distribution by running the language model and reading off the probabilities at the output layer. It also visualizes the distribution to check whether the model learned to place probability mass at the correct bin for each labeled example."
+    ],
+    "heat": {
+      "cells": [["Bin 1: Terrible", 1, false], ["Bin 2: Bad", 2, true], ["Bin 3: Okay", 3, false], ["Bin 4: Good", 4, true], ["Bin 5: Excellent", 1, false], ["Example A prob", 2, false], ["Example B prob", 4, true], ["Example C prob", 3, false], ["Margin spread", 2, false], ["Calibration error", 1, true], ["Test accuracy", 4, false], ["Data efficiency", 3, true]],
+      "caption": "Darker means more probability mass or better calibration. Borders highlight bins where the method concentrates probability as intended."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When you ask the model 'is this answer good?', it does not say 'yes' or 'no' or '7 out of 10'. It says 'I'm 10% sure it's bad, 30% sure it's okay, 50% sure it's good, 10% sure it's excellent.' Where did it put most of its confidence?"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Let <em>p<sub>ψ</sub>(s | x, y)</em> be the probability density function of a score <em>s</em> for response <em>y</em> given context <em>x</em>, controlled by <em>ψ</em>. The paper measures and optimizes the shape of this distribution across five discrete bins."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting the score into a probability cloud works",
+    "paras": [
+      "When the model learns on pairwise preferences alone, it only knows 'A is better than B', not 'A is actually good'. So it can place the chosen answer's score anywhere above the rejected answer's score. Both could be terrible and the ranking is still correct.",
+      "When the model learns on absolute labels ('this answer is Good'), it needs to anchor those probabilities to real quality. The paper uses Region Flooding Tuning: a smooth penalty that says 'if this answer is labeled Good, concentrate your probability mass in the Good bin, not Bad or Excellent'. But the penalty is not a hard wall—it is a smooth ramp shaped like a triangle. This prevents the gradients (the nudges during training) from getting stuck at zero. The model can smoothly move probability from one bin to the next.",
+      "By mixing both signal types—pairwise preferences for ranking + labeled quality for anchoring—the model learns a distribution that satisfies both constraints: A is preferred over B (because the chosen answer has higher total probability of being good) and the actual quality level matches human judgment (because probability concentrates in the labeled bin). The key: a probability distribution is flexible. You can satisfy 'A is better' AND 'A is actually Good' at the same time by tuning the shape of the cloud."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Prompt and answer text"
+        },
+        {
+          "t": "step",
+          "s": "Feed through language model layers",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Apply output layer to get 5 numbers (logits)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Convert to probabilities: divide each number by the sum so they add to 1",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply Region Flooding penalty to nudge mass into correct bin",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Distribution: probabilities over Terrible, Bad, Okay, Good, Excellent"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The ordinal probabilistic reward objective",
+    "words": "For each answer pair (chosen, rejected), maximize the probability that the chosen answer has higher total quality than the rejected answer, where total quality is the sum of (bin_position times bin_probability). For labeled examples, apply a smooth triangular penalty that concentrates probability in the correct bin.",
+    "equation": "Loss = -log P(score_chosen > score_rejected) + lambda * Reg_triangular(p, bin_target)",
+    "symbols": [
+      ["P(score_chosen > score_rejected)", "Probability that the chosen answer's quality ranking exceeds the rejected answer's"],
+      ["lambda", "How strong the quality-anchoring penalty is (controls data-efficiency tradeoff)"],
+      ["Reg_triangular(p, bin_target)", "Smooth penalty: zero when probability is peaked at bin_target, increases as you move to other bins"],
+      ["p", "Vector of 5 probabilities (one per quality bin), sums to 1"],
+      ["bin_target", "The labeled quality bin (e.g., 3 for Good)"]
+    ],
+    "worked": {
+      "title": "Tiny numeric example",
+      "lines": [
+        "Suppose an answer is labeled Good (bin 3 out of 5) and the model predicts probabilities [0.1, 0.2, 0.3, 0.3, 0.1] (already concentrated in bins 3 and 4).",
+        "Triangular penalty at bin 3: 0 * 0.1 + 1 * 0.2 + 0 * 0.3 + 1 * 0.3 + 2 * 0.1 = 0.8 (penalty measure of how far each bin is from target).",
+        "If the model instead predicted [0.01, 0.01, 0.01, 0.97, 0.0] (spiked at bin 4), penalty = 0 * 0.01 + 1 * 0.01 + 2 * 0.01 + 1 * 0.97 + 2 * 0.0 = 1.0 (slightly worse).",
+        "If it predicted [0.3, 0.3, 0.1, 0.2, 0.1] (spread all over), penalty = 0 * 0.3 + 1 * 0.3 + 2 * 0.1 + 3 * 0.2 + 4 * 0.1 = 1.6 (much worse).",
+        "Training reduces the penalty by sharpening the distribution around the true bin, so the model learns to be confident and correct."
+      ]
+    },
+    "note": "The probability distribution is the reward. Instead of outputting a single number, the model outputs five numbers. During training, the penalty gently steers those numbers toward the labeled quality level without blocking the gradients."
+  },
+  "bars": {
+    "h2": "Comparing approaches: ranking vs. absolute quality",
+    "charts": [
+      {
+        "title": "Bradley-Terry (old: preference-only)",
+        "rows": [
+          ["Preference pairs (relative ranking)", 92, "good"],
+          ["Absolute quality calibration", 48, "bad"],
+          ["Data efficiency (labels per example)", 0.0, "bad"],
+          ["Interpretability of scores", 55, "bad"]
+        ],
+        "note": "Learns rankings but scores are arbitrary numbers, hard to interpret or mix with quality labels."
+      },
+      {
+        "title": "OPRM (this paper: preference + quality)",
+        "rows": [
+          ["Preference pairs (relative ranking)", 93, "good"],
+          ["Absolute quality calibration", 76, "good"],
+          ["Data efficiency (only 20% labeled data)", 80, "good"],
+          ["Interpretability of scores (bins are human-readable)", 89, "good"]
+        ],
+        "note": "Learns both by discretizing into bins and using smooth penalties. Mixed data sources are compatible."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Bins not chosen well.",
+        "html": "If the quality levels (e.g., Bad, Okay, Good, Excellent) do not match human judgment, the distribution will learn a different ranking than humans intend. The method assumes the bin labels correspond to real distinctions humans actually make."
+      },
+      {
+        "warn": true,
+        "b": "Too much labeled data forces the ranking.",
+        "html": "If almost all training data is labeled, the preference signal (which is cheap and noisy) gets drowned out. The model will be well-calibrated but might miss real preference rankings that contradict the labels."
+      },
+      {
+        "warn": true,
+        "b": "Penalty steepness tuned wrong.",
+        "html": "The steepness of the penalty (the lambda setting) controls how hard the model is nudged toward the bin. Too steep and gradients vanish (the model cannot learn). Too shallow and the model ignores quality labels."
+      },
+      {
+        "b": "Done right.",
+        "html": "When bin labels match human judgment and the penalty is tuned to balance preference and quality signals, the model learns a distribution that is both a good ranker and well-calibrated on absolute quality. Two sources of truth become one."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy reward model on a small dataset. Use two types of labels: (1) pairs of answers where humans say 'A is better', (2) single answers labeled with a quality bin ('this is Good'). The model needs both because pairwise data alone teaches rankings but preferences are meaningless without an absolute scale, while quality labels alone would be too expensive to collect at scale. Train the model to output a probability distribution over bins. Run inference on held-out test answers. Measure two things: (A) does it rank preference pairs correctly? (B) does it place the probability mass in the right bin for each quality level?"
+    ],
+    "metric_eq": "Ranking accuracy = (fraction of preference pairs where chosen has higher total-quality-score) ; Calibration = (fraction of labeled examples where the true bin has >=50% probability)",
+    "closing": "If both metrics are high, you have proved that a single model can learn both rankings and absolute quality by discretizing into a probability distribution."
+  }
+}

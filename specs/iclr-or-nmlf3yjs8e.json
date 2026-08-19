@@ -1,0 +1,240 @@
+{
+  "slug": "iclr-or-nmlf3yjs8e",
+  "title": "FZOO: Fast Zeroth-Order Optimizer for Fine-Tuning LLMs",
+  "family": "Optimization",
+  "one_liner": "FZOO fine-tunes giant language models using only forward passes, not backward passes, and adapts step sizes by measuring how much the loss varies across random weight nudges.",
+  "lead": "Fine-tuning a large language model on a single GPU usually hits a wall: the backward pass (the memory-intensive step where the optimizer measures how to improve the model) can demand 10 times more memory than just running the model to answer a question. FZOO solves this by skipping the backward pass entirely and estimating the adjustment direction from a batch of forward passes instead. The trade-off is usually slow: existing methods need tens of times more passes to converge. FZOO breaks that trade-off by adapting step sizes intelligently—taking bigger steps when the loss is smooth and steady, smaller steps when it is rough and jittery—achieving Adam-scale convergence speeds while keeping memory as low as just running the model.",
+  "nav": [["theme-optimization.html", "Optimization"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The backward pass bottleneck",
+    "paras": [
+      "Fine-tuning a language model is a simple idea: run it on new data, measure the error, and nudge every weight to reduce that error. The nudging direction comes from the backward pass, which tracks how each weight affects the final error—a mathematical operation that requires storing activations (the intermediate values flowing through each layer) for every sample. A model like OPT-30B needs 633 GB of GPU memory just for this, even though running inference (using a finished model to answer questions) needs only 60 GB.",
+      "A beginner might try a simpler method: instead of measuring backward, just measure forward. Perturb each weight randomly, run the model twice (once unperturbed, once perturbed), and use the difference in loss to estimate a direction to move. This method, called zeroth-order optimization, needs zero backward memory—but it trades speed for memory. Existing zeroth-order methods like MeZO usually need tens of times more steps to converge, because the random perturbations are noisy estimates of the true direction to move the weights."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Zeroth-order optimizers save memory but require many more convergence steps than traditional optimizers."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The backward bottleneck",
+        "viz": "brain",
+        "caption": "Forward pass: 60 GB. Backward pass: 633 GB memory explosion."
+      },
+      {
+        "title": "2. Zeroth-order nudge",
+        "viz": "weights",
+        "viz_args": [["warm", 50], ["free", 30], ["warm", 50], ["free", 25], ["warm", 45]],
+        "caption": "Two forward passes with random nudges measure an adjustment direction without backward."
+      },
+      {
+        "title": "3. Adaptive step size",
+        "viz": "box",
+        "viz_args": "Smooth: big step. Rough: tiny step.",
+        "caption": "FZOO measures how much loss varies and scales steps accordingly."
+      },
+      {
+        "title": "4. Batched speedup",
+        "viz": "weights",
+        "viz_args": [["moved", 60], ["moved", 55], ["moved", 48], ["free", 22], ["free", 18]],
+        "caption": "Compute multiple forward passes in parallel; perturb only the middle layers, not input."
+      },
+      {
+        "title": "5. Adam-scale convergence",
+        "viz": "plain",
+        "caption": "FZOO converges 3x faster than MeZO; memory stays at inference level throughout."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Sample a batch of data",
+        "text": "Draw examples from the fine-tuning dataset."
+      },
+      {
+        "b": "Compute unperturbed forward pass",
+        "text": "Run the model normally, get baseline loss."
+      },
+      {
+        "b": "Perturb and run multiple forwards",
+        "text": "Add random bit-flips to middle-layer activations N times, measure loss each time."
+      },
+      {
+        "b": "Estimate direction and loss volatility",
+        "text": "Average the N difference signals to estimate which way to move; measure standard deviation of the N losses to find how rough the loss surface is."
+      },
+      {
+        "b": "Adapt step size and update weights",
+        "text": "Scale step size inversely by roughness; move weights in the estimated direction."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "FZOO changes the step-size schedule—the rule that decides how far to move weights in each update. Traditional zeroth-order methods use a fixed step size for all updates. FZOO measures the roughness of the loss surface (standard deviation of loss values from the batch of forward passes) and scales the step size inversely: large steps when loss is smooth and steady, tiny steps when loss is rough and jittery."
+    ],
+    "object": "step-size schedule"
+  },
+  "hidden": {
+    "h2": "The loss volatility",
+    "name": "loss standard deviation (roughness measure)",
+    "paras": [
+      "The hidden quantity is the standard deviation of loss values across the batch of N forward passes—a direct measurement of how much the loss bounces around as you move randomly through weight space at this point. A high standard deviation means the loss surface is rough and jittery; a low one means smooth and steady.",
+      "FZOO estimates this quantity by running N forward passes with different random perturbations and recording each loss. It then computes the standard deviation of those N values and uses it to divide the step size. This adaptive scaling ensures the optimizer takes cautious steps in rough regions and bold steps in smooth regions."
+    ],
+    "heat": {
+      "cells": [
+        ["loss_1", 2, false],
+        ["loss_2", 3, true],
+        ["loss_3", 2, false],
+        ["loss_4", 1, false],
+        ["loss_5", 3, true],
+        ["loss_6", 2, false],
+        ["loss_7", 1, false],
+        ["loss_8", 4, true],
+        ["loss_9", 1, false],
+        ["loss_10", 2, false],
+        ["loss_11", 3, true],
+        ["loss_12", 1, false]
+      ],
+      "caption": "Darker means higher loss value from perturbed forward pass. Spread of values measures roughness."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "FZOO measures how varied the loss values are across multiple forward passes. High variation means rough surface and small steps. Low variation means smooth surface and big steps."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The optimizer computes the standard deviation of the N loss values and scales the learning rate inversely. This mirrors adaptive optimizers like Adam but uses only forward-pass information."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: adaptive efficiency without backward",
+    "paras": [
+      "The core insight is that the spread of loss values tells you about how rough the surface is. On a smooth plateau, multiple random weight nudges produce similar loss values (small spread). On a rough bump, the same random nudges produce wildly different losses (large spread). By measuring this spread from just N forward passes, FZOO learns how to scale its steps without ever computing a backward pass.",
+      "The second insight is parallel efficiency. Instead of perturbing every weight and running a separate forward pass for each, FZOO perturbs activations (intermediate numerical values flowing through layers) using random bit-flips. This operation can run in parallel across many samples and many perturbations. Since activations are reused from the unperturbed forward pass, the perturbation cost is low. And since you only perturb middle layers (not the input), you share computation: compute the input representation (how the first layer converts raw text) once, apply it to N different perturbed versions of the later layers. This reuse reduces the total forward-pass count dramatically compared to naive zeroth-order methods."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "batch of text (shared across all perturbations)"
+        },
+        {
+          "t": "step",
+          "s": "forward pass (unperturbed) produces baseline loss",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "perturb activations N times to run N forward passes in parallel"
+        },
+        {
+          "t": "step",
+          "s": "measure loss spread (standard deviation) across N results",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "scale step size inversely by spread; estimate direction from N differences"
+        },
+        {
+          "t": "output",
+          "s": "update weights with adaptive-scaled step"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The adaptive step-size rule",
+    "words": "gradient estimate = average of N one-sided difference signals; step size = base learning rate divided by (loss standard deviation plus tiny stability constant)",
+    "equation": "g_t = (1/εN) Σ(l_i - l_0) u_i;  ε_t = ε / (σ_t + δ)",
+    "symbols": [
+      ["g_t", "estimated gradient direction at step t"],
+      ["l_i", "loss from the i-th perturbed forward pass"],
+      ["l_0", "baseline loss from unperturbed forward pass"],
+      ["u_i", "random vector with ±1 entries (Rademacher)"],
+      ["ε", "base perturbation size (how much to nudge activations)"],
+      ["N", "number of perturbations per step"],
+      ["σ_t", "standard deviation of the N loss values"],
+      ["δ", "tiny positive constant (e.g., 0.001) for numerical stability"],
+      ["ε_t", "actual step size for this update"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose N=4 perturbations yield losses: 2.1, 2.3, 2.0, 2.2. Baseline loss l_0 = 1.9.",
+        "Gradient estimate: g = (1/(0.1*4)) * [(2.1-1.9) + (2.3-1.9) + (2.0-1.9) + (2.2-1.9)] * u_i = (1/0.4) * [0.2 + 0.4 + 0.1 + 0.3] = 2.5 * u_i.",
+        "Loss std dev: σ = sqrt(avg(losses - mean)^2) ≈ 0.1 (the losses cluster tightly).",
+        "Step size: ε_t = 0.01 / (0.1 + 0.001) ≈ 0.099 (big step on smooth terrain).",
+        "If σ were 0.5 (rough terrain): ε_t = 0.01 / (0.5 + 0.001) ≈ 0.02 (tiny step to avoid overshooting)."
+      ]
+    },
+    "note": "The step size scales inversely with roughness: smooth regions get large steps, rough regions get tiny steps, matching how adaptive optimizers like Adam behave."
+  },
+  "bars": {
+    "h2": "Convergence comparison",
+    "charts": [
+      {
+        "title": "MeZO (fixed step size)",
+        "rows": [
+          ["Task accuracy before fine-tuning", 82, "bad"],
+          ["Task accuracy after 100 steps", 86, "bad"],
+          ["Task accuracy after 800 steps (convergence)", 91, "good"]
+        ],
+        "note": "Fixed step size means slow convergence: small steps are safe on bumps but creep on plateaus."
+      },
+      {
+        "title": "FZOO (adaptive step size)",
+        "rows": [
+          ["Task accuracy before fine-tuning", 82, "bad"],
+          ["Task accuracy after 100 steps", 89, "good"],
+          ["Task accuracy after 300 steps (convergence)", 91, "good"]
+        ],
+        "note": "Adaptive scaling converges faster because it matches step size to local terrain: big steps on smooth plateaus, tiny steps on bumps."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Too many perturbations per step.",
+        "html": "Increasing the number of perturbations N improves the quality of the direction estimate because averaging more random signals cancels out noise, but each perturbation takes computation time. If N is too large, you lose the speedup: each step becomes as slow as a first-order update. The sweet spot is usually N in the range 5–20."
+      },
+      {
+        "warn": true,
+        "b": "Unstable step sizes on near-zero loss spread.",
+        "html": "If the loss surface is extremely smooth and the spread rounds to zero, the step size can explode unless a small stability constant is added to the denominator. Without this buffer, updates become erratic and diverge. The paper adds this constant to avoid division by near-zero."
+      },
+      {
+        "warn": true,
+        "b": "Perturbation noise swamps signal in high dimensions.",
+        "html": "In very wide networks, random perturbations to activations can be noisy relative to the true direction to move, especially if you perturb lightly. The loss differences become tiny and hard to measure reliably, reducing the quality of the direction estimate. Larger perturbations help recover the true direction because the real trend in the losses (the signal) dominates over random noise more strongly."
+      },
+      {
+        "b": "Done right.",
+        "html": "FZOO works when you tune the number of perturbations per step and perturbation size for your model and dataset, and always include a small stability buffer in the denominator to avoid division by near-zero. The authors demonstrate it on RoBERTa-large, OPT-family models (350M–66B), Phi-2, and Llama3, validating the method across diverse architectures."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "To validate FZOO, build a small fine-tuning experiment: take a pretrained model (e.g., DistilBERT or a small version of LLaMA), pick a task with a training and test set (e.g., binary classification on a text dataset like BoolQ), and compare two optimizers side by side. For optimizer 1, run standard Adam for 100 steps with full backward passes (record time and peak memory). For optimizer 2, run FZOO with 8 perturbations per step for 100 steps (record time and peak memory). Measure task accuracy after convergence on both. The demo must show: (1) FZOO peak memory is much lower (near the level of just running the model, not 10x higher), (2) FZOO reaches similar accuracy in fewer steps than the baseline zeroth-order method, and (3) FZOO total wallclock time is competitive with Adam despite doing more forward passes."
+    ],
+    "metric_eq": "convergence_speedup = steps_MeZO_to_converge / steps_FZOO_to_converge;  memory_savings = peak_memory_Adam / peak_memory_FZOO",
+    "closing": "The demo makes undeniable that single-GPU fine-tuning is now possible without the 10x memory explosion of backward passes, and that zeroth-order optimization can be fast—not just memory-efficient."
+  }
+}

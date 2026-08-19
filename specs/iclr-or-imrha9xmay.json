@@ -1,0 +1,259 @@
+{
+  "slug": "iclr-or-imrha9xmay",
+  "title": "YoNoSplat: Feedforward 3D Reconstruction",
+  "family": "Computer Vision",
+  "one_liner": "A single feedforward model reconstructs 3D scenes from photos by learning to predict both the 3D point cloud and the camera positions, avoiding training collapse through gradual mixing of real and predicted camera poses.",
+  "lead": "Reconstructing a 3D scene from photos is usually slow—either the photos must have exact camera positions written down beforehand, or a computer must spend time solving for them. YoNoSplat trades optimization for speed: a single neural network sees your photos once and immediately outputs the full 3D scene and all camera positions, ready to render. The trick is teaching it without the model getting confused about which of two contradicting jobs is actually its job.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why fast reconstruction is stuck",
+    "paras": [
+      "Today there are two ways to build a 3D scene from photos. First: if you have exact camera poses (you know precisely where each camera was pointing), you can quickly fuse all the photos into a 3D model. Second: if you don't have poses, the computer must solve for them—trying millions of tiny adjustments until everything lines up. This takes minutes or hours per scene.",
+      "A beginner asks: why not train a neural network once on lots of photo collections, then use it to instantly predict both the 3D point cloud (the blob of points that make up the scene) and the camera poses all at once? The answer: if you tell the network to predict both things simultaneously, it gets confused. The network's gradients (the signals telling it to move its weights in a certain direction) point in contradictory ways—the cloud-learning signal says move this way, but the pose-learning signal says move that way. The two tasks tangle together, and training collapses."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Jointly predicting the 3D point cloud and camera poses in one network creates contradictory learning signals that destabilize training, making the feedforward approach impossible."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Setup: Photos with unknown poses",
+        "viz": "plain",
+        "caption": "Multiple photos of the same scene, camera positions unknown."
+      },
+      {
+        "title": "2. The tangling problem",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["hot", 65], ["warm", 40], ["free", 20], ["hot", 70], ["free", 15], ["warm", 35], ["hot", 55], ["free", 25], ["warm", 45], ["hot", 68], ["free", 18]],
+        "caption": "Point-cloud and pose learning tangle; contradictory signals destabilize training."
+      },
+      {
+        "title": "3. Mix-forcing: Start with truth",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["hot", 70], ["warm", 42], ["free", 18], ["hot", 72], ["free", 16], ["warm", 40], ["hot", 60], ["free", 22], ["warm", 46], ["hot", 70], ["free", 19]],
+        "caption": "Early training: use real camera poses, network learns the point cloud clearly."
+      },
+      {
+        "title": "4. Gradually introduce predicted poses",
+        "viz": "box",
+        "viz_args": "Truth: 100% → Blend: 60% truth + 40% predicted → Predicted: 100%",
+        "caption": "As training progresses, slowly replace real poses with predicted ones."
+      },
+      {
+        "title": "5. Both tasks now cooperate",
+        "viz": "weights",
+        "viz_args": [["moved", 68], ["moved", 72], ["moved", 44], ["moved", 20], ["moved", 74], ["moved", 17], ["moved", 43], ["moved", 62], ["moved", 24], ["moved", 48], ["moved", 71], ["moved", 21]],
+        "caption": "By the end, point-cloud and pose networks both train smoothly on predicted poses."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Extract image features",
+        "text": "A pretrained vision model reads all photos and creates a numerical description of each."
+      },
+      {
+        "b": "Fuse across images",
+        "text": "Special layers called attention blocks (which compare one photo to all others) mix information from all photos to understand the full 3D scene."
+      },
+      {
+        "b": "Predict point cloud and poses",
+        "text": "The network outputs the 3D point cloud (a blob of Gaussian splats) and where each camera was."
+      },
+      {
+        "b": "Align to world coordinates",
+        "text": "Use the predicted camera poses to rotate all local point-cloud pieces into one shared world frame."
+      },
+      {
+        "b": "Render and check",
+        "text": "Synthesize images from the 3D model using the predicted poses, compare to originals."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "YoNoSplat changes how training unfolds over time. Instead of using the model's predicted camera poses from day one (which confuses learning), or always using ground-truth poses (which does not prepare the model for real inference), the paper introduces a scheduling rule: use ground-truth poses at first, then gradually swap in the model's own predictions as training continues."
+    ],
+    "object": "Training schedule: ground-truth poses then mixed poses then predicted poses"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Exposure bias",
+    "name": "Exposure bias (distribution mismatch)",
+    "paras": [
+      "Exposure bias is a mismatch between training and test time. At training, the network practices on perfect camera poses (ground truth). At test, it must work with its own imperfect poses. This gap is an invisible trap: the model never trains on realistic pose errors until it is too late, and its predictions are built for a world that does not exist at deployment.",
+      "YoNoSplat estimates exposure bias by tracking how often the model's predictions diverge from ground truth, and by slowly introducing real prediction errors into training. The Intrinsic Condition Embedding (a subnetwork) also tracks how sensitive the point cloud is to camera intrinsics (focal length, etc.), catching another hidden source of scale confusion."
+    ],
+    "heat": {
+      "cells": [
+        ["Iter 0 (early)", 1, true],
+        ["Ground truth poses only", 1, false],
+        ["No exposure bias here", 1, false],
+        ["Iter 50k (mid)", 3, false],
+        ["50% truth + 50% predicted", 3, true],
+        ["Exposure bias now visible", 3, false],
+        ["Iter 150k (late)", 4, false],
+        ["Predicted poses only", 4, true],
+        ["Fully trained on realistic errors", 4, false],
+        ["Distribution match complete", 4, false],
+        ["Model ready for real photos", 4, true],
+        ["No train-test gap remains", 4, false]
+      ],
+      "caption": "Darker means higher mixing ratio of predicted poses; darker also means lower exposure bias."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The network must train on the same kinds of poses it will see at test time, otherwise it memorizes an illusion."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Mix-forcing gradually transitions from teacher-forcing (ground-truth inputs) to self-forcing (predicted inputs), preventing training instability and distribution mismatch."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the mixing strategy works",
+    "paras": [
+      "The core idea: if you ask a network to predict both the point cloud and poses at once, it will try to make them agree with each other rather than with the truth. It is the classic chicken-and-egg: slightly wrong poses make the cloud look wrong; wrong cloud makes pose refinement useless. Both errors feed back into each other, and training spirals into collapse.",
+      "Mix-forcing breaks the spiral by removing the pose question early on. For the first half of training, the network is told: forget about predicting poses, I will give you perfect poses—just learn to predict the point cloud correctly. This builds a strong foundation (what the paper calls a prior—a learned expectation of what realistic 3D scenes look like). Once point-cloud learning is solid, the network gradually starts predicting poses too, but now it has a stable foundation. By the time poses are fully its responsibility, the point-cloud network is confident enough to absorb pose errors without collapsing. The mixing schedule is a curriculum: start easy, gradually increase difficulty."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Multiple photos (all views)"
+        },
+        {
+          "t": "step",
+          "s": "Extract features from each photo"
+        },
+        {
+          "t": "step",
+          "s": "Fuse across views with cross-image attention"
+        },
+        {
+          "t": "step",
+          "s": "Predict local 3D Gaussians (per-view point cloud)"
+        },
+        {
+          "t": "step",
+          "s": "Predict camera poses"
+        },
+        {
+          "t": "step",
+          "s": "Choose poses: ground-truth (early) or predicted (late)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Align all Gaussians to world frame using chosen poses"
+        },
+        {
+          "t": "output",
+          "s": "Render and compare to real images"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training loss and mixing ratio",
+    "words": "Total loss = rendering loss + weighted intrinsic loss + weighted pose loss; mixing ratio alpha increases linearly from 0 to 1 over training steps",
+    "equation": "L_total = L_render + lambda_intrin * L_intrin + lambda_pose * L_pose; alpha(t) = (t - t_start) / (t_end - t_start) if t_start <= t <= t_end, else clipped to [0, 1]; poses_used = alpha * predicted_poses + (1 - alpha) * ground_truth_poses",
+    "symbols": [
+      ["L_render", "Loss measuring difference between rendered and real images (combination of pixel error and perceptual distance)"],
+      ["L_intrin", "Loss measuring difference between predicted and true camera focal length"],
+      ["L_pose", "Loss measuring difference between predicted and true relative camera positions"],
+      ["lambda_intrin, lambda_pose", "Weights balancing how much each loss contributes to training"],
+      ["alpha(t)", "Mixing ratio at training step t, ranging from 0 to 1"],
+      ["t_start, t_end", "Step numbers marking when mixing begins and completes"],
+      ["predicted_poses, ground_truth_poses", "Camera position predictions from network vs. real recorded positions"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose training runs for 150k steps, with mixing from step 30k to step 120k.",
+        "At step 30k: alpha = 0, uses 100% ground-truth poses (fully teacher-forcing).",
+        "At step 75k (midway): alpha = (75k - 30k) / (120k - 30k) = 45k / 90k = 0.5, uses 50% predicted plus 50% ground-truth (equally mixed).",
+        "At step 120k: alpha = 1.0, uses 100% predicted poses (fully self-forcing).",
+        "At step 150k: alpha still 1.0 (clamped), continues with fully predicted poses to convergence.",
+        "The gradual transition allows the point cloud to stabilize early, then adapt to realistic pose errors late."
+      ]
+    },
+    "note": "The mixing ratio alpha is the key: it is a schedule that turns on exposure to real pose errors slowly, avoiding the cliff where naive training collapses."
+  },
+  "bars": {
+    "h2": "Why mixing beats naive approaches",
+    "charts": [
+      {
+        "title": "Teacher-forcing only (ground-truth poses always)",
+        "rows": [
+          ["Point-cloud quality", 92, "good"],
+          ["Pose quality at test", 35, "bad"],
+          ["Speed at test", 98, "good"],
+          ["Overall usefulness", 45, "bad"]
+        ],
+        "note": "Point cloud is perfect but poses are terrible at test, because the model never learned to predict them."
+      },
+      {
+        "title": "Self-forcing only (predicted poses from start)",
+        "rows": [
+          ["Point-cloud quality", 28, "bad"],
+          ["Pose quality at test", 40, "bad"],
+          ["Speed at test", 98, "good"],
+          ["Overall usefulness", 35, "bad"]
+        ],
+        "note": "Training collapses immediately; point cloud and poses tangle, and neither learns cleanly."
+      },
+      {
+        "title": "Mix-forcing (gradual transition)",
+        "rows": [
+          ["Point-cloud quality", 88, "good"],
+          ["Pose quality at test", 82, "good"],
+          ["Speed at test", 98, "good"],
+          ["Overall usefulness", 87, "good"]
+        ],
+        "note": "Point cloud stabilizes early on truth, then adapts to realistic pose errors, enabling both quality and speed."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Wrong mixing schedule.",
+        "html": "If you start introducing predicted poses too early, the network collapses (same as pure self-forcing). If you wait too long, the network never adapts to real pose errors and performs poorly at test. The schedule must be tuned per dataset."
+      },
+      {
+        "warn": true,
+        "b": "Scale ambiguity.",
+        "html": "Without seeing the camera intrinsics (focal length, etc.), the network cannot tell if a blurry far object is small-and-close or big-and-far. YoNoSplat adds an Intrinsic Condition Embedding module to predict and embed this information, but if this module is bypassed or misconfigured, scale collapses."
+      },
+      {
+        "warn": true,
+        "b": "Limited generalization.",
+        "html": "The model trains on specific datasets and camera intrinsics. If you feed it photos from a wildly different camera or scene type, point-cloud and pose predictions degrade. The method requires diverse training data covering the target domain."
+      },
+      {
+        "b": "Done right.",
+        "html": "A properly tuned mix-forcing schedule, combined with intrinsic embedding and diverse training data, yields both fast inference and accurate point cloud and poses even when input photos are uncalibrated."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small dataset of 20 photos of a simple scene (a toy, a room corner, a small object). Run YoNoSplat's trained model on these photos. Measure two things: (1) does the reconstructed 3D model look correct when rendered from the input camera angles, and (2) are the predicted camera poses close to the true poses (if you have them). Compare this to a naive network trained with ground-truth poses only (teacher-forcing) and tested on the same photos—it should fail to predict realistic poses. Then compare to a naive network trained with predicted poses from the start (self-forcing) and watch it collapse during training."
+    ],
+    "metric_eq": "Rendering error = mean absolute difference between real and rendered images; Pose error = mean distance between predicted and true camera centers; Geometry error = mean distance from predicted to true 3D points.",
+    "closing": "The demo must make clear that mix-forcing yields low errors on all three metrics, while pure teacher-forcing fails at pose accuracy and pure self-forcing collapses completely."
+  }
+}
