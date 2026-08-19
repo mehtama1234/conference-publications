@@ -30,7 +30,11 @@ def theme_block(theme, rows):
                 links = '<div class="dl">' + " · ".join(
                     f'<a href="{bs.slug(r["id"])}.html">{e(bs.PAPERS.get(r["id"],{}).get("title","")[:46])}&rarr;</a>'
                     for r in deep[:8]) + '</div>'
-            parts.append(f'<div class="sub"><a class="subname" href="theme-{s}.html#{bs.slug(x["name"])}">{e(x["name"])}</a>'
+            import re as _re
+            is_catch = x["name"].startswith("Other work in")
+            subslug = s + "__" + _re.sub(r"[^a-z0-9]+", "-", x["name"].lower()).strip("-")
+            href = f"theme-{s}.html" if is_catch else f"subtheme-{subslug}.html"
+            parts.append(f'<div class="sub"><a class="subname" href="{href}">{e(x["name"])}</a>'
                          f'<span class="n">{len(x["_papers"])}</span>{badge}{links}</div>')
         nsub = len(allsubs)
     else:

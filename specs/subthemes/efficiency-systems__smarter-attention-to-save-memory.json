@@ -1,0 +1,50 @@
+{
+  "intro": "Memory and speed are the two bottlenecks in neural networks that use self-attention (the core mechanism in language models), and researchers attack them along five main directions. First, reusing cached scores instead of recomputing them from scratch, so you do not repeat work. Second, replacing full scoring with linear approximations that are mathematically cheaper, so each comparison costs less time. Third, computing only sparse subsets of scores that matter, so you skip unnecessary pairs. Fourth, writing optimized code that runs the math faster on actual hardware, reducing latency because efficient low-level code avoids wasted computation and memory transfers. Fifth, adapting scoring patterns to specific tasks like video, vision, or long reasoning, so the method fits the unique structure of each problem.",
+  "groups": [
+    {
+      "label": "Cache reuse and selective eviction",
+      "members": [1, 5, 15, 17, 23, 27],
+      "writeup": [
+        "When a language model generates text word by word, it stores all previous attention scores in a key-value cache so it does not have to recompute them. For long documents, this cache can explode in size and memory. The question is: which cached values are truly important, and which can be dropped or compressed?",
+        "Elastic-Cache drops cached values that will not be looked at again, speeding up generation by 8-45 times depending on sequence length. LookaheadKV predicts which values will be needed in the future before they are even generated, then evicts only the safe ones first, gaining a 14.5 times speedup in eviction cost. BeaconKV condenses multiple cached values into summary representations called beacon queries, achieving 5.8 times memory reduction while staying accurate. EpiCache stores conversation history compactly by grouping messages into episodes, cutting memory by 3.7 times on long conversations. Fast KV Compaction reaches 50 times compression by matching scoring patterns across similar word positions, and Predicting Future Utility compresses by 80 percent by predicting which words will be read later, trading a small loss in accuracy for major latency and memory cuts.",
+        "These approaches share the core insight: full cache is wasteful. By either compressing values before storing them, evicting words that will never be used again, or learning which heads and positions can afford lossy compression, the memory crisis becomes manageable while accuracy stays high."
+      ]
+    },
+    {
+      "label": "Linear attention alternatives",
+      "members": [3, 4, 6, 9, 20, 39],
+      "writeup": [
+        "Full scoring computes a relevance score for every pair of word positions: if you have 100,000 words, that is 10 billion scores. Linear scoring replaces this quadratic cost (all pairs) with a linear one: instead of comparing all pairs, use a mathematical shortcut that approximates the scoring behavior in a single pass. The tradeoff is that you lose some expressiveness, but in practice the loss is small if you choose the right shortcut.",
+        "Forge compiles linear scoring variants into fast GPU code, achieving 4.9 times speedup across different approximation methods and scaling to 16 million words on many GPUs. LaplacianFormer uses a Laplacian shortcut that keeps the expressiveness of full scoring while remaining linear, working well on images. Memory Caching shows that an RNN-like recurrent state can be competitive with transformers on long-context tasks, maintaining subquadratic (roughly linear) complexity. RACE Attention is strictly linear in both sequence length and embedding dimension (a numerical representation for each word), processing 12 million words on GPU, making it one of the fastest linear methods. Dynamic Linear Attention adapts the shortcut on the fly to match different sequence patterns. Delta linear attention (MDN) parallelizes the shortcut to run as fast as standard transformers on training.",
+        "Linear scoring works because most of the model's work comes from a small number of word pairs anyway. By picking the right shortcut and only computing those scores explicitly, you get linear time with competitive accuracy."
+      ]
+    },
+    {
+      "label": "Structured sparse attention patterns",
+      "members": [10, 12, 26, 37, 51, 59],
+      "writeup": [
+        "Sparse scoring does not abandon the full scoring formula—it still computes relevance scores between specific word pairs. But instead of looking at all pairs, it selects which pairs matter using patterns: local (nearby words), strided (every nth word), block structure, or learned patterns that change per input.",
+        "Tactic adaptively clusters words by similarity and selects which clusters to compute scores for, achieving 5.14 times speedup in scoring computation and 1.51 times faster overall on long contexts because it skips pairs in unrelevant clusters. UniSparse achieves 99 percent of full-scoring quality by compressing multiple input types down to a common sparse pattern, speeding up scoring by 2.61 times because the uniform sparsity is easier to run on hardware. LoSA uses locality—nearby words are more likely to matter—to skip distant words, reaching 4.14 times speedup while preserving near-full accuracy and even improving reasoning by 5 percent because words that interact often are nearby in the text. Prism uses spectral analysis to predict which blocks of words will matter, achieving 5.1 times speedup with no special training because the pattern emerges from the data structure. Scout Before You Attend sketches the scoring pattern first (fast approximation), then walks to the important parts, achieving 4.7 times speedup at 20 percent sparsity without losing accuracy because the sketch identifies which pairs matter before computing them fully.",
+        "These methods are faster than linear scoring on modern GPUs because sparse scoring runs the full formula (not an approximation) on a smaller set of word pairs, avoiding the overhead that linear scoring trades off."
+      ]
+    },
+    {
+      "label": "Multi-head and rank-reduced techniques",
+      "members": [7, 11, 69, 70],
+      "writeup": [
+        "Modern language models use multiple scoring heads—each head learns to look at different patterns in the data. Instead of running full scoring separately on each head, you can compress the shared structure across heads or reduce the amount of data stored for each head's key-value pair to save memory and compute.",
+        "Multi-Head Low-Rank Attention finds a low-rank shared representation across heads, delivering 2.8 times faster decoding with top-quality results because storing less data per head reduces the work to load and compute. Understanding the Dynamics of Forgetting uses mathematical analysis to understand how multi-head patterns change over learning, speeding up both when running and training the model because the analysis reveals which patterns are redundant. Tucker Attention generalizes grouped-query scoring and multi-head low-rank approaches as a single family, using an order of magnitude fewer numbers to store than earlier work to achieve comparable performance on both language and image models because the generalization discovers that all these methods are the same underlying idea. TyphoonMLA mixes different MLA code paths for efficient grouped-query scoring with shared prefixes, tripling scoring throughput on accelerators while keeping memory overhead minimal because choosing the right code path for each input reduces overhead.",
+        "These techniques share the insight that different heads often learn overlapping scoring patterns; by pooling or compressing those patterns, you cut the cost of every head without losing much expressiveness."
+      ]
+    },
+    {
+      "label": "Domain-specific and system-level optimizations",
+      "members": [2, 8, 25, 33, 35, 55],
+      "writeup": [
+        "Scoring is a core operation, but it runs inside bigger systems. Some work targets specific domains like video, vision, or long-reasoning chains, while others optimize how the system schedules and trains scoring across many GPUs or how it adapts when running on new data.",
+        "DASH optimizes the backward pass of scoring training, achieving 1.28 times throughput improvement by carefully scheduling compute so the GPU does not stall waiting for data. Neural Dynamics Self-Attention designs scoring for spiking neural networks (event-based vision sensors), cutting memory while boosting accuracy for energy-efficient hardware because the event-sparse input structure aligns with sparse computation. FAST-AR compresses temporal caches in video generation and applies sparse patterns, achieving 5 to 10 times faster end-to-end because video frames change slowly so old frames can be compressed. LIVEditor applies in-context sparse scoring to video editing, cutting latency by 60 percent because only a few frames and words matter for each edit step. Light Forcing uses sparse scoring on video diffusion, combining with other speedups to reach 27.4 frames per second on high-end GPUs because video diffusion allows pattern reuse across the fixed output resolution. SLA combines sparse and linear scoring in video generation, cutting computation by 95 percent and speeding up end-to-end by 13.7 times because combining the two methods captures benefits of each.",
+        "These domain-specific methods exploit structure unique to their tasks: video has temporal redundancy so frames can share cached values because successive frames are similar, long reasoning requires tracking specific keywords so you can drop irrelevant history because old words are not reread, and systems benefit from better scheduling so hardware stays busy because idle GPU cores waste power. Together they show that scoring is not one problem but many, and the best solution depends on the workload."
+      ]
+    }
+  ]
+}

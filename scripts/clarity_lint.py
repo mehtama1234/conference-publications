@@ -71,6 +71,10 @@ def lint_spec(fp):
     issues = []
     seen_jargon = set()   # first-use gloss: only check a term the first time it appears on the page
     for path, text in prose:
+        # ignore words inside quoted spans (cited paper titles / direct quotes) —
+        # a paper literally named "Powerful Discrete Tokenizer" must be quoted verbatim
+        text = re.sub(r'“[^”]{0,160}”', "  ", text)
+        text = re.sub(r'"[^"]{0,160}"', "  ", text)
         low = text.lower()
         if ".worked" not in path:   # worked examples may show arithmetic
             for pat, name in NOTATION:

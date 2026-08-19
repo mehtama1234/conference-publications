@@ -56,9 +56,12 @@ def render_theme(spec, theme, rows, have):
         chips = "".join(f'<a class="chip" href="{bs.slug(p["id"])}.html">{e(p.get("title","")[:70])}</a>'
                         for p in deep[:14])
         more = f' <span class="count">+{len(deep)-14} more deep dives</span>' if len(deep) > 14 else ""
-        subs_html += (f'<div class="sub"><div class="eyebrow">Subtheme</div><h2>{e(sub.get("name",""))}</h2>'
+        subpage = f'subtheme-{e(sub.get("slug",""))}.html'
+        readmore = f'<a class="chip" href="{subpage}" style="border-color:var(--accent);color:#0A5A62">Open the full subtheme page — narrative + all {len(papers)} papers →</a>'
+        subs_html += (f'<div class="sub"><div class="eyebrow">Subtheme</div>'
+                      f'<h2><a href="{subpage}" style="color:#111819;text-decoration:none">{e(sub.get("name",""))}</a></h2>'
                       f'{explain}<div class="count">{len(papers)} papers · {len(deep)} deep dives</div>'
-                      f'<div class="chips">{chips}</div>{more}</div>')
+                      f'<div class="chips">{readmore}{chips}</div>{more}</div>')
     body = f"""
 <header class="hero"><div class="wrap"><div class="bug">Theme · {len(rows)} papers · {len(spec.get('subthemes',[]))} subthemes</div>
 <h1>{e(theme)}</h1><p class="bigq">{e(spec.get('big_question',''))}</p></div></header>

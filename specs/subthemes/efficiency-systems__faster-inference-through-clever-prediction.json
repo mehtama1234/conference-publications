@@ -1,0 +1,49 @@
+{
+  "intro": "The work splits into five directions: improving the speculative decoding loop itself (where a small model guesses and the big model checks), optimizing the key-value cache that grows as you generate each word, using parallel branches to explore multiple paths at once, dynamically dropping unnecessary computation for easy examples, and serving multiple requests together more efficiently. Each addresses a different bottleneck: guessing speed, memory per word, sequential wall-clock time, per-input cost, and batch throughput.",
+  "groups": [
+    {
+      "label": "Speculative Decoding Advances",
+      "members": [1, 4, 8, 32],
+      "writeup": [
+        "Speculative decoding works by having a small, fast model generate a guess for the next token (or several tokens ahead), then feeding that guess to the big model to verify. If the big model agrees with the guess, you save the expensive computation of running the big model by itself. The challenge is that the small model is not perfectly aligned with the big model—the small model has different probabilities for which tokens are good—so its guesses are often wrong, wasting the cheap compute on failed predictions.",
+        "GTO (Group Tree Optimization) solves this by training the draft model specifically to pick tokens that the big model will accept, increasing the acceptance rate by 7.4%, which means more of the draft model's guesses get verified as correct by the big model without rejection, so you spend less work on failed speculations and save computation on the overall system another 7.7% beyond prior work. LTD (Learning to Draft) goes further, using reinforcement learning to adapt the draft model to each task and model pair, so the draft learns the target model's preferences for that specific domain and achieves 2.24x to 4.32x overall speedup. The loosely-speculative approach accepts tokens that are not exact matches but still semantically correct, which widens the window of acceptable guesses without needing retraining, pushing 5.07x speedup on the biggest models while keeping accuracy above 99%. Saguaro (Speculative Speculative Decoding) chains two draft models together—first a tiny model guesses, then a medium model verifies the guess against what the big model would do, which catches mistakes early before they reach the expensive big model, achieving 2x speedup over single-draft speculative decoding. Together, these papers show that alignment matters: the better the draft model predicts what the target will accept, the fewer failed guesses the big model has to reject, which means fewer wasted speculations and less redundant computation.",
+        "These methods build on each other: GTO directly improves draft training by aligning the draft model to the target model so more guesses are right; LTD applies reinforcement learning to make that alignment adapt to each task, so you get better acceptance on different domains; loosely-speculative increases the acceptance window—tolerating small mistakes rather than exact matches—without needing to retrain anything; Saguaro adds a verification layer by running a medium model to check the tiny model's guess, catching mistakes before they reach the expensive big model. All exploit the core insight that a wrong guess is still useful if it is cheap to check because the cost of the wrong guess is much lower than the cost of running the big model from scratch."
+      ]
+    },
+    {
+      "label": "Key-Value Cache and Memory Efficiency",
+      "members": [3, 18, 26],
+      "writeup": [
+        "As a transformer generates tokens one by one, it stores intermediate computations (called key-value cache or KV cache) to avoid recomputing them for earlier tokens. The problem is that this cache grows with every new token, and by the 1,000th token, storing it requires significant memory and bandwidth. When serving many requests at once, the cache dominates memory usage, forcing batch sizes to shrink and throughput to drop.",
+        "FreeKV retrieves only the most important parts of the cache on-the-fly using a learned index, avoiding the need to store all of it in fast memory. This achieves 13x speedup by trading a small overhead in deciding what to keep for massive savings in bandwidth per token. FAFO (Draftless Fumble Decoding) compresses the cache lossy—keeping only key parts—and then uses speculation to fix any mistakes the compression introduced, achieving 1.20-2.71x speedup without accuracy loss. ProphetKV predicts which parts of the cache will be needed for the next step based on the current query, recomputing only those pieces rather than keeping everything, achieving up to 50.9% accuracy gains on long-context benchmarks. The three papers span a spectrum: FreeKV uses learned lookup, FAFO uses lossy compression, and ProphetKV predicts what to keep.",
+        "All three cut memory-per-token, which directly increases how many requests you can serve in parallel without running out of GPU memory."
+      ]
+    },
+    {
+      "label": "Parallel and Adaptive Decoding",
+      "members": [5, 7, 15],
+      "writeup": [
+        "Generation is inherently sequential: each token depends on all previous tokens, so you have to wait for one to finish before computing the next. Two strategies attack this: parallel decoding (generate multiple possible next tokens at the same time and pick the best) and adaptive decoding (skip layers for inputs that do not need them).",
+        "Learn2PD (Learning to Parallel Decode) generates multiple candidate tokens in parallel and then uses a learned selector to pick which ones to keep, achieving up to 22.58x speedup without any drop in quality. The system learns which parts of the generation tree are worth exploring by training on diverse tasks. DyLLM skips tokens that do not contribute much to the final answer using saliency scores—like pruning leaves from a tree that do not affect the outcome—getting 9.6x throughput gain while keeping accuracy intact. RAEE (Retrieval-Augmented Early Exit) lets intermediate layers of the network exit early if they have high confidence in the answer, using retrieval-based lookup to provide corrective information at exit points to maintain accuracy. This gets 1-2x speedup across eight different downstream tasks without any per-task retraining.",
+        "These three complement each other: Learn2PD explores multiple futures in parallel, DyLLM prunes tokens that hurt efficiency, and RAEE exits when the answer is already confident. Together they show that generation does not have to be strictly left-to-right: either go wide (parallel branches) or shallow (skip layers for easy cases)."
+      ]
+    },
+    {
+      "label": "Flow-Matching and Video Generation",
+      "members": [6, 10],
+      "writeup": [
+        "Diffusion models that generate images or videos work differently than language models. Instead of generating left-to-right, they iteratively refine a random image, getting less noisy with each step. For 50 steps this means 50 full passes through the network. MeanCache observes that the refinement steps follow a smooth trajectory: the intermediate representations move gradually from noise toward signal, like watching a video frame by frame. Instead of recomputing from scratch each step, MeanCache caches and adjusts the prior step's computations, reducing the cost per step. It achieves 4.12x speedup on FLUX.1, a widely-used image generation model.",
+        "BWCache extends this idea to video generation by caching computations at the block level (not token level) and reusing them across consecutive frames, since adjacent frames are very similar. This gets 2.24x speedup with comparable quality. Both papers apply the same principle: iterative generation, whether for images or video, can reuse cached work from the prior iteration if you update it cleverly rather than starting from scratch."
+      ]
+    },
+    {
+      "label": "System-Level Improvements",
+      "members": [2, 11, 22, 24],
+      "writeup": [
+        "Speed is not just about the model; the serving system matters. When multiple requests arrive together (batching), the GPU has to balance between processing them fast (small batches, low latency) and processing many at once (large batches, high throughput). The bottleneck shifts depending on the hardware: on memory-limited chips, you process fewer tokens per second; on compute-limited chips, you do not have enough tokens to keep the GPU busy.",
+        "FOCUS detects this bottleneck on-the-fly and schedules the batch to fit the constraint, achieving 3.52x throughput improvement in scenarios where the GPU is memory-bound but the naive batch is too small. CONCUR controls concurrency (how many requests run in parallel) to prevent the system from thrashing—when memory pressure causes slowdowns that then cause cascading delays—improving batch generation speed by up to 4x. MineDraft batches speculative decoding requests together, so multiple drafts run in parallel using the same small model, then multiple big model verifications run in parallel, achieving 39-75% improvement over single-request speculation. PipeSD splits the work between cloud and edge devices—the cloud does the expensive big model, the edge does the cheap draft—and coordinates them with speculation, saving energy and latency on real hardware.",
+        "These papers show that serving efficiency is a systems problem: FOCUS adapts to hardware constraints, CONCUR prevents thrashing, MineDraft parallelizes speculation itself, and PipeSD distributes work. Speed requires attending to both the algorithm and the execution environment."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "intro": "Speeding up diffusion models splits into five main directions because diffusion has multiple bottlenecks: the computation for deciding which image regions to focus on, reusing features and intermediate results across steps to avoid redundant work, optimizing the denoising process for text-based models which have different structures than images, making video generation more efficient because frames are redundant, and accelerating both training and specialized use cases like speech because they have unique constraints.",
+  "groups": [
+    {
+      "label": "Skipping redundant computation in images",
+      "members": [1, 8, 20],
+      "writeup": [
+        "Diffusion models generate images by running millions of floating-point operations in their attention layers—the part of the model that decides which parts of the image to look at when refining each region. When generating large images, the full attention computation becomes a bottleneck because every position attends to every other position, which is quadratic in image size. These papers tackle this by throwing away or approximating attention connections that don't matter much, reducing the computation without hurting image quality.",
+        "DIFFSPARSE learns which tokens (image patches) matter at each step and skips computation for the ones that don't. It works on several major models including PixArt and FLUX, cutting compute by more than half while actually improving the generated images. SPRINT uses a clever mix of sparse and dense computation—some parts use full attention where it matters most, others use sparse attention—letting it cut training time by nearly 10 times and halve computation at inference. RSTR (Reducing SpatioTemporal Redundancy) exploits the fact that adjacent image regions are similar, so it can prune attention connections between redundant areas. The paper shows 50-70% compute savings and even improves image quality in some cases because focusing on distinct regions actually helps.",
+        "All three papers converge on the same insight: diffusion models contain redundancy—much of the attention is wasted on comparing regions that are already similar. By identifying and removing that waste, you get both speed and often better quality."
+      ]
+    },
+    {
+      "label": "Caching and feature reuse across steps",
+      "members": [6, 12, 16],
+      "writeup": [
+        "As a diffusion model refines an image across many steps, earlier layers compute representations (patterns and features) that change very little from one step to the next. Recomputing these from scratch every step is wasteful. These papers cache the results from earlier layers and reuse them, computing only the parts that actually change, similar to how a compiler caches intermediate results to avoid redundant work.",
+        "Relational Feature Caching keeps intermediate computations from attention layers in memory and reuses them intelligently—it learns which features are stable across steps and which ones need recalculating. It outperforms simpler caching approaches across different model architectures because it adapts to each architecture's unique patterns. EigenCache frames the problem mathematically: which intermediate results give you the most information about what comes next? It treats caching as finding the features that best predict future denoising steps, using a training-free method that works across images, video, and even models fine-tuned with LoRA. Let Features Decide Their Own Solvers (HyCa) goes further—different features need different amounts of reuse. Some features stay almost identical across steps, others change constantly. HyCa lets each feature decide how often it should be recomputed, achieving 5-6 times speedup without retraining on models like FLUX and HunyuanVideo.",
+        "The family of papers shares a philosophy: skip recomputation of stable features, but be smart about which ones are actually stable."
+      ]
+    },
+    {
+      "label": "Speeding up diffusion language models",
+      "members": [2, 3, 5, 7],
+      "writeup": [
+        "Diffusion language models apply the diffusion process to text—they denoise tokens (words or subwords) step by step, similar to how image diffusion works. The bottleneck is that generating a sequence of 100 tokens might take 100 denoising steps, and each step requires a full pass through a model with a billion weights (the learned numbers that control the model's behavior). These papers attack the problem from multiple angles because different bottlenecks need different fixes: some replace the backbone with faster models that avoid quadratic blowup, some skip unnecessary denoising steps because parts of the sequence have already converged, and others cache key information to avoid recomputing stable features.",
+        "DPad uses a simple trick: as the model denoise text, the later tokens (at the end of the sequence) often converge to their final form early. DPad drops these early-converged tokens from later denoising steps, avoiding wasted computation on regions that are already done. It achieves 61 times speedup over naive diffusion LLMs because dropping already-finished tokens removes the majority of computation. DiffuMamba replaces the attention-based transformer backbone with a Mamba model, which has linear memory scaling—it gets through long sequences faster without the quadratic blowup of attention that gets worse as sequences grow. It matches transformer performance while running 8 times faster on long sequences because Mamba doesn't require attention's expensive pairwise comparisons. ES-dLLM (Early-Skipping) combines step-skipping with smart caching. It identifies which denoising steps actually improve the text quality and which ones are just polishing already-good tokens, then skips the polish steps because polish iterations consume compute without changing meaning. The result is 5-16 times speedup. Residual Context Diffusion improves the model's core performance—it adds a mechanism to remember what was already denoised in earlier steps, so later steps don't re-denoise regions that are already done. This lets the model achieve good quality in 4-5 times fewer denoising steps because each step can make bigger jumps when it knows what earlier refinements already fixed.",
+        "These papers converge on two complementary insights: first, you can skip denoising work on parts that have converged because adding more refinement won't change the output, and second, giving the model better information about what earlier steps already fixed lets it make bigger jumps with fewer refinements because it doesn't waste steps re-denoising already-fixed regions."
+      ]
+    },
+    {
+      "label": "Efficient video and multi-frame generation",
+      "members": [9, 18, 23],
+      "writeup": [
+        "Video generation is harder than image generation because a model must maintain consistency across dozens or hundreds of frames while denoising each one. Naive approaches treat each frame independently, redoing similar work on every frame. These papers recognize that consecutive frames are nearly identical—a moving camera or object doesn't change the whole image, just parts of it. They cache computations from one frame and reuse them on the next, detecting which parts actually changed.",
+        "DFSAttn (Dynamic Fine-grained Sparse Attention) learns which regions of the video are redundant across frames and skips attention computation there. It achieves 2 times speedup while preserving video quality. Motion-Aware Caching goes deeper—it tracks which pixels are moving and which are static. Static regions (sky, background) can reuse all their computations because the content hasn't changed. Moving regions need fresh computation because the content has shifted. By caching aggressively where motion is minimal, it gets 6 times speedup on some models. Transform Trained Transformer accelerates native 4K video generation—high-resolution video is extremely expensive—by using a pre-trained image model to guide the process. It achieves over 10 times speedup and actually improves visual quality metrics because the guidance steers denoising toward plausible high-resolution details faster.",
+        "The pattern is that video generation contains massive redundancy because frames are similar, and the fastest models explicitly measure motion to decide what can be cached."
+      ]
+    },
+    {
+      "label": "Training speedup and specialized applications",
+      "members": [4, 14],
+      "writeup": [
+        "Most papers focus on inference (generating outputs), but training diffusion models is also slow. Additionally, some domains like speech have unique constraints that benefit from specialized efficiency tricks.",
+        "FaPS (Fast Training) accelerates the training phase of diffusion models, not just inference. It changes how the model learns to denoise, allowing it to learn from fewer steps during training, which cuts training time by 3 times because there's less compute per training example. The trick works especially well when you have limited training data, making it practical for domains where data is scarce. Dual-View Predictive Diffusion applies diffusion to speech enhancement—cleaning up noisy audio. Audio is different from images: it has a structure (spectrograms have time and frequency dimensions) that you can exploit. This paper uses two views of the audio (as a time-frequency spectrogram and as a 2D image) and lets them help each other during denoising because each view captures different noise patterns. The result is speech quality comparable to much larger models, using only 35% of the weights because the dual-view approach gives richer signal."
+      ]
+    }
+  ]
+}
