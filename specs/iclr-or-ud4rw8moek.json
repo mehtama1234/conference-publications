@@ -1,0 +1,197 @@
+{
+  "slug": "iclr-or-ud4rw8moek",
+  "title": "Verifier-free Test-Time Sampling for Vision Language Action Models",
+  "family": "Robotics & Control",
+  "one_liner": "A robot learns to pick its best action by measuring how uncertain the model is about each one, using the model's own internal uncertainty without needing an external verifier.",
+  "lead": "Robot models trained on demonstrations can answer a single action at a time, but to handle precision tasks like precise grasping they need to try multiple candidates and pick the best one. External verifiers that score actions need extra training and do not generalize to new situations. This paper uses the model's own internal uncertainty to score candidates: masking out the current state and instructions from the same model gives a view of the model's uncertainty, and comparing that to the model's actual prediction measures confidence. No extra training on the new task, and the same method works everywhere.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Robot models are precise, but fragile on hard tasks",
+    "paras": [
+      "A robot trained on human demonstrations learns to predict the next action: given a camera image and an instruction like pick up the cube, it outputs one action command. This works when the robot sees familiar objects and situations. But when precision matters—like picking up a fragile object where the grasp angle is critical—one prediction fails about half the time. A human doing the same task would try an action, watch closely, and if it does not feel right, try a slightly different angle. A trained robot cannot do that. If you ask it to generate multiple guesses and pick the best one, you need a separate scorer: a verifier module. But building and training a verifier costs time, money, and GPU time. And when the verifier sees a new object shape or lighting it has not seen in training, it confidently gives the wrong score.",
+      "A beginner might try to rate each action by how 'activated' or 'hot' the model got when predicting it. But activation strength tells you nothing reliable about correctness—a wrong answer can be high-confidence."
+    ],
+    "callout": {
+      "b": "The paper's move:",
+      "html": "Measure confidence by comparing what the model predicts for the real state and instruction against what it predicts for a blank state and instruction. Big difference means the model is confident in its choice. Small difference means it is confused and guessing."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Robot reads state and instruction",
+        "viz": "brain",
+        "caption": "Camera sees cube, instruction says pick. Model processes both."
+      },
+      {
+        "title": "2. Model predicts action with full context",
+        "viz": "weights",
+        "viz_args": [["moved", 78], ["free", 12], ["warm", 55], ["moved", 68], ["free", 25], ["moved", 82], ["free", 8], ["warm", 35], ["free", 18], ["warm", 45], ["moved", 70], ["free", 22]],
+        "caption": "Predicts grasp angle 45 degrees with high activation."
+      },
+      {
+        "title": "3. Same model, masked state and instruction",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["free", 22], ["warm", 38], ["warm", 32], ["free", 28], ["warm", 40], ["free", 18], ["warm", 35], ["free", 20], ["warm", 42], ["warm", 38], ["free", 25]],
+        "caption": "Predicts random action, much lower activation. Blurry guess."
+      },
+      {
+        "title": "4. Compare the two predictions",
+        "viz": "box",
+        "viz_args": "Distance = Difference",
+        "caption": "Big distance means the model used the state and instruction strongly."
+      },
+      {
+        "title": "5. Score each candidate action this way, pick best",
+        "viz": "plain",
+        "caption": "The action with the biggest difference between real and masked is most confident."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "At training time (once)",
+        "text": "Train the robot model with both normal inputs and with the state and instructions randomly masked out, using dropout. The model learns two distributions: one conditional on seeing everything, one when things are hidden."
+      },
+      {
+        "b": "At test time (every action)",
+        "text": "Get the actual prediction: run the model with real camera image and instruction. Get the uncertain prediction: run the same model with the image and instruction blanked out. Measure the distance between them."
+      },
+      {
+        "b": "Score multiple candidates",
+        "text": "Generate several candidate actions (using beam search or sampling). For each one, measure how different it is from the masked prediction. Large difference means the model is using the state and instruction strongly."
+      },
+      {
+        "b": "Pick the confident one",
+        "text": "Choose the action with the largest difference. It is the one the model trusts most given what it sees."
+      },
+      {
+        "b": "Execute and repeat",
+        "text": "The robot takes that action, gets new feedback from the camera, and repeats for the next step."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The thing it changes: action scoring at test time",
+    "paras": [
+      "Before: the model makes one action prediction, and you trust it. Or you use an external verifier trained separately. After: you generate a few action candidates and rank them by measuring the model's own internal confidence, without external modules. The object being changed is the decision rule at test time—how you pick which action to execute from multiple guesses."
+    ],
+    "object": "action selection rule"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: action-specific confidence",
+    "name": "action confidence score",
+    "paras": [
+      "Confidence here means: how much did the model rely on the actual state and language instruction to make this prediction, versus how much is it just guessing? If you hide the instruction and image, does the model still predict the same action, or does it drift? A score of zero means the model's prediction is identical whether or not it can see the state and instruction—so it does not trust the input. A high score means the model's prediction changes a lot when you remove the context—the model was leaning on what it saw.",
+      "The paper measures this using KL divergence (a tool that measures how different two probability distributions are). The reference distribution comes from the same model run with masked inputs. The confidence is the divergence from reference to predicted—how far the real prediction drifts from the masked one."
+    ],
+    "heat": {
+      "cells": [["action1", 1, false], ["action2", 4, true], ["action3", 2, false], ["action4", 3, true], ["action5", 1, false], ["action6", 4, true], ["action7", 2, false], ["action8", 3, false], ["action9", 1, false], ["action10", 4, true], ["action11", 2, false], ["action12", 3, false]],
+      "caption": "Darker cells are actions the model is more confident about (larger distance from masked prediction)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading",
+        "html": "Confidence is a distance: how much the model changes its mind when you take away the camera image and instruction. Bigger change means bigger confidence."
+      },
+      {
+        "b": "Paper reading",
+        "html": "Confidence is measured as KL divergence: how much the real prediction drifts from the masked prediction at each action step."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: uncertainty from hiding the inputs",
+    "paras": [
+      "The core insight is that a trained model is brittle: it was built to work best when it can see the camera and instructions. If you delete the instructions and black out the image, the model falls back to generic guessing—it predicts with low confidence because it is missing the information it was trained to use. When the real state and instruction are present, the model uses them to refine its prediction. The bigger the refinement, the more the model relied on those inputs, and thus the more confident it should be.",
+      "But confidence is not the same as correctness. The paper's second move is training the model with this uncertainty baked in. During training, you teach the model to learn the masked distribution—what it predicts when inputs are hidden—at the same time as learning the normal task. This way, when you compare them at test time, the masked version is not a hack, it is a trained approximation of the model's own inherent uncertainty. The joint training with dropout makes the reference distribution task-aligned: it is still predicting actions, but without being biased by the specific state or instruction."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Camera image + instruction"},
+        {"t": "step", "s": "Model with full input", "hl": true},
+        {"t": "step", "s": "Predicts action distribution"},
+        {"t": "step", "s": "Model with masked input"},
+        {"t": "step", "s": "Predicts generic distribution"},
+        {"t": "output", "s": "Measure distance between distributions"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: KL divergence as confidence",
+    "words": "The confidence score for an action at time step i is the KL divergence from the reference distribution to the predicted distribution. Reference comes from the model run on masked state and instruction. Predicted comes from the model run normally.",
+    "equation": "C_i = KL(Q_i || P_i) = sum_a Q_i(a) * log(Q_i(a) / P_i(a))",
+    "symbols": [
+      ["C_i", "confidence score at action step i"],
+      ["Q_i", "probability distribution over actions when state and instruction are masked"],
+      ["P_i", "probability distribution over actions with full state and instruction"],
+      ["sum_a", "sum over all possible actions"],
+      ["log", "logarithm (how much to scale the ratio)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with two actions",
+      "lines": [
+        "Suppose at step i there are two possible actions: grasp-angle-45 and grasp-angle-50.",
+        "With masked input (Q_i): the model guesses 60% angle-45, 40% angle-50. Uniform-ish, uncertain.",
+        "With real input (P_i): the model predicts 92% angle-45, 8% angle-50. Confident in angle-45.",
+        "For angle-45: Q(45)*log(Q(45)/P(45)) = 0.60*log(0.60/0.92) = 0.60*log(0.652) = 0.60*(-0.427) = -0.256",
+        "For angle-50: Q(50)*log(Q(50)/P(50)) = 0.40*log(0.40/0.08) = 0.40*log(5.0) = 0.40*1.609 = 0.644",
+        "Sum: -0.256 + 0.644 = 0.388. This is the confidence score.",
+        "Interpretation: the model refined its belief from 60-40 to 92-8. That large shift is what the KL divergence measures. A confident prediction where the model is sure would score higher."
+      ]
+    },
+    "note": "The KL divergence measures how much the model changed its prediction when given full information versus none, so larger scores mean stronger confidence in the choice, because a model that relies heavily on the inputs it sees will predict very differently when those inputs are hidden."
+  },
+  "bars": {
+    "h2": "Gains across robot tasks",
+    "charts": [
+      {
+        "title": "Base model (one shot)",
+        "rows": [["Pick-and-place, sparse data", 28, "bad"], ["Pick-and-place, normal data", 68, "good"], ["New object type", 31, "bad"]],
+        "note": "Single prediction struggles on sparse data and unseen objects."
+      },
+      {
+        "title": "With MG-Select (no extra training)",
+        "rows": [["Pick-and-place, sparse data", 64, "good"], ["Pick-and-place, normal data", 82, "good"], ["New object type", 71, "good"]],
+        "note": "Test-time scoring from internal uncertainty scales to sparse data and generalizes without retraining."
+      }
+    ]
+  },
+  "failures": {
+    "warn": true,
+    "items": [
+      {
+        "warn": true,
+        "b": "Masked prediction is not trustworthy early in training",
+        "html": "If you just blank out inputs without teaching the model to handle it, the masked predictions are random noise, not a real confidence signal. The joint training with dropout during training is essential."
+      },
+      {
+        "warn": true,
+        "b": "Masking must preserve task structure",
+        "html": "The confidence signal only works if masked predictions are plausible but uninformed. If dropout is too strong and the masked model predicts garbage, the comparison to the real prediction becomes meaningless. The dropout strength must be tuned carefully so masked predictions stay within the valid action space, just without using the specific state or instruction details."
+      },
+      {
+        "warn": true,
+        "b": "Computational cost of beam search",
+        "html": "Scoring K candidate actions means running the model K times. If K is large or the model is huge, test-time latency grows. The paper shows optimized implementations can keep latency acceptable."
+      },
+      {
+        "b": "Works best with joint training",
+        "html": "The method improves base models even without retraining on new tasks, but gains are amplified if you do a small retraining step with dropout on the target task dataset, because learning the masked distribution specifically on the new task data makes the reference predictions task-aligned and more reliable than using a distribution learned only on generic data."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple pick-and-place task in simulation where precise grasp angle matters (e.g. grasping a thin object versus a thick cube). Train a small robot model on 30 demonstrations. At test time, generate multiple action candidates via beam search. Score each using MG-Select: run the model once normally, then again with state and instruction masked via dropout. Execute the highest-confidence action. Measure success rate."
+    ],
+    "metric_eq": "improvement = (success_with_MG_Select - success_base) / success_base * 100%",
+    "closing": "The demo must make clear that the model, when blindfolded, genuinely predicts differently than when it can see—and that the difference tracks real task difficulty, not random noise."
+  }
+}

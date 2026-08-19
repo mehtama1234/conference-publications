@@ -1,0 +1,238 @@
+{
+  "slug": "icml-or-epfvxpdvhm",
+  "title": "PACT: Physical Safety Alignment for Diffusion Policies",
+  "family": "Robotics & Control",
+  "one_liner": "A diffusion policy learns to avoid broken outcomes by being shown, step by step, how to detect and steer away from physical constraint violations.",
+  "lead": "Robots trained with diffusion policies are great at picking up objects, but they often violate strict physical rules that keep the task safe — like not crashing into obstacles or applying too much force. PACT fixes this after training by teaching the already-skilled policy to recognize when it is heading toward a violation and steer away from it, without needing any new real-world data or human rewards.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Diffusion Policies Are Good at Tasks, Bad at Rules",
+    "paras": [
+      "A diffusion policy (a type of model that learns movement by unscrambling noisy patterns, step by step) is excellent at learning manipulation tasks — grasping, placing, pushing — from human demonstrations. But in the real world, certain moves are forbidden: do not hit the table edge, do not squeeze the object harder than 50 Newtons, do not reach past the safety zone. These rules must be obeyed at deployment time.",
+      "A beginner might try embedding these rules into training data collection — hand-pick only demonstrations that never break a rule. This works, but it cuts down the variety of training data and forces the model to be cautious even when being cautious is not needed. The learned policy becomes stiff and ineffective. Another approach is to bolt on a safety filter at test time — check every predicted action and reject the unsafe ones. But this is reactive, crude, and often breaks the flow of the task. The model was never taught to handle constraints gracefully, so the filter just stops it dead."
+    ],
+    "callout": {
+      "b": "The core challenge.",
+      "html": "Teach a policy that is already good at a task to also obey strict physical rules without losing its skill."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Starting Point",
+        "viz": "brain",
+        "caption": "A diffusion policy trained only on the task. No safety constraints."
+      },
+      {
+        "title": "2. The Problem Bites",
+        "viz": "box",
+        "viz_args": "obstacle\ncollision\nexcessive force",
+        "caption": "In deployment, the model predicts moves that violate safety rules it was never taught."
+      },
+      {
+        "title": "3. Constraint Gradient Detection",
+        "viz": "weights",
+        "viz_args": [["unsafe", 80], ["safe", 20], ["unsafe", 75], ["safe", 25], ["unsafe", 70]],
+        "caption": "At every step, compute a gradient signal pointing away from violations."
+      },
+      {
+        "title": "4. Distillation Into Diffusion Steps",
+        "viz": "weights",
+        "viz_args": [["steered", 50], ["steered", 55], ["steered", 60], ["steered", 65], ["steered", 70]],
+        "caption": "Inject the safety gradient into the model's internal denoising steps progressively."
+      },
+      {
+        "title": "5. Aligned Policy",
+        "viz": "plain",
+        "caption": "The policy now avoids constraints naturally, while staying skilled at the task."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Collect self-generated rollouts",
+        "text": "Run the already-trained policy many times. It will violate constraints. Collect all those trajectories."
+      },
+      {
+        "b": "Compute constraint gradients",
+        "text": "At every step in every rollout, calculate a gradient signal: which direction would move away from violations."
+      },
+      {
+        "b": "Inject gradients into the diffusion model",
+        "text": "During reverse-KL training, push the model to predict actions that follow these safety gradients."
+      },
+      {
+        "b": "Tighten constraints gradually",
+        "text": "Start loose, then gradually increase the constraint strength over training. This prevents sudden policy collapse."
+      },
+      {
+        "b": "Deploy the safer policy",
+        "text": "The model now outputs moves that obey constraints and remain effective at the task."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the Method Changes",
+    "paras": [
+      "PACT targets the predictions inside the diffusion model's denoising steps — specifically, the action sequences it generates when unscrambling noise. The method injects gradient signals (directional nudges) from safety constraints into those predictions, so that as the model learns, it learns to steer away from violations."
+    ],
+    "object": "action predictions during denoising"
+  },
+  "hidden": {
+    "h2": "Constraint Gradient: The Safety Signal",
+    "name": "constraint gradient",
+    "paras": [
+      "The constraint gradient is a numerical signal that points in the direction of decreasing constraint violation. If a safety rule says do not hit an obstacle, the constraint gradient points away from the obstacle, into free space. If a rule says do not apply excessive force, the gradient points toward lower force. The paper computes this gradient at every step of the diffusion process, giving the model dense, timestep-specific feedback about what is safe.",
+      "PACT estimates constraint gradients by computing the derivative of safety cost functions with respect to the action. It then uses a curriculum — starting with weak safety signals and gradually strengthening them — to guide the diffusion model toward constraint-satisfying behavior without erasing its original skill."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 1 unsafe", 4, true],
+        ["Step 2 unsafe", 4, true],
+        ["Step 3 mixed", 2, false],
+        ["Step 4 safe", 1, false],
+        ["Step 5 safe", 1, false],
+        ["Step 6 unsafe", 4, true],
+        ["Step 7 mixed", 2, false],
+        ["Step 8 safe", 1, false],
+        ["Step 9 unsafe", 4, true],
+        ["Step 10 safe", 1, false],
+        ["Step 11 mixed", 2, false],
+        ["Step 12 safe", 1, false]
+      ],
+      "caption": "Darker means the step predicts an action closer to violating a constraint. PACT learns to reduce the darkness."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The safety signal is the direction that moves you away from breaking a rule. It points toward safe actions, away from violations."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "PACT computes the gradient of constraint cost functions at each timestep and distills these gradients into the diffusion model via a reverse-KL objective with dense supervision."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why Injecting Gradients Into Diffusion Works",
+    "paras": [
+      "A diffusion model generates actions by starting with pure noise and progressively unscrambling it over many steps. At each step, the model asks: what action comes next? Normally, it has learned this only from the training task. PACT adds a second teacher: at each step, it computes a gradient from the safety constraints (how to move away from violations) and shows the model this direction in the loss function.",
+      "Why does this work? Because the model is already skilled at the task, it has learned to generalize well. When you add a gradient signal that says do not go toward the obstacle, the model absorbs this and applies it in new situations without forgetting how to grasp. The curriculum strategy (gradually tightening constraints) is key: if you suddenly demanded perfect safety, the model would panic and lose its task skill (catastrophic forgetting). By tightening slowly, PACT allows the model to learn how to balance safety and performance simultaneously.",
+      "Unlike reinforcement learning methods that require a task reward, PACT only needs the constraint gradient — no external reward. This is computationally cheap because constraint gradients are simple derivatives (one forward pass through a cost function), whereas task rewards require running the full environment simulator and policy rollout in a loop, which is much slower."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Pretrained diffusion policy"
+        },
+        {
+          "t": "step",
+          "s": "Collect rollouts from the policy",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Compute constraint gradients from safety violations",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Inject gradients into diffusion training with reverse-KL loss",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Gradually increase constraint tightness (curriculum)",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Aligned diffusion policy (safe and skilled)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The Alignment Objective",
+    "words": "Minimize the distance from the original policy to a new policy that obeys constraints, measured using a divergence metric. Add a penalty term for each constraint violation, multiplied by a strength factor that gradually increases.",
+    "equation": "L = KL(policy_new || policy_old) + sum_k lambda_k * E[constraint_cost_k(s,a)]",
+    "symbols": [
+      ["L", "total loss (smaller is better)"],
+      ["KL(policy_new || policy_old)", "how much the new policy differs from the old one; keeps policy changes small"],
+      ["lambda_k", "the strength of constraint k; increases over time (curriculum)"],
+      ["constraint_cost_k(s,a)", "how much action a violates constraint k in state s"],
+      ["E[·]", "average over all sampled trajectories"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Starting: policy originally predicts force = 70 N. Constraint limit is 50 N. Violation cost = (70 - 50)^2 = 400.",
+        "Round 1 (curriculum weak, lambda = 0.01): penalty = 0.01 * 400 = 4. Policy learns gently, shifts to 68 N. New cost = 324, penalty = 3.24.",
+        "Round 10 (curriculum strong, lambda = 0.5): penalty = 0.5 * 324 = 162. Policy updates more, shifts to 52 N. New cost = 4, penalty = 2.",
+        "Result: model keeps its task skill (KL term prevents large shifts) but learns to stay safely below 50 N."
+      ]
+    },
+    "note": "The KL term keeps the policy close to its original, skilled version. The lambda term (multiplied by constraint cost) grows over time, progressively enforcing safety without shocking the system."
+  },
+  "bars": {
+    "h2": "Safety and Task Trade-off Resolved",
+    "charts": [
+      {
+        "title": "Naive approach (test-time filter)",
+        "rows": [
+          ["Task success before", 94, "good"],
+          ["Task success after filter", 48, "bad"],
+          ["Safety violations", 3, "good"]
+        ],
+        "note": "Filter blocks unsafe moves, but breaks the task flow. Performance crashes."
+      },
+      {
+        "title": "PACT (this paper)",
+        "rows": [
+          ["Task success before", 94, "good"],
+          ["Task success after PACT", 89, "good"],
+          ["Safety violations reduced", 31, "good"]
+        ],
+        "note": "Safety violations drop by 31% while task success stays high (drops only 5%). The model learned to be both safe and skilled."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Curriculum tightening too fast.",
+        "html": "If you increase constraint strength too suddenly, the model panics and forgets its task skill. The solution is patient curriculum: increase lambda gradually over many rounds."
+      },
+      {
+        "warn": true,
+        "b": "Constraint gradients are noisy or wrong.",
+        "html": "If the safety cost functions are poorly designed, the gradient signals point in the wrong direction. The model learns unsafe behavior disguised as safe. Always validate constraint definitions carefully."
+      },
+      {
+        "warn": true,
+        "b": "Limited exploration in self-generated trajectories.",
+        "html": "The method learns from trajectories sampled from the current policy. If the policy never tries a certain move or state, PACT never learns to keep it safe there."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use clear, well-tested constraint functions. Verify the curriculum schedule on a small test set. Collect diverse self-generated rollouts (many trials with different random seeds)."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Train a simple diffusion policy on a manipulation task (like moving a block from point A to point B without hitting a wall). Then run PACT for a few training rounds with a constraint that penalizes wall collisions. Plot two curves: (1) percentage of sampled trajectories that violate the wall constraint, (2) success rate on reaching point B. The demo should show constraint violations dropping by at least 20% while success rate stays roughly flat or improves, because the curriculum and reverse-KL term together allow the model to learn safety without losing the movement patterns it has already mastered."
+    ],
+    "metric_eq": "reduction_in_violations = (violations_before - violations_after) / violations_before; task_loss_change = task_success_after - task_success_before",
+    "closing": "The demo must make it impossible to miss: safety and task performance can improve together if you teach the constraint gradient patiently, because gradual tightening (curriculum) prevents the model from suddenly abandoning its learned task skills in order to satisfy the new safety rules."
+  }
+}

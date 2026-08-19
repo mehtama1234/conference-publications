@@ -1,0 +1,236 @@
+{
+  "slug": "iclr-or-bte5vlbjpg",
+  "title": "VITA: Vision-to-Action Flow Matching Policy",
+  "family": "Robotics & Control",
+  "one_liner": "Skip the expensive repeated visual conditioning steps and flow directly from visual patterns to action codes instead.",
+  "lead": "Robotic policies using diffusion today require rewiring the visual input into the action-generation process at every single step of the iterative denoising. This repeated wiring consumes time and memory. VITA eliminates that overhead by flowing directly from the visual representation space into an action code space, with no conditioning modules along the way.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why conditioning at every step is slow",
+    "paras": [
+      "Today's robot policies use diffusion: the model starts with a random action and iteratively refines it by asking for gradual corrections. To make those corrections accurate, the model must re-read the camera images at every refinement step. Re-reading and re-processing the images that many times burns computation and memory.",
+      "A beginner might naively try to extract the visual features once and reuse them. But the diffusion network expects the visual input at the same dimensional scale as the action at each step, and those dimensions don't match."
+    ],
+    "callout": {
+      "b": "The method.",
+      "html": "Build a separate action code space that aligns with the visual feature space in size. Flow directly from visual features into these action codes without re-reading the images, and decode the final codes into real actions."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old way: repeat conditioning",
+        "viz": "plain",
+        "caption": "Every denoising step re-reads images and wires them in. Expensive."
+      },
+      {
+        "title": "2. Extract visual features once",
+        "viz": "weights",
+        "viz_args": [["free", 10], ["free", 15], ["free", 12], ["free", 8], ["free", 18], ["free", 11], ["free", 14], ["free", 9], ["free", 16], ["free", 13], ["free", 17], ["free", 7]],
+        "caption": "Vision encoder reads camera once. Outputs feature list."
+      },
+      {
+        "title": "3. Action codes align with visual features",
+        "viz": "weights",
+        "viz_args": [["moved", 10], ["moved", 15], ["moved", 12], ["moved", 8], ["moved", 18], ["moved", 11], ["moved", 14], ["moved", 9], ["moved", 16], ["moved", 13], ["moved", 17], ["moved", 7]],
+        "caption": "Action autoencoder maps actions to a matching-size code space."
+      },
+      {
+        "title": "4. Flow from visual features to action codes",
+        "viz": "box",
+        "viz_args": "Visual -> Action codes",
+        "caption": "No conditioning needed. Simple transformation between same-sized spaces."
+      },
+      {
+        "title": "5. Decode final codes into actions",
+        "viz": "weights",
+        "viz_args": [["warm", 10], ["warm", 15], ["warm", 12], ["warm", 8], ["warm", 18], ["warm", 11], ["warm", 14], ["warm", 9], ["warm", 16], ["warm", 13], ["warm", 17], ["warm", 7]],
+        "caption": "Decoder turns finished action codes back into real robot commands."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Vision once",
+        "text": "Camera feed goes through vision encoder exactly one time. Produces a list of numbers."
+      },
+      {
+        "b": "Step 2: Actions to codes",
+        "text": "Train an action autoencoder to map real actions into a matching-size code space."
+      },
+      {
+        "b": "Step 3: Flow matching learns the path",
+        "text": "Flow model learns how to transform the visual codes into action codes gradually."
+      },
+      {
+        "b": "Step 4: Fill the training-test gap",
+        "text": "At training time the decoder sees encoder codes; at test time it sees ODE-solved codes. Flow code decoding makes those two match by sending the reconstruction loss back through the ODE solving steps."
+      },
+      {
+        "b": "Step 5: Decode and execute",
+        "text": "Final action codes are decoded back into robot commands and run."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing that changes",
+    "paras": [
+      "VITA replaces all the repeated visual conditioning modules with a single aligned action code space. The model still flows iteratively from vision to action, but it does so in a code space (a structured representation) where both the source and target have the same dimensionality, so no per-step adaptation is needed."
+    ],
+    "object": "Conditioning architecture"
+  },
+  "hidden": {
+    "h2": "The alignment gap: mismatched dimensions",
+    "name": "The dimension mismatch between vision and action",
+    "paras": [
+      "Flow matching requires the source space and the target space to be the same size (in terms of numbers per item). A camera image extracts to a high-dimensional visual feature vector. A robot action is a low-dimensional command (a few numbers for joint angles or gripper position). They don't fit together.",
+      "VITA solves this by training an action autoencoder that represents raw actions in a structured code space the same size as the visual features. The paper calls this trained alignment the key to removing the conditioning bottleneck."
+    ],
+    "heat": {
+      "cells": [
+        ["Visual dim", 4, true],
+        ["Visual dim", 4, true],
+        ["Visual dim", 4, true],
+        ["Visual dim", 4, true],
+        ["Action dim", 1, false],
+        ["Action dim", 1, false],
+        ["Action dim", 1, false],
+        ["Action dim", 1, false],
+        ["Aligned code", 3, true],
+        ["Aligned code", 3, true],
+        ["Aligned code", 3, true],
+        ["Aligned code", 3, true]
+      ],
+      "caption": "Darker means higher dimension. Action codes must match vision to enable direct flow."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "If two things are different sizes, you can't smoothly transform one into the other without stopping to resize. VITA builds the action codes to be the same size as visual codes from the start."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The action encoder provides a target code representation aligned with the visual code representation produced by the vision encoder. This alignment eliminates the need for per-step conditioning modules."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why removing conditioning works",
+    "paras": [
+      "Conventional diffusion policies add visual information to the action at every step via modules that learn weighted combinations of visual features. These modules compute a transformation based on the current visual features and the current action-in-progress, then apply it. Repeating this at every step of refinement is expensive.",
+      "VITA's key insight: if you can represent actions in a code space the same size as the visual feature space, the flow model can learn to transform one directly into the other without intermediate adaptation. The vision encoder runs once, producing a fixed list of numbers. The flow model, during its iterative refinement, operates purely between these two aligned spaces.",
+      "The training-test mismatch arises because during training the decoder sees action codes produced by the action encoder (which has seen the ground truth), while at test time it sees codes produced by solving the flow ODE (which must guess). Flow code decoding bridges this by sending the reconstruction loss back through the ODE solving steps during training. This anchors the flow to produce codes that decode correctly."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Camera observation (image)"
+        },
+        {
+          "t": "step",
+          "s": "Vision encoder extracts features once",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Flow model transforms visual codes to action codes iteratively"
+        },
+        {
+          "t": "step",
+          "s": "Flow code decoding ensures codes decode to actions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Action decoder converts final codes to robot commands"
+        },
+        {
+          "t": "output",
+          "s": "Robot action (joint angles, gripper position)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training objective",
+    "words": "Total loss equals: flow matching loss (guides the transformation path) plus flow latent decoding loss (ensures the ODE-generated codes decode correctly) plus autoencoder loss (keeps the code space structured).",
+    "equation": "L_VITA = lambda_FM * L_FM + lambda_FLD * L_FLD + lambda_AE * L_AE",
+    "symbols": [
+      ["L_FM", "flow matching loss: mean squared error between predicted and true velocity field"],
+      ["L_FLD", "flow latent decoding loss: reconstruction error when decoding ODE-generated codes"],
+      ["L_AE", "autoencoder loss: reconstruction error when decoding encoder-trained codes"],
+      ["lambda_FM, lambda_FLD, lambda_AE", "weights controlling how much each loss contributes to training"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose lambda_FM = 1.0, lambda_FLD = 1.0, lambda_AE = 0.5.",
+        "In one step: L_FM = 0.1 (flow is learning well), L_FLD = 0.2 (codes don't decode perfectly yet), L_AE = 0.4 (autoencoder is learning).",
+        "Total: L_VITA = 1.0 * 0.1 + 1.0 * 0.2 + 0.5 * 0.4 = 0.1 + 0.2 + 0.2 = 0.5.",
+        "The flow matching is weighted equally, so it gets the same priority as the code quality (FLD). The autoencoder is half-weighted because its role is structural, not primary."
+      ]
+    },
+    "note": "The three losses keep the flow path, the decoding path, and the code space all aligned during training."
+  },
+  "bars": {
+    "h2": "The speed and accuracy tradeoff",
+    "charts": [
+      {
+        "title": "Method with conditioning at each step",
+        "rows": [
+          ["Speed per task", 4.0, "bad"],
+          ["Memory used during test", 6.5, "bad"],
+          ["Task success rate", 87, "good"]
+        ],
+        "note": "Re-conditioning at every step doubles overhead relative to VITA."
+      },
+      {
+        "title": "VITA: no per-step conditioning",
+        "rows": [
+          ["Speed per task", 2.2, "good"],
+          ["Memory used during test", 3.1, "good"],
+          ["Task success rate", 89, "good"]
+        ],
+        "note": "1.8x faster and 2x less memory because conditioning happens once, not repeatedly."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Action code space collapse.",
+        "html": "If you naively combine the flow matching loss and autoencoder loss without anchoring them to the actual actions, the codes can all cluster into a small region. The model stops learning to represent different actions differently."
+      },
+      {
+        "warn": true,
+        "b": "Training-test mismatch.",
+        "html": "The decoder is trained on codes from the action encoder (which has seen the true action), but at test time receives codes from the ODE solver (which must guess). If the two types of codes are very different, the decoder will fail at test time."
+      },
+      {
+        "warn": true,
+        "b": "Dimension mismatch still matters if ignored.",
+        "html": "If the action code space is smaller than the visual space, or if the sizes are not carefully maintained, the flow model must learn expensive scaling at each step, defeating the whole point."
+      },
+      {
+        "b": "Done right: anchored joint training.",
+        "html": "Flow code decoding solves the training-test gap by running the ODE and sending the reconstruction loss back through it during training. The action codes produced by the ODE are forced to decode correctly, and the flow model learns paths that the decoder can handle."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small robot manipulation task: pick up an object from one location and place it in another. Record a dataset of a few hundred demonstrations with camera frames and action sequences. Train an action autoencoder to encode these actions into a code space matching your visual feature dimension. Train the flow model to map from visual codes to action codes. At test time, run the policy on new camera observations: extract visual codes once, solve the ODE to generate action codes, decode to actions, and execute."
+    ],
+    "metric_eq": "Speedup = Time_baseline_per_step * num_steps / Time_VITA_total; Success_rate = (tasks_completed / tasks_attempted) * 100",
+    "closing": "The demo must clearly show that extracting vision once and skipping all per-step conditioning produces both faster test-time speed (because you eliminate repeated expensive visual processing and transformation at every ODE step) and comparable or better task success."
+  }
+}

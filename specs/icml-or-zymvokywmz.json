@@ -1,0 +1,244 @@
+{
+  "slug": "icml-or-zymvokywmz",
+  "title": "Any3D-VLA: Enhancing VLA Robustness via Diverse Point Clouds",
+  "family": "Robotics & Control",
+  "one_liner": "A robot learns to act better by looking at the world in both 2D images and 3D point clouds, trained on any depth source without breaking.",
+  "lead": "Robot arm models take 2D camera images and produce movement commands. But 2D alone misses depth (how far away objects are) and makes the model fragile across different environments and cameras. Any3D-VLA solves this by lifting the 2D image and its depth map into a 3D point cloud (a set of 3D coordinates), compressing it, and combining both the 2D and 3D views before deciding on an action — all while training on any kind of depth data so the robot works with any camera or simulator.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "2D images leave the robot blind to depth",
+    "paras": [
+      "A robot reads an RGB camera frame and outputs the arm movement needed — left, down, close the gripper. This works in one lab with one camera. But the model fails when moved to a different room, a new camera, or a simulator that measures depth slightly differently. The reason: the model learned only 2D patterns (colors and edges), not the actual 3D world. It never saw depth explicitly.",
+      "A beginner tries hard-coding depth estimates by hand (asking the camera for a depth map), but merging that depth into the model is messy. Do you feed depth as extra images? As a separate encoder? Do you train the whole thing from scratch? And worse: depth from a simulator looks different from real camera depth — the scale is wrong, the noise is different. The model overfits to one depth source and breaks on another."
+    ],
+    "callout": {
+      "b": "The paper's core move.",
+      "html": "Lift RGBD into a 3D point cloud, encode both 2D and 3D views with pretrained models, align them to the same grid, and fuse them with a learnable gating mechanism — trained on all depth sources at once so each 3D point pattern the encoder learns works with simulator depth, real camera depth, and LLM-guessed depth, making the fusion always yield useful signals."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: 2D only",
+        "viz": "plain",
+        "caption": "Camera sees a mug. Model reads colors and edges. Missing: distance to the mug."
+      },
+      {
+        "title": "2. Add depth: RGBD input",
+        "viz": "weights",
+        "viz_args": [["rgb", 50], ["depth", 50], ["free", 20], ["free", 20], ["free", 20], ["free", 20], ["free", 20], ["free", 20], ["free", 20], ["free", 20], ["free", 20], ["free", 20]],
+        "caption": "Now the input is RGBD: red-green-blue pixels plus depth (distance to each pixel)."
+      },
+      {
+        "title": "3. Lift to 3D: point cloud",
+        "viz": "box",
+        "viz_args": "XYZ cloud from RGBD; each pixel becomes a 3D point.",
+        "caption": "Use camera calibration to convert each pixel+depth to an XYZ coordinate in 3D space."
+      },
+      {
+        "title": "4. Fuse two views: 2D+3D combined",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 50], ["moved", 40], ["moved", 45], ["moved", 48], ["moved", 42], ["free", 20], ["free", 20], ["free", 20], ["free", 20], ["free", 20], ["free", 20]],
+        "caption": "Encode 2D with DINOv2, 3D point cloud with Concerto encoder. Align to patch grid, blend via gated sum."
+      },
+      {
+        "title": "5. Train on any depth source",
+        "viz": "box",
+        "viz_args": "Simulator + Real camera + Model-estimated all together; model learns invariant representation.",
+        "caption": "Same training pipeline sees simulator depth, real sensor depth, and LLM-guessed depth. Model tolerates all of them."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Input RGBD",
+        "text": "At each time step, receive RGB pixels and depth map (which you have, or can estimate)."
+      },
+      {
+        "b": "Step 2: Lift to 3D point cloud",
+        "text": "Using the camera's internal calibration (focal length and lens center), convert each pixel's depth into a 3D coordinate (x, y, z). Attach color and surface slope to each point."
+      },
+      {
+        "b": "Step 3: Compress point cloud",
+        "text": "Assign each 3D point to the nearest 2D patch (cell) in the image grid. Average the 3D point features over each patch."
+      },
+      {
+        "b": "Step 4: Encode both branches",
+        "text": "Run 2D image through DINOv2 (produces learned feature numbers per patch). Run compressed 3D points through Concerto (a pretrained 3D encoder). Both give lists of numbers for each patch."
+      },
+      {
+        "b": "Step 5: Fuse with gating",
+        "text": "For each patch, blend the 2D and 3D features via a learnable gate (a sigmoid-weighted sum). The gate learns which patches benefit from 3D and which prefer 2D."
+      },
+      {
+        "b": "Step 6: Feed to action model",
+        "text": "Fused features go to the language model and action head. The head outputs the next movement (joint angles or gripper open/close)."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes: visual input representation",
+    "paras": [
+      "Before Any3D-VLA, the visual module read only 2D images. After, it reads 2D and 3D simultaneously, using a single fusion layer to blend them. The object being changed is not the model weights or the action head — it is how the raw visual observation is lifted into features before the model reasons about it."
+    ],
+    "object": "visual input representation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: depth source invariance",
+    "name": "tolerance to depth bias",
+    "paras": [
+      "The paper secretly measures one thing: how well can the 3D branch represent objects and scenes even when depth comes from different sources (a Unity simulator with perfect XYZ, a real RealSense camera with noise and scale drift, or an LLM-estimated depth)? This is not a single number in the loss; it is a property learned during training. When the model sees point clouds from all three sources, the 3D encoder and fusion layer learn which geometric patterns matter for the task and which are artifacts of the depth source. In contrast, a model trained on only real depth will hallucinate when given simulator depth, and vice versa.",
+      "The paper demonstrates this by training on a mixed diet (simulator + real sensor + model-estimated) and testing on scenes unseen during pre-training. The degree to which performance stays high is a measure of how well the model learned domain-agnostic (source-independent) 3D patterns."
+    ],
+    "heat": {
+      "cells": [
+        ["Simulator depth", 4, true],
+        ["Real sensor depth", 4, true],
+        ["Model-est. depth", 4, true],
+        ["2D encoder frozen", 2, false],
+        ["3D encoder fine-tuned", 3, true],
+        ["Fusion gate learned", 3, true],
+        ["Patch alignment", 4, true],
+        ["3D shape patterns", 4, true],
+        ["Depth source invariance", 4, true],
+        ["Sim-to-real transfer", 4, true],
+        ["Real camera accuracy", 4, true],
+        ["Action accuracy", 4, true]
+      ],
+      "caption": "Darker means more critical to learning patterns that work across all three depth sources."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model is trained on a mixed diet of depth: the same robot scene rendered in a simulator, captured by a real camera, and estimated by an LLM. It learns what to pay attention to (objects, edges, distance) and what to ignore (the scale of the depth axis, camera noise, simulator artifacts), because the 3D encoder sees all three and must extract features that stay useful regardless of which depth source the features came from."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Hybrid point cloud training strategy (Section 6.2) exposes the 3D encoder and fusion layers to all three depth sources during training. The abstract calls this learning domain-agnostic 3D representations. The paper's claim is that explicitly modeling 3D and seeing many depth flavors teaches the model invariant features."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why fusing 2D and 3D works: two views of the same task",
+    "paras": [
+      "A robot does not need perfect 3D; it needs to distinguish objects and know their positions well enough to grasp them. 2D images are efficient — color gradients and contours often tell you object boundaries — but they fail when objects overlap or when lighting is strange. 3D point clouds speak in coordinates, not colors. When both are fed to the same decision mechanism, they cover each other's blind spots: 2D catches what 3D misses (colors, fine texture), and 3D catches what 2D misses (exact depth, occlusion by overlap).",
+      "Specifically: a point cloud encoder (Concerto) has seen millions of 3D shapes during pre-training on 3D datasets. It learned what a mug looks like in 3D, what a table leg looks like, what grasping surfaces feel like in space. An image encoder (DINOv2) has seen millions of images and learned color, lighting, occlusion patterns. When the two are combined via a learnable gate that can suppress either branch per patch, the gate learns to rely on 3D numbers when they are precise (exact object center for accurate grasping, because 3D coordinates are metric and absolute) and to ignore 3D when it is noisy (cluttered scenes where depth noise causes errors, because 2D color edges still show object boundaries clearly).",
+      "The catch: this only works if the 3D encoder is pretrained. A random 3D encoder outputs meaningless numbers. And this only avoids brittleness across environments if you train on all the depth sources at once. Train on only real depth, and the model overfits to that sensor's scale and noise patterns; train on only simulator depth, and it fails on real robots because the depth numbers have a different scale."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "RGB image and depth map"
+        },
+        {
+          "t": "step",
+          "s": "Lift RGBD to 3D point cloud",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compress: align points to 2D patch grid"
+        },
+        {
+          "t": "step",
+          "s": "Encode 2D patches (DINOv2) and 3D patches (Concerto)"
+        },
+        {
+          "t": "step",
+          "s": "Fuse: learnable gated blend per patch",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Fused visual features for action prediction"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The fusion equation: weighted blend of two encodings",
+    "words": "For each patch, the fused feature is the 2D feature plus a scaled 3D feature, where the scale (gate) is a sigmoid function of a learned bias. The sigmoid is initialized so the 3D contribution starts small and grows during training.",
+    "equation": "h_fused_j = h_2D_j + sigma(g) * LayerNorm(delta_j)",
+    "symbols": [
+      ["h_2D_j", "the 2D patch feature from DINOv2 for patch j"],
+      ["delta_j", "the compressed 3D feature (averages of all point features assigned to patch j)"],
+      ["g", "a learnable scalar gate parameter (initialized to -2.1972)"],
+      ["sigma(g)", "sigmoid function: 1 / (1 + exp(-g)), produces a number between 0 and 1"],
+      ["LayerNorm(delta_j)", "normalizes the 3D features to have stable scale"],
+      ["h_fused_j", "the final fused feature for patch j"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose patch j has: h_2D_j = [0.5, 0.8, 0.2] and delta_j = [0.3, 0.4, 0.1] (vectors of 3 numbers each).",
+        "Learnable g is initialized at -2.1972. sigma(-2.1972) ≈ 0.1 (so 3D starts with 10% weight).",
+        "LayerNorm(delta_j) ≈ [-0.5, 0.7, -0.2] (rescaled to unit variance).",
+        "0.1 * LayerNorm(delta_j) ≈ [-0.05, 0.07, -0.02].",
+        "h_fused_j = [0.5, 0.8, 0.2] + [-0.05, 0.07, -0.02] = [0.45, 0.87, 0.18].",
+        "As training proceeds, g is updated; if g moves toward 0, sigma(g) → 0.5, and 3D gets more say. If g moves toward +5, sigma(g) → 0.99, and 3D dominates."
+      ]
+    },
+    "note": "The gate is a learned switch that can tune how much 3D information each patch receives, starting gentle (mostly 2D) and adapting during training."
+  },
+  "bars": {
+    "h2": "Performance comparison: naive 2D-only vs. Any3D-VLA",
+    "charts": [
+      {
+        "title": "2D-only baseline (depth-pretrained encoder)",
+        "rows": [
+          ["Simulator test (seen)", 78, "good"],
+          ["Real robot test (unseen)", 52, "bad"],
+          ["New environment test (unseen)", 48, "bad"]
+        ],
+        "note": "Generalization fails. The model learned to expect simulator depth (10m scale); real depth is 1-2m scale. The mismatch breaks action prediction."
+      },
+      {
+        "title": "Any3D-VLA (2D+3D fused, hybrid training)",
+        "rows": [
+          ["Simulator test (seen)", 81, "good"],
+          ["Real robot test (unseen)", 71, "good"],
+          ["New environment test (unseen)", 69, "good"]
+        ],
+        "note": "Combining 2D and 3D during training on mixed depth sources closes the gap. The 3D encoder learns what objects look like in 3D space independent of depth scale, so it works whether the depth is from simulator, real camera, or LLM."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Pretrained 3D encoder is critical.",
+        "html": "If you use an untrained point-cloud encoder, it has no semantic knowledge of objects. The fusion becomes two random encodings averaged — useless. The paper relies on Concerto, which was pretrained on millions of real and synthetic 3D shapes. Without pretraining, the method fails."
+      },
+      {
+        "warn": true,
+        "b": "Missing depth in some frames breaks the pipeline.",
+        "html": "If the depth sensor drops out (e.g., outdoors in bright sun, or occluded by a hand), you have no depth map, so you cannot lift RGBD to a point cloud. The method degrades to 2D-only for those frames. The paper does not discuss what happens in total-occlusion scenarios, so coverage in those moments is unclear."
+      },
+      {
+        "warn": true,
+        "b": "Domain gap if training is not truly diverse.",
+        "html": "If you train only on simulator and real depth but not on LLM-estimated depth, the model will struggle when deployed with model-estimated depth. The paper's benefit comes from the hybrid training; skip that, and you lose the advantage."
+      },
+      {
+        "b": "Done right: multi-source training reduces brittleness.",
+        "html": "By exposing the model to simulator, sensor, and model-estimated depths during training, the 3D encoder sees that a mug looks the same (same center-of-mass, same surface) whether the depth scale is off or the noise is high. It learns which 3D patterns matter for grasping and which are depth artifacts. The final model works with any depth source because it skips the source's quirks and focuses only on 3D shapes."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple pick-and-place task in a physics simulator (e.g., PyBullet or MuJoCo). Place a few objects on a table at different distances. Render RGBD from two cameras: one matching real RealSense noise (scale ~0.3-2m, 5mm jitter), another perfectly clean (scale 0-3m, no jitter). Pre-train a robot model on 1000 random grasps using only the clean-depth camera. Then test on 100 new objects. Measure: (A) success rate with clean depth (should be high, ~85%), (B) success rate with noisy depth (should be low, ~55%, showing brittleness caused by depth scale mismatch). Now train the same model on a mixed diet: 500 clean grasps, 300 noisy grasps, 200 grasps with depth estimated from a pretrained monocular depth model. Re-test on new objects. Measure: (A) success rate with clean depth (should stay ~85%), (B) success rate with noisy depth (should jump to ~75%, because the encoder now ignores scale quirks), (C) success rate with model-estimated depth (should reach ~72%, showing the 3D encoder generalizes beyond the specific depths in training)."
+    ],
+    "metric_eq": "generalization_gain = (success_mixed_noisy - success_cleanonly_noisy) + (success_mixed_model_est - success_cleanonly_model_est)",
+    "closing": "If the mixed-diet model outperforms the clean-only model on unseen depth sources by 20+ percentage points per source, the demo proves that seeing all three depth flavors during training teaches the 3D encoder to extract patterns (like mug shape, table height, reachable zones) that remain true across depth scales and noise profiles, because the encoder learns which 3D features change with the source (scale bias, noise) and which do not (actual object shape)."
+  }
+}

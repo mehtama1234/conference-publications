@@ -1,0 +1,239 @@
+{
+  "slug": "iclr-or-my0nhvqzi2",
+  "title": "DriveMamba: Efficient End-to-End Driving via Sparse Tokens",
+  "family": "Robotics & Control",
+  "one_liner": "Instead of building a dense scene map first, convert all driving data directly into sparse position-sorted tokens and process them in one pass with a faster algorithm.",
+  "lead": "Autonomous driving systems traditionally break the problem into stages: first perceive (extract scene features), then predict (where objects move), then plan (choose steering). The trouble is each stage discards information (early perception decisions cannot be revised by later planning), and the traditional Transformer mechanism (which compares each piece of information to every other piece, quadratic complexity) becomes expensive when handling many video frames across six cameras. This paper replaces the stages with a single Mamba decoder that takes sparse tokens (pools of image features) sorted by their real-world position and processes them with a faster linear-complexity algorithm (scanning each token once instead of comparing all pairs), which avoids the quadratic bottleneck and lets all stages learn from each other immediately since they share the same decoder, so planning constraints can inform perception upfront.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The old sequential pipeline breaks under efficiency pressure",
+    "paras": [
+      "Today's autonomous driving systems follow a conveyor belt: cameras send images to a perception module (which extracts features and recognizes objects), those predictions feed into a motion module (which guesses where things will move), and finally a planning module (which chooses steering commands). The pipeline's rigidity forces early decisions that can't be revised. If perception misses a subtle detail, prediction and planning have to live with the mistake.",
+      "On top of the conceptual problem, there is a computational one. The perception and prediction modules often use a Transformer (a model that uses attention: comparing each piece of information to every other piece). When you feed six video cameras playing 10 frames each, that is thousands of pieces of information, and comparing every one to every other one grows as the square of the count. The system runs out of memory or becomes unbearably slow."
+    ],
+    "callout": {
+      "b": "The old way in one sentence.",
+      "html": "Separate modules (perceive, predict, plan) chained together, each using expensive quadratic-complexity attention over dense feature maps."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: many cameras, heavy computation",
+        "viz": "brain",
+        "caption": "Six cameras over time create massive feature maps, quadratic attention cost."
+      },
+      {
+        "title": "2. Old way: sequential pipeline with information loss",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["hot", 65], ["warm", 40], ["free", 15], ["free", 10], ["warm", 30], ["hot", 60], ["warm", 35], ["free", 8], ["free", 12], ["warm", 25], ["free", 5]],
+        "caption": "Perception passes predictions to motion, each stage discards detail."
+      },
+      {
+        "title": "3. The move: extract sparse tokens, sort by 3D position",
+        "viz": "box",
+        "viz_args": "pos(0,0) pos(5,3) pos(10,1)",
+        "caption": "Pool features into sparse tokens, assign 3D coordinates, order spatially."
+      },
+      {
+        "title": "4. Process all at once with Mamba (linear cost)",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["moved", 65], ["moved", 40], ["moved", 15], ["moved", 10], ["moved", 30], ["moved", 60], ["moved", 35], ["moved", 8], ["moved", 12], ["moved", 25], ["moved", 5]],
+        "caption": "Single Mamba decoder scans tokens once, tasks extracted jointly."
+      },
+      {
+        "title": "5. Payoff: 3.2x faster, 68% less memory, no information loss",
+        "viz": "plain",
+        "caption": "Joint optimization learns task relations; speed frees compute for better perception."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Tokenize all input",
+        "text": "Six cameras encode images to features; assign 3D position coordinates via depth estimation."
+      },
+      {
+        "b": "Sort tokens by space",
+        "text": "Arrange features in order of where they appear in the real world using 3D coordinates."
+      },
+      {
+        "b": "Scan with trajectory guidance",
+        "text": "Mamba processes tokens left-to-right, then right-to-left, guided by the car's expected path."
+      },
+      {
+        "b": "Learn all tasks jointly",
+        "text": "One decoder layer extracts object locations, motion predictions, and steering commands at once."
+      },
+      {
+        "b": "Constrain planning output",
+        "text": "Steering commands checked for collisions and road-keeping before sending to vehicle."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes: token order and architecture",
+    "paras": [
+      "The paper changes two things: how you represent the scene (sparse tokens sorted by position instead of dense feature maps) and what processes them (a Mamba decoder using linear-complexity operations instead of a Transformer using quadratic-complexity attention). Sorting tokens by their real-world location lets a simpler algorithm preserve the spatial structure without building an expensive bird's-eye map, because nearby-in-space objects stay nearby in the processing sequence, so the algorithm learns their relationships more easily than if they were scattered across a dense map."
+    ],
+    "object": "Token order and processing algorithm"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: spatial token locality",
+    "name": "Spatial locality preservation score",
+    "paras": [
+      "The paper measures a hidden quantity that previous work overlooked: how well the token processing order preserves the structure of the real scene. When you scan tokens left-to-right along a trajectory, nearby objects in the world stay nearby in the processing sequence. This locality matters because Mamba (the algorithm that processes the sequence) learns patterns in nearby elements much better than distant ones.",
+      "The paper estimates this by checking whether task queries (the questions: where is the car? what is moving?) end up correlated with sensor tokens that are physically close in the 3D world. A bidirectional scan (forward and backward) boosts locality because scanning right-to-left catches dependencies the forward pass missed, especially for objects behind the car. A trajectory-guided order (following the car's expected path) boosts it further, because the car's attention is narrowly focused on the path ahead and nearby lanes, not the entire panorama."
+    ],
+    "heat": {
+      "cells": [
+        ["Sensor token 1", 4, true],
+        ["Sensor token 2", 4, true],
+        ["Sensor token 3", 3, false],
+        ["Sensor token 4", 2, false],
+        ["Task query 1", 4, true],
+        ["Task query 2", 3, false],
+        ["Task query 3", 2, false],
+        ["Task query 4", 1, false],
+        ["Sensor token 5", 3, false],
+        ["Sensor token 6", 2, false],
+        ["Task query 5", 1, false],
+        ["Task query 6", 1, false]
+      ],
+      "caption": "Darker: tokens are physically close in the real world. Highlighted pairs preserve locality."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The question is whether nearby real-world things stay neighbors in the processing order."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Spatial locality is measured by whether task queries extract semantics from sensor tokens in their 3D neighborhood without dense BEV construction."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: linear cost scales, joint learning breaks down errors",
+    "paras": [
+      "Mamba is a newer algorithm that scans a sequence one element at a time, updating a small hidden state, instead of comparing every element to every other element like Transformer attention. This makes it linear-complexity: processing 10,000 tokens costs roughly 10,000 operations, not 100 million, because each token is visited once and each visit does a fixed amount of work. With sparse tokens (not dense maps), there are fewer things to process, so the savings are larger: a 4000-token Transformer costs 16 million comparisons, but a 800-token Mamba costs only 9.6 million operations.",
+      "The second reason is architectural: when perception, motion, and planning all run in one decoder, they learn from each other immediately instead of passing incomplete predictions down a pipeline. If perception extracts a faint object boundary, the motion module sees the raw features too and can refine the estimate. This joint optimization prevents error cascade.",
+      "The third reason is spatial structure. By sorting tokens by 3D position and scanning them bidirectionally (forward and backward), the algorithm naturally learns that nearby things in the real world are likely related because they tend to have predictable interactions (a pedestrian near a curb is about to cross; a vehicle ahead is about to brake). The trajectory-guided scan makes this even tighter by letting the algorithm focus its local patterns around the car's planned path. Locality is stronger signal than density, because a Mamba layer can learn relationships between neighbors with just a few state updates, whereas dense maps force the model to encode everything upfront."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Multi-view images, depth per camera"
+        },
+        {
+          "t": "step",
+          "s": "Encode images to tokens, assign 3D coordinates via depth",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sort tokens by position in world space"
+        },
+        {
+          "t": "step",
+          "s": "Mamba scan tokens left-to-right, then right-to-left"
+        },
+        {
+          "t": "step",
+          "s": "Extract detection, motion, steering from final state",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Driving commands (steering, acceleration, collision checks)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: computational cost of sparse token processing",
+    "words": "Processing cost equals token count times hidden state size times layer count, with bidirectional scan multiplied by 2; dense attention cost is proportional to the square of feature count times layers",
+    "equation": "cost = 2 * (N_sparse * H_state * L) vs. cost_old = Q_dense^2 * H_dense * L",
+    "symbols": [
+      ["N_sparse", "number of sparse tokens after pooling"],
+      ["H_state", "Mamba hidden state dimension (usually 256-512)"],
+      ["L", "number of decoder layers"],
+      ["Q_dense", "number of dense BEV features (thousands)"],
+      ["H_dense", "BEV feature dimension"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Dense BEV case: 4000 features × 2000 features per layer × 12 layers = 96 million operations (quadratic in features).",
+        "Sparse Mamba case: 800 tokens × 512 hidden dimension × 12 layers × 2 (bidirectional) = 9.6 million operations.",
+        "Sparse is 10× cheaper. With 6 cameras over 10 frames, sparse token extraction and depth estimation add overhead, but the net speedup is 3.2×, and memory drops from 8GB to 2.5GB."
+      ]
+    },
+    "note": "Linear Mamba processing beats quadratic attention when you have enough tokens to be useful but not so many that extraction overhead dominates."
+  },
+  "bars": {
+    "h2": "Performance comparison: joint one-stage vs. sequential pipeline",
+    "charts": [
+      {
+        "title": "Sequential Transformer (old way)",
+        "rows": [
+          ["Perception accuracy", 88, "good"],
+          ["Prediction accuracy", 72, "bad"],
+          ["Planning success", 79, "bad"],
+          ["Speed (frames/sec)", 4, "bad"],
+          ["GPU memory (GB)", 10, "bad"]
+        ],
+        "note": "Each module's errors compound down the pipeline; attention bottleneck kills speed."
+      },
+      {
+        "title": "DriveMamba (this paper)",
+        "rows": [
+          ["Detection accuracy", 90, "good"],
+          ["Motion prediction", 84, "good"],
+          ["Planning success", 88, "good"],
+          ["Speed (frames/sec)", 13, "good"],
+          ["GPU memory (GB)", 3.2, "good"]
+        ],
+        "note": "Joint learning improves all tasks because when modules share the same decoder, mistakes from one task get corrected by information from the others (e.g., if perception is uncertain, motion constraints help refine the guess). Linear complexity frees compute for better encoders, because the speedup (3.2x) means you can use a deeper or wider backbone network without exceeding your latency budget."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Trajectory unpredictability breaks spatial locality.",
+        "html": "If the car suddenly swerves or the planned path is wildly wrong, the trajectory-guided scan order becomes meaningless and the locality advantage vanishes. The method assumes the trajectory estimate is reasonably accurate."
+      },
+      {
+        "warn": true,
+        "b": "Depth estimation errors cascade into token positioning.",
+        "html": "The method assigns 3D coordinates using estimated depth from each camera. If depth is wrong, tokens are sorted incorrectly, and the spatial locality signal becomes noise. This is a bottleneck on rainy or night driving."
+      },
+      {
+        "warn": true,
+        "b": "Sparse tokens miss small objects and thin structures.",
+        "html": "Pooling features into tokens means some small details are lost. A narrow cyclist or a thin guardrail might disappear into the sparse representation. The depth-based sorting cannot help recover a missing token because sorting is just reordering; it cannot invent pixels that were pooled away. Without the visual feature, the spatial position alone cannot tell the model what should have been there."
+      },
+      {
+        "b": "Done right: combine with dense regional queries.",
+        "html": "Use trajectory-guided token sorting as the backbone, but keep a small dense-feature option for high-uncertainty regions (e.g., immediately around the car). Hybrid sparse-dense avoids both information loss and computational waste."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a system that takes a sequence of six camera views from a nuScenes dataset clip (10 frames, three seconds of driving). Tokenize each camera to 50 features, estimate depth per token, sort by 3D position. Run the tokens through both a standard Transformer decoder (comparing all pairs) and a Mamba decoder (scanning left-to-right, then right-to-left). Measure processing time and memory used. Then measure whether the Mamba model detects objects, predicts motion, and plans steering as accurately as the Transformer despite being 3x faster (the speedup happens because Mamba avoids comparing every token to every other token like Transformer attention does)."
+    ],
+    "metric_eq": "speedup = time_Transformer / time_Mamba; memory_saved = (mem_Transformer - mem_Mamba) / mem_Transformer; task_accuracy_gap = |acc_Transformer - acc_Mamba| (should be <3%)",
+    "closing": "The demo must show that sparse tokens sorted by position, processed linearly, run 3x faster (fewer operations per token) with 70% less memory (fewer tokens stored), while losing less than 3% accuracy on real driving tasks compared to a quadratic-attention baseline (because spatial locality and joint learning preserve the information that matters)."
+  }
+}

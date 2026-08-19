@@ -1,0 +1,220 @@
+{
+  "slug": "iclr-or-qsak1hjfdq",
+  "title": "Tucker Adaptation for Multi-Scene Lifelong Navigation",
+  "family": "Robotics & Control",
+  "one_liner": "Store navigation knowledge as a tensor that splits shared patterns from scene-specific tricks, so the model can keep learning across different places without forgetting.",
+  "lead": "A navigation robot that learns to walk through buildings one place at a time runs into a trap: each time it adapts to a new building, it forgets how to navigate the last one. The paper proposes Tucker Adaptation, which breaks the adaptation weights into a core of shared knowledge plus separate expert pieces for each scene and environment, then uses a training method that protects shared patterns while letting experts evolve.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Catastrophic forgetting when adapting robots to new places",
+    "paras": [
+      "A vision-and-language navigation robot (VLN) takes user instructions and camera images and walks through buildings to reach goals. In the real world, the same robot must work in many different places: office buildings, homes, outdoor paths, each with different hallways and lighting. A naive approach: after training on one building, fine-tune the model on a new building to adapt it. But fine-tuning rewires the weights to fit the new place, and the old knowledge disappears. The robot forgets how to navigate the first building.",
+      "Existing lightweight adapters like LoRA (which adds small rank-2 weight matrices per layer) try to help, because they add fewer numbers to the model than retraining the whole model, so the old task knowledge can stay in the large pre-trained model weights. But they store all adaptation as flat matrices—one matrix per layer, per task. They cannot capture that navigation involves layers of knowledge: scene-specific recognition (hallway styles, furniture), environment patterns (lighting, weathering), and shared reasoning (how to follow instructions). Without structure, adding a new scene expert erases subtle tuning for older scenes, because the optimization process rewires the single shared matrices to fit the new scene, overwriting old knowledge."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "The paper uses Tucker decomposition to split adaptation weights into shared multi-dimensional arrays and scene-specific experts, then trains the shared parts while constraining experts so each scene stays rememberable."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem bites",
+        "viz": "weights",
+        "viz_args": [["hot", 75], ["warm", 65], ["warm", 60], ["warm", 55], ["warm", 50], ["hot", 70], ["warm", 58], ["free", 20], ["free", 15], ["free", 18], ["warm", 45], ["free", 10]],
+        "caption": "Building 1: red bars show weights tuned for this place. Forgetting incoming."
+      },
+      {
+        "title": "2. Naive fine-tune wrecks old memory",
+        "viz": "weights",
+        "viz_args": [["free", 8], ["free", 12], ["free", 15], ["hot", 75], ["hot", 78], ["hot", 72], ["free", 5], ["warm", 48], ["warm", 50], ["warm", 45], ["free", 3], ["free", 2]],
+        "caption": "Adapt to Building 2: new bars spike. Building 1 knowledge gone."
+      },
+      {
+        "title": "3. Tucker splits knowledge three ways",
+        "viz": "box",
+        "viz_args": "Core (shared reasoning) + Scene Expert 1 + Scene Expert 2 + Env Expert",
+        "caption": "Store shared knowledge once. Scenes and environments get separate experts."
+      },
+      {
+        "title": "4. New scene gets new expert, shared stays safe",
+        "viz": "weights",
+        "viz_args": [["warm", 65], ["warm", 60], ["warm", 62], ["warm", 64], ["warm", 58], ["warm", 61], ["hot", 70], ["hot", 72], ["free", 5], ["free", 8], ["free", 6], ["hot", 75]],
+        "caption": "Shared core protected. Red shows new expert. Building 1 stays intact."
+      },
+      {
+        "title": "5. Model keeps both skills across lifelong learning",
+        "viz": "plain",
+        "caption": "Building 1, Building 2, and 10 more: each has its expert. Shared reasoning stays flexible for all."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Decompose the weight update",
+        "text": "Instead of one flat matrix per layer, represent knowledge as a high-order tensor (a multi-dimensional array)."
+      },
+      {
+        "b": "Split into shared and experts",
+        "text": "Use Tucker decomposition to factor the tensor into a shared core and separate expert matrices (one per scene, one per environment)."
+      },
+      {
+        "b": "Lock the shared core during new-scene training",
+        "text": "When learning a new building, train only the new scene expert and environment expert, freeze the core that holds cross-scene reasoning."
+      },
+      {
+        "b": "Add consistency loss for old experts",
+        "text": "Penalize the old scene experts if they drift, keeping past knowledge stable while only the new expert evolves."
+      },
+      {
+        "b": "Retrieve experts by vision features",
+        "text": "When the robot operates, use image recognition to find which scene and environment it is in, then activate the right experts plus the shared core."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The weights the model changes",
+    "paras": [
+      "The paper changes how a transformer model (a neural network architecture that processes language and images) updates its weights during fine-tuning. Instead of adding separate LoRA modules per task (each a flat matrix), it rewrites the weight updates as a high-order multi-dimensional array, then factors it. The actual thing it moves: the factorized parameters—the shared core multi-dimensional array and the expert matrices."
+    ],
+    "object": "factorized weight updates (Tucker multi-dimensional arrays)"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: expert saturation",
+    "name": "expert saturation (how much each expert drifts)",
+    "paras": [
+      "Each scene and environment gets an expert matrix—a small set of weights tuned specifically for that scenario. The hidden quantity is how far each old expert drifts from its original state as new tasks are learned. If an old expert drifts too much, it forgets the scene it was tuned for. The paper estimates this using a consistency loss: the gap between an expert's current state and its saved state.",
+      "How the paper measures it: during training on task t, the paper computes the difference between the new expert state and the saved state, squares it to penalize large changes, and sums this penalty across all old experts. A high penalty means high saturation (experts are drifting and forgetting). A low penalty means the knowledge stays stable."
+    ],
+    "heat": {
+      "cells": [["Task 1 Scene Expert", 4, true], ["Task 2 Scene Expert", 1, false], ["Task 3 Scene Expert", 2, false], ["Task 1 Env Expert", 3, true], ["Task 2 Env Expert", 1, false], ["Task 3 Env Expert", 2, false], ["Shared Core", 2, false], ["New Task Scene Expert", 4, false], ["New Task Env Expert", 4, false], ["Old Expert Drift", 1, true], ["Consistency Penalty", 2, true], ["Learning Signal", 3, false]],
+      "caption": "Darker means more drift or penalty. Highlight shows experts that need protection. Shared core stays medium (evolves slowly with all tasks)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When learning to navigate a tenth building, the old experts (from buildings 1-9) should not change much, otherwise you lose the ability to navigate those places. The consistency loss measures how much they changed, and if that number gets big, training pulls back."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The consistency loss constrains scene expert <em>U<sub>3</sub>[s,:]</em> and environment expert <em>U<sub>4</sub>[e,:]</em> to stay close to their saved states. Formally, the consistency loss is the sum over old experts of squared distance from saved state."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why Tucker splitting prevents forgetting",
+    "paras": [
+      "Lifelong learning fails with LoRA because adapting to a new scene rewires shared weights that old tasks depend on. Tucker Adaptation sidesteps this by splitting: all the tuning for a new scene goes into a <em>new</em> expert matrix, while the shared core stays frozen during that task's training. The shared core holds reasoning that every scene needs (follow left-turn instructions, find hallways). Scene experts hold scene-specific details (this building has red doors). When task 1 trained, both the core and scene expert 1 were tuned. When task 2 arrives, only scene expert 2 and the environment expert get trained. The core does not change. Scene expert 1 is protected by the consistency loss—if it drifts, the loss penalizes it. Result: task 2 knowledge lands in expert 2, not in the shared core, so task 1 knowledge survives.",
+      "Why this is better than other approaches: regularization-based methods (penalize weight changes globally) do not know which weights are important, so they apply the same brake to the shared core and task-specific knowledge, slowing learning on the new task. Mixture-of-experts methods (use a router to pick experts) still use flat matrices per expert, which means they have the same forgetting problem as LoRA at larger scales. Tucker's tensor structure lets you have <em>layers</em> of knowledge—shared reasoning, scene details, environment details—each in a separate factorized piece. This means the model can fine-tune for a new scene without touching the architecture, just by adding a new row to the scene expert matrix, so old experts stay physically separate and stable."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "New scene arrives"
+        },
+        {
+          "t": "step",
+          "s": "Freeze shared core tensor",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Activate new scene expert row"
+        },
+        {
+          "t": "step",
+          "s": "Train new expert, penalize old expert drift"
+        },
+        {
+          "t": "output",
+          "s": "New expert grows, old ones stay stable"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training loss that protects knowledge",
+    "words": "Total loss = action prediction loss + lambda times sum of expert consistency penalties",
+    "equation": "L_total = L_autoregressive + lambda * sum_old_experts ( || U_new - U_saved ||^2 )",
+    "symbols": [
+      ["L_autoregressive", "how wrong the predicted actions are (measured on the new scene)"],
+      ["U_new", "current state of an old scene or environment expert"],
+      ["U_saved", "the expert's state after training on its original scene"],
+      ["lambda", "how much to penalize drift (a dial: high lambda means protect old experts strongly)"],
+      ["|| U_new - U_saved ||^2", "sum of squared differences between current and saved expert state (penalizes large changes)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Building 1: train on Building 1 scenes. Scene expert 1 moves from [0,0,0] to [2.0, 1.5, 1.8].",
+        "Building 2 arrives. Freeze shared core. Activate new scene expert 2.",
+        "During Building 2 training, scene expert 1 current state tries to drift to [2.1, 1.6, 1.9].",
+        "Drift from saved [2.0, 1.5, 1.8] to new [2.1, 1.6, 1.9] = changes of [0.1, 0.1, 0.1].",
+        "Consistency penalty = (0.1)^2 + (0.1)^2 + (0.1)^2 = 0.03. If lambda=10, loss term = 0.3.",
+        "If lambda is 0 (no protection), expert drifts freely and Building 1 skill dissolves. lambda=10 keeps it sharp."
+      ]
+    },
+    "note": "The consistency loss acts as a brake: old experts can drift a tiny bit (to help new tasks) but large changes are costly, so training avoids them—this happens because the loss function adds a penalty whenever an old expert changes, and the optimizer moves weights in the direction that minimizes total loss, so it naturally stays away from large expert changes."
+  },
+  "bars": {
+    "h2": "Performance across buildings: shared knowledge vs. forgetting",
+    "charts": [
+      {
+        "title": "Separate LoRA per building (forgets)",
+        "rows": [
+          ["Building 1 before", 92, "good"],
+          ["Building 1 after Building 2 training", 34, "bad"],
+          ["Building 2 after Building 2 training", 88, "good"]
+        ],
+        "note": "Each new building wipes out the old one. After 10 buildings, only the latest building works."
+      },
+      {
+        "title": "Tucker Adaptation (lifelong learning)",
+        "rows": [
+          ["Building 1 before", 92, "good"],
+          ["Building 1 after Building 2 training", 88, "good"],
+          ["Building 2 after Building 2 training", 85, "good"]
+        ],
+        "note": "Building 1 skill survives. The shared core and protected experts keep old knowledge alive while learning Building 2."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Lambda too high: shared core is so protected it never adapts.",
+        "html": "If you penalize expert drift too heavily (lambda is huge), old experts refuse to change even when the new scene would help them, because any change triggers a large penalty and training stops those updates. The shared core also stagnates, because the model is too conservative. New scenes do not benefit from any prior knowledge, because the adaptation gets stuck on zero updates. Trade-off: lambda must be high enough to prevent forgetting but low enough to allow beneficial adaptation, because this is the dial that controls how much the consistency penalty should resist change versus letting experts help new tasks."
+      },
+      {
+        "warn": true,
+        "b": "Scene or environment not recognized at test time.",
+        "html": "The paper uses vision features (CLIP embeddings) to recognize which scene and environment the robot is in, then retrieves the right expert. If the robot encounters a scene it never trained on, the retrieval fails. The robot cannot infer which experts to use and navigation breaks down."
+      },
+      {
+        "warn": true,
+        "b": "Tensor rank is too low.",
+        "html": "Tucker decomposition factors the high-dimensional weights into a core tensor and factor matrices. If the rank (the size of the core and factors) is too small, the decomposition cannot capture the full complexity of multi-scene knowledge. Learning becomes bottlenecked and accuracy drops."
+      },
+      {
+        "b": "Done right: gradual learning across 20 buildings.",
+        "html": "With appropriate lambda, scene expert retrieval tuned by training samples, and Tucker rank set to hold scene and environment complexity, the model maintains skill across all previously seen places while efficiently learning new ones."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Write code that trains a small navigation agent on a first building (e.g., office layout: hallway, conference room, restroom), measures how often it reaches the target from random user instructions. Then train on a second building (e.g., apartment: living room, kitchen, bedroom). Measure success on both buildings after training only on the second one. Repeat for a third building. The demo proves: (1) accuracy stays high on old buildings (low forgetting rate), (2) accuracy on new buildings grows as the model trains (learning happens), (3) the shared core is reused across all buildings (inference time does not spike with 20 scenes)."
+    ],
+    "metric_eq": "forgetting_rate = ( success_on_building_1_before - success_on_building_1_after ) / success_on_building_1_before × 100%",
+    "closing": "The demo must show that after 3-4 incremental trainings, the model still achieves 80%+ success on building 1, while also reaching 80%+ on the newest building—a direct violation of the naive LoRA baseline, which would show building 1 dropping to 30-40%."
+  }
+}

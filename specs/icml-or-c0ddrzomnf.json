@@ -1,0 +1,571 @@
+{
+ "slug": "icml-or-c0ddrzomnf",
+ "title": "ResVLA: Intent Anchoring for Robot Control",
+ "family": "Robotics & Control",
+ "one_liner": "When robots learn from language and images, start with the big-picture goal first, then refine the details\u2014instead of generating everything from scratch.",
+ "lead": "Robot control requires both understanding what to do (from language) and how to do it physically. Most generative models start from pure noise and have to figure out the entire motion from zero, which is wasteful and error-prone. ResVLA splits the problem: first predict what the robot intends to do at a high level, then refine just the moment-to-moment variations around that intent.",
+ "nav": [
+  [
+   "theme-robotics-control.html",
+   "Robotics & Control"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Starting from noise wastes compute and breaks alignment",
+  "paras": [
+   "Traditional generative models for robot control start by sampling random noise and refining it step-by-step into an action sequence. This works in theory but has two problems. First, the model must spend computational effort re-discovering the high-level intent (what direction to move, which object to grasp) on every refinement step, even though the language instruction already tells it what the goal is. Second, if the noise doesn't drift toward the goal early on, the refinement can lock into a bad trajectory and never recover\u2014a phenomenon called loss collapse.",
+   "A beginner might try: just condition the noise on the language input so it drifts toward the right goal. But conditioning alone does not separate the planning horizon from execution noise; the model still wastes effort on global decisions when it should be refining micro-dynamics."
+  ],
+  "callout": {
+   "b": "The fix:",
+   "html": "Anchor on the predicted high-level intent first, then use a separate generative step to refine only the local motion details."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The old way: start from pure noise",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "free",
+      5
+     ],
+     [
+      "free",
+      3
+     ],
+     [
+      "free",
+      8
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      6
+     ],
+     [
+      "free",
+      1
+     ],
+     [
+      "free",
+      4
+     ],
+     [
+      "free",
+      7
+     ],
+     [
+      "free",
+      3
+     ],
+     [
+      "free",
+      5
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      6
+     ]
+    ],
+    "caption": "Model receives random noise and language instruction, must figure out intent."
+   },
+   {
+    "title": "2. Wasting compute rediscovering high-level goals",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "warm",
+      12
+     ],
+     [
+      "warm",
+      10
+     ],
+     [
+      "free",
+      8
+     ],
+     [
+      "warm",
+      14
+     ],
+     [
+      "free",
+      5
+     ],
+     [
+      "free",
+      3
+     ],
+     [
+      "free",
+      6
+     ],
+     [
+      "free",
+      4
+     ],
+     [
+      "warm",
+      9
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      1
+     ],
+     [
+      "free",
+      7
+     ]
+    ],
+    "caption": "Every refinement step rebuilds global intent instead of focusing on details."
+   },
+   {
+    "title": "3. ResVLA: split the problem into two stages",
+    "viz": "box",
+    "viz_args": "Intent (low-freq) then Refinement (high-freq)",
+    "caption": "First layer predicts what to do; second layer refines how to do it."
+   },
+   {
+    "title": "4. Anchor the high-level motion first",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      14
+     ],
+     [
+      "hot",
+      12
+     ],
+     [
+      "hot",
+      13
+     ],
+     [
+      "hot",
+      11
+     ],
+     [
+      "hot",
+      15
+     ],
+     [
+      "hot",
+      12
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      1
+     ],
+     [
+      "free",
+      3
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      1
+     ],
+     [
+      "free",
+      2
+     ]
+    ],
+    "caption": "Deterministic anchor captures global intent directly from language."
+   },
+   {
+    "title": "5. Refine only the local jitter around the anchor",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      14
+     ],
+     [
+      "hot",
+      12
+     ],
+     [
+      "hot",
+      13
+     ],
+     [
+      "hot",
+      11
+     ],
+     [
+      "hot",
+      15
+     ],
+     [
+      "hot",
+      12
+     ],
+     [
+      "moved",
+      5
+     ],
+     [
+      "moved",
+      4
+     ],
+     [
+      "moved",
+      6
+     ],
+     [
+      "moved",
+      3
+     ],
+     [
+      "moved",
+      4
+     ],
+     [
+      "moved",
+      5
+     ]
+    ],
+    "caption": "Diffusion adds fine details without rewriting the global plan."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Read the image and language",
+    "text": "Vision-language model processes camera frame and task instruction."
+   },
+   {
+    "b": "Predict the global intent",
+    "text": "Deterministic mapping outputs the high-level trajectory (reach, grasp, retract)."
+   },
+   {
+    "b": "Split by frequency",
+    "text": "Spectral analysis separates slow global motion from fast local jitter."
+   },
+   {
+    "b": "Refine the residual",
+    "text": "Diffusion model adds realistic detail and variation only around the anchor."
+   },
+   {
+    "b": "Execute the composite action",
+    "text": "Anchor plus refined residual forms the final smooth, goal-aligned robot motion."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "ResVLA changes where the generative process starts. Instead of starting from uninformative noise, it starts from a deterministic prediction of the high-level intent, then generates only the high-frequency residuals (the small, fast oscillations) around that anchor. The object being moved is the <b>starting point of the diffusion process</b>: from pure noise to an anchor that already points toward the language goal."
+  ],
+  "object": "diffusion starting point"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: Source-Condition Independence",
+  "name": "source-condition independence",
+  "paras": [
+   "ResVLA measures a hidden problem in generative VLA: source-condition independence. This is a mismatch between where the noise starts (the source) and where the language instruction points (the condition). In standard generation-from-noise, the source is a random Gaussian that tells the model nothing, and the condition is the language goal. These two pieces of information are far apart, so the model wastes effort bridging them\u2014because every diffusion step must spend some of its computational budget on figuring out what the goal is, rather than just refining the path to get there. Low source-condition independence means the starting point is far from the goal and requires more work.",
+   "ResVLA estimates this independence implicitly by computing the deterministic intent anchor. If that anchor already captures the language goal well, then the remaining residual is guaranteed to be close to the goal\u2014high source-condition independence. The paper does not measure it explicitly as a number, but the mechanism depends on this quantity being high."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "isotropic-noise",
+     1,
+     false
+    ],
+    [
+     "goal-state",
+     4,
+     true
+    ],
+    [
+     "anchor-near-goal",
+     4,
+     true
+    ],
+    [
+     "residual-local",
+     2,
+     false
+    ],
+    [
+     "language-signal",
+     3,
+     false
+    ],
+    [
+     "deterministic-fit",
+     4,
+     true
+    ],
+    [
+     "loss-collapse-zone",
+     1,
+     true
+    ],
+    [
+     "stable-refinement",
+     3,
+     false
+    ],
+    [
+     "spectral-decomp",
+     3,
+     false
+    ],
+    [
+     "intent-locked",
+     4,
+     true
+    ],
+    [
+     "drift-correction",
+     2,
+     false
+    ],
+    [
+     "semantic-alignment",
+     4,
+     true
+    ]
+   ],
+   "caption": "Darker means the source and condition are already close (low independent\u2014good)."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Starting from a random point that has nothing to do with the goal is inefficient. Starting from a point that already aims at the goal lets you skip the wasteful early steps."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The paper identifies source-condition independence (how aligned the noise is with the language condition) as a factor behind training inefficiency and loss collapse in generative VLA policies."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: Separating planning from execution",
+  "paras": [
+   "ResVLA works because it separates planning (what to do) from execution (how to do it smoothly). The mechanism has three parts. First, spectral analysis decomposes the action trajectory into low-frequency components (slow, intentional motion) and high-frequency components (fast vibration, noise, natural variation). Low-frequency is deterministic and predictable from the language; high-frequency is random and can vary. Second, the model predicts the low-frequency anchor directly from the vision-language input using a simple regression. This anchor is locked to the language instruction\u2014the model cannot drift because there is no iteration loop. Third, a diffusion process refines only the high-frequency residuals around that anchor. Because the anchor is already correct, the diffusion only has to learn realistic variation, not rebuild the intent. This means faster training (the diffusion loop has less to learn, converging with fewer gradient updates) and fewer refinement steps needed at test time (fewer diffusion steps because each step only corrects local noise, not global drift), along with stable performance: if language or camera input is noisy, the anchor still holds the goal; if embodiment (robot shape) changes, the anchor adapts but the residual structure persists.",
+   "Why this matters: loss collapse happened because pure generation forces the model to reconstruct intent and dynamics together under one diffusion loop. ResVLA decouples them. The anchor answers 'what?' once, deterministically. The residual then answers 'how to execute?' iteratively without risk of drifting from the original goal."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Camera image + language instruction"
+    },
+    {
+     "t": "step",
+     "s": "Vision-language encoder",
+     "hl": false
+    },
+    {
+     "t": "step",
+     "s": "Deterministic intent anchor (regression)",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Spectral split into anchor and residual",
+     "hl": false
+    },
+    {
+     "t": "step",
+     "s": "Diffusion refines high-frequency residual",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "Final action sequence (anchor + refined residual)"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The residual bridge equation",
+  "words": "The composite action is the deterministic anchor plus a refined residual. The residual diffusion loss measures how well the generative model predicts the high-frequency noise conditioned on both the anchor and the language instruction.",
+  "equation": "a_final = a_anchor + r_refined,  where  L_residual = E[ || epsilon - epsilon_theta(r_t, t, c, a_anchor) ||^2 ]",
+  "symbols": [
+   [
+    "a_final",
+    "the complete action sequence the robot executes"
+   ],
+   [
+    "a_anchor",
+    "the deterministic high-level intent (from regression)"
+   ],
+   [
+    "r_refined",
+    "the high-frequency residual refined by diffusion"
+   ],
+   [
+    "r_t",
+    "the residual at diffusion step t"
+   ],
+   [
+    "t",
+    "the diffusion time step (0 = most noise, T = clean)"
+   ],
+   [
+    "c",
+    "the language instruction (condition)"
+   ],
+   [
+    "epsilon",
+    "the ground-truth noise that was added to data"
+   ],
+   [
+    "epsilon_theta",
+    "the model's learned prediction of that noise"
+   ],
+   [
+    "L_residual",
+    "the training loss: how far the prediction misses"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose the anchor predicts (move right 10cm, then open gripper). In the data, we see (move right 10.3cm, then open gripper with a slight pause). The residual is +0.3cm and +0.05s pause.",
+    "Diffusion training: we add Gaussian noise to the residual, then ask the model to predict that noise at each step. If the model predicts noise as 0.2 when the true noise was 0.3, the loss is (0.3 - 0.2)^2 = 0.01.",
+    "Anchor alone gave 10cm (error 0.3cm). Anchor plus refined residual gives 10.3cm (error 0.0). By separating tasks, the model learns cleanly."
+   ]
+  },
+  "note": "The composite action is the sum of a semantic anchor (locked to language) and a learned variation (realistic execution detail)."
+ },
+ "bars": {
+  "h2": "Training and performance gains",
+  "charts": [
+   {
+    "title": "Standard generation-from-noise (\u03c00, Diffusion Policy)",
+    "rows": [
+     [
+      "Task success rate",
+      74,
+      "bad"
+     ],
+     [
+      "Training steps to convergence",
+      45000,
+      "bad"
+     ],
+     [
+      "Answer-time function evaluations needed",
+      50,
+      "bad"
+     ]
+    ],
+    "note": "Baseline must rebuild intent from noise; slow training and answering."
+   },
+   {
+    "title": "ResVLA with intent anchoring",
+    "rows": [
+     [
+      "Task success rate",
+      89,
+      "good"
+     ],
+     [
+      "Training steps to convergence",
+      28000,
+      "good"
+     ],
+     [
+      "Answer-time function evaluations needed",
+      32,
+      "good"
+     ]
+    ],
+    "note": "Anchor locks semantic intent early; residual refinement is efficient and reliable."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Anchor mispredicts the high-level goal.",
+    "html": "If the vision-language encoder misunderstands the task (e.g. confuses 'grasp the red block' with 'the blue block'), the anchor will be wrong, and refinement cannot fix it. The residual corrects small errors, not semantic misalignment. This fails because the anchor is deterministic; there is no loop to self-correct."
+   },
+   {
+    "warn": true,
+    "b": "Spectral decomposition assumes motion has clean frequency structure.",
+    "html": "Some tasks have intricate, multi-scale motion with no clear split between intent and execution. If low-frequency and high-frequency motions are entangled, the split misses dynamics. Example: a contact-dependent manipulation task where the gripper force feedback couples with position at all frequencies."
+   },
+   {
+    "warn": true,
+    "b": "Residual diffusion inherits the anchor's mistakes.",
+    "html": "The diffusion process only learns realistic variation around the predicted anchor. If the anchor trajectory is off-distribution (far from the training data), the residual cannot compensate. The model collapses to learned defaults rather than extrapolate."
+   },
+   {
+    "b": "Done right: anchor is trained with enough data diversity.",
+    "html": "Train the deterministic regression on a large, varied set of demonstrations so the anchor generalizes. Train residual diffusion on residuals extracted from the same data. When both are well-trained, anchoring works reliably even on unseen embodiments and language phrasings."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a simple simulation: a 2D reacher arm (two joints) must move to a target position given a language goal like 'reach top-right'. Train a ResVLA model on 500 demonstrations of the reacher moving to random targets. Then evaluate: (1) compare success rate of ResVLA vs. a pure diffusion baseline on held-out test targets; (2) measure how many diffusion steps each method needs to converge to the target; (3) perturb the language embedding (add noise) and measure success rate drop for both methods; (4) swap the embodiment (change arm length) and test zero-shot transfer."
+  ],
+  "metric_eq": "robustness = (success_rate_clean - success_rate_perturbed) / success_rate_clean;  faster_inference = (diffusion_steps_baseline / diffusion_steps_resvla)",
+  "closing": "The demo must show that ResVLA converges in fewer steps and degrades more gracefully under language/embodiment perturbation because the anchor protects the semantic intent while residual refinement handles execution detail."
+ }
+}

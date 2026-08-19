@@ -1,0 +1,240 @@
+{
+  "slug": "iclr-or-2egtffwxx8",
+  "title": "Differentiable Simulation of Hard Contacts with Soft Gradients",
+  "family": "Robotics & Control",
+  "one_liner": "When robots collide, simulators break at gradients; this paper fixes that by pairing adaptive time steps with a trick that lets you optimize through contact.",
+  "lead": "Robot simulators are used to train controllers via gradient descent—nudging the numbers in the control plan to improve an outcome. But when one body hits another, the math becomes discontinuous, which means gradients vanish or flip sign unpredictably. This paper solves that by combining adaptive time stepping (taking smaller steps through the collision) with a backward-pass-only contact trick that preserves usable gradients even before impact.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Collisions break the gradient signal",
+    "paras": [
+      "A robot simulator predicts where the robot will be after running a control action (like: apply force F for 0.1 seconds). To learn a better control, you take the gradient of the prediction error—a number that points in the direction of control change that shrinks the error—and nudge the control numbers slightly in that direction. This works because small nudges in the gradient direction reliably reduce error. But when two rigid bodies collide, the physics has a hard discontinuity: before contact the velocity changes smoothly, but at the instant of collision it must flip instantly. Automatic differentiation (the tool that computes gradients) sees this discontinuity and either returns zero (claiming the action has no effect) or flips the sign (claiming a nudge in the right direction actually makes things worse).",
+      "Simulators like MuJoCo soften contacts by modeling them as stiff springs—this makes the discontinuity continuous and gradients computable. But then the simulator is no longer realistic: the collision feels mushy instead of hard. If you make the spring very stiff to match reality, the gradients become unreliable again—they oscillate wildly at high frequency, so which direction to nudge becomes a random guess. If you make time steps tiny to stabilize the gradients, simulation becomes painfully slow and memory-hungry."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Hard collisions destroy gradient signals needed to learn robot controls, and all fixes trade accuracy for speed or realism for gradient stability."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Robot learns via gradient",
+        "viz": "box",
+        "viz_args": "control plan → simulate → loss → gradient",
+        "caption": "The robot simulator rolls forward, returns an error, gradients flow backward."
+      },
+      {
+        "title": "2. Collision hits: gradients die",
+        "viz": "weights",
+        "viz_args": [["before", 60], ["impact", 5], ["after", 50]],
+        "caption": "At contact moment, the signal drops to noise; before/after Physics discontinuous."
+      },
+      {
+        "title": "3. Soft spring workaround",
+        "viz": "weights",
+        "viz_args": [["stiff", 40], ["soft", 80], ["unstable", 20]],
+        "caption": "Making contact springy smooths the gradient but fakes the collision."
+      },
+      {
+        "title": "4. Adaptive time stepping",
+        "viz": "box",
+        "viz_args": "auto-shrink step size near collision",
+        "caption": "Squeeze time steps tighter at impact to resolve forces accurately."
+      },
+      {
+        "title": "5. Contacts from distance trick",
+        "viz": "weights",
+        "viz_args": [["moving", 70], ["gradient", 80], ["usable", 75]],
+        "caption": "During backward pass, count pre-contact distance as a virtual force to preserve gradient."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Forward pass: realistic simulation",
+        "text": "Roll the simulator forward with hard stiff contacts and fine time steps to get physically accurate predictions."
+      },
+      {
+        "b": "Check if bodies collide",
+        "text": "If two bodies are not touching (signed distance is positive), note the gap."
+      },
+      {
+        "b": "Backward pass: contacts from distance",
+        "text": "When computing gradients, pretend non-touching bodies do apply a small penalty force based on how close they are."
+      },
+      {
+        "b": "Straight-through: swap forward and backward",
+        "text": "Use the hard-contact forward prediction but the soft-contact backward gradients in one computation."
+      },
+      {
+        "b": "Adaptive time integration",
+        "text": "Automatically shrink time steps near collision moments so penalties resolve accurately without slowdown elsewhere."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how the simulator computes gradients when bodies are not touching. Instead of returning zero gradient (as a hard contact would), it pretends the distant bodies are weakly connected by an invisible spring, so nudging the control does move them closer or farther. This soft-spring model is only used when flowing gradients backward; the forward simulation stays realistic with hard contacts."
+    ],
+    "object": "the backward-pass contact model"
+  },
+  "hidden": {
+    "h2": "The gradient signal: what is preserved",
+    "name": "usable gradient magnitude at separation",
+    "paras": [
+      "In standard simulators, once bodies separate (move apart after a collision), the gradient becomes exactly zero—the optimizer thinks nothing it does matters. This paper measures a hidden quantity: the size and direction of the gradient signal just before and just after bodies separate. When bodies are close but not touching, this signal is normally zero; the paper's trick makes it nonzero by attributing an imaginary restoring force to the distance gap.",
+      "The paper estimates this by computing the same forward rollout twice: once with realistic hard contacts, once with soft pre-contact penalties. It then uses a straight-through trick: when flowing gradients backward, pass them through the soft-contact version even though the forward predictions came from the hard-contact version. This preserves gradient signal where it normally vanishes."
+    ],
+    "heat": {
+      "cells": [
+        ["before_contact", 4, true],
+        ["impact_moment", 2, false],
+        ["separation", 1, false],
+        ["after_separation", 1, false],
+        ["gradient_flow", 4, true],
+        ["signal_without_CFD", 1, false],
+        ["signal_with_CFD", 4, true],
+        ["learning_speed", 3, true],
+        ["realism_cost", 1, false],
+        ["integration_error", 2, false],
+        ["backward_pass", 4, true],
+        ["time_step_size", 2, false]
+      ],
+      "caption": "Darker means larger gradient magnitude or better signal preservation. Highlighted cells show where CFD and adaptive stepping matter most."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When two bodies are far apart, nudging the control does nothing (zero gradient). When they are close but not yet touching, the paper's trick creates a gradient signal by pretending a weak spring connects them. When they are in contact, adaptive time stepping ensures the penalty force resolves accurately."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper defines contacts from distance (CFD): during the backward pass, apply the same penalty force to nearby bodies whether or not they are touching. This is computed via straight-through estimation: forward simulation uses hard contacts, backward pass uses soft-contact penalties, and a grad-replace function swaps the forward prediction for the soft-contact gradient."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the gradient trick",
+    "paras": [
+      "The core mechanism has two parts. First: adaptive time integration. When the simulator detects a collision is about to happen (distance shrinks rapidly), it automatically reduces the time step size locally, concentrating more tiny steps around the impact moment. This lets the penalty force—the soft spring that models the contact—be resolved accurately without taking enormous steps that smear the collision across multiple time intervals. The result is that the forward prediction remains physically realistic.",
+      "Second: the straight-through gradient trick. During the backward pass, the simulator computes what the gradient would be if bodies had a soft spring between them, even when they are merely close (not actually touching). This soft-contact gradient tells you: if you nudge the control slightly, the bodies would move closer or farther. The actual forward values used in the loss come from the hard-contact simulation—physically correct. This mismatch (realistic forward, soft backward) is the key: you get an honest prediction but an informative gradient signal. Bodies that separate and no longer touch now have non-zero gradients, so the optimizer can learn to prevent unnecessary collisions.",
+      "Why does this work? Because the gradient just tells you the direction and speed to nudge to reduce error. It does not need to match the forward physics perfectly—it just needs to point in a direction that, when followed, actually reduces the loss. By using soft-contact gradients, you are telling the optimizer: if you push harder, bodies will press together less. That statement is true for hard contacts up to the point of actual touch, so the optimizer learns the right strategy: approach the target while avoiding collisions."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "control plan"
+        },
+        {
+          "t": "step",
+          "s": "forward simulation with hard contacts, adaptive time steps"
+        },
+        {
+          "t": "step",
+          "s": "compute loss from predictions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "re-simulate with soft pre-contact penalties for backward pass only",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "flow gradients backward through soft-contact model"
+        },
+        {
+          "t": "output",
+          "s": "gradient signal (direction to nudge control to reduce error)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The penalty force and its gradient",
+    "words": "For each pair of bodies, if they are separated by distance d (positive when not touching), the paper applies a penalty force during backward pass only. The force is proportional to the negative distance: force = k * max(0, -d), clamped to act only when d is small. The penalty drives separation distance toward zero in the backward pass, creating a gradient signal.",
+    "equation": "F_contact = k * max(0, -d)  ,  loss_total = L_prediction + lambda * sum_pairs max(0, -d_pair)^2",
+    "symbols": [
+      ["F_contact", "penalty force applied to each body pair in backward pass"],
+      ["k", "spring stiffness, set high"],
+      ["d", "signed distance between bodies, positive when separated"],
+      ["L_prediction", "prediction error (how far from target state)"],
+      ["lambda", "weight on preventing separation, a hyperparameter"],
+      ["sum_pairs max(0, -d_pair)^2", "penalty grows as distance shrinks toward zero"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a ball approaches a wall. At distance d=0.5 m, max(0, -d) = 0, so no penalty, gradient is zero.",
+        "At distance d=0.02 m, max(0, -d) = 0.02 m (just touching). Penalty = lambda * 0.02^2 = lambda * 0.0004.",
+        "At distance d=-0.01 m (penetrating), max(0, -d) = 0.01 m. Penalty = lambda * 0.01^2 = lambda * 0.0001.",
+        "If lambda = 100, then pre-touch gradient is 100 * 0.0004 = 0.04, and in-touch gradient is 100 * 0.0001 = 0.01.",
+        "The gradient tells the optimizer: move the control to prevent approach (gradient nonzero before touch), which allows learning to happen before collision."
+      ]
+    },
+    "note": "During forward simulation, contacts use hard penalty forces to stay realistic. During backward pass, the same distance-based penalty is applied to all nearby body pairs, creating gradient signal where none existed before."
+  },
+  "bars": {
+    "h2": "Comparing gradient accuracy and control learning",
+    "charts": [
+      {
+        "title": "Standard MuJoCo (soft spring)",
+        "rows": [
+          ["Gradient stability", 40, "bad"],
+          ["Prediction realism", 60, "bad"],
+          ["Control learning success", 35, "bad"]
+        ],
+        "note": "Soft springs needed for gradients mean unrealistic dynamics. Large time steps cause oscillatory loss and gradient sign flips."
+      },
+      {
+        "title": "DiffMJX + CFD (this paper)",
+        "rows": [
+          ["Gradient stability", 85, "good"],
+          ["Prediction realism", 90, "good"],
+          ["Control learning success", 88, "good"]
+        ],
+        "note": "Adaptive time steps resolve hard contacts accurately. Contacts from distance preserves gradient signal before and after separation."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Forward and backward mismatch too large.",
+        "html": "If adaptive stepping resolves hard contacts into many microsteps but you use only a few soft steps in the backward pass, the gradients become inaccurate. The fix: ensure backward-pass time steps are similarly fine-grained, even if more expensive."
+      },
+      {
+        "warn": true,
+        "b": "Pre-contact gradient points the wrong way.",
+        "html": "If the penalty force is too weak (lambda too small), it does not overcome other forces in the loss, and the optimizer ignores it. If lambda is too large, the penalty dominates and the model learns only to keep things separated, ignoring the actual task. Tuning matters."
+      },
+      {
+        "warn": true,
+        "b": "Penetration becomes reward.",
+        "html": "If the backward-pass penalty is asymmetric (penalizes separation more than penetration), the optimizer might learn to push objects into walls because soft-contact gradients do not fully warn it. The straight-through trick only works if soft-contact gradients are reasonable approximations to hard-contact reality."
+      },
+      {
+        "b": "Done right.",
+        "html": "Keep adaptive step sizes consistent between forward and backward. Tune lambda via a small offline sweep. Verify learned control on real hardware before deploying, since adaptive stepping is an approximation."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple 2D simulation: a block sliding on a table toward a wall. Use gradient descent to learn a sequence of forces that moves the block to a target position without penetrating the wall. Compare three versions: (A) standard MuJoCo with soft contacts, (B) standard MuJoCo with hard contacts and small time steps, (C) DiffMJX with CFD. Measure two things: (1) How many gradient steps does it take to converge? (2) Does the learned control actually work in realistic forward simulation?"
+    ],
+    "metric_eq": "convergence_steps = iterations_to_loss < 0.01  ,  success = does_learned_control_reach_target_without_penetration",
+    "closing": "Version A converges fast but the learned control overshoots or penetrates. Version B converges slowly or has sign-flipping gradients. Version C converges quickly and the learned control is physically accurate."
+  }
+}

@@ -1,0 +1,234 @@
+{
+  "slug": "iclr-or-kcj9u0x6ko",
+  "title": "HAMLET: History-Aware Vision-Language-Action Models",
+  "family": "Robotics & Control",
+  "one_liner": "This paper adds memory to robot vision models so they use what happened before, not just what they see right now.",
+  "lead": "Today's robot vision models make decisions based only on the current image. But real manipulation tasks are history-dependent: to pick up a cup, a robot needs to know where it was looking a moment ago. HAMLET adds a lightweight memory system to existing robot models, letting them attend to past frames without retraining from scratch.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The wall: robots ignore the past",
+    "paras": [
+      "Today's robot vision-language models (systems that look at images and decide actions) only look at one frame: the current image. They ignore everything that came before. A human manipulating objects watches continuously, remembering what happened a moment ago to plan the next move.",
+      "A naive approach is to feed the model more frames at once. But that wastes memory and slows down the decision. And just stacking frames doesn't teach the model to pay attention to the important patterns that unfold over time—like how a cup's position changes as the robot reaches toward it."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Robots look at the present moment but throw away what they just saw, so they fail on tasks that need memory."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The status quo",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["warm", 30], ["free", 50], ["free", 25], ["free", 40]],
+        "caption": "Robot looks at one image, predicts an action."
+      },
+      {
+        "title": "2. Time rolls forward",
+        "viz": "weights",
+        "viz_args": [["hot", 75], ["warm", 35], ["free", 55], ["moved", 28], ["moved", 42]],
+        "caption": "Cup moves. Robot sees a new frame, but forgets the old one."
+      },
+      {
+        "title": "3. HAMLET's moment tokens capture each frame",
+        "viz": "box",
+        "viz_args": "Frame1→Token | Frame2→Token | Frame3→Token",
+        "caption": "Each frame is compressed into a small token capturing key information."
+      },
+      {
+        "title": "4. Memory module aggregates the tokens",
+        "viz": "weights",
+        "viz_args": [["moved", 80], ["moved", 75], ["moved", 35], ["warm", 55], ["hot", 90]],
+        "caption": "Past tokens flow together. Memory learns which frames matter."
+      },
+      {
+        "title": "5. History-aware prediction",
+        "viz": "plain",
+        "caption": "Robot now predicts the next action using both current image and memory of past frames."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Compress each frame",
+        "text": "When a new image arrives, HAMLET appends a small trainable token and feeds it through the vision model, producing a compact summary."
+      },
+      {
+        "b": "Learn temporal patterns",
+        "text": "During initialization, these tokens are trained to capture timestep-specific cues: what makes one moment different from the next."
+      },
+      {
+        "b": "Store in memory",
+        "text": "Past tokens are stored in a lightweight memory module that sits alongside the pre-trained model."
+      },
+      {
+        "b": "Aggregate across time",
+        "text": "The memory module reads the sequence of tokens and produces a single enriched representation of history."
+      },
+      {
+        "b": "Condition the action",
+        "text": "The history-aware memory features are concatenated with the current image representation, then fed to the action predictor."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "HAMLET modifies the input to the action prediction head by adding two new components: learnable moment tokens (small learned lists of numbers appended to each frame that compress perceptual information) at each frame, and a memory aggregation module that runs between the vision encoder and the action output. The pre-trained vision model itself is frozen; only the new pieces are trained."
+    ],
+    "object": "The input condition to the action predictor"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: timestep discriminativeness",
+    "name": "How much each frame's token stands out from the others",
+    "paras": [
+      "The paper measures something called timestep discriminativeness: how much each moment token captures information that is unique to that one frame, and how much it ignores static background or irrelevant detail. Tokens that are highly discriminative encode what is actually changing (the cup is moving, the hand is closing), not what stays the same (the table, the lighting).",
+      "HAMLET enforces this by using a contrastive learning procedure (a technique that pulls similar things together and pushes different things apart). For each frame, it treats the current observation as an anchor, an augmented version of the same frame as a positive example, and frames from other times as negatives. This pushes the moment tokens to be identical for the same moment even with noise or blur, but different from other moments."
+    ],
+    "heat": {
+      "cells": [
+        ["Frame 1 token", 4, true],
+        ["Frame 2 token", 3, false],
+        ["Frame 3 token", 4, true],
+        ["Frame 4 token", 2, false],
+        ["Frame 5 token", 3, false],
+        ["Static part", 1, false],
+        ["Noise resilience", 4, true],
+        ["Temporal signal", 4, true],
+        ["Background static", 1, false],
+        ["Shared structure", 2, false],
+        ["Unique to t=3", 4, true],
+        ["Shared across t", 1, false]
+      ],
+      "caption": "Darker cells show higher discriminativeness. Cells marked capture actual temporal information."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The moment tokens are taught to be different from each other (so they retain temporal information) but unchanged by noise or blur in the same frame (so they capture the stable aspects of that moment)."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Time-contrastive learning encourages moment tokens to align with representations from the same timestep while remaining discriminative across timesteps, enabling mt to capture unique, timestep-specific cues while suppressing static components."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the causal chain",
+    "paras": [
+      "The core insight: a robot's action depends on the trajectory of past observations, not just the current frame. But feeding all past frames into a vision model at once is expensive because each frame is a large array of pixel values. Instead, HAMLET compresses each frame into a small moment token (initialized to be discriminative across time), then aggregates only these tokens. This is much cheaper than storing full frames because a moment token is just a list of a few dozen numbers, compared to hundreds of thousands for a full image.",
+      "Because the moment tokens are discriminative, they contain the temporal patterns the action predictor needs: they encode which frame is which, not just generic visual information. The memory module learns to read this sequence and extract features that correlate with successful actions. Since the vision model is frozen, no retraining is needed; the new pieces train end-to-end on the action prediction loss. On long-horizon tasks where the robot must remember prior context—like picking up an object from a sequence of frames—the history-aware condition produces better action decisions than single-frame predictions because the action predictor now has explicit access to what happened a moment ago, so it can adjust its move based on where the object was before."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current image + task instruction"
+        },
+        {
+          "t": "step",
+          "s": "Append moment token, encode in frozen vision model",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Store token in memory module"
+        },
+        {
+          "t": "step",
+          "s": "Aggregate past tokens into history features",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Concatenate history with current frame, predict action"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: time-contrastive learning initialization",
+    "words": "For each frame, the moment token is trained to make the same frame (with noise added) produce a similar token, while making different frames produce different tokens. The loss pulls the anchor and positive together and pushes the anchor and negative apart.",
+    "equation": "L_t = -log( exp(sim(anchor, positive) / tau) / (exp(sim(anchor, positive) / tau) + exp(sim(anchor, negative) / tau)) )",
+    "symbols": [
+      ["anchor", "The moment token for the current frame"],
+      ["positive", "The token for an augmented version of the same frame"],
+      ["negative", "The token for a frame from a different time"],
+      ["sim(x, y)", "Dot product (cosine similarity) between two token representations"],
+      ["tau", "Temperature parameter controlling the sharpness of the loss"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose anchor = [1.0, 0.5], positive = [1.1, 0.48], negative = [0.2, 0.9] (vectors in 2D).",
+        "sim(anchor, positive) = 1.0 × 1.1 + 0.5 × 0.48 = 1.1 + 0.24 = 1.34 (high, same timestep).",
+        "sim(anchor, negative) = 1.0 × 0.2 + 0.5 × 0.9 = 0.2 + 0.45 = 0.65 (lower, different timestep).",
+        "With tau = 0.1: exp(1.34 / 0.1) ≈ exp(13.4) ≈ 677,000 and exp(0.65 / 0.1) ≈ exp(6.5) ≈ 665.",
+        "Loss = -log(677000 / (677000 + 665)) ≈ -log(0.999) ≈ 0.001 (small, good alignment).",
+        "The large gap in similarity drives the loss down, encouraging the token to stay similar to the same frame but different from others."
+      ]
+    },
+    "note": "This initialization teaches the moment tokens to encode the distinctive aspects of each moment in the trajectory."
+  },
+  "bars": {
+    "h2": "Naive baseline vs. HAMLET",
+    "charts": [
+      {
+        "title": "Naive: single frame only",
+        "rows": [
+          ["Short tasks (1-2 steps)", 89, "good"],
+          ["Long tasks (5+ steps)", 42, "bad"],
+          ["Retraining needed", 1, "bad"]
+        ],
+        "note": "Without history, performance collapses on long-horizon tasks that require remembering prior context."
+      },
+      {
+        "title": "HAMLET: with history memory",
+        "rows": [
+          ["Short tasks (1-2 steps)", 88, "good"],
+          ["Long tasks (5+ steps)", 76, "good"],
+          ["Retraining needed", 0, "good"]
+        ],
+        "note": "By adding history without retraining, HAMLET handles long-horizon tasks and preserves short-task performance."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Moment token collapse.",
+        "html": "If the contrastive loss is too weak, all moment tokens might converge to the same representation, erasing temporal information. Then the memory module has nothing to work with."
+      },
+      {
+        "warn": true,
+        "b": "Memory overflow.",
+        "html": "If the task horizon is very long (hundreds of frames) and the memory module naively stores all tokens, memory usage grows unbounded. HAMLET mitigates this by keeping only the most recent rows of the aggregated memory, but very long sequences could still overflow."
+      },
+      {
+        "warn": true,
+        "b": "Frozen vision model limits adaptation.",
+        "html": "Because the base vision encoder is frozen, the model cannot specialize its visual features to the new history-conditioned setup. This works well for transfer, but might leave performance on the table if the base model was never trained to look for temporal patterns."
+      },
+      {
+        "b": "Done right.",
+        "html": "HAMLET works best on tasks where the base VLA is already strong on single-frame decisions, so the added memory is a genuine refinement rather than a patch for a weak model."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple robotic manipulation task: a robot reaching for an object that moves across the table over 5-10 frames. Implement HAMLET by (1) attaching a small learnable moment token to each frame, (2) training those tokens with time-contrastive learning on a few hundred trajectories, (3) adding a lightweight memory module (a transformer with 2-3 layers), and (4) training the memory module end-to-end on action prediction. Compare against a baseline that uses only the current frame."
+    ],
+    "metric_eq": "success_rate = (tasks_where_robot_grasped_object_correctly) / (total_tasks) and forgetting_rate = (success_on_long_tasks_with_history) - (success_on_long_tasks_without_history)",
+    "closing": "The demo must show that history-dependent tasks (where the object's position evolves over multiple frames) see a large gain from HAMLET, while tasks that can be solved in a single frame see little change."
+  }
+}

@@ -1,0 +1,238 @@
+{
+  "slug": "iclr-or-pklmd8pwuy",
+  "title": "UniVLA: Unified Vision-Language-Action Model",
+  "family": "Robotics & Control",
+  "one_liner": "A robot learns action sequences by treating images, words, and movements as the same kind of tokens and predicting what comes next.",
+  "lead": "Robots learn to manipulate objects by watching videos and reading instructions, but most systems ignore the time-order and cause-effect hidden in the visual stream. UniVLA treats vision, language, and action as a single stream of discrete items (tokens), each one a tiny numbered block from the same vocabulary, and trains the robot to predict what token comes next, much like predicting the next word in a sentence. Before manipulating real objects, it first watches unlabeled videos to learn how the world changes over time — a process called world modeling — which makes the robot much faster to retrain on new tasks because the model has already absorbed the physics and causality, so fine-tuning only needs to teach task-specific actions instead of starting from scratch.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The old way missed time and cause-and-effect",
+    "paras": [
+      "Previous robot models relied on general-purpose vision systems (which read images) and language systems (which read instructions) to produce robot actions. The problem: these systems were trained on internet text and photos, not on video. They did not learn that if the robot pushes a block, the block moves — they only learned static facts like 'blocks are rectangular' or 'instructions are spelled with letters.'",
+      "A beginner might ask: why not just add another layer to predict actions? Because the disconnect runs deeper. The vision part outputs a fixed-size summary (a compressed picture in the model's mind), the language part outputs a summary of the text, and then a separate action-prediction head glues them together. This three-part pipeline works but misses the causal structure: when a robot watches a 10-second video of pushing a block, that video is really a chain of cause-and-effect — one frame causes the next frame. The old pipeline collapsed the whole video into one image-summary, throwing away the time order."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Instead of separate image-reading and action-predicting stages, convert images, text, and robot actions into a single stream of numbered tokens, and train the robot to predict each token based on all the tokens before it."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old way: three separate pipes",
+        "viz": "plain",
+        "caption": "Vision system reads image, language system reads instruction, separate head guesses action."
+      },
+      {
+        "title": "2. UniVLA: everything becomes tokens",
+        "viz": "box",
+        "viz_args": "IMAGE→[42,1,88,15...], TEXT→[9,45,2...], ACTION→[7,8,3...]",
+        "caption": "Images, words, and moves all become lists of numbers from the same vocabulary."
+      },
+      {
+        "title": "3. First: learn video causality with world modeling",
+        "viz": "weights",
+        "viz_args": [["predict", 80], ["predict", 75], ["predict", 82], ["predict", 78]],
+        "caption": "Watch unlabeled videos; predict next frame. Robot learns what causes what."
+      },
+      {
+        "title": "4. Then: interleave actions and retrain",
+        "viz": "box",
+        "viz_args": "[VID][VID][ACT][VID][VID][ACT][VID]",
+        "caption": "Mix video-prediction and action-prediction in the same stream. Fine-tune on task videos."
+      },
+      {
+        "title": "5. Result: faster, better, long-horizon control",
+        "viz": "weights",
+        "viz_args": [["old", 45], ["old", 52], ["new", 85], ["new", 89]],
+        "caption": "Robot converges faster (3.19 vs 2.52 tasks), handles long sequences, outperforms baselines."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Tokenize all inputs.",
+        "text": "Convert each image frame and text instruction into a list of small integers (tokens) using pre-built encoders, then concatenate them into one long sequence."
+      },
+      {
+        "b": "Post-train on unlabeled video.",
+        "text": "Show the robot millions of video clips (no actions needed). Train it to predict the next image token given all earlier tokens in the sequence, using only a simple prediction-error loss."
+      },
+      {
+        "b": "Interleave action tokens.",
+        "text": "Take video clips from actual robot tasks (with recorded actions). Insert action tokens into the stream between image-token clusters, so the sequence alternates: image, image, action, image, image, action."
+      },
+      {
+        "b": "Fine-tune on task data.",
+        "text": "Retrain the model on task videos using only the action-token loss, asking: given past images and words, predict the next action. The robot now knows both causality (from video pre-training) and task-specific moves."
+      },
+      {
+        "b": "Evaluate on new tasks.",
+        "text": "Test on unseen manipulation benchmarks. The robot succeeds at long-horizon tasks (push A, then B, then C in sequence) with much less task-specific retraining than methods trained from scratch."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper shifts the robot's learning target from a two-stage pipeline (image understanding, then action generation) to a single unified sequence model. The robot no longer compresses vision into a fixed summary before generating actions. Instead, it treats every pixel-detail, every word, and every motor command as tokens in one stream, and learns to predict what comes next in that stream."
+    ],
+    "object": "The training objective: from separate image and action losses to a single next-token prediction loss."
+  },
+  "hidden": {
+    "h2": "Causal dynamics: what the model learns during video pre-training",
+    "name": "Temporal causal structure of the video",
+    "paras": [
+      "When the robot watches a video, it should learn not just 'blocks are square' but 'when I push block-A, it moves in direction D and collides with block-B.' This cause-and-effect is encoded in the sequence of frames — each frame causally follows the last. The paper calls this the world model: the hidden pattern of how observations flow into one another over time.",
+      "During post-training, the paper forces the model to predict the next image token given prior ones, using only a reconstruction error (how wrong was the predicted picture?). By doing this on millions of unlabeled videos, the model absorbs the causal rules without ever seeing a robot action label. Then, when action tokens are added during fine-tuning, the model already knows the physics, so it learns the policy much faster."
+    ],
+    "heat": {
+      "cells": [
+        ["Frame 1", 2, false],
+        ["Frame 2", 4, true],
+        ["Frame 3", 4, true],
+        ["Frame 4", 3, false],
+        ["Predicted", 3, true],
+        ["Error", 2, false],
+        ["Update signal", 4, true],
+        ["Updated", 3, false],
+        ["Next clip", 2, false],
+        ["Converges", 4, true],
+        ["Fast task", 3, true],
+        ["Policy ready", 4, true]
+      ],
+      "caption": "Darker means the model is learning causal patterns stronger. Highlights show where video-prediction loss flows."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The video world model is the pattern of how one image frame causes the next — if you push a block, it moves. The paper learns this by watching videos and checking if it can guess the next frame."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The post-training stage adopts a world-model objective to capture video dynamics, leveraging large-scale robot-centric video datasets without action labels, and then fine-tunes with action tokens interleaved into the sequence."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why unified tokens and two-stage training work",
+    "paras": [
+      "Predicting the next pixel is hard — it forces the model to understand causality. If the model could always predict frame 2 from frame 1, it means frame 1 determines frame 2, so the model internalized the deterministic rules of the world by building internal representations of how actions change the scene. Conversely, a model trained only on action prediction (given an image and instruction, output an action) never needs to learn the causal chain — it only learns an input-to-output mapping, where each input always points to the same output, without understanding the physics or side effects.",
+      "By using the same token vocabulary and the same prediction mechanism (a transformer, which attends to and combines earlier tokens to predict the next one) for both vision and action, the model builds a unified internal representation. When an action token comes next in the sequence, the model can now reason: 'if I generate action-token-7, what would frame-N+1 look like?' without a separate visual-planning step. This causal reasoning makes long-horizon tasks easier because the model can mentally simulate a chain of consequences, not just the immediate effect. After post-training absorbs the causal rules, fine-tuning becomes efficient because the model only needs to learn which specific moves the robot performs in this specific task, not re-learn physics from scratch."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Raw video frames, text instruction"
+        },
+        {
+          "t": "step",
+          "s": "Convert each frame and words to numbered tokens",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Post-train: predict next image token from prior tokens, using reconstruction loss",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Interleave action tokens from task videos, keep image-prediction loss",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Fine-tune: predict next action token using combined image + action context",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Robot policy: given frames and instruction, predict action sequence"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training loss across two stages",
+    "words": "During post-training: cross-entropy loss computed on predicted vision tokens only. During fine-tuning: cross-entropy loss computed on predicted action tokens only. Token prediction is the same at both stages — pick the most likely next token.",
+    "equation": "L_post = cross_entropy(predicted_vision_tokens, target_vision_tokens) | L_finetune = cross_entropy(predicted_action_tokens, target_action_tokens)",
+    "symbols": [
+      ["predicted_vision_tokens", "the model's guess for the next image token based on prior tokens"],
+      ["target_vision_tokens", "the actual next image token in the video"],
+      ["predicted_action_tokens", "the model's guess for the next robot action token"],
+      ["target_action_tokens", "the actual action the robot performed in the task"],
+      ["cross_entropy", "a score of how wrong the guess is: 0 if perfect, higher if off"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with video clips",
+      "lines": [
+        "Post-train example: Show the model tokens [image_8, image_15, image_22]. Model guesses image_30 is next. True next token is image_31. Prediction error (a measure of how wrong the guess is) = how much 30 differs from 31. Update the model to predict 31 better next time.",
+        "Fine-tune example: Show the model tokens [image_8, image_15, action_3]. Model guesses action_2 is next. True next action is action_4. Loss = how much 2 differs from 4. Update the model to predict action_4 better.",
+        "Key: same prediction machinery, different label source (images in post-train, actions in fine-tune). This means the model reuses the causality it learned in post-training when predicting actions."
+      ]
+    },
+    "note": "The two losses use the same mechanism (next-token prediction) but different supervisory signals, allowing the model to transfer causal understanding from video to policy."
+  },
+  "bars": {
+    "h2": "Performance before and after",
+    "charts": [
+      {
+        "title": "Success rate on LIBERO manipulation",
+        "rows": [
+          ["Prior best (Pi-0 FAST)", 85.5, "good"],
+          ["UniVLA without post-train", 78.0, "good"],
+          ["UniVLA with post-train", 95.5, "good"]
+        ],
+        "note": "Post-training on unlabeled video lifted performance by 17 percentage points, setting a new benchmark record."
+      },
+      {
+        "title": "Data efficiency on CALVIN (multi-task learning)",
+        "rows": [
+          ["GR-1 with 10% data", 2.00, "bad"],
+          ["RoboVLMs with 10% data", 2.52, "bad"],
+          ["UniVLA without post-train", 0.15, "bad"],
+          ["UniVLA with post-train", 3.19, "good"]
+        ],
+        "note": "With post-training, the model converges 59% faster and achieves much higher performance because the model has already learned from millions of unlabeled videos how the robot's body affects the scene, so it only needs to learn which action to choose in each situation, not how the world physically responds."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Post-training on the wrong video type.",
+        "html": "If the unlabeled videos are of a different robot or environment, the causal rules will be wrong. The model learns 'pushing this arm makes the gripper open,' but if you then fine-tune on a robot where the gripper works differently, the learned dynamics mislead the policy."
+      },
+      {
+        "warn": true,
+        "b": "Long-horizon tasks with no causal memory.",
+        "html": "Post-training learns frame-to-frame causality but not long-term cause-and-effect. A sequence like 'push block A, wait for it to settle, then push block B' requires remembering the side effect of step 1 when deciding on step 2. If the post-training videos were short clips, the model may not learn multi-step reasoning."
+      },
+      {
+        "warn": true,
+        "b": "Misaligned action vocabulary.",
+        "html": "If the action tokens from the task-training stage are different from the task context (e.g., training on 'gripper open/close' but the real robot uses continuous angles), the fine-tuning stage cannot bridge the gap. The model will produce the wrong action tokens."
+      },
+      {
+        "b": "Done right.",
+        "html": "Match the post-training video domain to the task domain so the model learns the right physics; ensure action tokens represent the real task space so predictions map to actual moves; and use sufficient post-training data so the model has truly absorbed the physics before it learns the policy, because insufficient pre-training means the model starts policy learning without causal grounding, defeating the whole method."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple robot simulation (or use an existing one like LIBERO). (1) Record 100 short videos of the robot arm exploring — pushing blocks, moving between poses, with no specific task goal. (2) Train a UniVLA model on just those videos using the post-training loss (predict next frame). Do not provide any action labels yet. (3) Then collect 20 labeled examples of the task 'place a block in a target zone' — each example is a 10-frame video with recorded actions. Fine-tune the UniVLA model using only the action-loss on those 20 examples. (4) Test the trained model on new task scenarios."
+    ],
+    "metric_eq": "Success rate = (number of tasks the robot completes / total number of test tasks) × 100%. Compare against a baseline model trained on 20 labeled examples with no post-training. UniVLA should show ≥ 30% higher success rate despite starting with the same amount of labeled task data, because the unlabeled video pre-training taught causality.",
+    "closing": "The demo should show that post-training on unlabeled video cuts the number of labeled task examples needed to reach a target success rate by at least half, proving that learning causal dynamics from video is the key."
+  }
+}

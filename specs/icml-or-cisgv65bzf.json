@@ -1,0 +1,254 @@
+{
+  "slug": "icml-or-cisgv65bzf",
+  "title": "ScenePilot: Boundary-Driven Scenario Generation",
+  "family": "Robotics & Control",
+  "one_liner": "Find driving scenarios that are physically possible but break the self-driving system by optimizing a safety score and a learned risk predictor together.",
+  "lead": "When you test an autonomous vehicle, you want to find scenarios that will crash it. But if you just push harder and harder on the gas or steer wilder and wilder, you eventually create crashes that a real car could never pull off in the first place. ScenePilot solves this by finding scenarios that stay at the boundary: physically solvable (a real car could do it) yet dangerous enough to fail the autonomy system. It uses two coupled measures (physics limits and predicted risk) to search exactly the right spot.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The gap in scenario generation",
+    "paras": [
+      "Testing an autonomous vehicle in real traffic is rare and expensive. So researchers generate fake scenarios in simulation, controlling nearby cars to create crashes. But there's a trap: if you just make other cars drive aggressively and unpredictably, you often make them violate physics. Real vehicles have limits on how fast they can decelerate (braking) and how sharply they can turn due to tire grip and steering arm constraints—these limits exist because tires have a maximum grip level and steering has a maximum speed of rotation. When a simulation ignores these limits and has a car brake harder than physics permits, that car closes the distance to the ego vehicle faster than any real car could, because there is no physical resistance slowing it down. This creates a collision scenario that cannot occur in reality. The autonomy system then trains on this false scenario, learning to handle a crash mode that will never happen on real roads.",
+      "The old approach was to say: only generate scenarios where every vehicle respects the physical limits of real cars. That works, but now the scenarios become tame. You end up testing the same easy-to-avoid situations over and over. You miss the tricky ones. Alternatively, some methods tie constraints to what the deployed autonomy system can do. But if you do that, you only find crashes that the current version of the system would crash on. You miss edge cases that should be tested but depend on quirks of the deployed planner.",
+      "The real need: scenarios that are on the edge. Physically viable (a real car could execute this driving) but risky enough to crash the autonomy stack."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Find driving scenarios where vehicles stay physically possible but push the deployed autonomy system to fail."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Naive adversary: no constraints",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["free", 2], ["free", 2], ["hot", 5], ["hot", 5]],
+        "caption": "Adversary pushes cars to unphysical braking and steering."
+      },
+      {
+        "title": "2. Physics check fails",
+        "viz": "box",
+        "viz_args": "Physical feasibility: FAIL",
+        "caption": "Crash is real but physically impossible. Test is useless."
+      },
+      {
+        "title": "3. ScenePilot couples two signals",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["warm", 4], ["warm", 4], ["moved", 4], ["moved", 3]],
+        "caption": "Physics limit nudges adversary back. Risk score nudges it forward."
+      },
+      {
+        "title": "4. Boundary band: physics YES, autonomy NO",
+        "viz": "box",
+        "viz_args": "Physically solvable & AV-risky",
+        "caption": "Scenario is real and dangerous. Hits the sweet spot."
+      },
+      {
+        "title": "5. Adversarial training improves safety",
+        "viz": "weights",
+        "viz_args": [["warm", 5], ["warm", 5], ["free", 2], ["warm", 4], ["warm", 4]],
+        "caption": "AV system trains on boundary scenarios, crashes less often."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Start with a base scenario",
+        "text": "Choose a driving situation (e.g. intersection, lane merge). One car is the ego (the AV under test). Others are adversaries."
+      },
+      {
+        "b": "Score physical feasibility",
+        "text": "Check if the adversaries' moves respect real vehicle limits (braking, steering, time-to-collision). RSS (a safety standard) gives a yes/no."
+      },
+      {
+        "b": "Score autonomy risk",
+        "text": "Run the ego vehicle through simulation. Does it crash? Train a neural network to predict crash risk continuously as the scene unfolds."
+      },
+      {
+        "b": "Sweep the boundary band",
+        "text": "Use reinforcement learning to find adversary moves that stay near the feasibility boundary. Tighter the band, the higher the risk without breaking physics."
+      },
+      {
+        "b": "Train on the hard scenarios",
+        "text": "Take the generated boundary scenarios and use them to retrain the autonomy system. It learns to handle the edge cases."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the method changes",
+    "paras": [
+      "ScenePilot changes how the adversary vehicles move. Instead of moving freely or obeying only physics or only the deployed planner's limits, the method nudges them to stay at the boundary: physically feasible but autonomy-risky."
+    ],
+    "object": "Adversary vehicle trajectories"
+  },
+  "hidden": {
+    "h2": "The feasibility boundary band",
+    "name": "Physical-risk coupling signal",
+    "paras": [
+      "The paper tracks a hidden quantity: how close is the scenario to becoming physically infeasible? If an adversary brakes too hard, steers too sharply, or cuts time-to-collision too close, the scenario crosses the line. The paper calls this the feasibility threshold, typically denoted epsilon (ε).",
+      "ScenePilot estimates this by combining two sources: an explicit physics check (RSS, a safety model) that gives a yes-no per step, and an online-learned neural network (called Φ) that predicts autonomy-stack crash risk. The two are treated as a vector: one dimension is physics, one is risk. The method sweeps the threshold epsilon during training, exploring the narrow band where both scores are at their limits."
+    ],
+    "heat": {
+      "cells": [
+        ["physics-ok", 4, true],
+        ["physics-ok", 4, true],
+        ["physics-ok", 3, false],
+        ["physics-ok", 3, false],
+        ["physics-edge", 2, true],
+        ["physics-edge", 2, true],
+        ["physics-edge", 2, false],
+        ["risk-high", 4, true],
+        ["risk-high", 4, true],
+        ["risk-high", 3, false],
+        ["risk-low", 1, false],
+        ["risk-low", 1, false]
+      ],
+      "caption": "Darker means closer to infeasibility; red highlight marks the sweet spot."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The feasibility band is the range of scenarios where a real car could physically execute the maneuvers but the autonomy system still crashes."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The method sweeps epsilon-constrained objectives on both sigma (RSS physical-feasibility score) and Phi (learned AV-risk predictor), using step-level shielding to recover when approaching infeasibility."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: coupled objectives keep you at the boundary",
+    "paras": [
+      "If you only optimize for crashes (maximize risk), you drift into physics violations. If you only optimize for physics, the scenarios stay docile and the AV never fails. Combining both fixes this: the method treats them as two separate objectives in a multi-objective reinforcement learning setup. Each step, the adversary is pulled in two directions: the risk predictor pulls it toward crashes, and the physics score pushes it back when it gets too close to infeasible maneuvers.",
+      "Step-level shielding adds a safety layer. As the adversary explores, if it ever steps into an infeasible zone (violating physics), the algorithm forces a recovery move on the very next step. This keeps the search tight to the boundary. The method also sweeps the feasibility threshold (epsilon) over the course of training, gradually exploring scenarios closer to the edge. Together, these two mechanisms guide the search to the exact band: physically plausible yet autonomy-risky."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Base scenario (road, ego vehicle, adversary positions)"
+        },
+        {
+          "t": "step",
+          "s": "Compute physics feasibility (RSS model)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Predict autonomy crash risk (learned network)"
+        },
+        {
+          "t": "step",
+          "s": "RL: nudge adversary toward high-risk, high-feasibility zone"
+        },
+        {
+          "t": "step",
+          "s": "Step-level shielding: force recovery if infeasible",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sweep feasibility threshold epsilon"
+        },
+        {
+          "t": "output",
+          "s": "Boundary-band scenario (physically valid, AV-crashing)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The constrained multi-objective loss",
+    "words": "The method optimizes a two-part reward vector per step: one part is the learned risk score Φ, the other is the physical feasibility score σ. These are combined in a constrained objective where the goal is to maximize risk subject to staying above a feasibility threshold ε. A step-level shielding mask detects when feasibility is violated and applies recovery.",
+    "equation": "r_t = (Φ_t, σ_t);  V(s_t) = E[sum_{k=0}^{T-1} gamma^k r_{t+k} | s_t];  m_t = I[h_t > 0 OR h_t+1 > 0] * recovery_penalty",
+    "symbols": [
+      ["r_t", "reward vector at step t (risk and feasibility)"],
+      ["Φ_t", "autonomy crash risk predictor output (learned via binary cross-entropy)"],
+      ["σ_t", "physical feasibility score (RSS-based, 1 if OK, 0 if violated)"],
+      ["V(s_t)", "expected discounted return from state s_t"],
+      ["gamma", "discount factor (how much to weight future steps; typically 0.99)"],
+      ["T", "episode length (total steps in the scenario)"],
+      ["h_t", "feasibility violation indicator (positive if constraints breached)"],
+      ["m_t", "shielding mask (1 if recovery needed, 0 otherwise)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Step 1: σ = 1.0 (physically OK), Φ = 0.3 (low crash risk). Reward = (0.3, 1.0). Good trajectory to explore.",
+        "Step 2: σ = 0.8 (still OK), Φ = 0.7 (higher crash risk). Reward = (0.7, 0.8). Boundary zone—exactly where we want to search.",
+        "Step 3: σ = -0.1 (physics violated), Φ = 0.9. Shielding mask m_t = 1 triggers. Recovery penalty applied; RL backs off this trajectory.",
+        "Result: Over many rollouts, RL learns to hover in the band where Φ is high and σ stays positive, avoiding infeasible excursions."
+      ]
+    },
+    "note": "The two-part reward keeps the balance: risk predictor pulls adversary toward crashes, feasibility constraint pulls it back when physics breaks."
+  },
+  "bars": {
+    "h2": "Comparison: naive, physics-only, and ScenePilot",
+    "charts": [
+      {
+        "title": "Naive adversary (no constraints)",
+        "rows": [
+          ["Collision rate on generated scenarios", 85, "good"],
+          ["Physical validity of scenarios", 15, "bad"],
+          ["Improvement after fine-tuning on these scenarios", 8, "bad"]
+        ],
+        "note": "High collision rate but scenarios are unphysical. No real-world transfer."
+      },
+      {
+        "title": "Physics-only generation",
+        "rows": [
+          ["Collision rate on generated scenarios", 32, "bad"],
+          ["Physical validity of scenarios", 98, "good"],
+          ["Improvement after fine-tuning on these scenarios", 12, "bad"]
+        ],
+        "note": "Safe scenarios but too easy. AV system learns little."
+      },
+      {
+        "title": "ScenePilot (boundary-band)",
+        "rows": [
+          ["Collision rate on generated scenarios", 78, "good"],
+          ["Physical validity of scenarios", 96, "good"],
+          ["Improvement after fine-tuning on these scenarios", 42, "good"]
+        ],
+        "note": "Hard scenarios that are real. AV improves when trained on them because the system learns to handle the specific edge cases that are actually solvable but risky."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Risk predictor is wrong.",
+        "html": "The learned network Φ is trained on early rollouts and might mispredict crash risk in unexplored areas of the scenario space. If it is confidently wrong, RL can chase false signals. Retraining it online helps because fresh data corrects the model's mistakes, but there is still a lag between when the model mispredicts and when retraining fixes it, allowing RL to waste rollouts on bad signal."
+      },
+      {
+        "warn": true,
+        "b": "Physics model is incomplete.",
+        "html": "RSS is a conservative model. Some real-world maneuvers that are physically valid in practice might not pass RSS. The boundary band becomes artificially tight."
+      },
+      {
+        "warn": true,
+        "b": "Step-level shielding can trap the search.",
+        "html": "If the recovery penalty is too strong, RL never explores near the boundary. If it is too weak, scenarios drift infeasible. Tuning epsilon is critical."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the physics model is accurate, the risk predictor is retrained frequently, and epsilon is swept gradually, ScenePilot finds genuine boundary scenarios that transfer to real-world safety improvements."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple 2D scenario: a highway with an ego vehicle and one adversary car ahead. Use a basic physics simulator (e.g. bicycle model) to enforce vehicle limits. Train an RL agent to control the adversary. Couple a simple heuristic physics check (e.g. maximum braking acceleration) with a learned crash predictor. Show that over training iterations, the adversary's trajectory moves into the high-risk, high-feasibility zone. Then freeze the generated scenario and measure: (1) does the baseline ego policy crash? (2) is the scenario physically valid? (3) does retraining the ego on this scenario reduce crashes on a test set of other boundary scenarios?"
+    ],
+    "metric_eq": "Boundary band coverage = fraction of generated scenarios where (risk_score > threshold AND feasibility_score > 0)",
+    "closing": "The demo proves the point when coverage reaches >80 percent and the fine-tuned ego crashes less often on held-out boundary scenarios than on easy scenarios or on scenarios from naive adversarial generation."
+  }
+}

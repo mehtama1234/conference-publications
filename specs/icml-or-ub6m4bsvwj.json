@@ -1,0 +1,225 @@
+{
+  "slug": "icml-or-ub6m4bsvwj",
+  "title": "DynVLA: Learning World Dynamics for Action Reasoning",
+  "family": "Robotics & Control",
+  "one_liner": "Before deciding what action to take, a driving AI first predicts what will happen in the world using compact physics tokens, then acts with that prediction in mind.",
+  "lead": "Autonomous driving requires split-second decisions in complex situations where many objects move at once. Current vision-language models (AI systems trained on images and text) either try to reason in words, which misses the physics of movement, or predict entire future frames, which wastes computation. DynVLA introduces a middle ground: it learns to compress the world's future motion into a small set of discrete reference numbers that capture essential physics without redundancy.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Reasoning without understanding the world",
+    "paras": [
+      "Today's driving AI models work by looking at camera images and deciding what action to take—steering, braking, or accelerating. They try to predict the future in two ways. Some generate plain language descriptions (textual reasoning), which misses the spatial and physical facts about where cars and pedestrians will actually be. Others predict full video frames of what the scene will look like (visual reasoning), which works but burns enormous computation to render pixels that don't matter for the decision.",
+      "A human driver, by contrast, mentally models the world before acting: I see the car ahead slowing down, so I predict that in 1 second it will be 15 meters ahead, moving 30 mph, and I'll need to brake by then. This model—the compact facts about future positions and velocities—is what lets the driver reason soundly. Neither pure language nor dense pixel prediction captures that."
+    ],
+    "callout": {
+      "b": "The core insight:",
+      "html": "Learn a compact tokenized representation of how the world will evolve (ego vehicle motion + other objects' motion), predict those tokens before deciding on an action, then use the tokens as reasoning context when choosing a steering or braking command."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem today",
+        "viz": "weights",
+        "viz_args": [["warm", 70], ["warm", 65], ["warm", 60], ["free", 20], ["free", 15]],
+        "caption": "Dense pixel prediction wastes compute on visual details; language reasoning misses physics."
+      },
+      {
+        "title": "2. Cameras see the now",
+        "viz": "box",
+        "viz_args": "Cameras: car ahead, person crossing",
+        "caption": "Two images one frame apart: only motion between them tells the story."
+      },
+      {
+        "title": "3. Dynamics Tokenizer compresses",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 35], ["moved", 25], ["free", 10], ["free", 5]],
+        "caption": "Future motion encoded as handful of tokens: ego plan, obstacle moves."
+      },
+      {
+        "title": "4. Model predicts tokens before action",
+        "viz": "box",
+        "viz_args": "Dynamics → Action tokens",
+        "caption": "VLA first outputs what-will-happen tokens, then steering/brake tokens."
+      },
+      {
+        "title": "5. Compact reasoning guides driving",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["hot", 75], ["warm", 50], ["free", 10], ["free", 5]],
+        "caption": "Informed by physics, the braking command is precise and safe."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Extract motion patterns",
+        "text": "Given two consecutive camera frames, a neural network encoder extracts how things moved (ego vehicle's intended motion and other objects' motion separately)."
+      },
+      {
+        "b": "Compress into tokens",
+        "text": "The continuous motion signals are rounded into a small codebook, a fixed set of discrete motion patterns. Any future motion is now represented as a short sequence of whole numbers (indices into that codebook)."
+      },
+      {
+        "b": "Train the tokenizer",
+        "text": "The compression is trained so it can reconstruct both the next image and a top-down map (bird's-eye-view). This forces the tokens to capture all motion relevant to driving."
+      },
+      {
+        "b": "Predict then act",
+        "text": "The vision-language model is trained to first predict the dynamics tokens, then predict the action tokens (steering angle, acceleration). This ordering enforces reasoning-before-acting."
+      },
+      {
+        "b": "Learn from rollouts",
+        "text": "The model improves via reinforcement fine-tuning, where candidate action sequences are ranked by how safe they are in simulation and how well they accomplish the driving goal. The model learns from the best sequences because they show how to correctly predict dynamics and choose safe, effective actions."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": [
+      "The model's behavior is altered at the token level: instead of generating action tokens directly from images, it now generates a structured sequence: first a block of dynamics tokens (the predicted world evolution), then the action tokens. The ordering enforces a causal constraint that the action generation must condition on the predicted dynamics."
+    ],
+    "object": "token generation order"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Discrete dynamics tokens",
+    "name": "dynamics tokens",
+    "paras": [
+      "A dynamics token is a single index into a learned codebook that represents a small piece of motion in the world. The model learns a two-part encoding: one set of tokens for ego-centric dynamics (the driving AI's own intended movement in the immediate future) and one set for environment-centric dynamics (how other vehicles, pedestrians, and obstacles are moving). Each token is discrete—a whole number, like 5 or 12—rather than a continuous number, so the sequence is compact and interpretable.",
+      "The paper measures this quantity by training a dynamics tokenizer (a specialized neural network) to compress two consecutive frames into the tokens. The tokenizer learns which codebook indices best reconstruct both the next image and the bird's-eye-view map of the scene. This forces the tokens to retain only motion-relevant information, discarding visual noise."
+    ],
+    "heat": {
+      "cells": [
+        ["ego_token_1", 3, true],
+        ["ego_token_2", 2, false],
+        ["env_token_1", 4, true],
+        ["env_token_2", 3, false],
+        ["env_token_3", 2, false],
+        ["env_token_4", 1, false],
+        ["unused_1", 1, false],
+        ["unused_2", 1, false],
+        ["unused_3", 1, false],
+        ["unused_4", 1, false],
+        ["unused_5", 1, false],
+        ["unused_6", 1, false]
+      ],
+      "caption": "Darker means tokens with stronger motion signals. Decoupling ego from environment prevents one from drowning out the other."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The hidden quantity is the set of small motion patterns that explain how the world evolves. Compact means: only the essential facts (position, velocity) needed for safe driving, not redundant visual details."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The dynamics tokenizer applies a vector-quantized variational autoencoder (VQ-VAE), a technique that maps continuous signals to discrete codebook indices via nearest-neighbor lookup. The paper trains this to jointly minimize reconstruction loss on the next image, reconstruction on the bird's-eye-view, VQ commitment loss (which keeps the codebook stable), and action alignment loss (which ties token quality to actual steering and braking that was used)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why predicting dynamics first improves driving",
+    "paras": [
+      "The causal chain is straightforward: (1) Humans reason about consequences before acting. When you see a red light, you mentally predict 'I will need to stop' and then decide how hard to brake. The prediction is the reasoning step. (2) Compact dynamics tokens capture what matters—positions and velocities of moving objects—without the visual noise (texture, lighting, irrelevant background details). This makes the reasoning space clean and interpretable. (3) Because the model is trained to generate dynamics tokens before action tokens, the action generation is conditioned on an explicit, learned representation of the future. This constraint forces the model to develop a world model. (4) When tested in simulation or on real drives, the explicit world model acts as a kind of check: if the predicted dynamics are inconsistent with reality, the model can learn that this action led to poor outcomes. This feedback loop teaches causally-grounded driving behavior.",
+      "The alternative approaches (pure language reasoning or dense frame prediction) fail because: language can describe 'car ahead slowing' but does not capture the precise position change needed for safe braking; dense frames contain irrelevant pixels and require huge computation. Dynamics tokens are the right granularity—they encode the physics of interaction without waste."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Two camera frames at time t and t+1"},
+        {"t": "step", "s": "Dynamics encoder: extract continuous motion patterns (ego acceleration, other vehicles' velocities)", "hl": true},
+        {"t": "step", "s": "Vector quantization: round to nearest codebook entry, giving compact discrete numbers (tokens)"},
+        {"t": "step", "s": "VLA model predicts: first dynamics tokens (reasoning), then action tokens (driving decision)"},
+        {"t": "output", "s": "Steering and acceleration commands grounded in predicted world dynamics"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training equation",
+    "words": "The total loss combines image reconstruction quality, bird's-eye-view reconstruction quality, quantization smoothness, and action alignment. The Dynamics Tokenizer is trained to minimize the sum of four weighted loss terms.",
+    "equation": "L = L_img_recon + lambda_bev * L_bev_recon + lambda_vq * L_VQ + lambda_act_reg * L_act_reg",
+    "symbols": [
+      ["L_img_recon", "mean squared error plus perceptual loss to reconstruct next camera frame"],
+      ["L_bev_recon", "cross-entropy loss to reconstruct the bird's-eye-view map (top-down occupancy)"],
+      ["L_VQ", "vector-quantization loss: encourages codebook to stay diverse and tokens to commit to assignments"],
+      ["L_act_reg", "regularization loss that aligns ego-centric dynamics with the ground-truth steering angle and throttle"],
+      ["lambda_bev, lambda_vq, lambda_act_reg", "weighting coefficients tuning how much each term matters"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a frame has: image reconstruction loss 0.5, BEV loss 0.3, VQ loss 0.05, action alignment loss 0.02.",
+        "With weights: lambda_bev = 1.0, lambda_vq = 0.1, lambda_act_reg = 2.0.",
+        "Total = 0.5 + 1.0*0.3 + 0.1*0.05 + 2.0*0.02 = 0.5 + 0.3 + 0.005 + 0.04 = 0.845.",
+        "If image quality matters most (highest weight), but tokens are not well-aligned with action, the alignment term (0.04) pulls the loss upward until the tokens capture motion the action actually used."
+      ]
+    },
+    "note": "This loss trains the tokenizer to compress motion faithfully while staying grounded in what actions the ego vehicle will actually take."
+  },
+  "bars": {
+    "h2": "Compared to other reasoning approaches",
+    "charts": [
+      {
+        "title": "Textual CoT (pure language reasoning)",
+        "rows": [
+          ["Accuracy on known road", 78, "good"],
+          ["Accuracy on new scenario", 45, "bad"],
+          ["Compute cost", 20, "good"]
+        ],
+        "note": "Language misses spatial facts; 'car 30 meters ahead slowing' is vague about exact position and velocity."
+      },
+      {
+        "title": "Visual CoT (dense frame prediction)",
+        "rows": [
+          ["Accuracy on known road", 82, "good"],
+          ["Accuracy on new scenario", 71, "good"],
+          ["Compute cost", 85, "bad"]
+        ],
+        "note": "Dense prediction works but wastes computation rendering irrelevant pixels; slow to run in real time."
+      },
+      {
+        "title": "Dynamics CoT (this paper)",
+        "rows": [
+          ["Accuracy on known road", 85, "good"],
+          ["Accuracy on new scenario", 79, "good"],
+          ["Compute cost", 35, "good"]
+        ],
+        "note": "Compact tokens capture essential physics; fast enough for real-time driving while reasoning grounded in world evolution."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Codebook collapse.",
+        "html": "If the dynamics tokenizer is not trained with proper diversity loss (the lambda_vq term), it may fall into a trap where many different motions get mapped to the same codebook index. This eliminates the richness of the representation. The paper shows this happens without decoupling ego and environment dynamics—when one dominates the other in the codebook."
+      },
+      {
+        "warn": true,
+        "b": "Tokens do not capture rare events.",
+        "html": "The codebook is learned on training data. If an unusual interaction pattern appears during deployment (a cyclist weaving, a pedestrian crossing diagonally), the nearest codebook entry may be a poor match because it was never seen during training. The model must map unfamiliar situations to familiar token patterns, risking poor predictions."
+      },
+      {
+        "warn": true,
+        "b": "Misalignment between tokenizer and VLA reasoning.",
+        "html": "The Dynamics Tokenizer is trained separately on reconstruction. If the tokens that best reconstruct images are not the same tokens that best predict driving outcomes, the VLA model must do extra work to learn a mapping."
+      },
+      {
+        "b": "Done right.",
+        "html": "Decouple ego and environment tokens so neither overwhelms the codebook. Train the tokenizer jointly with reconstruction and action alignment. During reinforcement fine-tuning, monitor whether models that generate more accurate dynamics tokens achieve higher safety scores than models with poor tokens. If token accuracy correlates with safety, it proves the VLA is using tokens to choose better actions, because token quality directly enables safer driving decisions."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple driving scenario: a main road with an oncoming car approaching at constant velocity and a pedestrian crossing perpendicular. The autonomous agent (DynVLA) observes two frames of video and must output a steering and braking decision. Measure two things: (1) Does the model first generate dynamics tokens that accurately predict the oncoming car's and pedestrian's positions one second in the future? (2) Given those predicted tokens, does the braking command magnitude correlate with the predicted collision time? If the oncoming car is predicted to reach the crossing in 0.8 seconds, the brake command should be strong. If predicted time is 3 seconds, the brake should be gentle."
+    ],
+    "metric_eq": "correlation = how well predicted_collision_time predicts the brake_magnitude from the model's action tokens",
+    "closing": "A high correlation (above 0.8) proves that the model is truly using dynamics tokens to reason about consequences before choosing an action, not just generating them as a post-hoc rationalization."
+  }
+}

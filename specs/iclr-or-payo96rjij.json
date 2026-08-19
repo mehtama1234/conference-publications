@@ -1,0 +1,240 @@
+{
+  "slug": "iclr-or-payo96rjij",
+  "title": "Uni-Walker: Lifelong Embodied Navigation",
+  "family": "Robotics & Control",
+  "one_liner": "Split navigation knowledge into shared and task-specific pieces so an agent remembers old scenes while mastering new ones.",
+  "lead": "Navigation agents powered by large language models can solve individual tasks well but forget how to solve old tasks when learning new ones, a problem called catastrophic forgetting. This paper (Uni-Walker) solves it by separating the model into two parts: one that learns general navigation skills shared across all tasks, and another that learns task-specific skills for each new scene or instruction style. The agent retains old knowledge by protecting the shared part while only updating the task-specific part.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The forgetting trap",
+    "paras": [
+      "A navigation agent learns to solve Task 1 (finding a kitchen in House A with detailed instructions). It memorizes the route, the instruction style, and the house layout. Then you train it on Task 2 (finding a bedroom in House B with different instructions). The model updates its internal weights to solve the new task, but in doing so, it overwrites the knowledge needed for Task 1. When you ask it to solve Task 1 again, it fails. This is catastrophic forgetting.",
+      "A beginner might naively try to save the model after each task and switch between saved copies. This wastes memory and computation—you end up storing dozens of full models. Another naive approach is fine-tuning the whole model on each new task, but that damages the old knowledge. The paper's insight: the old knowledge and new knowledge are not the same thing. Some parts of the model (how to parse navigation instructions, how to fuse vision and language) should stay stable across tasks. Other parts (what a specific house looks like, how to respond to a particular instruction style) are task-specific."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Split the model into shared knowledge (used by all tasks) and task-specific knowledge (unique to each task), so learning a new task only updates the task-specific part."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Agent learns Task 1",
+        "viz": "weights",
+        "viz_args": [["hot", 75], ["hot", 80], ["warm", 45], ["warm", 50], ["free", 20], ["free", 15], ["hot", 70], ["warm", 48], ["free", 18], ["warm", 52], ["hot", 78], ["free", 12]],
+        "caption": "Model weights tune to solve finding the kitchen in House A."
+      },
+      {
+        "title": "2. Naive fine-tuning on Task 2",
+        "viz": "weights",
+        "viz_args": [["moved", 30], ["moved", 25], ["warm", 40], ["warm", 38], ["free", 22], ["free", 28], ["moved", 35], ["warm", 55], ["free", 25], ["warm", 60], ["moved", 20], ["free", 14]],
+        "caption": "Same model re-tuned for House B—old weights scatter, Task 1 breaks."
+      },
+      {
+        "title": "3. Uni-Walker splits knowledge",
+        "viz": "box",
+        "viz_args": "Shared (decoder A) | Task 1 (B₁) | Task 2 (B₂)",
+        "caption": "Decoder Extension LoRA assigns shared weights and separate task adapters."
+      },
+      {
+        "title": "4. Learning Task 2 only touches B₂",
+        "viz": "weights",
+        "viz_args": [["hot", 75], ["hot", 80], ["warm", 45], ["warm", 50], ["free", 20], ["free", 15], ["hot", 70], ["warm", 48], ["free", 18], ["warm", 52], ["hot", 78], ["free", 12]],
+        "caption": "Shared decoder (A) stays locked. Only Task 2 adapter (B₂) updates for House B."
+      },
+      {
+        "title": "5. Both tasks work",
+        "viz": "plain",
+        "caption": "Agent solves Task 1 by loading B₁, Task 2 by loading B₂—forgetting gone."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Split the model weights",
+        "text": "Replace the base model with a shared decoder (A) plus one task-specific adapter (B) per task."
+      },
+      {
+        "b": "Learn shared knowledge first",
+        "text": "Feed the agent multiple tasks and update the shared decoder (A) because these skills reduce error on all tasks, so training weights them all equally."
+      },
+      {
+        "b": "Activate relevant experts",
+        "text": "When solving a new task, select and activate the adapters (B modules) most similar to past tasks to warm-start learning."
+      },
+      {
+        "b": "Constrain new adapters to be orthogonal",
+        "text": "When creating a new task adapter, nudge it to be mathematically independent from old ones so it learns truly new knowledge."
+      },
+      {
+        "b": "Reason step-by-step per task",
+        "text": "Use a chain-of-thought that adjusts to the instruction style (detailed steps, objects, or high-level goals) to capture task-specific reasoning."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The split",
+    "paras": [
+      "The paper changes one thing: the structure of the model's trainable weights. Instead of one monolithic set of weights, the model now has a shared decoder (A) that learns general navigation skills, and a separate small-matrix adapter for each task. Low-rank means the adapter is small and efficient—just a thin collection of numbers arranged in a grid, not a full copy of the model. This split is implemented using Decoder Extension LoRA, a variant of LoRA (Low-Rank Adaptation, a method that adds tiny trainable layers) that works with decoder layers in a transformer (the neural network architecture that processes both text and images)."
+    ],
+    "object": "Model architecture: from monolithic to split (shared + task-specific)"
+  },
+  "hidden": {
+    "h2": "Task similarity and expert reuse",
+    "name": "Expert cosine similarity (how alike two task adapters are)",
+    "paras": [
+      "The hidden quantity is the cosine similarity—a number from 0 (completely different) to 1 (identical) that measures how similar two task adapters are. If Task 2 (bedroom search with objects) is similar to Task 1 (kitchen search with objects), their adapters will have high similarity. The paper computes this by looking at how the agent's observation (what it sees) and instruction (what it's told) embed in each adapter.",
+      "The paper uses this similarity to decide which old adapters to activate when learning a new task. High similarity means the old adapter already learned weight patterns useful for the new task because both tasks share structure—so starting with those weights gives the optimization algorithm less distance to travel to good values, reducing training steps needed. Low similarity means the old task was different, so freeze it to avoid corrupting unrelated knowledge. Reusing good starting points saves training time and avoids damaging old knowledge because the new task's training never touches unrelated adapters."
+    ],
+    "heat": {
+      "cells": [
+        ["Task1–Task2 sim", 4, true],
+        ["Task2–Task3 sim", 3, false],
+        ["Task3–Task1 sim", 2, false],
+        ["Task1–Task4 sim", 1, false],
+        ["Task2–Task4 sim", 3, false],
+        ["Task3–Task4 sim", 4, true],
+        ["Task4–Task5 sim", 2, false],
+        ["Task5–Task1 sim", 1, false],
+        ["Task2–Task5 sim", 2, false],
+        ["Task3–Task5 sim", 3, false],
+        ["Task4–new sim", 2, false],
+        ["Shared–new sim", 4, true]
+      ],
+      "caption": "Darker means higher similarity; activated adapters (marked) transfer knowledge to new tasks."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Before learning a new task, the agent looks at which old tasks are most similar to the new one and reuses their knowledge as a starting point."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Cosine similarity between expert embeddings (observation-based and instruction-based) identifies related tasks; TAKA (Top-K Expert Selector) picks which old adapters to use together."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting shared and task-specific knowledge works",
+    "paras": [
+      "The core reason is that navigation tasks share deep structure but differ in specifics. All navigation tasks require the agent to parse a language instruction, understand what it sees with a camera, and output a direction. These are general skills. But different tasks happen in different houses (House A vs House B), and some tasks use step-by-step instructions (\"turn left, then right\") while others use object search (\"find the sofa\"). These are task-specific. By splitting the model, the shared decoder learns the general parsing and reasoning, while each task adapter learns only what is different about that task. When learning a new task, the shared decoder is already trained, so the agent only has to learn the new task-specific adapter. The old adapters stay untouched—their weights never change—so old task knowledge is perfectly preserved. The orthogonality constraint (keeping new adapters mathematically independent from old ones) prevents the new adapter from accidentally overwriting shared knowledge by ensuring it learns truly new patterns."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "New navigation task (scene + instruction style)"
+        },
+        {
+          "t": "step",
+          "s": "Measure similarity to past tasks using expert embeddings",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Activate top-K old adapters as warm start"
+        },
+        {
+          "t": "step",
+          "s": "Train new task adapter with orthogonality constraint"
+        },
+        {
+          "t": "step",
+          "s": "Tune task-specific chain-of-thought reasoning",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "New task adapter + updated shared decoder, old adapters frozen"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The adaptation formula",
+    "words": "The loss (total error) for training combines the navigation loss (how wrong the prediction is) plus an orthogonality penalty (which pushes the new adapter to be independent from old ones)",
+    "equation": "L_total = L_nav + lambda * sum_j ||B_t^T @ B_j||_F^2",
+    "symbols": [
+      ["L_total", "total error to minimize"],
+      ["L_nav", "navigation loss—how wrong the direction prediction is"],
+      ["B_t", "new task adapter (the weights being trained)"],
+      ["B_j", "old task adapter j (kept frozen)"],
+      ["lambda", "strength of the orthogonality penalty (how much to push them apart)"],
+      ["||·||_F^2", "Frobenius norm squared—sum of all squared elements in the matrix"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say Task 1 adapted weights (B_1) are the 2-by-2 grid [[2, 1], [0, 3]].",
+        "Task 2's new adapter (B_t) starts as [[1, 1], [1, 1]].",
+        "Measure overlap: B_t^T @ B_1 = [[1, 1], [1, 1]]^T @ [[2, 1], [0, 3]] = [[2, 4], [2, 4]].",
+        "Frobenius norm squared: 2² + 4² + 2² + 4² = 4 + 16 + 4 + 16 = 40.",
+        "If lambda = 0.1, the orthogonality penalty is 0.1 * 40 = 4.0.",
+        "Training nudges B_t toward patterns that are mathematically independent from B_1, pushing the penalty down."
+      ]
+    },
+    "note": "The orthogonality penalty prevents new task adapters from reusing old weight patterns, forcing them to learn genuinely new task-specific knowledge."
+  },
+  "bars": {
+    "h2": "Learning curves across tasks",
+    "charts": [
+      {
+        "title": "Naive fine-tuning (retrains whole model each task)",
+        "rows": [
+          ["After Task 1", 92, "good"],
+          ["After Task 2 training", 88, "bad"],
+          ["Task 1 tested again", 42, "bad"],
+          ["Task 2 tested", 86, "good"]
+        ],
+        "note": "Retraining the whole model on Task 2 degrades Task 1 performance from 92 to 42—catastrophic forgetting."
+      },
+      {
+        "title": "Uni-Walker (split model, freeze shared)",
+        "rows": [
+          ["After Task 1", 92, "good"],
+          ["After Task 2 training", 90, "good"],
+          ["Task 1 tested again", 90, "good"],
+          ["Task 2 tested", 88, "good"]
+        ],
+        "note": "Splitting the model and keeping shared weights frozen preserves old task performance (Task 1 stays at 90) while achieving high new task performance (Task 2 at 88)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Adapters become too similar.",
+        "html": "If all new adapters learn to reuse the same patterns, they are no longer task-specific. The orthogonality constraint prevents this by penalizing overlap, but if the penalty weight (lambda) is set too low, tasks can still collide."
+      },
+      {
+        "warn": true,
+        "b": "Shared decoder gets overfit to early tasks.",
+        "html": "The first few tasks dominate training of the shared decoder because they update it first and most often, so the shared weights lock into patterns that work for Tasks 1–3. When new tasks arrive, they must adapt to a shared layer already specialized for old tasks, leaving less room to optimize for the new task. Careful task ordering (mixing tasks instead of pure sequence) helps because each task sees a shared layer updated by all tasks equally, not biased toward early ones. Gentle steering of the weights (soft penalties on large changes) helps because it slows the shared layer's specialization, leaving it more flexible for later tasks. But the fundamental problem—earlier data shapes the model before later data arrives—cannot be fully fixed."
+      },
+      {
+        "warn": true,
+        "b": "Cold start on a radically different task.",
+        "html": "If a new task is completely different from all past tasks (e.g., first house exploration, then outdoor navigation), the expert similarity scores are low and no good old adapters activate. The new adapter trains from near-zero, offering little benefit."
+      },
+      {
+        "b": "Done right.",
+        "html": "With moderate task similarity, a well-tuned shared decoder, and proper orthogonality constraints, the agent maintains performance on old tasks while learning new ones. The balance between shared and task-specific learning is key."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy navigation scenario: a small grid-world with 4 rooms (Kitchen, Bedroom, Living Room, Office). Create 6 sequential tasks: Task 1 (find Kitchen with step-by-step instructions), Task 2 (find Bedroom with object-search instructions), Task 3 (find Kitchen again with a different instruction style), Task 4 (find Living Room), Task 5 (find Office), Task 6 (find Bedroom again). Implement the split model: shared layer + task-specific adapters. For each task, train the new adapter with the orthogonality constraint. Measure success rate on all past tasks before and after learning each new task."
+    ],
+    "metric_eq": "Forgetting = (accuracy on Task 1 before Task 2) − (accuracy on Task 1 after Task 2) \nAverage task performance = mean of success rates on all 6 tasks",
+    "closing": "The demo must show that naive fine-tuning causes Forgetting to spike (old task performance drops >50%) while Uni-Walker keeps Forgetting near zero. Average task performance should stay above 80% across all 6 tasks for Uni-Walker, versus collapsing to <60% for naive fine-tuning."
+  }
+}

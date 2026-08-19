@@ -1,0 +1,241 @@
+{
+  "slug": "icml-or-tl2zkbmg8t",
+  "title": "BridgePolicy: Visuomotor Learning via Observation-Embedded Diffusion",
+  "family": "Robotics & Control",
+  "one_liner": "A robot learns to control its arm by treating what it sees as the starting point of action generation, not just a side condition.",
+  "lead": "Robotic arms learn from human demonstrations by building a diffusion model (a process that turns random noise into executable actions step by step). Current methods use diffusion to go from noise to actions, but they treat camera images as a separate condition applied from the outside—the image is handled only at the end, after the denoising has already started down one path. BridgePolicy instead weaves the observation directly into the noise-to-action transformation itself, so the robot's perception and its arm movements stay tightly coupled. This requires solving a mismatch: images are thousands of pixels, but actions are just a handful of joint angles; a semantic aligner (a small neural network) maps the image into action-space before the diffusion begins.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why existing diffusion policies are stuck",
+    "paras": [
+      "Robot learning usually starts with imitation: watch a human grab a cup, record what the arm does, and train the robot to mimic it. Modern methods use diffusion models to capture multiple valid ways to reach the goal (you can pick up a mug from the left or right; both work).",
+      "The problem: current diffusion policies begin from pure random noise and treat the camera image as a label attached to the denoising process, like saying 'generate an action given this image.' The robot's brain has to figure out the action without ever anchoring it to what it sees first. Imagine trying to write a sentence by starting with random letters and then being told the topic—you'd have to throw away your random start and rebuild. The separation between seeing and moving breaks the tight connection that real control requires."
+    ],
+    "callout": {
+      "b": "The method in one plain sentence:",
+      "html": "Start the action generator with a starting distribution (what the image tells you about plausible actions) instead of from random noise, so perception and motion evolve together."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Old way: random start",
+        "viz": "plain",
+        "caption": "Begin with noise. Apply image as a side label. Action emerges detached from sight."
+      },
+      {
+        "title": "2. The mismatch revealed",
+        "viz": "box",
+        "viz_args": "Image (thousands of pixels) vs. Action (six joint angles)—shapes don't match for bridging.",
+        "caption": "Observations and actions live in different spaces, incompatible for a direct bridge."
+      },
+      {
+        "title": "3. Semantic aligner at work",
+        "viz": "weights",
+        "viz_args": [["image", 60], ["aligner", 45], ["action-space", 70]],
+        "caption": "The aligner shrinks image down to action-sized starting guess, unifying the two modalities."
+      },
+      {
+        "title": "4. BridgePolicy samples",
+        "viz": "weights",
+        "viz_args": [["observation-prior", 70], ["step-1", 62], ["step-2", 55], ["step-3", 48], ["clean-action", 30]],
+        "caption": "Start from observation-informed starting distribution and iteratively denoise toward executable action."
+      },
+      {
+        "title": "5. Tight coupling payoff",
+        "viz": "plain",
+        "caption": "Perception feeds into motion step by step; robot grasp succeeds where old methods failed."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Fuse and align",
+        "text": "The semantic aligner receives the camera image (thousands of pixel values) and robot state (joint positions) and maps them together into a single action-sized list of numbers (this list describes what action the image suggests)."
+      },
+      {
+        "b": "Construct the starting point",
+        "text": "This aligned list of numbers becomes the starting point for diffusion instead of random noise. It carries information from the observation: angles and distances the robot learned from watching the camera."
+      },
+      {
+        "b": "Reverse diffusion",
+        "text": "A neural network trains to denoise: given a slightly-noisy version of the action and the observation-based starting guess, predict the cleaner action. It learns this from demonstrations."
+      },
+      {
+        "b": "Iterative sampling",
+        "text": "At test time, start from the observation-based starting guess and apply the learned denoiser repeatedly, each step moving closer to a final, executable action."
+      },
+      {
+        "b": "Constrained output",
+        "text": "The observation-informed start acts as a guardrail—the robot cannot propose actions wildly inconsistent with what it sees, because it is carrying that information forward."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces the starting point of diffusion. Instead of beginning from random noise (as DP3 and FlowPolicy do), BridgePolicy constructs a starting distribution (what the image and robot state tell the system about plausible actions) by translating the image into action-space. The semantic aligner, trained with a contrastive loss (a technique that groups similar images and pulls apart different actions), learns to map visual and state information into this action-aligned form, so that heterogeneous inputs (images and joint angles) can bootstrap the diffusion process."
+    ],
+    "object": "diffusion starting distribution"
+  },
+  "hidden": {
+    "h2": "Observation-action alignment gap",
+    "name": "alignment error between image space and action space",
+    "paras": [
+      "The core difficulty the paper measures: how much does the observation's natural shape mismatch the action's shape? An image is thousands of independent pixel values; an action is six or seven joint angles. A naive diffusion bridge connecting these directly would fail because the two spaces have completely different shapes and sizes.",
+      "BridgePolicy estimates this gap via the semantic aligner's contrastive loss. The aligner learns a shared representation (a learned map) such that images of the same action cluster together, and images of different actions separate. The smaller the gap—the higher the alignment score—the more the starting distribution will bias diffusion toward plausible actions instead of noise. The paper measures success by how well this alignment reduces the number of denoising steps needed and how often the final action succeeds on the real robot."
+    ],
+    "heat": {
+      "cells": [
+        ["no-image", 1, false],
+        ["low-align", 2, true],
+        ["medium-align", 3, false],
+        ["high-align", 4, true],
+        ["perfect-align", 4, true],
+        ["noise-only", 1, false],
+        ["partial-start", 2, false],
+        ["full-start", 4, true],
+        ["misaligned", 2, true],
+        ["matched", 4, false],
+        ["constraint-weak", 1, false],
+        ["constraint-strong", 4, false]
+      ],
+      "caption": "Darker means stronger alignment between what the robot sees and what it can do. A tight alignment (top-right) constrains noise-to-action diffusion toward valid behaviors."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The alignment gap is the difference between how images naturally organize and how actions naturally organize. A good aligner makes them share the same language (the same learned representation), so a picture directly suggests an action rather than leaving diffusion to bridge a noisy gap."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Equation 8 in the paper (the contrastive loss, inspired by CLIP) trains the semantic aligner to minimize this gap. The loss encourages learned representations of observations paired with the same action to cluster together, while observations from different actions push apart. This learned alignment then becomes the starting distribution in Equation 3 (the diffusion objective)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why observation-embedded diffusion works",
+    "paras": [
+      "Standard diffusion policies face a bottleneck: they must infer intent from an image while simultaneously denoising action noise. Every denoising step has to both refine the noise and figure out what the image means—two jobs at once, starting from no information at all.",
+      "BridgePolicy decouples these tasks. The semantic aligner pre-processes the image once (before the denoising loop) and translates it into action-space, creating a good starting guess based on what the robot sees. Now diffusion's job is purely to refine: given a starting point that already says 'based on the image, something like this action is plausible,' iteratively remove noise and converge to a final action. Because the starting point is anchored in the observation, the refinement steps stay faithful to what the robot sees; the starting point acts as a guardrail that prevents wild divergence into actions inconsistent with the image.",
+      "Why this tightens perception-control coupling: the observation and the action trajectory evolve in the same mathematical framework (a diffusion process, a standard mathematical procedure for turning noise into data by reversing a corruption). The image is not added after the fact; it is baked into the foundation. So when the robot looks at a cup in a tight corner, the starting guess immediately encodes the cup's position and the tight space, and diffusion simply refines that guess into the exact motion. Old methods had to learn this mapping through denoising; BridgePolicy learns it upfront in the aligner and then uses diffusion only to resolve remaining uncertainty."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Camera image + robot state (joint angles)"
+        },
+        {
+          "t": "step",
+          "s": "Semantic aligner: map to action-space starting guess",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Diffusion SDE: iteratively denoise with starting guess as anchor"
+        },
+        {
+          "t": "step",
+          "s": "Neural network predicts cleaner action at each step"
+        },
+        {
+          "t": "output",
+          "s": "Final action (joint velocities or positions)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The diffusion bridge objective",
+    "words": "Total loss equals the diffusion reconstruction loss plus the alignment loss. The diffusion loss teaches the network to denoise actions starting from an observation-informed prior instead of random noise. The alignment loss teaches the semantic aligner to map images and states into a shared action-space embedding using contrastive learning.",
+    "equation": "L_total = L_diffusion + alpha * L_alignment\nL_diffusion = E_t [ ||a_theta(a_t, a_T, t) - a_0||^2 ]\nL_alignment = -log( exp(sim(enc_o, enc_a) / tau) / sum_j exp(sim(enc_o_j, enc_a) / tau) )",
+    "symbols": [
+      ["a_t", "action at noise level t (partially corrupted)"],
+      ["a_0", "clean action from demonstration"],
+      ["a_T", "observation-derived prior (not random noise)"],
+      ["a_theta", "neural network predicting clean action given noisy input"],
+      ["t", "diffusion time step (0 = clean, T = maximum noise)"],
+      ["enc_o", "aligner embedding of observation"],
+      ["enc_a", "aligner embedding of action"],
+      ["sim", "cosine similarity between two embeddings"],
+      ["tau", "temperature parameter for the contrastive loss"],
+      ["alpha", "weight controlling importance of alignment versus diffusion"],
+      ["L_diffusion", "prediction error at all noise levels"],
+      ["L_alignment", "contrastive loss (CLIP-style); lower when obs and action embeddings align"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the robot sees a cup at position (0.3, 0.5, 0.8) in the camera image. The aligner maps this into action-space as a_T = [0.2, -0.1, 0.15] (three joint-angle deltas; this is the starting guess, not random noise).",
+        "A human demonstration shows the action should be a_0 = [0.21, -0.09, 0.14] (very similar to the starting guess, because the image was taken from the same pose). At a noisy intermediate level, a_t = [0.30, -0.05, 0.22] (more corrupted).",
+        "The network a_theta tries to predict a_0 from a_t and a_T. It outputs [0.22, -0.08, 0.15], error = [0.01, -0.01, 0.01]—very small, because the observation-informed starting guess a_T was already close.",
+        "Contrast this to random noise a_T_random = [0.0, 0.0, 0.0]. The network must now guess the action entirely from the noisy a_t, outputting [0.10, 0.20, -0.05], error = [0.11, 0.29, 0.19]—much larger. The observation-based variant converges faster because it starts closer to the truth."
+      ]
+    },
+    "note": "The diffusion loss trains the network to denoise actions when starting from an observation-informed starting guess; the alignment loss trains the semantic aligner to make that starting guess faithful to the image."
+  },
+  "bars": {
+    "h2": "Success rates: BridgePolicy versus baselines",
+    "charts": [
+      {
+        "title": "Random-noise diffusion (DP3, FlowPolicy)",
+        "rows": [
+          ["Oven-opening task", 70, "bad"],
+          ["Pick task", 60, "bad"],
+          ["Pour task", 50, "bad"],
+          ["Average across 52 sim tasks", 65, "bad"]
+        ],
+        "note": "Starting from random noise forces diffusion to simultaneously infer intent and refine actions, leading to lower success on complex tasks."
+      },
+      {
+        "title": "BridgePolicy: observation-embedded start",
+        "rows": [
+          ["Oven-opening task", 100, "good"],
+          ["Pick task", 80, "good"],
+          ["Pour task", 90, "good"],
+          ["Average across 52 sim tasks", 90, "good"]
+        ],
+        "note": "Starting from an observation-informed starting guess allows diffusion to focus purely on refinement, yielding higher success, because the network does not have to simultaneously learn to interpret the image and refine the action—it inherits the image interpretation for free from the aligned starting guess."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Semantic aligner mismatch.",
+        "html": "If the contrastive loss (a technique that groups similar images together) fails to learn a tight learned representation, images and actions will not align in the starting guess, and diffusion will inherit a poor starting point. This happens when training data is sparse or when visual scenes are ambiguous (multiple valid actions per image). The remedy is to weight alpha (the alignment loss importance) higher during training until alignment improves, because increasing alpha forces the optimizer to reduce alignment errors relative to diffusion errors, tightening the learned representation."
+      },
+      {
+        "warn": true,
+        "b": "Heterogeneous observation types.",
+        "html": "Robots often have mixed inputs: RGB camera, depth, joint state, tactile sensors. If not all modalities are properly fused by the aligner, some information is lost, and the starting guess becomes incomplete. The semantic aligner must explicitly handle each modality type or the approach degrades."
+      },
+      {
+        "warn": true,
+        "b": "Out-of-distribution test scenarios.",
+        "html": "If the robot encounters a scene (e.g., a cup placed in an unusual location) that is far from training examples, the aligner's learned representation may be unreliable, yielding a poor starting guess. Diffusion can only refine so far; a bad start is hard to recover from. Reliability at test time depends on training data diversity and how well the aligner generalizes to new scenes."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the aligner is well-trained (tight contrastive alignment) and the starting guess properly constrains diffusion, the diffusion network requires fewer denoising steps (faster action generation), because the network inherits a head start and does not have to search as far in action-space to converge. The network also produces actions more faithful to what the robot observes, because the starting guess encodes the visual information upfront and acts as a guardrail. Real-robot experiments confirm this: BridgePolicy achieves 90% success on 52 simulation tasks and strong performance on 5 real-world manipulation tasks."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small robotic task (e.g., pick-place in simulation, like MetaWorld). Train a BridgePolicy model on 50 human demonstrations. Train a baseline (DP3 or FlowPolicy) on the same data. At test time, run both policies on 20 random trials of the same task, with the robot's view initialized from a new camera angle.",
+      "Measure the success rate (did the task complete?) and the number of diffusion steps required to generate an action. Log the predicted action for a few test episodes, and visualize the semantic aligner's embedding by plotting images and actions in a 2D projection (e.g., UMAP or t-SNE). Verify that images with similar optimal actions cluster together in the embedding space."
+    ],
+    "metric_eq": "success_rate = (num_trials_completed / 20) * 100. Steps_per_action_BridgePolicy vs. Steps_per_action_DP3. Alignment_quality = within-class similarity / between-class similarity (in the semantic embedding).",
+    "closing": "The critical insight the demo must surface: BridgePolicy requires fewer diffusion steps to converge to a successful action because the observation-informed starting guess is already close to a valid action. A good aligner (tight clustering of same-action images) directly enables faster control, because the network does not have to search as far; and more reliable control, because the starting guess constrains the search to stay consistent with what the robot sees."
+  }
+}
