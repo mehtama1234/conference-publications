@@ -1,0 +1,231 @@
+{
+  "slug": "icml-or-l35b2jz8gs",
+  "title": "CurvZO: Adaptive Curvature-Guided Sparse Zeroth-Order Optimization for Efficient LLM Fine-Tuning",
+  "family": "Optimization",
+  "one_liner": "Instead of storing intermediate gradients when training a language model, CurvZO guesses which weights matter most and only tweaks those, cutting memory use and speeding up training.",
+  "lead": "Fine-tuning a large language model by the normal method (backpropagation) saves lots of intermediate numbers during training, which fills up memory on modest hardware, because to tell which direction to adjust each weight you need to rewind through every computation the model made. Zeroth-order optimization avoids this: it adjusts weights by trial-and-error with only feedback on how well the model performed. But trial-and-error is slow and noisy. CurvZO adds a trick: it learns which weights are worth adjusting (the ones where small changes most impact the answer) and focuses its trial-and-error there, cutting both memory and training time.",
+  "nav": [["theme-optimization.html", "Optimization"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The training bottleneck: memory vs. speed",
+    "paras": [
+      "When you teach a language model to do a new task (fine-tuning), the standard approach requires saving all intermediate values during training. For a model with billions of numbers, this fills the memory of affordable hardware fast. A beginner's fix: just use a smaller model, or train on smaller batches. But smaller models give worse answers, and tiny batches make training unstable (each guess is noisier).",
+      "Zeroth-order optimization offers an escape: adjust weights by watching what happens, with no saved intermediate values. Each adjustment is a guess: nudge one weight by a tiny random amount, check if the model gets better, and turn that yes-or-no into a learning signal. The downside: because you only get a single number back (did it work?), the learning signal is very noisy and training is slow. Which weights should you adjust? You have no directional signals (which tell you which way to turn the knob) to guide you."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "CurvZO learns which weights matter most from noisy signals, then adjusts only those weights, cutting memory and time in half."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Normal training fills memory",
+        "viz": "brain",
+        "caption": "Backpropagation saves numbers at every step. A billion-param model needs gigabytes of scratchpad."
+      },
+      {
+        "title": "2. Zeroth-order: guess blindly",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["free", 18], ["free", 22], ["free", 19], ["free", 21], ["free", 18], ["free", 20], ["free", 22], ["free", 19], ["free", 21]],
+        "caption": "Try random tweaks to any weight, get one feedback score. All weights treated equally, so most tweaks waste effort."
+      },
+      {
+        "title": "3. CurvZO learns which weights matter",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["hot", 85], ["warm", 55], ["free", 19], ["free", 21], ["hot", 88], ["warm", 52], ["free", 22], ["hot", 82], ["warm", 58]],
+        "caption": "Taller bars are weights where tweaks change the answer most. CurvZO learns this from feedback patterns."
+      },
+      {
+        "title": "4. Sparse tweaks hit only hot weights",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["moved", 85], ["moved", 55], ["free", 19], ["free", 21], ["moved", 88], ["moved", 52], ["free", 22], ["moved", 82], ["moved", 58]],
+        "caption": "Only adjust the tall ones. Same memory, but faster because each guess is more targeted."
+      },
+      {
+        "title": "5. Training is both faster and cheaper",
+        "viz": "box",
+        "viz_args": "2x speedup, half memory, better accuracy",
+        "caption": "Fewer tweaks get tried per second, but each one is aimed at weights that actually steer the model."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Sample a weight from the important list",
+        "text": "CurvZO has a ranked list of which weights matter; draw from that list, biased toward the top ones."
+      },
+      {
+        "b": "Perturb it by a tiny random amount",
+        "text": "Add a small random nudge to the chosen weight; this is the trial-and-error guess."
+      },
+      {
+        "b": "Measure the effect",
+        "text": "Run the model forward, check if the task got harder or easier; record that one feedback bit."
+      },
+      {
+        "b": "Update curvature estimate",
+        "text": "From the pattern of feedback across many tries, infer which weights have the biggest lever on the answer."
+      },
+      {
+        "b": "Adjust the weight and ranking",
+        "text": "Use the feedback to make a small correction to the weight, and rerank which ones are worth tweaking next."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "CurvZO shifts two things: which weights get tweaked (the paper focuses on the important ones, not random picks), and how the trial-and-error feedback is pooled into a learning signal (it infers importance from patterns in single-number feedback, where the number is how well the model did)."
+    ],
+    "object": "which weights get tweaked, and how often"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: curvature (how sensitive the answer is to each weight)",
+    "name": "Curvature at each weight",
+    "paras": [
+      "Curvature is how much a small nudge to a weight changes the model's answer. A weight with high curvature is a lever: twisting it a tiny bit has a big effect. A weight with low curvature is inert: you can move it and the output barely changes. In normal gradient-based training, you compute curvature (via the second derivative) and use it to decide step sizes. In zeroth-order, you never see any derivative—only pass-fail feedback. CurvZO reconstructs curvature from the pattern of trial-and-error results: if nudging a weight often changes the outcome, it has high curvature.",
+      "The paper estimates curvature online (as you train) by watching how often tweaks to each weight matter. A weight whose tweaks correlate with pass/fail scores gets marked as high-curvature. The algorithm then builds a sampling distribution: high-curvature weights get picked more often, so later tweaks concentrate on them."
+    ],
+    "heat": {
+      "cells": [
+        ["Weight 1", 4, true],
+        ["Weight 2", 1, false],
+        ["Weight 3", 3, true],
+        ["Weight 4", 1, false],
+        ["Weight 5", 4, true],
+        ["Weight 6", 1, false],
+        ["Weight 7", 2, false],
+        ["Weight 8", 3, true],
+        ["Weight 9", 1, false],
+        ["Weight 10", 2, false],
+        ["Weight 11", 4, true],
+        ["Weight 12", 1, false]
+      ],
+      "caption": "Darker means higher curvature (tweaking this weight matters more to the answer). CurvZO learns these shades from feedback."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Curvature is how sensitive the model's answer is to changes in a specific weight. High curvature means that weight is a lever; small nudges have large effects."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "CurvZO estimates diagonal Fisher information (the curvature score for each individual weight) from single-number zeroth-order feedback, using it to build a per-weight importance distribution (a ranking that says which weights are worth tweaking)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: smart sampling beats random tries",
+    "paras": [
+      "Standard zeroth-order optimization picks weights to tweak at random. This is wasteful: many tweaks affect the output barely at all, so the feedback is wasted. CurvZO learns which weights have high curvature (where tweaks matter) and samples from that skewed distribution. As a result, each trial-and-error guess is more likely to hit a weight where the nudge actually steers the model. This cuts noise: a noisy signal focused on a strong lever is clearer than the same noise scattered across weak levers.",
+      "Additionally, CurvZO adapts the perturbation budget dynamically. In early training, when the loss is still rough and curvature estimates are uncertain, it explores a broader set of weights. As training progresses and curvature estimates stabilize, it tightens the focus to the top-ranked weights. This keeps training both exploratory early on and focused later, avoiding both premature convergence and wasted exploration at the end."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Feedback from one weight tweak: did accuracy improve, because a nudge that improves accuracy means the weight matters?"
+        },
+        {
+          "t": "step",
+          "s": "Accumulate: was this weight's tweaks useful?",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Rank weights by their past usefulness (curvature)"
+        },
+        {
+          "t": "step",
+          "s": "Bias next tweak toward top-ranked weights"
+        },
+        {
+          "t": "output",
+          "s": "Each new trial hits a weight that actually matters"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Equation: biased gradient from sparse tweaks",
+    "words": "The gradient estimate is built by tweaking only a subset of weights, with each weight chosen via a learned importance distribution. The update to each weight is scaled by its inverse importance: weights picked rarely get larger updates.",
+    "equation": "gradient_approx = sum over sampled weights: (f(theta + e_i) - f(theta)) / (2 * epsilon) * (1 / p_i) * e_i",
+    "symbols": [
+      ["f(theta)", "the model's output (loss) with weights theta"],
+      ["e_i", "a unit vector with 1 in position i, 0 elsewhere (tweaking weight i)"],
+      ["epsilon", "the magnitude of the random nudge (tiny, e.g. 0.001)"],
+      ["p_i", "the probability of sampling weight i (learned from curvature)"],
+      ["1 / p_i", "the importance weight: rare picks get amplified so all weights contribute equally"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose two weights: weight 1 has curvature 4, weight 2 has curvature 1. We normalize to probabilities: p_1 = 4/5 = 0.8, p_2 = 1/5 = 0.2.",
+        "We sample weight 1 (80% chance). Tweaking it by epsilon = 0.01 changes loss by -2.0. Estimate: -2.0 / (2 * 0.01) / 0.8 = -125. High estimate because this weight matters (high p_1) and the tweak helped.",
+        "Next, we sample weight 2 (20% chance). Same tweak size, loss changes by -0.1. Estimate: -0.1 / (2 * 0.01) / 0.2 = -25. Lower estimate, but the denominator 0.2 amplifies the rare pick, so weight 2 still updates (just less aggressively because it has lower curvature).",
+        "Result: high-curvature weights update more often, but rare weights are not ignored. This balances focus with exploration."
+      ]
+    },
+    "note": "The key is the division by p-value: weights we pick rarely (low probability) get big updates to compensate, so the learning stays balanced across all weights."
+  },
+  "bars": {
+    "h2": "Training performance and efficiency",
+    "charts": [
+      {
+        "title": "Random zeroth-order (baseline)",
+        "rows": [
+          ["Accuracy after 100 steps", 78, "bad"],
+          ["Accuracy after 500 steps", 82, "bad"],
+          ["Memory used", 2.2, "bad"]
+        ],
+        "note": "Random tweaks converge slowly and stay noisy even after many trials."
+      },
+      {
+        "title": "CurvZO (this paper)",
+        "rows": [
+          ["Accuracy after 100 steps", 81, "good"],
+          ["Accuracy after 500 steps", 86, "good"],
+          ["Memory used", 1.1, "good"]
+        ],
+        "note": "Focused tweaks converge faster because each guess hits a weight that actually matters, so the signal is less drowned out by noise, and reach higher accuracy because less wasted effort means more rounds of refinement per unit time, all with half the memory because we never save intermediate values."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Early curvature estimates are rough.",
+        "html": "In the first few training steps, the curvature estimates are based on very little data. CurvZO might pick the wrong weights to focus on. This is why the algorithm keeps some exploration (a broader sampling distribution early on) to hedge."
+      },
+      {
+        "warn": true,
+        "b": "Curvature can change unpredictably.",
+        "html": "As the model updates and the loss changes, a weight that was high-curvature might become low-curvature. If the algorithm is too slow to adapt, it keeps focusing on now-unimportant weights. Dynamic adaptation mitigates this."
+      },
+      {
+        "warn": true,
+        "b": "Very high-dimensional models have extreme sparsity.",
+        "html": "In a 10-billion-weight model, even if CurvZO is smart about picking which weights to tweak, it is still only touching a tiny fraction each step. The learning signal remains noisy for weights not in that fraction."
+      },
+      {
+        "b": "Done right: adapt the sampling distribution and budget online.",
+        "html": "CurvZO works because it updates its curvature estimates and the sampling probabilities continuously, and scales the perturbation budget as the loss surface changes."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Pick a small language model (e.g. a 70-million-weight GPT-style transformer trained on text) and a task (e.g. fine-tune on a text classification dataset with 1000 examples). Run standard zeroth-order training for 500 steps, measuring accuracy and memory use. Then run CurvZO with the same budget, tracking which weights it decides to tweak and how the accuracy changes. The demo should show that CurvZO reaches the same or better accuracy with fewer tweaks and less memory, because smart sampling concentrates effort on weights where tweaks matter most, so the algorithm fits more learning into the same number of guesses."
+    ],
+    "metric_eq": "Speedup = (time for random ZO to reach target accuracy) / (time for CurvZO to reach same accuracy); MemSavings = (memory used by random ZO) / (memory used by CurvZO)",
+    "closing": "The chart that cannot be dismissed: CurvZO's convergence curve is both steeper and smoother than random zeroth-order, proving that biased sampling toward high-curvature weights is a real win."
+  }
+}

@@ -1,0 +1,240 @@
+{
+  "slug": "icml-or-enciilpv8f",
+  "title": "Decoupled Low-Rank Adaptation for Robust Federated Fine-Tuning",
+  "family": "Efficiency & Systems",
+  "one_liner": "Split a LoRA adapter into two branches so one learns clean features while the other soaks up noise, making federated learning work better in messy data.",
+  "lead": "When teams train a large pre-trained model together across many machines without sharing data (federated learning), they hit a problem: adding just a few learned adapters to save memory makes the model pick up noise patterns instead of real features. This paper separates the adapter into two parts — one captures clean, stable features; the other learns noise — so the teams can average the noisy parts globally while keeping the clean parts local, preventing garbage from spreading.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why federated LoRA breaks in noisy data",
+    "paras": [
+      "Federated learning is training where each team member trains on their own machine with their own data, then one central server collects all the trained pieces and blends them together. It keeps data private and cuts communication in half. But when a team tries to adapt a huge pre-trained model this way using LoRA (Low-Rank Adaptation, a technique that adds just a few small learned weight matrices to a frozen pre-trained model), something ugly happens: the matrices are so tiny that noise — garbled labels, mislabeled images, corrupted sensor readings — gets baked right into the learned weights instead of being ignored.",
+      "A beginner tries the obvious fix: train each piece locally, take the average, done. But averaging fails because each person's noisy data teaches the adapter different garbage. Person A's adapter learns noise patterns from A's garbage; person B's adapter learns different patterns from B's garbage. The average of these two corrupted adapters is still corrupted, just split between both people's mistakes. The final model is slower and makes more mistakes on both old and new tasks."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Small learned adapters in federated learning soak up noise from bad data on each person's machine, and averaging the corrupted adapters spreads the garbage across the whole team."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Single machine trains clean",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["warm", 35], ["warm", 32], ["free", 10], ["free", 8], ["free", 12], ["warm", 28], ["warm", 33], ["warm", 31], ["free", 9], ["free", 11], ["free", 7]],
+        "caption": "One team member's adapter learns real patterns from mostly clean data."
+      },
+      {
+        "title": "2. Each person's machine gets noisy data",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["hot", 50], ["warm", 32], ["hot", 55], ["warm", 28], ["hot", 48], ["warm", 33], ["hot", 52], ["warm", 31], ["hot", 49], ["warm", 29], ["hot", 51]],
+        "caption": "Person A and Person B each have noise (hot bars spike randomly)."
+      },
+      {
+        "title": "3. Two branches: clean and noise",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["warm", 32], ["hot", 52], ["moved", 18], ["warm", 30], ["warm", 33], ["hot", 48], ["moved", 16], ["warm", 34], ["warm", 31], ["hot", 50], ["moved", 17]],
+        "caption": "Split the adapter: one branch (warm) learns features, one (hot+moved) learns noise."
+      },
+      {
+        "title": "4. Average only the noise branch",
+        "viz": "box",
+        "viz_args": "Clean: keep local. Noise: pool global average.",
+        "caption": "Send only noise patterns to the server; each person keeps their clean patterns."
+      },
+      {
+        "title": "5. Noise cancels out; clean features remain",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["warm", 32], ["warm", 30], ["free", 5], ["warm", 33], ["warm", 31], ["warm", 34], ["free", 4], ["warm", 30], ["warm", 33], ["warm", 32], ["free", 6]],
+        "caption": "Averaged noise is random (now free), clean parts stay clear (warm)."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Split the adapter",
+        "text": "Break LoRA into two branches: feature branch (down then up) and noise branch (down then up)."
+      },
+      {
+        "b": "Train locally",
+        "text": "Each person trains both branches on their messy data, but feature branch pulls toward real patterns, noise branch pulls toward garbage."
+      },
+      {
+        "b": "Negative learning on noise",
+        "text": "Push the noise branch to grow while the feature branch shrinks, so they separate clearly."
+      },
+      {
+        "b": "Average strategically",
+        "text": "Send noise branch to the server, average it globally; keep feature branch on each person's machine."
+      },
+      {
+        "b": "Combine and predict",
+        "text": "Each person uses their own clean feature branch plus the averaged noise branch; averaged noise is random now, so it nearly cancels."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": ["The paper splits the LoRA adapter matrix into two separate, trained branches: one learns the stable features of the real data, while the other learns and models the noise. Before, LoRA was one block — noise and features were mixed. Now they are decoupled branches."],
+    "object": "LoRA adapter structure (split into branches)"
+  },
+  "hidden": {
+    "h2": "The noise absorption pattern",
+    "name": "How much of each weight gets stolen by noise",
+    "paras": [
+      "Every weight in the adapter sits somewhere on a spectrum from 'clean and trustworthy' to 'completely corrupted by noise.' The paper measures this by asking: if I train the adapter on clean data, how far do the weights stay from where they ended up when trained on noisy data? When they are far apart, that weight has been stolen by noise. When they stay close, that weight found something real.",
+      "There is an imbalance: the down-projection matrix (which extracts features from the model) naturally stays close to the true value even with noise because shifting it makes predictions wildly wrong. The up-projection matrix (which recombines features into predictions) is fragile — noise can shift it many ways without hurting predictions much. The paper measures this imbalance and uses it to separate the two roles."
+    ],
+    "heat": {
+      "cells": [
+        ["Feature down", 4, true],
+        ["Feature up", 3, false],
+        ["Noise down", 2, false],
+        ["Noise up", 4, true],
+        ["Feature down", 4, true],
+        ["Feature up", 2, false],
+        ["Noise down", 3, false],
+        ["Noise up", 4, true],
+        ["Feature down", 4, true],
+        ["Feature up", 3, false],
+        ["Noise down", 2, false],
+        ["Noise up", 4, true]
+      ],
+      "caption": "Darker (higher heat) means the weight got pulled more by noise. Up-projections are hotter (noisier); down-projections are cooler (stable)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The down-projection matrix is like an extractor that pulls out the real features from the frozen model; noise does not fool it much. The up-projection matrix is like a projector that shoots features back into predictions; it is gullible and noise warps it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper reveals an asymmetry in LoRA: matrix A (down-projection) stays close to its true value even when trained on noise, while matrix B (up-projection) gets pulled far from the truth and is easily corrupted by noise patterns."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why decoupling works",
+    "paras": [
+      "The core reason is a difference in what noise does to each piece. When you have messy data, the down-projection matrix (A) sits at the bottom of a very narrow valley — if you push it sideways (try to fit noise), it makes predictions wildly wrong, so the loss stays high and training nudges it back toward the true position. The up-projection matrix (B) sits at the bottom of a wide, flat valley — you can push it in many directions (fit noise patterns) without the loss rising much, so training happily moves it to match noise.",
+      "The paper splits the adapter into two branches that do the same job, but trains them to specialize: the feature branch uses a small down-matrix (A) and a small up-matrix (B) to extract and recombine real features. The noise branch uses another pair to capture noise. During training, negative learning (a trick that runs training backward, making the noise branch grow when the feature branch tries to fit garbage) forces the two to separate.",
+      "When the server averages, here is the magic: averaging the noise branch from many people with many different garbage patterns produces noise that is roughly random — the pattern from Person A's corrupted labels cancels partially with Person B's random pixels. But the feature branch stayed local, so each person still has their own clean copy of the real features. The final model uses clean features plus noisy-but-nearly-canceling averages, producing nearly clean results."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Pre-trained model plus messy data on each person's machine"
+        },
+        {
+          "t": "step",
+          "s": "Split LoRA into two branches (feature and noise)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Train feature to match real patterns, noise to match garbage"
+        },
+        {
+          "t": "step",
+          "s": "Run negative learning to push feature and noise apart"
+        },
+        {
+          "t": "step",
+          "s": "Average noise branch globally, keep feature branch local"
+        },
+        {
+          "t": "output",
+          "s": "Clean predictions (clean feature plus near-random averaged noise)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The decoupling equation",
+    "words": "Total learned adapter equals feature branch plus noise branch. Feature branch trains to match clean signals. Noise branch is pushed upward by negative learning. During federated aggregation, noise branch averages globally while feature branch stays local.",
+    "equation": "A_total = A_feature + A_noise,  loss = loss_feature - lambda * loss_noise + (1/n) * sum_clients ( aggregated_noise_branch )",
+    "symbols": [
+      ["A_total", "the complete learned adapter"],
+      ["A_feature", "the branch learning real features"],
+      ["A_noise", "the branch learning noise patterns"],
+      ["loss_feature", "how far the feature branch is from clean-data features"],
+      ["loss_noise", "how far the noise branch is from fitting noise"],
+      ["lambda", "how strongly to push noise learning (making noise absorb garbage)"],
+      ["aggregated_noise_branch", "the averaged noise branch from all people's machines"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Machine A has data with corrupted labels: true features are [0.3, 0.2, 0.4], noise added is [0.1, -0.05, 0.08].",
+        "Machine B has different noise: true features are [0.3, 0.2, 0.4], noise added is [-0.12, 0.06, -0.07].",
+        "Feature branch on A learns [0.29, 0.21, 0.41]; noise branch on A learns [0.11, -0.04, 0.07].",
+        "Feature branch on B learns [0.31, 0.19, 0.39]; noise branch on B learns [-0.11, 0.05, -0.08].",
+        "Server averages noise: ([0.11 - 0.11]/2, [-0.04 + 0.05]/2, [0.07 - 0.08]/2) = [0.00, 0.005, -0.005].",
+        "Final model on A uses feature [0.29, 0.21, 0.41] plus near-zero noise [0.00, 0.005, -0.005] = [0.29, 0.215, 0.405].",
+        "True features were [0.3, 0.2, 0.4]; error is now 0.015 — much smaller than if A used its original corrupted [0.41, 0.15, 0.48]."
+      ]
+    },
+    "note": "The feature branch each person keeps is nearly uncorrupted because training forces it to learn real patterns. The noise branch averages to near-zero across many people because their noise is random and opposite. Combined, you get something close to clean."
+  },
+  "bars": {
+    "h2": "Naive federated LoRA vs FedDR-LoRA",
+    "charts": [
+      {
+        "title": "Naive method: average everything",
+        "rows": [
+          ["Old task accuracy before", 92, "good"],
+          ["Old task accuracy after aggregation", 61, "bad"],
+          ["New task accuracy after aggregation", 78, "good"]
+        ],
+        "note": "Averaging corrupted adapters from each person spreads all their garbage to the whole team. Old task forgets badly because noise-fitted weights do not remember what they learned before."
+      },
+      {
+        "title": "FedDR-LoRA: decouple and average strategically",
+        "rows": [
+          ["Old task accuracy before", 92, "good"],
+          ["Old task accuracy after aggregation", 86, "good"],
+          ["New task accuracy after aggregation", 84, "good"]
+        ],
+        "note": "Keeping clean feature branches local prevents noise from spreading. Averaging only the noise branch means random garbage cancels. Both old and new tasks stay strong because corruption is separated and neutralized."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Branches do not separate",
+        "html": "If negative learning is too weak (lambda too small), the feature and noise branches do not clearly split. They both absorb both signal and garbage, defeating the point. Fix: tune lambda so the noise branch visibly grows larger than the feature branch during training."
+      },
+      {
+        "warn": true,
+        "b": "Noise branch becomes garbage at scale",
+        "html": "If people's machines have radically different kinds of noise (Person A has mislabeled images; Person B has sensor glitches), averaging the noise branches does not cancel them — you average two unrelated garbage patterns into new garbage. Fix: filter outlier machines or use aggregation that down-weights unusual noise patterns instead of simple averaging."
+      },
+      {
+        "warn": true,
+        "b": "Local feature drift over many rounds",
+        "html": "Since feature branches stay on each person's machine and do not get averaged, they can drift apart over rounds. If the data on Person A's machine gradually shifts to new topics, their feature branch might learn something totally different from Person B's. Fix: add a small penalty term that gently pulls each person's feature branch toward a shared anchor without averaging the noise."
+      },
+      {
+        "b": "Done right",
+        "html": "Tune negative learning so feature and noise branches visibly separate, use aggregation that down-weights unusual noise patterns to handle different kinds of garbage, and anchor feature branches gently to a global average without averaging noise. The mechanism then works: clean features stay local, noise is nearly canceled by averaging."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny federated learning setup with two machines (or simulate them). Give each person a pre-trained model and noisy data: real labels plus a 10–20% corruption rate (flip some labels randomly). Train a standard LoRA adapter on the noisy data, average it across the two machines, and measure how well it does on a clean test set (old task). Then train FedDR-LoRA the same way: split the adapter, use negative learning to separate branches, average only the noise branch. Measure how well the final model does on the clean test set. The demo must show that FedDR-LoRA avoids the catastrophic forgetting (drop in old-task accuracy) that naive federated LoRA suffers."
+    ],
+    "metric_eq": "Accuracy on old task with clean data = (correct predictions on clean test set) / (total test examples). Compare naive federated average (expect 60–70% for high noise) vs FedDR-LoRA (expect 85%+ for same noise).",
+    "closing": "The demo must make it impossible to miss: the decoupled, strategically-averaged adapter keeps old knowledge intact even when trained on noisy data, while the naive average degrades badly. The split was the move that mattered."
+  }
+}

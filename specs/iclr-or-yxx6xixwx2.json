@@ -1,0 +1,229 @@
+{
+  "slug": "iclr-or-yxx6xixwx2",
+  "title": "ROMI: Robust Value-Aware Model Learning for Offline RL",
+  "family": "Reinforcement Learning",
+  "one_liner": "Learn a dynamics model that predicts future states with predictable value, not just accuracy.",
+  "lead": "In offline reinforcement learning, you train a robot policy using only past recorded data—no new trials allowed. A smart trick is to also learn a model of how the world changes, so you can plan ahead using the data you have. But the model makes mistakes. The problem: if you keep using a wrong model to plan, you start trusting it on situations it has never seen, and your policy falls apart. This paper fixes that by making the model care about value—the actual usefulness of its predictions—not just accuracy.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Trusting a broken model",
+    "paras": [
+      "Offline RL starts with a frozen dataset of old experiences. You cannot try new things; you can only learn from what happened before. A naive approach: train a dynamics model (a predictor of what happens next) on this data, then use it to plan. The model learns to predict the next state accurately on average.",
+      "Here is what goes wrong: the model makes small mistakes on states it has rarely seen. When you use the model to plan ahead many steps, those tiny errors add up. Soon you are planning in an imagined world that looks nothing like the real one. The policy optimizes for this fake world and fails on real data."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "A model that is accurate on average can still be dangerously wrong on rare, uncertain states. Planning with it over many steps amplifies the errors."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Offline dataset",
+        "viz": "box",
+        "viz_args": "old recorded trajectories",
+        "caption": "You have only past data; cannot try new things."
+      },
+      {
+        "title": "2. Train a model",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["warm", 35], ["hot", 50], ["warm", 30], ["free", 15], ["hot", 45], ["warm", 28], ["free", 18], ["hot", 48], ["warm", 32], ["free", 22], ["warm", 35]],
+        "caption": "Model learns average predictions; unaware of rare states."
+      },
+      {
+        "title": "3. Plan with errors",
+        "viz": "box",
+        "viz_args": "model error → fake rollout",
+        "caption": "Small per-step mistakes pile up over many steps ahead."
+      },
+      {
+        "title": "4. Value-aware pivot",
+        "viz": "weights",
+        "viz_args": [["free", 18], ["moved", 52], ["hot", 60], ["moved", 45], ["warm", 28], ["moved", 48], ["warm", 32], ["free", 16], ["hot", 50], ["moved", 40], ["warm", 30], ["warm", 35]],
+        "caption": "Now weights are steered by value, not just error."
+      },
+      {
+        "title": "5. Stable rollouts",
+        "viz": "plain",
+        "caption": "Model predicts realistic, useful states at every step."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Measure value-awareness",
+        "text": "Score how close the model's predictions are to the minimum Q-value (the safe estimate of reward)."
+      },
+      {
+        "b": "Set an uncertainty zone",
+        "text": "Around the actual trajectory, mark a region where the model is allowed to drift slightly."
+      },
+      {
+        "b": "Train model on value",
+        "text": "Push model predictions toward states whose Q-value stays near the minimum, within that zone."
+      },
+      {
+        "b": "Adapt the zone size",
+        "text": "A bi-level optimizer adjusts how wide the zone is to balance stability and realism."
+      },
+      {
+        "b": "Plan with confidence",
+        "text": "Use the model for multi-step rollouts knowing predictions will stay in the value-safe region."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of training the model to minimize prediction error alone, the paper adds a new goal: make sure every predicted state has a Q-value close to the minimum Q-value (the conservative estimate). This steers the model toward realistic, safe trajectories."
+    ],
+    "object": "model predictions"
+  },
+  "hidden": {
+    "h2": "The value-awareness score",
+    "name": "How close to minimum Q-value",
+    "paras": [
+      "The paper measures one hidden quantity: how far is the model's predicted state from having the minimum Q-value? Imagine you have a Q-value function (a score of how good each state is). The minimum Q-value is the most conservative, pessimistic estimate. For each state the model predicts, the paper asks: does this state have a Q-value near the minimum? If yes, the prediction is value-aware. If it drifts toward higher Q-values, the model is optimistic and risky.",
+      "The paper estimates this by computing the Q-value of the model's predicted states and checking how close they are to the minimum Q-value estimate. A bi-level optimizer (a double loop that tunes hyperparameters while training) adapts the size of the allowed zone so the model stays value-safe without being overly pessimistic. This works because a tight zone (small delta) keeps predictions conservative, but too tight and the model cannot learn realistic diversity; a wide zone lets the model explore, but too wide and predictions drift toward risky states. The outer loop finds the sweet spot by measuring how well the policy trained with the model performs on held-out data."
+    ],
+    "heat": {
+      "cells": [["w1", 2, false], ["w2", 1, false], ["w3", 4, true], ["w4", 2, false], ["w5", 3, false], ["w6", 4, true], ["w7", 1, false], ["w8", 2, false], ["w9", 4, true], ["w10", 2, false], ["w11", 3, false], ["w12", 4, true]],
+      "caption": "Darker means value-aware (Q-value near minimum); white means risky optimism."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A good model prediction is one that leads to a state with realistic, conservative value—not an imagined high-value state. This is good because if the model predicts only low-value states, the policy trained with it will learn safe moves rather than risky fantasies."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The model adjusts its weights using a nudge (gradient) that pulls predictions into a state uncertainty set centered on actual states, where the value function stays close to its minimum."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why value-aware learning stops the collapse",
+    "paras": [
+      "Here is the concrete reason this works. In offline RL, you train a value function (Q-function) on the recorded data. This Q-function is conservative: it tends to underestimate the true reward because it has never seen optimistic moves that worked. Now, when you learn a model and plan ahead, you use this conservative Q-function to score the rollouts. If the model predicts a state that looks high-value (Q-value higher than the minimum), the Q-function does not trust it—because the state is out of distribution (unlike anything in the original data). So the method says: keep model predictions close to states that have Q-value near the minimum. Why does this work? Because the minimum Q-value is based on real observed data. By constraining the model to predict states with this value, you keep it grounded in reality. Small prediction errors stay within a safe zone; they do not snowball into fantasies.",
+      "The second clever part is the bi-level optimization. A simple approach would be to set the uncertainty zone size by hand, but that breaks with different datasets. Instead, the method learns the zone size as part of training. An outer loop tunes the zone size to maximize value-aware performance. This adaptivity means the model can be tighter (more accurate) on easy parts of the data and looser (more forgiving) on hard parts, because the outer loop measures which zone size leads to better policy performance and adjusts accordingly. The result: stable, realistic rollouts that respect both what actually happened and what is safe to imagine."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Recorded trajectory state"
+        },
+        {
+          "t": "step",
+          "s": "Model predicts next state",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Compute Q-value of prediction",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Check if Q is near minimum Q-value",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Adjust model if Q is too high",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Value-safe prediction"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The value-aware loss",
+    "words": "minimize the prediction error plus a penalty when the predicted state's Q-value drifts too far from the minimum Q-value, scaled by how uncertain we are about this state",
+    "equation": "L = E[||s_next - s_pred||^2] + lambda * E[max(0, Q(s_pred) - Q_min - delta)]",
+    "symbols": [
+      ["s_next", "the actual next state from data"],
+      ["s_pred", "the state predicted by the model"],
+      ["Q(s_pred)", "the Q-value (value estimate) of the predicted state"],
+      ["Q_min", "the minimum Q-value from the data"],
+      ["delta", "the adjustable margin (uncertainty zone size)"],
+      ["lambda", "the strength of the value-awareness penalty"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose delta = 2.0 (allowed zone size) and lambda = 0.5 (penalty strength).",
+        "The model predicts a state with actual next-state error 0.8 and Q-value 15.0.",
+        "But Q_min = 10.0, so Q(s_pred) - Q_min - delta = 15 - 10 - 2 = 3.0 (it drifted too high).",
+        "Penalty = 0.5 * max(0, 3.0) = 1.5.",
+        "Total loss = 0.8^2 + 1.5 = 0.64 + 1.5 = 2.14.",
+        "If the model predicts a state with Q(s_pred) = 11.5 instead (within the zone), the penalty = 0.5 * max(0, 11.5 - 10 - 2) = 0, so loss = 0.64 only.",
+        "The model is incentivized to keep Q-values low."
+      ]
+    },
+    "note": "The equation penalizes the model when its predictions jump to high Q-values, anchoring it to the data-driven conservative estimate."
+  },
+  "bars": {
+    "h2": "How it compares",
+    "charts": [
+      {
+        "title": "RAMBO (overly conservative, unstable)",
+        "rows": [
+          ["Average offline performance", 45, "bad"],
+          ["Exploiting model errors", 78, "bad"],
+          ["Gradient stability", 32, "bad"]
+        ],
+        "note": "Tends to be too pessimistic and suffers from training instability."
+      },
+      {
+        "title": "ROMI (controlled conservatism, stable)",
+        "rows": [
+          ["Average offline performance", 74, "good"],
+          ["Exploiting model errors", 28, "good"],
+          ["Gradient stability", 82, "good"]
+        ],
+        "note": "Value-awareness tuned via bi-level optimization keeps the model grounded and training smooth."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Q-value function itself is wrong.",
+        "html": "ROMI relies on a Q-value function trained on the offline data. If that Q-function is badly miscalibrated (learns spurious high values), then anchoring the model to its minimum is less effective. The method assumes the Q-function is a reasonably honest, conservative estimate."
+      },
+      {
+        "warn": true,
+        "b": "Uncertainty zone too small.",
+        "html": "If the margin delta is tuned too tightly, the model may not be able to explore enough variation, leading to overly simplistic predictions that fail to capture the true diversity of real trajectories."
+      },
+      {
+        "warn": true,
+        "b": "Multi-step compounding.",
+        "html": "Even value-aware predictions can drift after many rollout steps if the per-step zones are narrow. The paper addresses this with adaptive weighting, but extremely long horizons remain a challenge."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the Q-function is well-trained on data, the zone size is tuned adaptively, and rollouts stay within a reasonable horizon, ROMI keeps the model trustworthy across offline RL tasks."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple offline RL task: a robot arm reaching a target, with a small recorded dataset of random moves. Train a naive model (standard prediction error minimization) and train ROMI (with value-aware loss). Use both to plan a policy via a planning algorithm (like an optimizer that samples many rollouts and picks the best, or a tree search that explores branches). Run both policies on the real simulator and measure success rate."
+    ],
+    "metric_eq": "success_rate = (number of reaching episodes that touch target) / (total rollouts)",
+    "closing": "The demo must show that ROMI's policy succeeds more often because its rollouts stay realistic, whereas the naive model's rollouts drift into impossible states and lead to bad plans."
+  }
+}

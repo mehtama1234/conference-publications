@@ -1,0 +1,224 @@
+{
+ "slug": "icml-or-40fuedwvh3",
+ "title": "FOCUS: DLLMs Know How to Tame Their Compute Bound",
+ "family": "Efficiency & Systems",
+ "one_liner": "A diffusion language model can run faster by skipping the tokens it is not ready to decode yet, instead of wasting compute on impossible tokens.",
+ "lead": "Diffusion language models (models that fill in words gradually, like painting a picture) decode differently than traditional models. Instead of one word at a time, they refine all words together in steps. But that makes them slow: at each step, the model computes predictions for all words, even though only some of them are ready to be picked. FOCUS fixes this by skipping the unreadable words and focusing work on the ones the model can actually use.",
+ "nav": [["theme-efficiency-systems.html","Efficiency & Systems"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Diffusion models waste compute on impossible words",
+  "paras": [
+   "A diffusion language model works in stages, like revealing words bit by bit. At stage one, all words are fuzzy guesses. By stage ten, most are clear. But at each stage, the model runs its compute on ALL words in the batch—even the ones still too fuzzy to decide on. Only some words are ready (confident enough to pick); the rest are just wasting compute cycles.",
+   "A beginner would try running the same compute on all words, hoping bigger hardware solves it. That fails because the hardware is already maxed out—the limit is not electricity, it is the time each word sits waiting to be decoded."
+  ],
+  "callout": {
+   "b": "The fix in one sentence.",
+   "html": "Skip words that are not ready to decode yet; run compute only on the ones the model can use, and squeeze more words into the same time budget."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The setup",
+    "viz": "weights",
+    "viz_args": [["free",40],["free",35],["free",42],["free",38],["free",45]],
+    "caption": "All five words are fuzzy guesses at step one."
+   },
+   {
+    "title": "2. The problem",
+    "viz": "weights",
+    "viz_args": [["free",40],["warm",35],["free",42],["free",38],["warm",45]],
+    "caption": "Two words are clear; the model still computes all five, wasting work."
+   },
+   {
+    "title": "3. The insight",
+    "viz": "box",
+    "viz_args": "Focus says: word 2 and 5 are important now.",
+    "caption": "The model's focus tells which words it trusts to decode."
+   },
+   {
+    "title": "4. The move",
+    "viz": "weights",
+    "viz_args": [["free",40],["hot",35],["free",42],["free",38],["hot",45]],
+    "caption": "Keep compute on ready words; evict the fuzzy ones until they ripen."
+   },
+   {
+    "title": "5. The payoff",
+    "viz": "box",
+    "viz_args": "3.5× more tokens decoded per second.",
+    "caption": "Same compute budget, more words done because no cycles wasted."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Measure readiness",
+    "text": "Look at the focus weights (how much the model is focusing on each word) to rank which words are ready to decode."
+   },
+   {
+    "b": "Sort the batch",
+    "text": "Reorder the batch so decodable words come first; non-decodable words go to the back."
+   },
+   {
+    "b": "Trim computation",
+    "text": "Run the model only on the front part (the ready words); skip the back part for now."
+   },
+   {
+    "b": "Evict and requeue",
+    "text": "When a word is done, remove it from compute; when a fuzzy word gets ready, move it to the front."
+   },
+   {
+    "b": "Increase throughput",
+    "text": "By always running at full capacity on ready words, the system decodes more words per second."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper changes which words get computed on at each decoding step. Instead of computing all words, FOCUS computes only the ready ones—using how much the model is focusing on each word to spot which words the model is confident about, and skipping the rest until they ripen."
+  ],
+  "object": "Word computation schedule"
+ },
+ "hidden": {
+  "h2": "Word readiness score",
+  "name": "Word importance from focus",
+  "paras": [
+   "At each diffusion step, the model has an attention map (a set of weights showing how much it is focusing on each word). A high focus weight on word three means the model trusts its prediction for word three and is ready to decode it. A low weight means the word is still too fuzzy.",
+   "The paper measures this importance score directly from the model's own focus output. No extra computation; the signal is already there. The insight is that words with high focus (high importance) are the ones the model will actually decode in the next step—so the system should evict low-importance words and keep them off the GPU until they ripen."
+  ],
+  "heat": {
+   "cells": [["t1",1,false],["t2",4,true],["t3",1,false],["t4",2,false],["t5",4,true],["t6",1,false],["t7",3,true],["t8",1,false],["t9",2,false],["t10",3,false],["t11",1,false],["t12",2,false]],
+   "caption": "Darker tokens have higher attention (readier to decode)."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The model's attention tells you which tokens it is about to decide on. Use that signal to predict which tokens will actually be decodable."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "Attention-derived token importance scores correlate strongly with token-wise decoding probability, enabling dynamic computation reallocation."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: evict the unready to serve the ready faster",
+  "paras": [
+   "Diffusion decoding is bottlenecked by how many words fit on the GPU at once. Each step, the model tries to decode many words in parallel, but only some are actually decodable. The rest sit idle, consuming memory and GPU time for nothing.",
+   "The paper's move is simple: evict the non-decodable words and pack more decodable words into the same GPU. The focus weights tell you which words are ready—the model is focused on that word, so it is ready to decode. The system reorders the batch to put ready words first, computes only on those, and leaves non-ready words in a buffer. When a word becomes ready, the system moves it to the front of the queue. When a word is done, it leaves. The result: the GPU is always at full capacity on words the model is actually ready to decode, so it decodes more words per second with the same hardware."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Batch of all tokens, fuzzy and clear"
+    },
+    {
+     "t": "step",
+     "s": "Read attention weights to rank readiness",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Sort: ready tokens to front, unready to back"
+    },
+    {
+     "t": "step",
+     "s": "Compute only the front (ready) tokens"
+    },
+    {
+     "t": "step",
+     "s": "Remove decoded tokens; move newly-ready tokens to front"
+    },
+    {
+     "t": "output",
+     "s": "More decoded words per unit time because GPU never idles"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The scheduling equation",
+  "words": "effective batch size (tokens computed) equals ready tokens at each step; throughput scales with the fraction of tokens ready times the batch size",
+  "equation": "throughput = (ready_fraction) × (batch_size) × (compute_per_token) / time_per_step",
+  "symbols": [
+   ["ready_fraction","fraction of tokens with attention weight above threshold"],
+   ["batch_size","number of tokens in the batch"],
+   ["compute_per_token","GPU operations per token"],
+   ["time_per_step","time for one diffusion step"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Batch of 100 tokens. At step 5, attention weights say 35 tokens are ready (threshold: importance > 0.6).",
+    "Standard compute: run all 100 → 100 × cost = 1000 ops.",
+    "FOCUS compute: run only 35 ready → 35 × cost = 350 ops.",
+    "Same time per step; FOCUS finishes 350 ops while standard finishes 1000. But FOCUS can now fit more batches in the same wall-clock time: 1000 / 350 = 2.86× more batches, thus 2.86× throughput gain (the paper shows 3.52× in practice with better reuse)."
+   ]
+  },
+  "note": "By focusing compute on the ready tokens only, FOCUS packs more ready tokens into the same time budget, lifting throughput as if the batch size for useful work tripled."
+ },
+ "bars": {
+  "h2": "Throughput comparison",
+  "charts": [
+   {
+    "title": "Standard LMDeploy (all tokens always computed)",
+    "rows": [
+     ["Step 1: 100 tokens computed",150,"bad"],
+     ["Step 2: 100 tokens computed",150,"bad"],
+     ["Step 3: 100 tokens computed",150,"bad"],
+     ["Total decoded",30,"bad"]
+    ],
+    "note": "Most compute wasted on unreadable tokens."
+   },
+   {
+    "title": "FOCUS (compute only ready tokens)",
+    "rows": [
+     ["Step 1: 35 ready tokens computed",52,"good"],
+     ["Step 2: 38 ready tokens computed",53,"good"],
+     ["Step 3: 42 ready tokens computed",55,"good"],
+     ["Total decoded",106,"good"]
+    ],
+    "note": "Same compute; FOCUS decodes over 3 times more words because no wasted cycles."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Attention weight threshold too high.",
+    "html": "If you mark a token ready when attention is still uncertain, you evict it too early and the decode fails. The threshold must be tuned per model."
+   },
+   {
+    "warn": true,
+    "b": "Batch reordering overhead.",
+    "html": "Constantly sorting and moving tokens costs GPU time. If reordering is slow, the gains from compute savings vanish. Efficient reordering (via GPU sort) is critical."
+   },
+   {
+    "warn": true,
+    "b": "Attention-decode correlation breaks.",
+    "html": "If the model's attention weights do NOT predict which tokens will actually decode, the sorting hurts: you evict ready tokens by mistake. This only works if the model's focus aligns with decoding readiness."
+   },
+   {
+    "b": "Done right.",
+    "html": "Use the model's actual focus weights (no extra learned weights). Tune the threshold on validation data once per model architecture. Implement reordering as a fast parallel sort so it is faster than the compute savings it enables."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a small diffusion language model (or use an existing one like DiffusionBERT). Run decoding on a large batch of sequences. Implement FOCUS: extract attention weights at each step, compute the importance score for each token, sort the batch to put high-importance tokens first, and skip compute on the rest. Measure tokens decoded per second (throughput) against the baseline (standard compute on all tokens)."
+  ],
+  "metric_eq": "speedup = throughput_FOCUS / throughput_baseline; quality = task_accuracy_FOCUS minus task_accuracy_baseline",
+  "closing": "The demo must show that FOCUS decodes 2 to 3 and a half times more tokens per second without losing task accuracy."
+ }
+}

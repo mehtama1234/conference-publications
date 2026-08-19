@@ -1,0 +1,184 @@
+{
+  "slug": "icml-or-ujjfkcj7k9",
+  "title": "Task-Driven Subspace Decomposition for LoRA Continual Learning",
+  "family": "Representation & Self-Supervised Learning",
+  "one_liner": "When a model learns new tasks in sequence, LoDA splits its weight-update space into shared directions (for reusing old knowledge) and task-only directions (for learning new things), avoiding the trap of throwing away useful old patterns.",
+  "lead": "Imagine training a model on Task A, then Task B, then Task C without forgetting what it learned about A. Most methods try to lock down weights from old tasks to stop forgetting. But LoRA (Low-Rank Adaptation) updates weights efficiently by changing only a tiny slice of the model. The trap: when you protect old weights too strictly, the model cannot reuse patterns from Task A when solving Task B. LoDA fixes this by splitting the update space: some directions are shared (the model can move here to borrow old knowledge), and some are task-only (to learn the new thing without stepping on old patterns). This means the model keeps the best of both: old knowledge stays alive, and new tasks can build on it.",
+  "nav": [["theme-representation-self-supervised-learning.html","Representation & Self-Supervised Learning"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "The Continual Learning Trap",
+    "paras": [
+      "When a model learns Task A very well, its weights shift into a shape optimized for that task. Now comes Task B. If the model just trains on B, those weights shift again, erasing the shape that made A work (this is called catastrophic forgetting). A beginner might think: lock the old weights down, only train the new parts. But in a practical world, Task B shares some patterns with Task A—same objects, same relationships. If you lock weights completely, the model cannot reuse those shared patterns, so it either forgets A or fails at B.",
+      "LoRA made continual learning more efficient by adapting only a small slice of weights, not the whole model. But LoRA-based methods still face a puzzle: when tasks overlap in theme, old tasks' null space (the directions where old weights do not move) can still be nearly silent for new tasks. The model is forced to either step on old patterns (forgetting) or waste effort finding new directions (failing at the new task)."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "LoDA splits the update space into shared and task-specific directions. Shared directions stay fixed so their patterns survive to the next task; task-specific directions let each new task learn privately without stepping on old patterns."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Model learns Task A",
+        "viz": "weights",
+        "viz_args": [["hot",70],["hot",65],["warm",40],["free",15],["free",10],["hot",68],["warm",35],["free",8],["free",12],["warm",42],["free",5],["free",9]],
+        "caption": "Weights shift into an A-shaped pattern. Some weights are heavily used (hot), others sit still (free)."
+      },
+      {
+        "title": "2. Task B arrives but looks different",
+        "viz": "weights",
+        "viz_args": [["hot",68],["moved",45],["moved",38],["warm",50],["free",12],["hot",72],["moved",42],["warm",48],["free",11],["moved",35],["warm",55],["free",9]],
+        "caption": "Old weights (hot) and new task's needed changes (moved, red) collide. Directions overlap messily."
+      },
+      {
+        "title": "3. LoDA finds two paths",
+        "viz": "weights",
+        "viz_args": [["hot",68],["hot",65],["warm",40],["warm",50],["free",12],["hot",70],["warm",42],["warm",48],["warm",45],["warm",38],["free",8],["free",10]],
+        "caption": "Shared direction (warm) carries patterns both tasks use. Task-specific path (separate) learns only what's new."
+      },
+      {
+        "title": "4. Gradient-aligned optimization tunes up-projections",
+        "viz": "box",
+        "viz_args": "Carefully adjust how shared patterns feed into each task",
+        "caption": "Shared direction is fixed; only how each task reads it changes, protecting both old and new."
+      },
+      {
+        "title": "5. Both tasks score well, knowledge shared",
+        "viz": "weights",
+        "viz_args": [["hot",68],["hot",65],["warm",48],["warm",52],["free",10],["hot",70],["warm",45],["warm",50],["warm",42],["warm",40],["free",8],["free",9]],
+        "caption": "Task A's pattern survives (hot). Task B built on shared ground (warm). Both work together."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {"b": "Measure projection energy","text": "After each task, study which weight-update directions were most active (where training pushed strongest)."},
+      {"b": "Split the space","text": "Separate shared directions (used by this task AND past tasks) from task-only directions (this task only)."},
+      {"b": "Fix shared ground","text": "Lock the shared directions in place so they carry old patterns forward unchanged to future tasks."},
+      {"b": "Train how to read shared","text": "Learn how each task reads and applies the shared directions. Since shared directions are locked, the model can only adjust the coefficients that weight each shared direction, forcing adaptation without disturbing old patterns."},
+      {"b": "Recalibrate and integrate","text": "After learning, derive a closed-form adjustment for how the shared direction combines with the model, then merge into the backbone."}
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "LoDA changes the LoRA update space itself. Instead of defending old tasks by building new tasks' updates in a null space (the leftover directions), LoDA explicitly splits the space into two: a shared subspace (directions both old and new tasks can use) and a task-only subspace (private to the new task). The shared space is fixed; only how each task applies it changes."
+    ],
+    "object": "The LoRA update space"
+  },
+  "hidden": {
+    "h2": "Projection energy: how active is each direction",
+    "name": "Projection energy (gradient signal in each direction)",
+    "paras": [
+      "Projection energy is a measure: for any direction in weight-update space, how much did this task actually push the gradients through that direction? A high-energy direction was heavily used; a low-energy direction was barely touched. Think of it like heat: a busy highway is warm, a quiet back road is cool.",
+      "LoDA estimates projection energy by tracking which directions the gradients point toward during training. Directions with big gradients all pointing one way are high energy; directions where gradients cancel out or stay small are low energy. This tells LoDA which weight-update paths the task truly needed."
+    ],
+    "heat": {
+      "cells": [["past-task-1",4,true],["shared",3,true],["past-task-2",4,false],["task-specific",2,false],["shared",3,true],["past-task-1",2,false],["task-specific",1,false],["past-task-2",3,false],["shared",4,true],["task-specific",2,false],["past-task-1",1,false],["quiet",1,false]],
+      "caption": "Darker means higher projection energy (more gradients flowing). Highlighted cells show shared directions across tasks."
+    },
+    "reads": [
+      {"b": "Plain reading.","html": "Projection energy tells you which weight-update directions were actually busy during learning. If a direction had high energy, the task genuinely needed it."},
+      {"b": "Paper reading.","html": "LoDA uses projection energy perspective (analyzing which subspaces carry gradient signal) to identify both shared and task-specific dimensions in the LoRA weight-update table."}
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting the space keeps knowledge alive",
+    "paras": [
+      "Old methods lock weights down to prevent forgetting, but they also block knowledge reuse. LoDA solves this by realizing: the model does not need to move weights in shared directions—it just needs to learn a new way to read those directions for the new task. Think of a library: if you lock the books on the shelf (shared knowledge), you can still train staff (the model) to pull different books for different questions.",
+      "LoDA fixes the shared weight-update directions and only trains how the model reads and combines them via a process called Gradient-Aligned Optimization. This keeps the old patterns alive (the books stay put) and lets the new task reuse them (staff learn new retrieval strategies). A closed-form recalibration ensures the shared direction integrates smoothly into the model backbone after the task is done, so the next task starts fresh but with the library still intact."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input","s": "New task and past task's weight updates"},
+        {"t": "step","s": "Compute projection energy: which update directions were busy.","hl": true},
+        {"t": "step","s": "Identify shared directions (high energy in both tasks)."},
+        {"t": "step","s": "Lock shared directions; train only how to read them (up-projections).","hl": true},
+        {"t": "step","s": "Recalibrate shared contribution to final weights."},
+        {"t": "output","s": "Updated model with reusable old patterns + new task skill"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "Energy-based decomposition and recalibration",
+    "words": "Loss is (new task loss) plus (penalty for moving shared directions) plus (penalty for redundancy between tasks). After learning, apply a closed-form correction to the shared direction to achieve joint optimality across tasks.",
+    "equation": "L = L_task + lambda_shared * ||A_shared||^2 + lambda_task * ||A_task||^2; then A_shared_updated = closed_form(gradients_shared, F_shared)",
+    "symbols": [
+      ["L","total loss for this task"],
+      ["L_task","how well the model performs on the new task"],
+      ["A_shared","the shared weight-update matrix (fixed row, learned column mapping)"],
+      ["A_task","the task-specific weight-update matrix"],
+      ["lambda_shared","penalty strength for moving shared directions"],
+      ["lambda_task","penalty strength for non-sparse task updates"],
+      ["F_shared","energy matrix (which directions carry gradient signal)"],
+      ["||·||^2","the squared size (how big the update is)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a shared direction carries energy F_shared = 3.0 and was moving by 0.5 units.",
+        "Penalty for moving shared: lambda_shared * 0.5^2 = 2.0 * 0.25 = 0.5 (high cost, stay still).",
+        "A task-specific direction carries energy F_task = 1.0 and moves 0.4 units.",
+        "Penalty for moving task-specific: lambda_task * 0.4^2 = 1.0 * 0.16 = 0.16 (low cost, move freely).",
+        "Result: shared direction barely moves (0.05 units), task-specific direction moves more (0.35 units). Old knowledge stays, new learning happens.",
+        "Closed-form recalibration: shift A_shared to cancel gradients on shared direction, ensuring future tasks see a clean slate."
+      ]
+    },
+    "note": "The equation penalizes moving shared directions more than task-specific ones, and recalibration ensures the shared direction does not interfere with the next task's learning."
+  },
+  "bars": {
+    "h2": "Forgetting versus learning on new tasks",
+    "charts": [
+      {
+        "title": "Old method (protect via null space)",
+        "rows": [
+          ["Task A before any learning",100,"good"],
+          ["Task A after learning B",55,"bad"],
+          ["Task B after learning B",82,"good"]
+        ],
+        "note": "Protecting old weights (avoiding their null space) blocks knowledge reuse, so Task B cannot borrow patterns from Task A."
+      },
+      {
+        "title": "LoDA (shared + task-specific)",
+        "rows": [
+          ["Task A before any learning",100,"good"],
+          ["Task A after learning B",88,"good"],
+          ["Task B after learning B",86,"good"]
+        ],
+        "note": "Shared direction stays intact (A stays high), and Task B reuses those patterns, so both tasks perform well."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Tasks are completely unrelated.","html": "If Task B shares no patterns with Task A, the shared direction is wasted space. LoDA still works (task-specific learning proceeds), but the method's advantage shrinks. The paper assumes some task correlation."
+      },
+      {
+        "warn": true,
+        "b": "Projection energy estimation is noisy.","html": "If computing which directions carried gradient signal is unstable (too little data, high randomness), the split between shared and task-specific is wrong, and both old and new tasks suffer."
+      },
+      {
+        "warn": true,
+        "b": "Too many tasks overwhelm the shared space.","html": "If Task C and Task D both add new patterns to the shared direction, it becomes a bottleneck. Later tasks may run out of shared capacity and be forced into task-specific subspace, reducing reuse."
+      },
+      {
+        "b": "Done right.","html": "When tasks genuinely overlap in theme and projection energy is stable, LoDA keeps old knowledge intact while learning new tasks, and each task can efficiently reuse the shared library."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a sequence: train on Task A (e.g., classify animals), then Task B (classify vehicles), then Task C (classify furniture). All three share the LoRA weight space. Measure: (1) How well does the model still score on Task A after training B and C? (2) How well does it score on Task B and C? (3) How stable is the shared direction across all three tasks (low change in the shared subspace)?"
+    ],
+    "metric_eq": "Forgetting_A = Score_A_before_B - Score_A_after_BC; Score_BC_after_BC = (Score_B + Score_C) / 2; Shared_stability = ||shared_direction_after_B - shared_direction_after_C||",
+    "closing": "The demo must show that LoDA achieves both high scores on all tasks (A, B, C) AND keeps the shared direction stable across tasks, proving that old knowledge survives and is genuinely reused."
+  }
+}

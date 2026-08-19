@@ -1,0 +1,242 @@
+{
+  "slug": "icml-or-drhlbrurhy",
+  "title": "Anchored Decoding: Suppressing Copyright Violation in Language Models",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "Keep a language model from reproducing copyrighted text by steering its predictions toward a safe model, one token at a time.",
+  "lead": "Language models sometimes output long passages word-for-word from their training data. When that training data includes copyrighted books or articles, the model is essentially reselling someone else's work. This paper proposes a simple fix: at each step of text generation, blend the risky model's predictions with a safe model's predictions in just the right proportions, so the final text never strays too close to memorized copyrighted material.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Language models leak copyrighted material",
+    "paras": [
+      "When you train a language model on a huge mix of internet text—some copyrighted, some free to use—the model memorizes chunks of it. When you ask the model to finish a sentence, it sometimes outputs entire paragraphs from books or articles word-for-word, because that's a pattern it learned.",
+      "A naive solution is to block known copyrighted phrases. But this doesn't work: the risky model contains thousands of copyrighted passages, most unknown; a blocklist catches only a tiny fraction. Even building a safer model by training only on permissive data is expensive and slows down research."
+    ],
+    "callout": {
+      "b": "The real problem:",
+      "html": "You have a model trained on all available data that memorizes copyrighted material, and you cannot retrain it. You need a lightweight, plug-and-play way to prevent copying without sacrificing the model's quality."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Two models",
+        "viz": "box",
+        "viz_args": "Risky (trained on all data) vs Safe (trained on permissive data only)",
+        "caption": "Risky model and safer model start decoding."
+      },
+      {
+        "title": "2. At each step, both predict",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["warm", 25], ["free", 15], ["hot", 45], ["warm", 20], ["free", 10], ["hot", 35], ["warm", 30], ["free", 12], ["hot", 50], ["warm", 18], ["free", 8]],
+        "caption": "Risky model outputs one guess (left). Safe model outputs another (right)."
+      },
+      {
+        "title": "3. Anchored decoding blends them",
+        "viz": "weights",
+        "viz_args": [["moved", 38], ["free", 20], ["moved", 42], ["free", 18], ["moved", 28], ["free", 15], ["moved", 43], ["free", 22]],
+        "caption": "Mix the risky predictions toward the safe ones in exact proportions."
+      },
+      {
+        "title": "4. A spending budget",
+        "viz": "box",
+        "viz_args": "Budget: 10 bits. Spent: 3. Left: 7. Init penalty: 2.",
+        "caption": "Track how much copyright distance the model has used up."
+      },
+      {
+        "title": "5. Text stays safe",
+        "viz": "plain",
+        "caption": "Final output avoids verbatim copying while remaining fluent."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Accept a prompt",
+        "text": "User gives an input sentence."
+      },
+      {
+        "b": "Check initial risk",
+        "text": "Measure how similar the prompt is to known copyrighted data."
+      },
+      {
+        "b": "Allocate a budget",
+        "text": "Decide how much divergence from the safe model you can afford over the full response."
+      },
+      {
+        "b": "Blend at each step",
+        "text": "For each new word, mix the risky and safe predictions so the result stays within budget."
+      },
+      {
+        "b": "Output text",
+        "text": "Sample from the blended score list to generate the response, checking budget at each step."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "At each step of text generation, instead of sampling from the risky model alone, the paper computes a blend of the risky and safe model's score lists (how likely each possible word is). The blend proportion is chosen automatically to keep the result close to the safe model."
+    ],
+    "object": "the next-word score list"
+  },
+  "hidden": {
+    "h2": "Kullback-Leibler divergence: the distance between two probability lists",
+    "name": "KL divergence (the distance from safe)",
+    "paras": [
+      "At each decoding step, the risky model outputs a probability for each possible next word (say, word A gets 30%, word B gets 50%, word C gets 20%). The safe model outputs its own probabilities (perhaps word A is 20%, word B is 60%, word C is 20%). Kullback-Leibler divergence is a number that measures how different these two score lists are. It is zero when they match exactly and grows as they diverge.",
+      "The paper estimates KL divergence between the risky and safe score lists at each step. Then it controls this divergence by adjusting the blend: if you are at risk of using up your budget too fast, it forces the blended score list closer to the safe one. This keeps the generation trajectory bounded away from copying."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 1", 1, false],
+        ["Step 2", 2, true],
+        ["Step 3", 4, true],
+        ["Step 4", 2, false],
+        ["Step 5", 3, false],
+        ["Step 6", 1, false],
+        ["Step 7", 2, true],
+        ["Step 8", 3, true],
+        ["Step 9", 1, false],
+        ["Step 10", 2, false],
+        ["Step 11", 4, true],
+        ["Step 12", 2, false]
+      ],
+      "caption": "Darker means higher divergence at that step. Highlights show where budget was spent."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Think of a score list as a pie chart where each slice is a word. KL divergence is how differently shaped the risky pie and the safe pie are. When they are identical, divergence is zero. The paper keeps the cumulative divergence under a user-set limit, like a carbon budget."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The method enforces that the per-step KL divergence from the safe model to the blended score list stays within a time-varying budget at each step, and proves that this per-step constraint implies a global sequence-level guarantee for any sequence length."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why blending toward the safe model stops copying",
+    "paras": [
+      "The risky model has learned copyrighted patterns during training, so when certain prompts trigger those patterns, the risky model's predictions concentrate heavily on the copyrighted words. A safe model, trained only on permissive data, has never seen those patterns, so its predictions are different. By mixing the risky predictions toward the safe ones, the blended score list spreads probability across more possible continuations, so any single memorized phrase loses its peak probability.",
+      "The paper also introduces two practical tricks. First, it checks the prompt at the start: if the prompt itself is already close to a memorized passage, it reduces the budget (prefix debt). Second, it uses an adaptive banking rule: on steps where the two models naturally agree (low risk), it saves unused budget for later steps where they disagree (high risk). This means the model can still pick the risky model's choice when both models agree, because copying is unlikely when they agree."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Prompt and information budget K"
+        },
+        {
+          "t": "step",
+          "s": "Check if prompt is memorized; subtract prefix debt",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "At each word, measure KL divergence between risky and safe",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Compute blend weight: stay within per-step budget at this word",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sample word from blended score list; update budget",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Safe text with reduced copying risk"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The blending equation",
+    "words": "At each step t, compute a blended distribution p_t_star that stays within KL distance k_t from the safe model while staying as close as possible to the risky model. The blend weight lambda is chosen by solving: KL divergence of blended distribution minus safe model equals exactly k_t.",
+    "equation": "p_t_star(lambda) = (1/Z) * exp( (1/lambda) * log(p_r) ) * p_s^(lambda / (1 + lambda))    subject to: KL(p_t_star || p_s) = k_t",
+    "symbols": [
+      ["p_r", "the risky model's probability for next token"],
+      ["p_s", "the safe model's probability for next token"],
+      ["p_t_star", "the blended (safe) distribution we output"],
+      ["lambda", "the blend strength (larger lambda = safer, more like p_s)"],
+      ["k_t", "the budget we can spend at step t"],
+      ["KL(...)", "Kullback-Leibler divergence, a distance measure between two probability distributions"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say risky model: word A = 0.5, word B = 0.3, word C = 0.2.",
+        "Safe model: word A = 0.3, word B = 0.4, word C = 0.3.",
+        "Budget k_t = 0.1 bits (you can diverge a small amount from safe).",
+        "Solver finds lambda = 2.0 that makes KL distance exactly 0.1.",
+        "Blended output: word A = 0.35, word B = 0.38, word C = 0.27.",
+        "This is closer to safe (0.3, 0.4, 0.3) than risky (0.5, 0.3, 0.2).",
+        "If k_t were 0 (no budget), lambda would be very large, output would equal the safe model exactly."
+      ]
+    },
+    "note": "Lambda solves the constraint equation in closed form using Newton's method, so blending is fast enough to do at every token."
+  },
+  "bars": {
+    "h2": "Balancing safety and quality",
+    "charts": [
+      {
+        "title": "Just the risky model (baseline)",
+        "rows": [
+          ["Copyright copying", 68, "bad"],
+          ["Text fluency", 92, "good"],
+          ["Factuality", 88, "good"]
+        ],
+        "note": "Risky model is fluent but copies copyrighted material."
+      },
+      {
+        "title": "Anchored Decoding (this paper)",
+        "rows": [
+          ["Copyright copying", 17, "good"],
+          ["Text fluency", 85, "good"],
+          ["Factuality", 84, "good"]
+        ],
+        "note": "Removes 75% of the copying problem while staying nearly as fluent and factual."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Overly tight budget.",
+        "html": "If you set the budget too small, the blended model becomes too much like the safe model, and quality drops. The paper introduces a knob to let users trade safety for quality."
+      },
+      {
+        "warn": true,
+        "b": "Prompt is already copyrighted.",
+        "html": "If the user's input prompt itself is verbatim from copyrighted material, the output will likely follow, because the model must condition on the prompt. The paper detects this (prefix debt) and reduces the budget, but cannot fully prevent it."
+      },
+      {
+        "warn": true,
+        "b": "Vocabulary mismatch.",
+        "html": "The risky and safe models may have been trained on different text, so they might tokenize words differently (e.g., breaking words into different pieces). The paper introduces a byte-level variant (Anchored-Byte Decoding) to handle this, but it is more expensive."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the safe model has truly different score lists and the budget is tuned appropriately, the method provably guarantees bounded KL divergence over the whole sequence, so copying risk is mathematically capped."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small experiment with two open models: a risky model that has memorized passages from a public book, and a safe model trained only on permissive data. Generate continuations from the same prompts using (1) the risky model alone, (2) the safe model alone, and (3) Anchored Decoding with two different budgets (one tight, one loose). Measure the longest-common-substring between each output and the original book, and also have humans rate the fluency and factuality of each output."
+    ],
+    "metric_eq": "copying_risk = longest_common_substring_length between output and memorized_passage; fluency = average rating 1-5; factuality = fraction of claims that are true",
+    "closing": "The demo should show that Anchored Decoding pushes copying_risk down toward the safe model (75% reduction) while keeping fluency much higher than using the safe model alone. A tighter budget makes copying_risk lower but fluency worse; a looser budget does the opposite. This shows the user-controlled trade-off is real and useful."
+  }
+}

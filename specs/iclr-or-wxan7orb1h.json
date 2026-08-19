@@ -1,0 +1,238 @@
+{
+  "slug": "iclr-or-wxan7orb1h",
+  "title": "FreeKV: Boosting KV Cache Retrieval for Efficient LLM Inference",
+  "family": "Efficiency & Systems",
+  "one_liner": "FreeKV speeds up LLM inference by pulling key-value data from memory in the background, so the GPU doesn't have to wait.",
+  "lead": "When a large language model answers a long question, it keeps a massive lookup table (the KV cache) in memory that grows with each word. Retrieving data from this table becomes a bottleneck. FreeKV solves this by fetching the needed data speculatively—before the GPU even asks—and by storing data smartly across both CPU and GPU memory.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The KV cache bottleneck",
+    "paras": [
+      "When an LLM (a neural network that generates text one word at a time) processes a long document, it maintains a lookup table called the KV cache. This table stores past context so the model can reference earlier words, because when the model generates the next word, it needs to know what all the previous words were in order to pick the most sensible continuation. The cache size grows with every new word—a 1,000-word document creates a cache 1,000 times bigger than a 1-word cache.",
+      "To find the right cached values when generating the next word, the GPU must fetch them from memory. This fetch is slow: the data lives far from where the computation happens, and memory access causes the GPU to idle waiting. With long contexts, this idle time kills performance. Naive approaches try to compress the cache by dropping tokens (cutting out words), but this breaks accuracy because the model loses information it needs."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "The GPU generates output slowly because it sits idle waiting for memory to deliver cached data, and there is no way to speed this up without breaking accuracy."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Long context, huge cache",
+        "viz": "weights",
+        "viz_args": [["hot", 90], ["hot", 85], ["hot", 80], ["hot", 75], ["hot", 70], ["warm", 50], ["warm", 45], ["warm", 40], ["free", 20], ["free", 15], ["free", 10], ["free", 5]],
+        "caption": "KV cache grows as context grows, consuming GPU memory."
+      },
+      {
+        "title": "2. GPU waits for memory fetch",
+        "viz": "box",
+        "viz_args": "GPU idle -> fetch request -> wait -> data arrives",
+        "caption": "Retrieving cached values from memory blocks all GPU computation."
+      },
+      {
+        "title": "3. Speculative fetch in background",
+        "viz": "weights",
+        "viz_args": [["moved", 88], ["moved", 82], ["moved", 76], ["warm", 50], ["free", 20], ["free", 10]],
+        "caption": "FreeKV guesses which cache entries will be needed and fetches them early."
+      },
+      {
+        "title": "4. GPU computes while data streams",
+        "viz": "box",
+        "viz_args": "GPU works -> data streams in -> fetch complete",
+        "caption": "Computation and data transfer overlap, hiding the wait time."
+      },
+      {
+        "title": "5. Speedup from overlap",
+        "viz": "weights",
+        "viz_args": [["hot", 88], ["warm", 60], ["warm", 50], ["warm", 45], ["free", 20], ["free", 10], ["free", 5], ["free", 4], ["free", 3], ["free", 2], ["free", 1], ["free", 1]],
+        "caption": "Time saved by overlapping fetch and computation yields big speedup."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Predict which cache entries will be needed",
+        "text": "Before the GPU asks, guess which past words the next word will look back to."
+      },
+      {
+        "b": "Step 2: Fetch those entries into GPU memory in the background",
+        "text": "Start pulling the guessed data from CPU or GPU memory while the GPU is still computing on other things."
+      },
+      {
+        "b": "Step 3: GPU proceeds with computation",
+        "text": "The GPU does not wait; it works on the current step while the data arrives."
+      },
+      {
+        "b": "Step 4: Verify and correct",
+        "text": "Once the prediction is done, check if the fetch was right and fix errors quickly with a small correction pass."
+      },
+      {
+        "b": "Step 5: Reuse the layout",
+        "text": "Data is stored in a smart order across CPU and GPU, so future fetches are contiguous and fast, not scattered."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "FreeKV reshapes when and how the KV cache is fetched from memory. Instead of fetching on demand (blocking computation), it fetches speculatively in advance, in the background, and from a cleverly organized memory layout."
+    ],
+    "object": "The fetch timing and memory layout"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Latency hiding ratio",
+    "name": "How much of the memory fetch time is hidden by overlapping with GPU work",
+    "paras": [
+      "The core insight is that a memory fetch takes time (say 10 milliseconds), but the GPU is doing other work too (say 8 milliseconds). If you can overlap them, the GPU finishes its work just as the data arrives, and zero time is wasted. FreeKV measures this overlap: the fraction of fetch time that the GPU can hide by computing in parallel.",
+      "The paper achieves this by predicting which cache entries will be needed next, fetching them while the GPU computes, and storing data contiguously so the fetch is a single fast stream instead of scattered random accesses."
+    ],
+    "heat": {
+      "cells": [
+        ["Predict next needs", 4, true],
+        ["GPU compute time", 3, false],
+        ["Fetch start", 3, true],
+        ["Fetch overlaps", 4, true],
+        ["Compute end", 2, false],
+        ["Fetch end", 4, true],
+        ["Correction pass", 2, false],
+        ["Double-buffer load", 3, true],
+        ["Stream schedule", 3, false],
+        ["Cache hit", 4, true],
+        ["Fragmented access", 1, false],
+        ["Contiguous layout", 4, true]
+      ],
+      "caption": "Darker means more overlap between fetch and compute, hiding latency."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The latency hiding ratio is how much of the memory wait time disappears because the GPU is working on something else at the same time."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Speculative prefetching with double-buffered streaming overlaps the critical path of KV retrieval with GPU computation, measured by the fraction of total retrieval latency that becomes invisible during the model's output step."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: The causal chain",
+    "paras": [
+      "The KV cache fetch is slow because the GPU must wait for data to arrive from far-away memory. FreeKV breaks this chain by making the fetch happen in parallel with GPU work. Here is how: before the GPU finishes its current computation, FreeKV guesses (speculatively) which tokens the next step will need and sends a request to fetch them. This request goes to the memory system as a background task, not interrupting the GPU. While the fetch is in flight, the GPU keeps working on its current output. By the time the GPU finishes, the data has already arrived (or is just arriving), so there is no additional wait.",
+      "On the system side, FreeKV stores the cache in a hybrid layout: frequently-accessed entries stay in fast GPU memory, others live in CPU memory. But they are organized contiguously (one after another in order), not scattered. This turns a slow, random-access fetch (jumping around in memory) into a fast, sequential stream (reading data in order), which is orders of magnitude faster because modern memory systems are optimized to pull data in chunks and can deliver contiguous blocks much quicker than scattered random locations.",
+      "The fine-grained correction step is insurance: if the speculation got a token's access pattern wrong, a quick re-fetch of just that one token fixes it, with minimal overhead. The double-buffering technique means one batch of data is being fetched while another is being used, so fetches never stall computation."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "LLM finishes computing current token"
+        },
+        {
+          "t": "step",
+          "s": "Speculatively predict which past tokens this output will need",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Send fetch request to memory system (CPU or GPU, contiguous)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "GPU starts next computation while fetch streams in background"
+        },
+        {
+          "t": "step",
+          "s": "Fetch completes; verify prediction and correct if needed"
+        },
+        {
+          "t": "output",
+          "s": "Data is ready when next token computation needs it"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation",
+    "words": "Total time per inference step equals max(GPU compute time, memory fetch time). With overlap, fetch time does not add to total time.",
+    "equation": "step_time = max(T_compute, T_fetch_hidden) + T_correction",
+    "symbols": [
+      ["T_compute", "Time for the GPU to compute the next token from the fetched data"],
+      ["T_fetch_hidden", "Memory fetch time minus the overlap with GPU compute (the truly visible wait)"],
+      ["T_correction", "Time to verify the speculative prediction and fix errors if needed"],
+      ["max(A, B)", "Take the larger of A or B; computation and fetch happen in parallel if possible"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose: GPU compute takes 10 ms, memory fetch takes 8 ms without overlap.",
+        "Without FreeKV: total time = 10 ms (compute) + 8 ms (wait for fetch) = 18 ms.",
+        "With FreeKV (full overlap): fetch starts before compute finishes; by the time GPU is done (10 ms), fetch is done (8 ms started earlier, so yes, it is ready).",
+        "New total time = max(10, 8) = 10 ms, plus small correction time (0.5 ms) = 10.5 ms.",
+        "Speedup: 18 / 10.5 ≈ 1.7×. With longer contexts and better prediction, overlap improves and speedup reaches 13×."
+      ]
+    },
+    "note": "Memory fetch and computation can run at the same time. Scheduling the fetch early hides it from view, so only GPU compute time matters."
+  },
+  "bars": {
+    "h2": "Accuracy and latency tradeoff",
+    "charts": [
+      {
+        "title": "Naive KV dropping (loses accuracy)",
+        "rows": [
+          ["Latency (ms)", 6, "good"],
+          ["Accuracy on task 1", 71, "bad"],
+          ["Accuracy on task 2", 68, "bad"]
+        ],
+        "note": "Dropping tokens saves time but breaks the model because it forgets important context."
+      },
+      {
+        "title": "FreeKV (keeps accuracy, gains speed)",
+        "rows": [
+          ["Latency (ms)", 8.2, "good"],
+          ["Accuracy on task 1", 96, "good"],
+          ["Accuracy on task 2", 94, "good"]
+        ],
+        "note": "Speculative fetch with correction maintains full accuracy because the correction step catches any wrong guesses, while being much faster than naive retrieval because the prediction lets the GPU do work while data transfers happen in parallel."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Bad speculation ruins the overlap.",
+        "html": "If the prediction about which cache entries to fetch is wrong, the fetch completes too early (wasted), or too late (GPU still waits), and latency hiding fails. Fix: use a fast, accurate prediction model trained on access patterns from the real tasks."
+      },
+      {
+        "warn": true,
+        "b": "Correction overhead kills gains.",
+        "html": "If every misprediction requires a second fetch, the correction can be slower than the original fetch. Fix: make correction a fast, local operation (just re-fetch the wrong entries, not the whole batch)."
+      },
+      {
+        "warn": true,
+        "b": "Memory layout fragmentation returns.",
+        "html": "If data is scattered across memory, the fetch becomes random-access (slow) instead of streaming (fast), because the memory system has to hunt for pieces one at a time, making prediction useless—the overlap does not help since the fetch will still stall. Fix: keep the cache organized (entries in one order that matches access patterns), not scattered by cache eviction or compression."
+      },
+      {
+        "b": "Done right.",
+        "html": "Prediction is accurate, correction is cheap, and memory is organized. Latency is truly hidden, and the model's output speed is limited only by GPU compute, not memory wait."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple LLM inference loop (even on CPU; use a tiny model with 125 million tunable weights inside). Generate 100-word output on a 4,000-word context. Measure time with and without FreeKV's speculative fetch. Measure accuracy by comparing the output to a full-retrieval baseline. Show that speculative fetch (predicting which cache entries to pull) reduces latency while keeping accuracy the same."
+    ],
+    "metric_eq": "speedup = latency_without_speculative / latency_with_speculative",
+    "closing": "The demo must show that fetch time is reduced—i.e., the GPU does less waiting—without any loss of output quality."
+  }
+}

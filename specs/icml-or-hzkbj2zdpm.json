@@ -1,0 +1,235 @@
+{
+  "slug": "icml-or-hzkbj2zdpm",
+  "title": "MAC-NeRF: Motion-Aware Curriculum Learning for Dynamic LiDAR",
+  "family": "Computer Vision",
+  "one_liner": "A LiDAR model learns to ignore motion noise early and fill in geometric details later by carefully choosing which frames to trust at each training step.",
+  "lead": "LiDAR NeRF models can reconstruct static scenes perfectly but fail on dynamic ones, where moving objects create contradictory instructions for the same 3D point (one frame says it is a car, another says the road beneath). MAC-NeRF fixes this by using a curriculum: it trains on the most reliable frames first (where multiple views agree), then gradually adds harder examples (where motion confuses the signals).",
+  "nav": [["theme-computer-vision.html","Computer Vision"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why LiDAR models break on moving cars",
+    "paras": [
+      "A LiDAR sensor fires laser pulses and listens for echoes to measure distance, building a sparse 3D point cloud of the world. A NeRF (a neural radiance field) is a small network that learns to predict what color and transparency each 3D location should have. NeRFs work beautifully in static scenes because the model sees the same tree from five different camera angles, and all five images vote for the same tree position and color, so the training process converges to a single, confident answer — the network learns which color belongs at that exact position and stops updating.",
+      "But when a car drives through the scene, the same 3D point gives different answers in different frames: one frame shows the road, the next shows the car's windshield. The training process pulls the model in opposite directions. It is like trying to learn a face by looking at photos where the person has rotated their head — the network cannot form a coherent mental picture of what should be there. The learned 3D positions and colors become mushy, ghostly versions of cars blur across multiple frames, and the final video looks broken."
+    ],
+    "callout": {
+      "b": "The core issue.",
+      "html": "When objects move between frames, the same 3D location gets contradictory visual labels, so the model gets confused and produces ghosting artifacts because it tries to average two incompatible instructions, resulting in blurry phantom versions of the object bleeding across the scene."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Static NeRF works",
+        "viz": "brain",
+        "caption": "Five views of a stationary tree. All agree: tree is green here."
+      },
+      {
+        "title": "2. Moving car breaks it",
+        "viz": "weights",
+        "viz_args": [["free",10],["hot",35],["free",8],["hot",38],["free",12],["hot",32],["free",9],["moved",45],["free",11],["moved",40],["free",10],["moved",38]],
+        "caption": "Same 3D point: one frame says car, another says road. Contradictory labels pull in opposite directions."
+      },
+      {
+        "title": "3. Curriculum says: trust the road first",
+        "viz": "box",
+        "viz_args": "Early epochs: only frame A (road). Frame B (car) queued.",
+        "caption": "Learn from frames where views agree strongly before adding confusing motion."
+      },
+      {
+        "title": "4. 3D positions and colors stabilize",
+        "viz": "weights",
+        "viz_args": [["warm",28],["warm",26],["warm",30],["warm",27],["warm",29],["warm",25],["warm",31],["warm",28],["warm",26],["warm",27],["warm",30],["warm",28]],
+        "caption": "Base positions and colors are now consistent. Only then add motion-frames to refine."
+      },
+      {
+        "title": "5. Clear car, clear road",
+        "viz": "plain",
+        "caption": "Final model renders sharp car without ghosting because base positions/colors are solid."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Verify temporal agreement",
+        "text": "For each 3D point in each frame, project it forward to the next frame and backward to the previous frame. If the positions and colors match across frames, that supervision is reliable."
+      },
+      {
+        "b": "Step 2: Sort frames by confidence",
+        "text": "Build a curriculum: put highly-consistent frames first (where motion barely changed the scene), then queued harder frames (where objects moved more)."
+      },
+      {
+        "b": "Step 3: Early epochs — lock in stable positions and colors",
+        "text": "Train only on the trustworthy frames. The model learns clean, motion-free 3D positions and colors without ghosting."
+      },
+      {
+        "b": "Step 4: Frequency budget starts strict",
+        "text": "Regularization forces the model to use only low-frequency (blurry, smooth) patterns, suppressing noise-artifacts and spurious detail."
+      },
+      {
+        "b": "Step 5: Later epochs — add detail, then motion",
+        "text": "Gradually increase the allowed detail frequencies and add harder frames. The model refines its foundation with motion-handling details."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "MAC-NeRF changes the <em>order and content of training examples</em> (the curriculum) and the <em>constraints on model smoothness</em> (the frequency budget). Traditional methods train on all frames at once with the same rules. MAC-NeRF starts by training on only the cleanest, most-consistent frames, then gradually admits harder examples and relaxes the smoothness requirement as the model's learned 3D structure becomes stable."
+    ],
+    "object": "training schedule and example selection"
+  },
+  "hidden": {
+    "h2": "Motion-induced supervision conflict",
+    "name": "Trustworthiness of each frame pair",
+    "paras": [
+      "The hidden quantity is how much the 3D positions and colors stay consistent when you move forward and backward in time. If a 3D point in frame A projects to the same color in frame B, and projecting back lands at the same place, that pair is highly reliable. If the positions bounce around or the colors change drastically, the frames contradict each other — supervision is unreliable.",
+      "The paper estimates this by <em>forward-backward verification</em>: for each observed point, warp it to the next frame using the predicted motion, then warp back. If it lands where it started with matching color, the two frames agree. If it drifts or mismatches, motion has created a conflict, and the pair is marked as untrustworthy early in training."
+    ],
+    "heat": {
+      "cells": [
+        ["Frame-A-B",4,true],
+        ["Frame-B-C",3,false],
+        ["Frame-C-D",2,false],
+        ["Frame-D-E",1,false],
+        ["Frame-E-F",4,true],
+        ["Frame-F-G",2,false],
+        ["Frame-G-H",1,false],
+        ["Frame-H-I",3,false],
+        ["Frame-I-J",4,true],
+        ["Frame-J-K",2,false],
+        ["Frame-K-L",1,false],
+        ["Frame-L-M",2,false]
+      ],
+      "caption": "Darker means frames agree strongly (trustworthy). Bright means motion broke consistency."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "If two sequential frames show the same 3D structure at a given location, the model can trust both images when training. If they show different things (one shows a car, one the road), they are in conflict."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Rectified Temporal Consistency uses forward-backward warping to detect misalignment. A point at pixel (x,y) in frame t, warped via predicted flow to frame t+1 and back, should land near (x,y) again if the same 3D structure underlies both frames."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why curriculum learning fixes dynamic scenes",
+    "paras": [
+      "The core insight: a network learning 3D positions and colors from contradictory examples is stuck. It has to average opposing signals, producing mushy, ghosted output. But if it first learns from clean, consistent examples, it builds a solid foundation of positions and colors. Then, even when conflicting frames are added later, the foundation is anchored and the model can learn to adjust for motion without losing coherence.",
+      "The frequency regularization works similarly. A model with no constraints will latch onto any fine detail to fit the data, including motion artifacts and noise. But if the model is forced to stay smooth (low-frequency) early on, it cannot memorize spurious wiggles. Once the base positions and colors are stable, the constraint loosens, and the model can add true high-frequency detail (fine edges, reflections) without reintroducing ghosting.",
+      "Together: the trustworthy-frame curriculum ensures base positions and colors are consistent, and the adaptive frequency constraint ensures the model does not waste capacity on artifacts. By the end, the model has learned to render motion-aware 3D scenes clearly."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "LiDAR frames 0–N (moving objects, conflicting positions/colors)"
+        },
+        {
+          "t": "step",
+          "s": "Forward-backward warp: detect which frames agree",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sort into curriculum: clean frames first, motion frames last"
+        },
+        {
+          "t": "step",
+          "s": "Train epochs 1–100: high-confidence frames only, strict low-freq"
+        },
+        {
+          "t": "step",
+          "s": "Train epochs 101–200: add harder frames, relax freq budget",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Sharp 3D model, no ghosting, motion-aware"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Confidence-modulated frequency regularization",
+    "words": "penalty = sum over all frequency bands of (model weight in that band) squared, multiplied by a strictness that starts high and slowly drops",
+    "equation": "L = render_loss + lambda(epoch) * sum_freq (||weights_freq||^2)",
+    "symbols": [
+      ["render_loss","how far the rendered output is from the observed frames"],
+      ["lambda(epoch)","the strictness coefficient: high when epoch is low (early), decreases as training progresses"],
+      ["weights_freq","the model's learned coefficients for one frequency band"],
+      ["sum_freq","sum over all frequency bands (low, mid, high)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Epoch 10 (very early, clean-frame curriculum): lambda(10) = 0.50. If a weight is 4.0 in the high-frequency band, penalty = 0.50 * (4.0)^2 = 8.0. The model is heavily punished for high-freq details.",
+        "Epoch 150 (middle, mixed frames added): lambda(150) = 0.10. Same weight 4.0 in high-freq, penalty = 0.10 * (4.0)^2 = 1.6. Punishment is now 5x lighter; high-freq is permitted.",
+        "Epoch 200 (late, all frames included): lambda(200) = 0.01. Penalty = 0.01 * (4.0)^2 = 0.16. Very weak constraint; model can freely use fine detail.",
+        "Result: early training builds low-freq base (positions and colors only, no artifacts), later training adds true detail without reintroducing ghosting because the foundation is solid."
+      ]
+    },
+    "note": "Gradually relaxing the strictness lets the model commit to a smooth foundation before allowing it to fill in fine details."
+  },
+  "bars": {
+    "h2": "Training trajectories: static curriculum vs. all-at-once",
+    "charts": [
+      {
+        "title": "Naive training (all frames from epoch 1)",
+        "rows": [
+          ["Rendering quality at epoch 50",38,"bad"],
+          ["Rendering quality at epoch 150",54,"bad"],
+          ["Rendering quality at epoch 200",61,"bad"]
+        ],
+        "note": "Model is pulled in contradictory directions. 3D positions and colors never stabilize, ghosting persists throughout."
+      },
+      {
+        "title": "MAC-NeRF (curriculum learning)",
+        "rows": [
+          ["Rendering quality at epoch 50",72,"good"],
+          ["Rendering quality at epoch 150",81,"good"],
+          ["Rendering quality at epoch 200",88,"good"]
+        ],
+        "note": "Starts on clean frames, building stable positions and colors. Later epochs refine and add detail without sacrificing the base."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Curriculum is too strict.",
+        "html": "If the forward-backward verification is overly conservative, so many frames are marked as untrustworthy that the curriculum is empty early on. The model has no examples to learn from and cannot train."
+      },
+      {
+        "warn": true,
+        "b": "Frequency constraint relaxes too fast.",
+        "html": "If lambda(epoch) drops sharply (e.g., from 0.50 to 0.01 by epoch 50), the model can start memorizing high-frequency noise before the base positions and colors are solid. Ghosting reappears."
+      },
+      {
+        "warn": true,
+        "b": "Motion estimation is wrong.",
+        "html": "Forward-backward warping relies on a flow or displacement estimate. If the motion model is garbage, even frames that should be clean are marked as conflicted, and the curriculum fails."
+      },
+      {
+        "b": "Done right.",
+        "html": "Tune the verification threshold and lambda schedule so the curriculum is neither too empty nor too lax. Verify the motion model on a held-out static scene first."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy LiDAR NeRF on a synthetic scene: three frames of a simple box, with one frame showing the box shifted sideways (simulating motion). Implement two training runs in parallel: (1) naive, training on all three frames at once, and (2) curriculum, training on the two static frames first, then adding the moving frame after 100 epochs. Render the 3D model at intervals and track how many ghosting artifacts appear (visual inspection or a pixel-level mismatch metric)."
+    ],
+    "metric_eq": "ghosting_score = percentage of pixels that jump between multiple depth values across renderings",
+    "closing": "The naive model should produce visible ghosting at every epoch. The curriculum model should show clean 3D structure by epoch 100, and even after adding the moving frame, should render it clearly by epoch 200."
+  }
+}

@@ -1,0 +1,244 @@
+{
+  "slug": "icml-or-fssirpjy9u",
+  "title": "EvoCF: Multi-Agent Planning via Learned Constraints & Memory",
+  "family": "Reinforcement Learning",
+  "one_liner": "A planner discovers better multi-agent strategies by mutating existing plans using rules learned from past failures, then scores candidates against stored experience.",
+  "lead": "Large language models are good at writing single plans quickly, but they miss physical reality — robots can bump into each other, commands fail when agents disagree. This paper proposes EvoCF: instead of trusting one plan, the system mutates it into variants using rules learned from failures, keeps only plans that follow those rules, and ranks them by matching against a library of past execution outcomes. This finds plans that execute successfully where a model left alone would produce brittle ones.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Large language models fail at real multi-agent coordination",
+    "paras": [
+      "A naive approach: ask an LLM to write a plan for multiple agents (robots, drones, or characters in a simulator) working together. It produces one plan, fast, and you run it. But real embodied systems are constrained — agents have limited communication, move in shared space, and actions can conflict. The LLM cannot foresee these collisions because it has not seen the physics.",
+      "When the plan fails at runtime, that failure teaches nothing. The planner does not know why it broke. The next LLM call might make the same mistake.",
+      "Multi-agent planning is also inherently ambiguous: many valid plans exist for the same goal, but the LLM picks the first coherent one, not one that avoids coordination failures."
+    ],
+    "callout": {
+      "b": "The problem.",
+      "html": "LLM planners produce brittle one-shot strategies that ignore coordination constraints and do not learn from failures."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. One naive plan",
+        "viz": "brain",
+        "caption": "LLM writes a single strategy; ignores whether agents collide."
+      },
+      {
+        "title": "2. It breaks at runtime",
+        "viz": "box",
+        "viz_args": "COLLISION: agents blocked",
+        "caption": "Physical world punishes the plan; planner sees only failure."
+      },
+      {
+        "title": "3. Learn a rule from failure",
+        "viz": "weights",
+        "viz_args": [["hot", 72], ["free", 20], ["hot", 68], ["free", 25], ["moved", 45], ["free", 30], ["hot", 55], ["free", 18], ["hot", 60], ["free", 28], ["moved", 50], ["free", 22]],
+        "caption": "System extracts a constraint: never have both agents in zone A."
+      },
+      {
+        "title": "4. Mutate & filter plans",
+        "viz": "box",
+        "viz_args": "Plan A, B, C: only B, C obey the rule",
+        "caption": "Evolve variants by tweaking the plan; keep only rule-compliant ones."
+      },
+      {
+        "title": "5. Rank by memory match",
+        "viz": "weights",
+        "viz_args": [["warm", 45], ["free", 15], ["warm", 50], ["free", 20], ["warm", 48], ["free", 18], ["warm", 52], ["free", 16], ["warm", 46], ["free", 19], ["warm", 49], ["free", 17]],
+        "caption": "Score each plan against past successful executions; pick highest."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Inductor",
+        "text": "When a plan fails, extract a symbolic rule (constraint) that the failure violated."
+      },
+      {
+        "b": "Rule library",
+        "text": "Collect induced rules over time; build a library of what breaks plans."
+      },
+      {
+        "b": "Plan generator",
+        "text": "Take the LLM's initial plan and mutate it, sampling variants that satisfy the rules."
+      },
+      {
+        "b": "Evaluation",
+        "text": "For each candidate, retrieve similar past executions and score fit."
+      },
+      {
+        "b": "Selection",
+        "text": "Return the highest-scoring plan, with reasons (constraints & memories) shown."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes <em>how candidate plans are selected</em>. Instead of using the LLM's first plan, EvoCF generates multiple variants, filters by learned constraints, then ranks by match to memory. The object moved is <em>plan quality</em>."
+    ],
+    "object": "plan selection strategy"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: constraint adherence score",
+    "name": "how well a plan obeys learned failure rules",
+    "paras": [
+      "Each time a multi-agent plan fails in the simulator, the system infers a symbolic constraint — a rule like <em>never have Robot A and Robot B in the same room simultaneously</em>. Over repeated failures, a library of constraints accumulates. When scoring a new candidate plan, the system counts how many of these constraints it satisfies. Plans that satisfy more constraints are less likely to fail.",
+      "The paper estimates this by checking each candidate plan against the induced constraint library. A plan either satisfies a constraint (score +1) or violates it (score 0). Summing across all constraints gives a plan's total adherence score."
+    ],
+    "heat": {
+      "cells": [
+        ["Rule 1 met", 4, true],
+        ["Rule 2 met", 4, true],
+        ["Rule 3 unmet", 1, false],
+        ["Rule 4 met", 4, true],
+        ["Rule 5 met", 4, true],
+        ["Rule 6 unmet", 1, false],
+        ["Rule 7 met", 4, true],
+        ["Rule 8 met", 4, true],
+        ["Rule 9 unmet", 1, false],
+        ["Rule 10 met", 4, true],
+        ["Rule 11 met", 4, true],
+        ["Rule 12 met", 4, true]
+      ],
+      "caption": "Darker means the plan satisfies that constraint (learned from a past failure). Unmarked cells show rules the plan violates."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A constraint adherence score is the count of failure-prevention rules a plan obeys."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper ranks candidate plans by their total adherence to the symbolic constraint library, updated each time a new failure is observed."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: three coupled loops",
+    "paras": [
+      "The mechanism has three parts. First, <em>induction from failure</em>: when a real execution breaks, the system reverse-engineers the constraint that was violated. For instance, if two agents collide while moving through a doorway, the inductor hypothesizes a rule like <em>agents must not occupy the same grid cell</em>. Over trials, a rule library grows.",
+      "Second, <em>evolutionary search with constraints</em>: the LLM's one-shot plan is treated as a seed. The system mutates it (small changes to action sequences) and keeps only variants that satisfy all learned constraints. This shrinks the search space to plausible plans, avoiding re-learning the same failures.",
+      "Third, <em>ranking by memory match</em>: each surviving candidate is scored against a library of past successful executions. The retrieval-augmented evaluator finds similar scenarios and scores the plan by how well it aligns with what worked before. This is <em>why</em> constraint filtering helps: plans that obey constraints align more closely with past successes, so they score higher.",
+      "Together, these three loops eliminate brittle plans: the LLM generates a starting point, constraints prune implausible variants, and memory validates the survivors. The final plan is interpretable (you can see which constraints and past successes justified it) and less likely to fail (it has been vetted against learned failure modes)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "LLM generates initial plan + stored failures"
+        },
+        {
+          "t": "step",
+          "s": "Induce constraint from each failure",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Mutate plan; keep constraint-compliant variants",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Retrieve similar past executions",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Score each candidate by memory match",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Best plan + interpretable justification"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Scoring formula",
+    "words": "For each candidate plan P, the score combines constraint adherence and memory retrieval: score of P equals adherence count plus weighted sum of similarity to stored successful plans.",
+    "equation": "score(P) = sum_c [C_c(P)] + alpha * sum_s [sim(P, success_s) * weight_s]",
+    "symbols": [
+      ["score(P)", "overall fitness of candidate plan P"],
+      ["sum_c [C_c(P)]", "count of constraints P satisfies; C_c returns 1 if P obeys rule c, else 0"],
+      ["alpha", "balance weight between constraint adherence and memory match"],
+      ["sum_s [sim(P, success_s) * weight_s]", "retrieve top successes; sim(P, success_s) is semantic similarity (0 to 1); weight_s is how recent or reliable success_s is"]
+    ],
+    "worked": {
+      "title": "Tiny worked example: scoring two candidate plans",
+      "lines": [
+        "Suppose the rule library has 4 constraints. Candidate plan A obeys 3 (score 3). Candidate plan B obeys 4 (score 4).",
+        "Memory has 5 past successful plans. Plan A matches 2 of them with avg similarity 0.6 (retrieval score 1.2). Plan B matches 3 of them with avg similarity 0.7 (retrieval score 2.1).",
+        "If alpha=2, then score(A) = 3 + 2*1.2 = 5.4, and score(B) = 4 + 2*2.1 = 8.2.",
+        "Plan B ranks higher because it satisfies more rules and matches more past successes. In multi-agent settings, this keeps B out of collision zones and near tactics that have worked before."
+      ]
+    },
+    "note": "The score penalizes plans that repeat past failures (low constraint adherence) and rewards plans similar to proved strategies (high memory match). Both terms increase the chance a plan succeeds in the real embodied system."
+  },
+  "bars": {
+    "h2": "How constraint filtering improves success rate",
+    "charts": [
+      {
+        "title": "LLM alone (baseline)",
+        "rows": [
+          ["Plan executes without collision", 28, "bad"],
+          ["Plan executes with agents coordinating", 15, "bad"],
+          ["Multi-agent task completed", 18, "bad"]
+        ],
+        "note": "One-shot LLM plans often violate physical constraints because the model has no real-world grounding."
+      },
+      {
+        "title": "EvoCF (this paper)",
+        "rows": [
+          ["Plan executes without collision", 76, "good"],
+          ["Plan executes with agents coordinating", 68, "good"],
+          ["Multi-agent task completed", 72, "good"]
+        ],
+        "note": "Constraint-filtered, memory-ranked plans avoid learned failure modes and favor strategies proven in similar scenarios."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Constraint library becomes stale.",
+        "html": "If the environment changes (new obstacles, different agent capabilities), old constraints may no longer apply or new ones may be unlearned. The inductor must stay active to refresh the rule library."
+      },
+      {
+        "warn": true,
+        "b": "Mutation space is too narrow.",
+        "html": "If the only allowed mutations are small tweaks (e.g., shifting timing by one step), the search may miss truly different strategies. Constraint filtering can prune the solution space too aggressively."
+      },
+      {
+        "warn": true,
+        "b": "Retrieval memory is sparse or skewed.",
+        "html": "If the past successful executions are few or all solve the same simple scenario, the memory ranking will not generalize. New situations will have no similar precedent."
+      },
+      {
+        "b": "Inductor tolerates measurement noise.",
+        "html": "The paper uses symbolic constraint induction, which forgives small errors in the simulator. A rule like <em>agents must stay in different rooms</em> stays valid even if positions jitter slightly."
+      },
+      {
+        "b": "Interpretability is kept.",
+        "html": "Unlike a black-box LLM, every plan choice is backed by explicit constraints and retrieved successes, because the system shows which rules the plan obeys and which past scenarios it resembles. When a plan fails, you know exactly which constraint was wrong or which memory was stale, so you can fix the inductor or refresh the library."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple multi-agent embodied task: two robot arms reaching for objects on a shared table, or two drones delivering packages while avoiding a shared air corridor. Start with the LLM's one-shot plan. Then run EvoCF: induce constraints from a few simulated failures, mutate the plan into variants, score them against a small memory of past successes. Compare final success rate and interpretability (can you name the constraints and past plans that justified the chosen strategy?)."
+    ],
+    "metric_eq": "success_rate = (number of completed multi-agent tasks) / (total attempted tasks); interpretability = number of constraints and retrieved memories shown to the user",
+    "closing": "The demo must show that constraint filtering catches collisions the LLM would miss, and that memory ranking picks strategies similar to what has worked before — making the final plan execute more often successfully and remain human-understandable unlike a raw LLM output."
+  }
+}
