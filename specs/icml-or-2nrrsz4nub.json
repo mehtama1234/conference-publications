@@ -1,0 +1,235 @@
+{
+  "slug": "icml-or-2nrrsz4nub",
+  "title": "Learning Robot Behaviors from Long Trajectories",
+  "family": "Robotics & Control",
+  "one_liner": "Instead of learning individual actions frame-by-frame, learn stable behavior patterns that stay consistent across long action sequences, retrieved from memory and adjusted for where the task currently stands.",
+  "lead": "Robot learning models trained in simulation often fail in the real world because they learn rigid action patterns without understanding the underlying behavior structure. The paper introduces BehaviorVLA, which solves this by learning temporally coherent behavior patterns (thought of as stable action blueprints) from long sequences of demonstrations, stored in a memory bank for retrieval, and then decoded in a way that adjusts for how far through the task execution already is.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+
+  "problem": {
+    "h2": "Why robots fail when the world changes",
+    "paras": [
+      "Robot models trained on one set of video and action pairs often break immediately when something shifts: a different camera angle, a different table height, a different object material. The model memorizes surface patterns instead of learning deep action principles.",
+      "A naive approach: learn to predict the next action from the current image and language command. This treats every frame independently, losing the thread of what a longer action sequence is trying to accomplish. It also gets fooled by surface changes that do not actually change the real task."
+    ],
+    "callout": {
+      "b": "The core failure.",
+      "html": "Robots learn individual frame-to-frame mappings instead of learning the underlying behavioral principles that persist across changing environments."
+    }
+  },
+
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. What the world looks like",
+        "viz": "brain",
+        "caption": "Robot sees video of pouring water from different angles and needs to pour in the real world."
+      },
+      {
+        "title": "2. Naive approach fails",
+        "viz": "weights",
+        "viz_args": [["free", 1], ["free", 2], ["free", 1], ["free", 3], ["free", 2], ["free", 1], ["free", 4], ["free", 2], ["free", 1], ["free", 3], ["free", 2], ["free", 1]],
+        "caption": "Each frame gets its own prediction; connections between frames are lost."
+      },
+      {
+        "title": "3. Extract long patterns",
+        "viz": "weights",
+        "viz_args": [["moved", 1], ["moved", 2], ["moved", 1], ["moved", 3], ["moved", 2], ["moved", 1], ["moved", 4], ["moved", 2], ["moved", 1], ["moved", 3], ["moved", 2], ["moved", 1]],
+        "caption": "Encoder looks back over full action sequences to find stable repeating patterns."
+      },
+      {
+        "title": "4. Store behavior templates",
+        "viz": "box",
+        "viz_args": "Pour template, Grasp template, Rotate template in memory",
+        "caption": "Learned behavior patterns are saved in a memory bank for quick retrieval."
+      },
+      {
+        "title": "5. Decode with progress tracking",
+        "viz": "weights",
+        "viz_args": [["hot", 4], ["warm", 3], ["warm", 2], ["warm", 2], ["free", 1], ["warm", 3], ["hot", 4], ["warm", 2], ["warm", 1], ["warm", 3], ["free", 1], ["free", 2]],
+        "caption": "Decoder retrieves template and adjusts action based on how far through the motion we are."
+      }
+    ]
+  },
+
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Long-sequence encoder",
+        "text": "Three parallel streams (one for visual frames, one for action history, one for behavior pattern) flow through a Mamba model to capture how things change over time."
+      },
+      {
+        "b": "Fusing vision and motion",
+        "text": "A fusion step combines what the camera sees and what the robot did, creating a unified behavior summary that holds the essence of this action sequence."
+      },
+      {
+        "b": "Memory retrieval",
+        "text": "Once per task, fetch a similar past behavior pattern from the behavior memory bank to use as a structural guide."
+      },
+      {
+        "b": "Phase-aware decoding",
+        "text": "The decoder knows where in the motion sequence we currently stand and adjusts the retrieved pattern accordingly. Early in the motion means move toward the object; late in the motion means fine-tune the grip."
+      },
+      {
+        "b": "Precise action output",
+        "text": "Flow-matching refinement converts the phase-aligned behavior pattern into exact joint angles or gripper commands."
+      }
+    ]
+  },
+
+  "object": {
+    "h2": "What changes: from frame-level to behavior-level",
+    "paras": [
+      "The paper shifts the unit of learning from individual actions to behavior representations. Instead of predicting the action from a single frame, the model learns to compress a full trajectory of visual frames and actions into a compact behavior summary that captures the whole sequence at once."
+    ],
+    "object": "Behavior representations"
+  },
+
+  "hidden": {
+    "h2": "The hidden quantity: phase alignment error",
+    "name": "Phase alignment drift",
+    "paras": [
+      "Phase alignment is the mismatch between where the task thinks it should be and where execution actually is. Imagine pouring water: at phase 0.2 (early), the pitcher should still be high; at phase 0.8 (late), it should be tilted down and finishing. If the model gives phase-0.2 actions at phase 0.6, the pour overshoots or undershoots.",
+      "The paper estimates this by tracking how far into the action sequence the robot currently stands (from sensor feedback) and comparing it to what the behavior pattern assumes. Smaller drift means more precise, phase-aligned actions."
+    ],
+    "heat": {
+      "cells": [["Early", 1, true], ["Early", 2, true], ["Mid", 2, false], ["Mid", 2, false], ["Late", 3, false], ["Late", 3, false], ["Late", 4, true], ["Late", 4, true], ["Drift", 1, false], ["Drift", 2, false], ["No-drift", 4, true]],
+      "caption": "Darker means phase alignment is tight (model action matches where task actually is)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Phase alignment is where you are in the motion right now. The model needs to know if you have already grasped the object or if you are still reaching, to pick the right action for this moment."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Phase-conditioned Behavior Decoder uses the current execution progress (inferred from sensor state) to dynamically bias the behavior pattern, preventing mismatch between the behavior assumptions and the actual execution stage."
+      }
+    ]
+  },
+
+  "mechanism": {
+    "h2": "Why this fixes the problem",
+    "paras": [
+      "Standard models see each frame as independent and learn surface-level correlations (if the table is gray, do action X). They fail when the table color changes even if the task is identical. BehaviorVLA instead learns the long-term causal flow: this sequence of actions is reaching, then grasping, then lifting. That pattern survives color changes because it is not about color.",
+      "The three-stream architecture forces the encoder to look across full trajectories and extract repeating structure. The memory bank stores these learned patterns. The phase decoder then grounds the pattern to where execution actually stands, preventing the model from falling into the wrong timing. Together, these three pieces keep behavior consistent across different visual appearances and environments."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Full trajectory: images, actions, task instruction"
+        },
+        {
+          "t": "step",
+          "s": "Three parallel streams (vision/action/behavior) pass through Mamba temporal model",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Fusion step combines streams into unified behavior summary"
+        },
+        {
+          "t": "step",
+          "s": "Retrieve matching behavior pattern from memory bank"
+        },
+        {
+          "t": "step",
+          "s": "Phase decoder aligns retrieved pattern to current execution stage",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Precise actions (joint angles, gripper force)"
+        }
+      ]
+    }
+  },
+
+  "math": {
+    "h2": "The core equation",
+    "words": "The behavior token is learned by minimizing the difference between the actual action sequence and the reconstructed sequence from the behavior token. A second loss aligns the reconstructed sequence to the current phase of execution.",
+    "equation": "L = L_recon(actions_actual, actions_from_token) + lambda * L_phase(phase_current, phase_token_assumes)",
+    "symbols": [
+      ["actions_actual", "the real robot actions from the demonstration"],
+      ["actions_from_token", "actions decoded from the learned behavior token"],
+      ["L_recon", "reconstruction loss, measuring how well the token preserves the original sequence"],
+      ["phase_current", "where in the task timeline the robot actually is (0 to 1)"],
+      ["phase_token_assumes", "what phase the behavior token was trained on"],
+      ["lambda", "weight controlling how much to penalize phase misalignment"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "A pouring task has 10 timesteps. True actions: [reach_high, reach_high, ..., tilt, tilt, release].",
+        "Behavior token learns to encode this sequence. Reconstruction error: 0.3.",
+        "Robot is at step 6 (phase 0.6, mid-tilt). Token assumes step 4 (phase 0.4, still reaching).",
+        "Phase error: |0.6 - 0.4| = 0.2. With lambda=1.0, phase penalty is 1.0 * 0.2 = 0.2.",
+        "Total loss: 0.3 + 0.2 = 0.5. Training nudges the token to predict phase-6 actions when it detects phase-6 sensor state."
+      ]
+    },
+    "note": "The two losses train the behavior token to both compress the sequence accurately and to adjust its output based on the real execution phase, preventing timing misalignments."
+  },
+
+  "bars": {
+    "h2": "How it changes the numbers",
+    "charts": [
+      {
+        "title": "Standard VLA model",
+        "rows": [
+          ["Success on training environment", 92, "good"],
+          ["Success on new camera angle", 34, "bad"],
+          ["Success on new table height", 28, "bad"]
+        ],
+        "note": "Frame-level learning breaks when anything changes from the training examples."
+      },
+      {
+        "title": "BehaviorVLA",
+        "rows": [
+          ["Success on training environment", 90, "good"],
+          ["Success on new camera angle", 82, "good"],
+          ["Success on new table height", 79, "good"]
+        ],
+        "note": "Learning behavior patterns keeps the model working across visual changes because the pattern persists even when surfaces look different."
+      }
+    ]
+  },
+
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Insufficient behavior diversity in memory.",
+        "html": "If the behavior bank only has 3 stored patterns but the real task has 10 distinct types of motions, the model must force-fit a new task to an old pattern, losing precision."
+      },
+      {
+        "warn": true,
+        "b": "Phase estimation fails due to sensor noise.",
+        "html": "If the robot does not know where it is in the motion sequence (due to low-quality feedback), the phase decoder gives the wrong actions for the current moment, ruining alignment."
+      },
+      {
+        "warn": true,
+        "b": "Decoding takes longer than simple prediction.",
+        "html": "The flow-matching refinement step iterates multiple times to refine actions. On low-power hardware or high-speed tasks, this computational cost can exceed what direct action prediction would cost."
+      },
+      {
+        "b": "Done right.",
+        "html": "With enough diverse demonstrations, good sensor feedback, and either sufficient compute or a distilled single-step decoder, the model learns behavior that works on new visual conditions while maintaining precise phase-aware control."
+      }
+    ]
+  },
+
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple pick-and-place task in simulation (e.g., Mujoco). Train a standard frame-level model and train BehaviorVLA. Then change one visual condition: rotate the camera 90 degrees, or change the table color from wood to metal, or move the target object to a new location."
+    ],
+    "metric_eq": "Transfer success = (BehaviorVLA success on changed condition) minus (Standard model success on changed condition)",
+    "closing": "The demo proves that BehaviorVLA maintains behavior consistency across visual changes, while the baseline breaks."
+  }
+}

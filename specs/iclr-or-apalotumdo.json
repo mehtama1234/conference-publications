@@ -1,0 +1,253 @@
+{
+  "slug": "iclr-or-apalotumdo",
+  "title": "CE-Nav: Flow-Guided Reinforcement Refinement for Cross-Embodiment Local Navigation",
+  "family": "Robotics & Control",
+  "one_liner": "Use a flow model to learn which navigation moves are kinematically possible, then train a small adapter per robot to compensate for its specific dynamics.",
+  "lead": "Robots with different body shapes (four legs, two legs, rotors) need different navigation strategies. A robot trained on a quadruped cannot immediately tell a bipedal robot what to do. CE-Nav solves this by separating the problem into two pieces: first, learn what moves are safe and kinematically feasible using only simulated data, then for each new robot, learn only how to adjust those moves to match that robot's specific hardware quirks.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why robots do not generalize across body shapes",
+    "paras": [
+      "A navigation policy is a rule that says: given what I see (a LiDAR scan and my current speed), pick a velocity command (how fast to move forward, and how hard to turn). A policy trained on a four-legged dog works perfectly on that dog. But the same weights do not work on a two-legged humanoid or a quadrotor—each has different top speeds, turning radii, and response delays.",
+      "The naive fix is to collect real robot data for each new body shape and retrain. But real robot data is expensive: hours of time on hardware, risk of crashes, and each robot type needs weeks of development.",
+      "There is a deeper problem: navigation is <em>multi-modal</em>. When a robot sees an obstacle dead ahead, it can dodge left or dodge right—both are valid. A deterministic model forced to pick one answer averages them, producing a dodge straight toward the obstacle. Flows (generative models that output a probability distribution—a list of how likely each possible move is) avoid this trap, but they are expensive to train and do not account for a specific robot's dynamics."
+    ],
+    "callout": {
+      "b": "The challenge:",
+      "html": "Train a shared navigation expert once, then cheaply adapt it to new robots without real robot data, while preserving the multi-modal decisions flows naturally capture."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The multi-modality trap",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["free", 22], ["hot", 15], ["hot", 15], ["free", 18], ["free", 25]],
+        "caption": "Obstacle ahead. Dodge left or right are both valid. Deterministic model averages: straight into wall."
+      },
+      {
+        "title": "2. Flow captures both options",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 42], ["warm", 28], ["warm", 29], ["moved", 38], ["moved", 50]],
+        "caption": "Flow model learns the full probability—left move and right move both get high scores in its distribution."
+      },
+      {
+        "title": "3. But flow ignores robot quirks",
+        "viz": "weights",
+        "viz_args": [["hot", 10], ["hot", 8], ["warm", 15], ["warm", 12], ["free", 5], ["free", 3]],
+        "caption": "A quadrotor responds instantly; a quadruped has delay. Flow gives generic moves that do not match."
+      },
+      {
+        "title": "4. Refiner learns the gap",
+        "viz": "weights",
+        "viz_args": [["moved", 3], ["moved", -2], ["moved", 4], ["moved", -1], ["moved", 2], ["moved", -3]],
+        "caption": "Lightweight refiner discovers: add this nudge to flow output, and the quadrotor tracks accurately."
+      },
+      {
+        "title": "5. Shared expert, robot-specific tweaks",
+        "viz": "box",
+        "viz_args": "Flow + Refiner = navigation for this robot",
+        "caption": "One frozen flow plus many cheap refiner models. Quadruped version vs. quadrotor version vs. bipedal version."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Stage 1: Train the expert offline",
+        "text": "Learn a flow model on 10 million synthetic navigation moves (state and velocity command pairs) from a kinematic planner, capturing the full multi-modal distribution of valid moves."
+      },
+      {
+        "b": "Stage 2: Freeze the expert",
+        "text": "Lock the flow weights. This expert is now embodiment-agnostic—it knows obstacle avoidance and goal-seeking but nothing about any specific robot's speed limits or response delays."
+      },
+      {
+        "b": "Stage 3: Train a lightweight refiner",
+        "text": "For a new robot, run it in the real environment. Train a small neural network refiner to predict velocity corrections that make the frozen flow outputs match the robot's true behavior."
+      },
+      {
+        "b": "Stage 4: Mix the two outputs",
+        "text": "At runtime, sample a multi-modal move from the frozen flow and add the refiner's corrections. The result is a safe, multi-modal move adapted to this robot."
+      },
+      {
+        "b": "Stage 5: Rapid convergence",
+        "text": "The refiner converges in hours of online training, not weeks. Quadrupeds, bipeds, and quadrotors all use the same frozen expert with different tiny refiners."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing this paper changes",
+    "paras": [
+      "Normally, a navigation policy is a single neural network that must output one velocity command. CE-Nav splits it: a large pretrained flow model (the shared expert) outputs multi-modal velocity options, and a small refiner network (trained per robot) corrects those options for the specific robot's dynamics."
+    ],
+    "object": "Policy architecture: from end-to-end to flow-plus-refiner"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: multi-modal distribution",
+    "name": "The probability of each valid velocity command",
+    "paras": [
+      "When a robot faces an obstacle, multiple escape velocities are valid and safe. A single number (one velocity) cannot represent this ambiguity. A <em>distribution</em> (a set of probabilities over many possible velocities) can. The flow model learns this distribution: it assigns high probability to both left-dodge and right-dodge, and zero probability to straight-into-obstacle.",
+      "The paper measures this hidden quantity via negative log-likelihood on expert demonstrations: the flow's probability of the expert's choices. A good flow gives high probability to the choices a kinematic planner (which is perfect for ideal robots) actually makes."
+    ],
+    "heat": {
+      "cells": [
+        ["Left-dodge", 4, true],
+        ["Right-dodge", 4, true],
+        ["Forward", 2, false],
+        ["Backward", 1, false],
+        ["Left-sharp", 3, false],
+        ["Right-sharp", 3, false],
+        ["Stop", 2, false],
+        ["Forward-left", 3, false],
+        ["Forward-right", 3, false],
+        ["Straight-wall", 0, false],
+        ["Other", 1, false],
+        ["Reserved", 1, false]
+      ],
+      "caption": "Darker cells get higher probability from the flow. Multi-modality means two or more bright cells at once, not just one winner."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The flow learns a full probability map over all possible moves, not just a single best guess."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "VelFlow is a conditional normalizing flow (Real-NVP architecture, 12 coupling layers) that models the multi-modal kinematic distribution p(v | s), where s is the state (LiDAR + robot pose) and v is the velocity. Trained with negative log-likelihood on expert data."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting expert and refiner works",
+    "paras": [
+      "Flows learn probability distributions by applying reversible mathematical transformations. They take a simple starting distribution (one that is easy to work with) and smoothly reshape it to match the data's actual patterns. When the data is multi-modal (multiple valid answers for one input), the flow preserves that—it does not collapse to one mode. A standard deterministic network must average modes and loses critical information.",
+      "Stage 1 builds this shared expert on kinematic data (no real robots), so it understands obstacle avoidance, path planning toward goals, and safe turning angles. It does not know about motor delays, tracking error, or top-speed limits of any specific robot.",
+      "Stage 2 freezes the expert and trains a lightweight refiner (just a few layers) via reinforcement learning on real robot data. The refiner sees the expert's multi-modal proposal, the robot's actual position, and the reward signal, then learns small corrective nudges. Because the expert already got the physics-free planning right, the refiner only needs to fix the dynamics mismatch—a much easier learning problem than learning from scratch.",
+      "At runtime, this two-stage pipeline preserves multi-modality and respects real physics: the expert guarantees sound planning logic, and the refiner compensates for real-world quirks."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "LiDAR scan and robot state"
+        },
+        {
+          "t": "step",
+          "s": "State encoder: CNN + MLP to 256 dimensions",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "VelFlow: sample multi-modal velocity from frozen expert",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Refiner: predict correction for this robot's dynamics",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Scale by velocity limits and send to motors",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Safe, multi-modal velocity adapted to this robot"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The two-stage training objective",
+    "words": "Stage 1 loss is the negative log-likelihood of expert moves under the flow. Stage 2 loss combines PPO (reinforcement learning reward) with a guidance term that pulls the refiner's output close to the flow's sampled velocity.",
+    "equation": "L_total = L_PPO + lambda * L_guide   where   L_guide = ||refiner(s_guided) - scale * v_ref||^2",
+    "symbols": [
+      ["L_PPO", "standard reinforcement learning loss driving high cumulative reward"],
+      ["L_guide", "auxiliary loss keeping the refiner close to the frozen flow's guidance"],
+      ["refiner(s_guided)", "the refiner's velocity correction, given the state"],
+      ["scale * v_ref", "a single velocity sample from the frozen VelFlow, scaled by predefined limits"],
+      ["lambda", "a curriculum parameter that decreases over training (strong early guidance, weaker later)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the flow proposes velocity [0.5 m/s forward, 0.2 rad/s turn] but this quadrotor overshoots by 0.15 on forward and 0.1 on turn (its acceleration is fast).",
+        "The refiner learns to output [-0.15, -0.1] as a correction on every similar state.",
+        "L_guide = ||[-0.15, -0.1] - [0.5, 0.2]||^2 = [0.65]^2 + [0.3]^2 = 0.4225 + 0.09 = 0.5125.",
+        "Early training (lambda=0.5): this guidance term contributes 0.5 * 0.5125 = 0.256 to the total loss, keeping the refiner anchored to valid moves.",
+        "Late training (lambda=0.2): guidance term contributes only 0.2 * 0.5125 = 0.102, allowing the refiner to drift slightly if it finds higher rewards (e.g., faster goal-reaching).",
+        "The refiner converges in hours because it only learns tiny adjustments, not a full policy from scratch."
+      ]
+    },
+    "note": "The guidance loss keeps the refiner's correction output close to the frozen flow's sample, preventing the refiner from drifting into invalid moves or ignoring multi-modality."
+  },
+  "bars": {
+    "h2": "How CE-Nav compares to baselines",
+    "charts": [
+      {
+        "title": "DWA (traditional planning)",
+        "rows": [
+          ["Success rate on seen quadruped", 75, "good"],
+          ["Success rate on new bipedal form", 15, "bad"],
+          ["Real robot data needed", 240, "bad"]
+        ],
+        "note": "Classical planner is fast but brittle to new morphologies. Transferability is zero."
+      },
+      {
+        "title": "NavRL (end-to-end RL baseline)",
+        "rows": [
+          ["Success rate on seen quadruped", 51, "bad"],
+          ["Success rate on new bipedal form", 42, "bad"],
+          ["Real robot data needed", 160, "bad"]
+        ],
+        "note": "Learns embodiment-specific, does not transfer. Mixes obstacle avoidance and dynamics control, so adapts poorly to new shapes."
+      },
+      {
+        "title": "CE-Nav (this paper)",
+        "rows": [
+          ["Success rate on seen quadruped", 92, "good"],
+          ["Success rate on new bipedal form", 82, "good"],
+          ["Real robot data needed", 20, "good"]
+        ],
+        "note": "Obstacle avoidance shared across morphologies. Refiner only learns dynamics compensation. Dramatic cost reduction and reliable transfer."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The flow sees no real dynamics.",
+        "html": "The expert is trained on kinematic simulation only, so it has never seen motor delays, friction, or actuator saturation. If a real robot's dynamics are radically different from any kinematic assumption (e.g., it is broken), the refiner cannot fix it in reasonable time."
+      },
+      {
+        "warn": true,
+        "b": "The refiner collapses multi-modality.",
+        "html": "If the guidance loss lambda is too strong throughout training, the refiner is forced to always pick the mean of the flow's distribution instead of exploring its own preferred correction. The multi-modal property dies, and performance degrades."
+      },
+      {
+        "warn": true,
+        "b": "New morphology is too alien.",
+        "html": "CE-Nav assumes that the flow's kinematic reasoning (obstacle avoidance, goal direction) still applies to the new robot. If the new robot has fundamentally different constraints (e.g., inverted pendulum dynamics for bipeds vs. four-point stability for quadrupeds), the refiner must unlearn the flow's assumptions, defeating the purpose."
+      },
+      {
+        "b": "Done right.",
+        "html": "Curriculum learning (lambda high early, low late) ensures the refiner is guided to valid initialization but free to refine. Online adaptation on the actual target robot grounds the refiner's learning in reality, not simulation."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Train VelFlow on 10 million kinematic expert moves from a classical planner in simulation. Freeze it. Then, for each of three robot types (quadruped, bipedal, quadrotor), run a short online training loop: deploy the refiner in the real environment, run 10 rollouts, update the refiner via PPO and guidance loss, repeat for 50 episodes. Measure success rate (reach goal without collision) and mean episode return (cumulative reward)."
+    ],
+    "metric_eq": "transfer_quality = (success_rate_on_new_robot) - (success_rate_on_random_policy). refinement_cost = total_online_steps / success_rate.",
+    "closing": "The demo must show that the frozen flow transfers geometrically (baseline success on the new robot without any refining), and that a few hours of online training bring it to near-expert level—without re-labeling real robot data or retraining the flow."
+  }
+}

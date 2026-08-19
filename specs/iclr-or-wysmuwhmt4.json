@@ -1,0 +1,194 @@
+{
+  "slug": "iclr-or-wysmuwhmt4",
+  "title": "Primary-Fine Decoupling for Robotic Action Generation",
+  "family": "Robotics & Control",
+  "one_liner": "Split robot action generation into two stages: one policy picks consistent coarse action types, then another generates precise continuous motions within that type.",
+  "lead": "When a robot learns from human demonstrations, it needs to handle actions that have many equally valid ways to execute. A robot hand can grasp an object in dozens of slightly different ways, each correct. Existing approaches either force the robot to pick one exact way (losing flexibility) or let it jump randomly between ways (creating jerky, unreliable movements). This paper splits the problem into two stages: first, pick what broad type of action to do; second, generate the precise continuous motion for that type.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why existing methods fail on multi-modal robot actions",
+    "paras": [
+      "Robot tasks have multiple correct solutions. A robot hand can open a drawer with a quick flick or a slow deliberate pull, and both work. But imitation learning (where a robot learns by copying human examples) struggles with this variety.",
+      "One approach forces actions into discrete tokens (symbols that stand for fixed actions) or bins, like bucketing a grasp into grid squares. This works well for picking which broad type of grasp, but loses the fine details of how the grasp feels. Another approach tries to generate the full continuous motion in one shot, learning a probability distribution (a set of likelihoods for different actions) over actions. But when this distribution is unstructured, the robot keeps switching between different grasp styles randomly, creating unstable jerky behavior where it cannot commit to one way of grasping."
+    ],
+    "callout": {
+      "b": "The problem.",
+      "html": "Multi-modal robot actions need to pick a consistent coarse strategy first, then refine it continuously; doing both at once causes the robot to bounce randomly between strategies."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: many correct actions",
+        "viz": "weights",
+        "viz_args": [["grasp_flick", 40], ["grasp_slow", 38], ["grasp_twist", 42], ["grasp_squeeze", 35], ["grasp_slide", 39]],
+        "caption": "Five equally valid ways to grasp an object, all correct."
+      },
+      {
+        "title": "2. Old way: continuous generation bounces",
+        "viz": "weights",
+        "viz_args": [["flick", 50], ["slow", 15], ["twist", 45], ["squeeze", 20], ["slide", 40]],
+        "caption": "Model randomly switches between strategies at each step, creating jerky motion."
+      },
+      {
+        "title": "3. First stage: discretize into modes",
+        "viz": "box",
+        "viz_args": "Mode 0: slow grasp. Mode 1: flick grasp. Mode 2: twist grasp.",
+        "caption": "Compress five actions into three discrete, stable modes."
+      },
+      {
+        "title": "4. Policy selects mode, sticks with it",
+        "viz": "weights",
+        "viz_args": [["mode_1_selected", 80], ["mode_1_confidence", 75], ["mode_2_rejected", 10], ["mode_0_rejected", 5], ["hold", 70]],
+        "caption": "Lightweight policy commits to one mode, avoids bouncing."
+      },
+      {
+        "title": "5. Second stage: refine within chosen mode",
+        "viz": "weights",
+        "viz_args": [["flick_coarse", 50], ["flick_refined_smooth", 72], ["flick_timing_tuned", 65], ["flick_pressure_exact", 68]],
+        "caption": "Conditioned on chosen mode, generate smooth continuous refinements."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {"b": "Step 1: Build a codebook of coarse modes", "text": "Run a compressor (VQ-VAE) on all demonstration actions, finding a small set of discrete prototypes that cover the action space."},
+      {"b": "Step 2: Train mode picker", "text": "Teach a lightweight policy to look at the current robot state and pick one of these discrete modes, matching what the human demonstrated."},
+      {"b": "Step 3: Learn mode-conditioned refinement", "text": "For each mode, train a continuous generator to take the chosen mode and the current state, then output smooth high-fidelity motion."},
+      {"b": "Step 4: Execute greedily", "text": "At test time: observe state, pick the best mode (greedy, no resampling), then generate precise continuous actions from it."},
+      {"b": "Step 5: Re-plan frequently", "text": "Every few frames, pick a new mode if needed based on the current state, allowing fast reactive control."}
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes where and how the policy makes decisions. Instead of generating raw continuous actions directly from state, it splits the decision into two parts: a discrete mode-choice (which coarse strategy to use) and a continuous refinement (how to execute that strategy smoothly). This prevents the random bouncing because the mode choice is committed and deliberate."
+    ],
+    "object": "decision structure: discrete mode choice, then continuous refinement"
+  },
+  "hidden": {
+    "h2": "Mode consistency: the quantity that matters",
+    "name": "mode-consistency",
+    "paras": [
+      "The hidden quantity is how often the policy sticks with the same action mode over consecutive steps. If a robot picks grasp mode 1, then mode 3, then mode 1, then mode 3 again, the mode consistency is low—the policy is bouncing. The paper measures this by checking whether the discrete mode index (which prototype is chosen) stays the same step-to-step, rather than jumping around.",
+      "The paper estimates mode consistency by analyzing demonstrations offline: which actions cluster together under the VQ-VAE codebook, and how naturally does one mode lead to the next as you follow a real human trajectory. A good mode codebook will let the policy pick stable sequences; a poor one will cause bouncing no matter what."
+    ],
+    "heat": {
+      "cells": [
+        ["step1_mode", 4, true],
+        ["step2_mode", 4, false],
+        ["step3_mode", 2, false],
+        ["step4_mode", 2, false],
+        ["step5_mode", 4, false],
+        ["step6_mode", 4, false],
+        ["step7_mode", 3, false],
+        ["step8_mode", 1, false],
+        ["step9_mode", 3, false],
+        ["step10_mode", 1, false],
+        ["step11_mode", 2, false],
+        ["step12_mode", 2, true]
+      ],
+      "caption": "Darker means mode held longer without switching. Highlights show transitions to a new mode (often necessary); low-darkness shows random bouncing (bad)."
+    },
+    "reads": [
+      {"b": "Plain reading.", "html": "In writing, coherence means committing to a voice and sticking with it. Random switches between voices (active to passive, technical to slang, past to future) make the writing break apart. Mode consistency works the same way: the robot commits to one type of grasp strategy and executes it cleanly, rather than switching randomly between strategies."},
+      {"b": "Paper reading.", "html": "The codebook compresses action trajectories into discrete symbols; the mode policy learns to predict which symbol from the current observation, avoiding independent per-step resampling that causes mode-switching instability. By training the mode policy with a classification loss (penalizing wrong mode predictions to match the encoder-assigned VQ indices), the method ensures stable mode sequences over time."}
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting into two stages fixes the problem",
+    "paras": [
+      "The core insight is that action planning has two different speeds. Picking what type of action to do (grasp vs. reach, slow vs. fast) is a discrete, committed choice that should stay stable over several steps. Refining exactly how to execute that choice (what angle, pressure, timing) is a continuous, fluid process that should change smoothly. By separating them, each stage can use the right tool: a lightweight discrete policy for stable mode choice, and a continuous flow-based generator for smooth refinement.",
+      "Here is why this works mechanically: when the mode policy sees the current state, it picks one mode and commits to it for the entire action chunk (the next few steps). This commitment is explicit—the policy is trained to output one mode index, not resampling randomly at each step. Then, given that one chosen mode and the state, the continuous generator produces the full smooth trajectory, conditioned on the mode. Because the mode is fixed for the chunk, the generator does not need to hedge its bets or average over conflicting strategies. It can generate a crisp, coherent sequence optimized for that one mode. The result: the robot is decisive (one strategy per chunk), and precise (smooth motions within that strategy)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Current state observation"},
+        {"t": "step", "s": "VQ codebook lookup: compress actions to modes", "hl": true},
+        {"t": "step", "s": "Mode policy: observe state, pick one discrete mode"},
+        {"t": "step", "s": "MeanFlow generator: given mode and state, output smooth continuous actions"},
+        {"t": "output", "s": "Executed motion: consistent + refined"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The loss functions that drive learning",
+    "words": "The mode policy is trained with cross-entropy loss to match the human's mode index, and the MeanFlow generator is trained with mean-squared-error loss to match the human's continuous actions conditioned on the mode.",
+    "equation": "Loss = CrossEntropy(mode_policy_output, true_mode_index) + MSE(continuous_output, true_actions)",
+    "symbols": [
+      ["mode_policy_output", "the discrete mode predicted by the policy from the state"],
+      ["true_mode_index", "which mode the VQ-VAE assigned to the human's action"],
+      ["continuous_output", "the refined continuous action from the MeanFlow generator"],
+      ["true_actions", "the actual continuous action from the human demonstration"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Scenario: Human demos grasping with a slow steady motion (mode 2 in codebook).",
+        "Mode branch: Policy sees hand-position state and predicts mode 1 (flick). True mode is 2. CrossEntropy loss = log(5) - log(p_mode2) = 1.61 - 0.85 = 0.76 (high penalty).",
+        "Continuous branch: Policy picked mode 1. MeanFlow generator given (state, mode_1) outputs action=[45, 32]. True action=[35, 28]. MSE = ((45-35)^2 + (32-28)^2) / 2 = (100+16)/2 = 58.",
+        "Total loss = 0.76 + 58 = 58.76. Training nudges the mode policy toward mode 2 and MeanFlow toward the true slow motion."
+      ]
+    },
+    "note": "The mode policy learns which mode is right for each state (via cross-entropy), and the continuous generator learns to refine that mode smoothly (via squared-error). Training them jointly, with frozen codebook modes, ensures stable mode selection without resampling."
+  },
+  "bars": {
+    "h2": "How it outperforms simpler approaches",
+    "charts": [
+      {
+        "title": "Single-stage continuous policy (baseline)",
+        "rows": [
+          ["Simple grasp task", 72, "good"],
+          ["Complex multi-modal task", 38, "bad"],
+          ["Mode-bouncing episodes", 11, "bad"]
+        ],
+        "note": "Single-stage methods collapse multi-modal distributions, fail on complex tasks with multiple solutions."
+      },
+      {
+        "title": "PF-DAG two-stage (this paper)",
+        "rows": [
+          ["Simple grasp task", 74, "good"],
+          ["Complex multi-modal task", 78, "good"],
+          ["Mode-bouncing episodes", 2, "good"]
+        ],
+        "note": "By decoupling mode choice from continuous refinement, the method handles diverse strategies cleanly and runs at real-time speeds."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Codebook too coarse.",
+        "html": "If the discrete modes do not cover the action diversity well (e.g., grouping slow and medium grasps into one mode), the continuous generator cannot refine away the difference. The robot will overly smooth the motion."
+      },
+      {
+        "warn": true,
+        "b": "Rapid high-frequency control.",
+        "html": "The method commits to a mode for an entire action chunk (e.g., 8 steps). In extremely fast, fine-grained tasks (e.g., balancing a pencil tip), this chunk length may be too long, and the mode cannot adapt quickly enough."
+      },
+      {
+        "warn": true,
+        "b": "Out-of-distribution states.",
+        "html": "If the robot encounters an object placement or sensor noise it has never seen, the mode policy may choose a mode that is no longer appropriate, because it learned only on the demonstration states."
+      },
+      {
+        "b": "Done right.",
+        "html": "Choose the codebook size and chunk length to match the task timescale. Validate on diverse demonstrations. The two-stage design then ensures stable, reactive control."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simulation: a 2D robot hand learning to grasp a cylinder from 20 human demonstrations, each showing a slightly different grasp strategy (slow approach, quick pinch, etc.). Train the two-stage model and a baseline continuous policy. Measure two things: (1) success rate (does the grasp succeed?), and (2) mode consistency (does the policy stick to one mode over each 4-step chunk, or does it bounce between modes)."
+    ],
+    "metric_eq": "Mode-consistency = (number of steps where mode does not change) / (total steps). Success rate = (successful grasps) / (test episodes).",
+    "closing": "The demo must show that PF-DAG maintains mode consistency above 85% while the baseline bounces below 40%, yet both achieve similar success rates on simple tasks—proving that decoupling gives stability for free."
+  }
+}

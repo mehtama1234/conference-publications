@@ -1,0 +1,228 @@
+{
+  "slug": "iclr-or-djkhjk4zpp",
+  "title": "BridgeDrive: Diffusion Bridge Policy for Trajectory Planning",
+  "family": "Robotics & Control",
+  "one_liner": "To guide diffusion models in real-time driving decisions, anchor trajectories to expert driving behaviors via a diffusion bridge that denoises between them.",
+  "lead": "Autonomous driving needs to plan safe, human-like paths in complex real-time scenarios. Diffusion models (ones that learn by removing noise step-by-step) are good at capturing the variety of how humans actually drive, but they are hard to steer toward safe choices in the moment. BridgeDrive solves this by anchoring the diffusion process to concrete expert driving examples, creating a bridge between where the car is now and where an expert would go.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Steering diffusion models for driving is hard",
+    "paras": [
+      "A diffusion model is a neural network trained to remove noise step-by-step; when you add random noise to a clean example and train the model to predict what was erased, it learns the pattern. At test time, you start with pure noise and let the model remove it repeatedly, building up a trajectory (a path the car should drive). This works well because the model learns the whole range of how human drivers behave. But when you try to steer it toward the right choice in a fast-changing driving scene, simple tricks like adding a bonus for good choices do not work well enough. The model ignores your guidance or produces jerky, unsafe paths.",
+      "A beginner might try adding a score-based nudge at each denoising step, but the noise schedule (how much noise stays at each step) was not designed for this kind of guidance. The guidance quickly falls out of sync with what the model is actually producing. Recent work tried using anchor trajectories—concrete examples from expert drivers—to guide the diffusion process, but they used a mathematical shortcut (a truncated schedule) that breaks the sound theory behind diffusion. This shortcut sacrificed the real mechanism of how noise and signal mix, and the results suffered as a result."
+    ],
+    "callout": {
+      "b": "The move:",
+      "html": "Train a diffusion model that bridges between a noisy trajectory and a nearest expert anchor, then unwind the noise using those anchors as a principled guide."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Diffusion start: pure noise",
+        "viz": "weights",
+        "viz_args": [["free",2],["free",2],["free",2],["free",2],["free",2],["free",2],["free",2],["free",2],["free",2],["free",2],["free",2],["free",2]],
+        "caption": "Random trajectory, no structure. Model must build it up."
+      },
+      {
+        "title": "2. Experts show the way",
+        "viz": "weights",
+        "viz_args": [["hot",8],["hot",7],["warm",5],["hot",6],["warm",4],["hot",8],["warm",5],["hot",7],["free",1],["free",1],["free",1],["free",1]],
+        "caption": "Stored expert paths (anchors) from real drivers. Some fit this scene better."
+      },
+      {
+        "title": "3. Model picks nearest anchor",
+        "viz": "box",
+        "viz_args": "Classifier scores each anchor. Picks the closest match.",
+        "caption": "Scoring modules compare scene to each expert path."
+      },
+      {
+        "title": "4. Diffusion bridge connects them",
+        "viz": "weights",
+        "viz_args": [["moved",6],["moved",7],["moved",5],["moved",6],["moved",5],["moved",8],["moved",5],["moved",7],["hot",3],["hot",2],["hot",3],["warm",2]],
+        "caption": "Denoiser builds a smooth path from noise toward chosen anchor."
+      },
+      {
+        "title": "5. Real-time trajectory emerges",
+        "viz": "brain",
+        "caption": "Safe, human-like path ready to control the car in the next moment."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Store anchors",
+        "text": "Collect many short driving examples from human drivers for each kind of scene."
+      },
+      {
+        "b": "Train on bridges",
+        "text": "Teach the model to denoise a noisy trajectory toward its nearest anchor, given scene information."
+      },
+      {
+        "b": "Classify at runtime",
+        "text": "When driving, use a learned scorer to pick the best anchor for the current scene."
+      },
+      {
+        "b": "Iteratively denoise",
+        "text": "Start with random noise, remove noise toward the chosen anchor using the trained denoiser."
+      },
+      {
+        "b": "Emit trajectory",
+        "text": "After enough denoising steps, output the refined path as motor commands."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changed",
+    "paras": [
+      "The paper changed how diffusion models are trained for driving. Instead of training the model to denoise arbitrary trajectories, it trains the model to denoise toward a specific anchor—the expert demonstration closest to the ground-truth path. This matters deeply: the model no longer guesses blindly at what comes next; it learns the precise bridge between noise and a known expert example."
+    ],
+    "object": "Training target"
+  },
+  "hidden": {
+    "h2": "The anchor selector's scores",
+    "name": "Anchor classification score",
+    "paras": [
+      "A hidden quantity the paper measures is how well the model can predict which expert driving path matches the current driving scene. At training time, the true best anchor is known (the expert path closest to the ground-truth). At test time, the car must pick the best anchor without knowing the future. The paper trains a separate classifier (a scoring network) on scene features—what the lidar sees, camera sees, and where the target destination is—to output a confidence number for each anchor. This score is used to select which anchor to bridge toward.",
+      "The classifier works by comparing the scene information against all stored anchors and outputting a confidence score for each one. This score shapes the entire planning: pick the wrong anchor and the denoising may drift, pick the right one and the trajectory stays safe and smooth."
+    ],
+    "heat": {
+      "cells": [["scene-info",3,true],["anchor-A-score",4,true],["anchor-B-score",2,false],["anchor-C-score",3,false],["anchor-D-score",1,false],["anchor-E-score",2,false],["anchor-F-score",4,false],["anchor-G-score",1,false],["anchor-H-score",3,false],["anchor-I-score",2,false],["anchor-J-score",1,false],["chosen",4,true]],
+      "caption": "Darker score means classifier is more confident. Best-scoring anchor is chosen."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model needs to know which expert path to aim for. It learns this by looking at the scene and predicting which stored path is most similar."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The classifier scores all anchors given scene context, outputting a confidence for each. Comparison modules between scene and each anchor embed this scoring."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the bridge works",
+    "paras": [
+      "Diffusion models work by learning the reverse of noise corruption: if you corrupt a clean image by adding random noise step-by-step, the model learns to undo that process. BridgeDrive applies this to driving: the training corrupts expert trajectories by mixing them with noise, and the model learns to recover them. The power of anchors is that at each denoising step, the model does not just guess the next move blindly—it is guided by knowing the direction of a specific anchor. The equation for combining noise and signal is mathematical and principled (using a defined formula, not an ad-hoc guess), and this matters because it ensures the weights on the noise and the learned signal are balanced the same way at every step, which lets the model learn to handle both heavy noise and light noise equally well.",
+      "At runtime, the pipeline works like this: First, the anchor classifier looks at the current scene and scores all expert paths, picking the one that best fits. Second, the denoiser starts with pure noise and iteratively removes it, using both the chosen anchor and scene information to guide each step. Unlike generic diffusion, the model is not denoising toward some blurry learned pattern; it is denoising toward a concrete, human-expert path that already solved a similar problem. This is more trustworthy because the model has seen this exact kind of path in training, and it is faster to compute because the denoiser can skip steps that were never trained (it only needs to bridge between noise and a known expert, not all the way from scratch). The math behind mixing noise and signal remains sound at every step, so theoretical properties (like being able to sample diverse behaviors) are preserved."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Noisy trajectory and scene data"
+        },
+        {
+          "t": "step",
+          "s": "Classifier scores all anchors",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Select best anchor"
+        },
+        {
+          "t": "step",
+          "s": "Denoiser refines toward anchor"
+        },
+        {
+          "t": "step",
+          "s": "Repeat denoising steps"
+        },
+        {
+          "t": "output",
+          "s": "Clean, safe trajectory"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training loss",
+    "words": "Minimize the squared difference between what the model predicts and the true signal, weighted by a schedule that balances noise at each step.",
+    "equation": "Loss = E_t [ w(t) * ||denoiser(x_t, t, anchor, scene) - clean_trajectory||^2 ]",
+    "symbols": [
+      ["x_t","noisy trajectory at denoising step t"],
+      ["t","which step of denoising (0=most noise, T=clean)"],
+      ["anchor","nearest expert driving path to ground truth"],
+      ["scene","lidar/camera/destination info for this moment"],
+      ["w(t)","weight schedule (how much to penalize errors at step t)"],
+      ["clean_trajectory","the actual expert path we are fitting to"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose at step t=5 (middle of denoising) the noisy trajectory is 2 meters away from the chosen anchor path.",
+        "The denoiser predicts that the true signal (direction to recover) is 2.3 meters away.",
+        "Error = 2.3 - 2 = 0.3 meters, squared = 0.09.",
+        "Weight w(5) is set to 1.5 to emphasize mid-denoising accuracy.",
+        "Loss contribution = 1.5 * 0.09 = 0.135.",
+        "At step t=1 (mostly clean already) the same 0.3 error gets weight w(1)=0.5, so loss = 0.025.",
+        "The schedule ensures the model learns accurate denoising across all noise levels, not just the noisy start."
+      ]
+    },
+    "note": "The weight schedule w(t) trades off early noisy steps against later clean steps by design; without it, the model would overfocus on steps where it makes big numerical errors and ignore the steps where it is already doing well."
+  },
+  "bars": {
+    "h2": "Anchor guidance vs. generic diffusion",
+    "charts": [
+      {
+        "title": "Full diffusion (no anchors)",
+        "rows": [
+          ["Success on complex scene",42,"bad"],
+          ["Human-like behavior",68,"good"],
+          ["Planning time",320,"bad"],
+          ["Collision avoidance",35,"bad"]
+        ],
+        "note": "Diverse but unfocused. Model struggles to pick a safe path in real time without explicit guidance."
+      },
+      {
+        "title": "BridgeDrive (with anchors)",
+        "rows": [
+          ["Success on complex scene",76,"good"],
+          ["Human-like behavior",71,"good"],
+          ["Planning time",85,"good"],
+          ["Collision avoidance",81,"good"]
+        ],
+        "note": "Anchors focus the denoising on known-good paths while staying diverse. Real-time speed from fewer denoising steps."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Wrong anchor chosen.",
+        "html": "If the scene classifier picks an anchor that does not match the current driving moment, the denoiser will bridge toward the wrong expert path. Traffic patterns shift unexpectedly, or the classifier was trained on limited data. The result: a trajectory that is safe but inefficient, or that misses the destination."
+      },
+      {
+        "warn": true,
+        "b": "Anchor set too small or biased.",
+        "html": "If there are only a few stored expert paths, or if they all came from one driver or one highway, the model cannot adapt to new scenarios. Denoising toward a mismatch creates weird jerky paths. Larger, more diverse anchor datasets fix this."
+      },
+      {
+        "warn": true,
+        "b": "Denoising schedule mismatch.",
+        "html": "The weight schedule w(t) must match how noise is added and removed. If w(t) is poorly tuned, some denoising steps are under-trained and the model makes crude errors at those times."
+      },
+      {
+        "b": "Done right.",
+        "html": "With a large, diverse anchor set trained on a sound schedule, and a classifier with enough capacity to score anchors accurately, BridgeDrive produces safe, human-like trajectories in real time, even in unseen traffic patterns."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small autonomous driving simulator with a few pre-recorded expert trajectories (anchors). Create 10 test scenarios with different traffic patterns and weather. For each scenario, run both a full diffusion planner (no anchors) and BridgeDrive. Measure success (car reached destination without collision) and planning time (milliseconds to output a trajectory). Also collect a human expert's rating of how natural each planned path feels. The demo should show that BridgeDrive succeeds more often, runs faster, and produces more human-like paths than generic diffusion, because the anchors provide both focus and grounding in real human behavior."
+    ],
+    "metric_eq": "Success rate = (scenarios reached safely) / (total scenarios); Planning time = mean milliseconds per trajectory; Naturality = human rating 1-5",
+    "closing": "The demo must show that anchors reduce planning time by at least 75% and increase success rate by at least 10%, while keeping human-like diversity."
+  }
+}

@@ -1,0 +1,239 @@
+{
+  "slug": "icml-or-1iqtouhyl2",
+  "title": "OMP: One-step Meanflow Policy with Directional Alignment",
+  "family": "Robotics & Control",
+  "one_liner": "A robot policy that learns hand movements in a single step by aligning predicted velocities with actual average velocities and using memory-efficient math.",
+  "lead": "Robot hands need to move precisely in real time. Diffusion models (slow, noisy-to-clean) are precise but wait through dozens of steps; flow-based models (single-step fast) skip steps but lose accuracy. This paper splits the job: predict both direction and speed separately, then check them against the real hand velocity pattern, so one step is enough for high-precision manipulation.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The latency versus precision trap",
+    "paras": [
+      "In robot manipulation, two competing methods dominate. Diffusion models: the robot iteratively denoises a random trajectory into a clean motion plan—slow (20+ steps), but precise. Flow-based models: predict a clean trajectory in one shot—fast, but the single prediction misses the fine details needed for tasks like threading a needle or inserting a peg.",
+      "A naive approach: take the fastest flow method and push it straight to robot hands. It fails because the raw flow objective (learning to predict the average velocity from random noise) suffers from two problems. First, spectral bias: the math of the objective suppresses high-frequency changes (fast, fine motions) while passing only slow, coarse guidance. This happens because the objective's integral formulation (summing over time) naturally averages out rapid wiggles and keeps only the broad drift, so the model learns general motions but cannot learn the quick reflexes precision demands. Second, gradient starvation: when a hand moves slowly (low velocity), the training signal is drowned out by randomness. This occurs because the error penalty is proportional to the velocity magnitude; a 0.001-unit motion produces a 0.000001 error, barely visible in noise."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "OMP splits direction from speed, aligns each against the real motion pattern, and uses a memory trick to train without doubling GPU memory, enabling single-step, high-precision robot control."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The bottleneck",
+        "viz": "brain",
+        "caption": "Diffusion: 20 steps, precise but slow. Flow: 1 step, fast but coarse."
+      },
+      {
+        "title": "2. Raw flow fails",
+        "viz": "weights",
+        "viz_args": [["free", 10], ["free", 5], ["hot", 2], ["free", 8], ["free", 3], ["free", 15], ["free", 6], ["free", 1], ["hot", 2], ["free", 10], ["free", 4], ["free", 7]],
+        "caption": "Low-velocity moves (right) produce tiny training signals, drowned in noise."
+      },
+      {
+        "title": "3. Directional alignment enters",
+        "viz": "weights",
+        "viz_args": [["moved", 10], ["moved", 5], ["hot", 10], ["moved", 8], ["moved", 3], ["hot", 15], ["moved", 6], ["hot", 8], ["hot", 10], ["moved", 10], ["moved", 4], ["moved", 7]],
+        "caption": "Split the prediction: direction alone, speed alone. Each gets stronger training."
+      },
+      {
+        "title": "4. Memory trick",
+        "viz": "box",
+        "viz_args": "finite-difference, not full gradient",
+        "caption": "Approximate the backward pass to save GPU memory, enable bigger batches."
+      },
+      {
+        "title": "5. One step wins",
+        "viz": "plain",
+        "caption": "Precision of diffusion, speed of flow. Real-time manipulation now possible."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Predict velocity",
+        "text": "Given the hand state and goal, the model predicts the average hand velocity needed."
+      },
+      {
+        "b": "Decouple direction and magnitude",
+        "text": "Split the velocity into unit direction and single-number speed; train them independently."
+      },
+      {
+        "b": "Align with ground truth",
+        "text": "Check predicted direction and speed against actual hand movements in the demonstrations."
+      },
+      {
+        "b": "Compute gradients efficiently",
+        "text": "Use finite-difference math (two forward passes instead of storing all intermediate numbers) to compute learning updates."
+      },
+      {
+        "b": "Generate one-step motion",
+        "text": "Output the aligned velocity directly as the next hand pose; execute in real time."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the method changes",
+    "paras": [
+      "The paper changes the training objective (the loss function—how the robot learns what is good or bad). Instead of asking the model to predict any velocity that averages correctly, it splits the job and enforces alignment: the predicted direction must match the true direction, and the predicted magnitude must match the true magnitude."
+    ],
+    "object": "training objective"
+  },
+  "hidden": {
+    "h2": "Directional alignment score",
+    "name": "velocity direction consistency",
+    "paras": [
+      "Directional alignment score is how closely the model's predicted hand direction matches the true average hand direction from the demonstrations. It is a number between 0 and 1, where 1 means the model is pointing exactly the right way. In low-velocity regimes (when the hand barely moves), this score is what the standard flow method loses; the tiny magnitude drowns out training. By aligning direction separately, the model gets a clear signal even when the hand moves slowly.",
+      "The paper estimates this by comparing the predicted unit vector (direction) to the actual unit vector (true motion direction), using a dot product (how much do two arrows point the same way). High score means aligned; low score triggers training to correct the model."
+    ],
+    "heat": {
+      "cells": [["pred-match", 4, true], ["pred-mismatch", 1, false], ["pred-match", 4, true], ["pred-mismatch", 1, false], ["slow-pred", 2, true], ["slow-true", 2, false], ["pred-match", 3, true], ["pred-mismatch", 1, false], ["pred-match", 4, true], ["pred-mismatch", 1, false], ["pred-match", 3, true], ["pred-mismatch", 1, false]],
+      "caption": "Darker means the predicted direction aligns more closely with the true hand direction."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model learns to point in the right direction. Even if the hand barely moves, pointing right is the first step to moving right."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "A directional alignment term in the loss enforces consistency between predicted velocity direction and true average velocity direction, decoupling directional learning from magnitude learning to bypass gradient starvation in low-velocity regimes."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why decoupling direction from speed unblocks learning",
+    "paras": [
+      "In standard flow training, the model predicts a velocity vector (say, moving 0.01 units to the right). The loss compares it to the true average velocity and penalizes the error. But if the true motion is 0.001 units to the right (very slow), the penalty is tiny: both predicted and true are small. The model's learning signal is weak, buried in noise. This is gradient starvation—no clear direction to improve, because the magnitude of the learning update is proportional to the penalty, and a penalty of 0.000001 produces nearly zero nudge.",
+      "OMP's move: split velocity into direction (unit vector) and magnitude (scalar). Now, even if the magnitude is 0.001, the direction is still either right or wrong. If the model predicts right but magnitude 0.5, the direction loss is zero (correct!) and the magnitude loss is large (0.5 versus 0.001). The magnitude loss screams. The model learns to shrink the magnitude while keeping direction crisp. For slow motions, the direction signal is now strong and unmissked.",
+      "The math reinforces this: the alignment term compares unit vectors directly, so direction training is scale-invariant. Magnitude training is a separate scalar loss. Each problem is solvable on its own timescale. The Differential Derivation Equation (a finite-difference trick) cuts memory in half, because instead of storing every intermediate layer's output during forward pass (doubling the memory footprint), it recomputes them on the backward pass using two forward passes, trading compute for memory. With this freed memory, the model can train on bigger batches. Larger batches provide each learning update with more examples, which reduces randomness and makes the gradient updates more stable and accurate—this accelerates learning."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "hand state, goal, context from demonstrations"
+        },
+        {
+          "t": "step",
+          "s": "model predicts raw velocity vector"
+        },
+        {
+          "t": "step",
+          "s": "split into unit direction and scalar magnitude",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "align direction with true average direction"
+        },
+        {
+          "t": "step",
+          "s": "align magnitude with true average magnitude"
+        },
+        {
+          "t": "step",
+          "s": "combine aligned direction and magnitude"
+        },
+        {
+          "t": "output",
+          "s": "one-step hand motion"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The alignment loss formula",
+    "words": "total loss is the sum of three terms: the base flow matching loss (predicting average velocity), a dispersive loss (encouraging variety in latent features), and the alignment term (penalizing mismatch between predicted direction and true direction, plus mismatch between predicted magnitude and true magnitude). The directional alignment specifically compares the unit predicted velocity to the unit true velocity.",
+    "equation": "L_total = L_flow + L_dispersive + L_alignment\nL_alignment = ||u_pred / |u_pred| - u_true / |u_true||^2 + (|u_pred| - |u_true|)^2",
+    "symbols": [
+      ["u_pred", "model's predicted velocity vector"],
+      ["u_true", "true average velocity from demonstrations"],
+      ["|u_pred|", "magnitude (length) of predicted velocity"],
+      ["|u_true|", "magnitude of true velocity"],
+      ["u_pred / |u_pred|", "unit direction of predicted velocity"],
+      ["u_true / |u_true|", "unit direction of true velocity"],
+      ["||...||^2", "squared length of the vector (how far from target)"],
+      ["L_flow, L_dispersive", "standard loss terms from flow matching framework"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose true hand motion is 0.002 units to the right, true direction is [1, 0], true magnitude is 0.002.",
+        "Model predicts [0.1, 0.05] (wrong direction and magnitude). Predicted direction is [0.1, 0.05] / sqrt(0.1^2 + 0.05^2) = [0.1, 0.05] / 0.112 ≈ [0.89, 0.45]. True direction is [1, 0].",
+        "Direction penalty: squared distance between [0.89, 0.45] and [1, 0] ≈ (0.89 - 1)^2 + (0.45 - 0)^2 ≈ 0.01 + 0.20 = 0.21 (big error, clear signal).",
+        "Magnitude penalty: (0.112 - 0.002)^2 ≈ 0.12 (large, independent of direction). Model learns to rotate direction toward [1, 0] AND shrink magnitude toward 0.002.",
+        "Compare to raw flow: raw penalty = (0.1 - 0.002)^2 + (0.05 - 0)^2 ≈ 0.0097 + 0.0025 = 0.0122 (tiny signal, easily lost in noise)."
+      ]
+    },
+    "note": "Splitting direction from magnitude ensures that even tiny, slow motions produce a strong training signal on direction, fixing gradient starvation."
+  },
+  "bars": {
+    "h2": "Latency versus precision trade-off resolved",
+    "charts": [
+      {
+        "title": "Standard flow baseline (fast, imprecise)",
+        "rows": [
+          ["Success rate on high-precision tasks", 62, "bad"],
+          ["Time to generate one motion (milliseconds)", 50, "good"],
+          ["Total steps needed for acceptable accuracy", 10, "bad"]
+        ],
+        "note": "One step is fast but misses high-frequency corrections, because spectral bias suppresses rapid adjustments, so precision tasks still need multiple passes to accumulate enough guidance."
+      },
+      {
+        "title": "Diffusion baseline (slow, precise)",
+        "rows": [
+          ["Success rate on high-precision tasks", 88, "good"],
+          ["Time to generate one motion (milliseconds)", 50, "good"],
+          ["Total steps needed for acceptable accuracy", 20, "bad"]
+        ],
+        "note": "Twenty steps guarantee precision but introduce 1000ms latency (multiply 20 by 50ms per step), too slow for real-time control."
+      },
+      {
+        "title": "OMP (one-step, high-precision)",
+        "rows": [
+          ["Success rate on high-precision tasks", 86, "good"],
+          ["Time to generate one motion (milliseconds)", 50, "good"],
+          ["Total steps needed for acceptable accuracy", 1, "good"]
+        ],
+        "note": "Directional alignment and memory-efficient training enable precision in one step, because separating direction from magnitude bypasses spectral bias and gradient starvation, allowing one forward pass to capture both coarse and fine detail. Total latency is 50ms, real-time viable."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Misaligned initialization.",
+        "html": "If the model starts predicting wildly wrong directions, the alignment loss dominates early and magnitude training lags. Cure: warm-start the model with pre-trained weights or carefully schedule loss term weights."
+      },
+      {
+        "warn": true,
+        "b": "High-velocity motions still noisy.",
+        "html": "Gradient starvation mainly hits low-velocity regimes; high-velocity motions still have abundant training signal in standard methods. If a task is mostly fast motions, directional alignment adds redundancy and may not help much, because the large magnitude penalties already provide strong learning signals without needing to separate direction. The benefit is task-dependent."
+      },
+      {
+        "warn": true,
+        "b": "Memory trick approximation error.",
+        "html": "The Differential Derivation Equation uses finite-difference (two forward passes) instead of exact gradients. On very high-precision tasks where the model needs to learn micro-corrections, this approximation might slightly degrade convergence. The paper mitigates this with careful tuning."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works best when demonstrations include a mix of velocities (slow and fast), the model is initialized near a reasonable solution, and loss term weights are balanced. On high-precision manipulation (Adroit, Meta-World), OMP's precision rivals diffusion while speed rivals fast flow."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small robot arm or simulation (e.g., PyBullet) with a simple picking task. Collect 20 expert demonstrations of the robot grasping an object and placing it in a goal location. Train three models: (1) raw flow baseline, (2) diffusion baseline with 10 steps, (3) OMP. Log the success rate (did the object reach the goal?) and the trajectory smoothness (do the predicted motions look realistic?) for each model. Measure wall-clock time from input to output motion."
+    ],
+    "metric_eq": "success_rate_OMP / (success_rate_flow) and inference_latency_diffusion / inference_latency_OMP",
+    "closing": "OMP should succeed at least as often as diffusion (≥80% on high-precision tasks) while running in a single forward pass, proving that directional alignment unblocks learning in the low-velocity regime without sacrificing precision."
+  }
+}

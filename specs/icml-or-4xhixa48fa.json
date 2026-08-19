@@ -1,0 +1,248 @@
+{
+  "slug": "icml-or-4xhixa48fa",
+  "title": "ReLAM: Learning Anticipation Model for Rewarding Visual Robotic Manipulation",
+  "family": "Robotics & Control",
+  "one_liner": "Learn a model that watches videos of successful robot tasks and proposes intermediate steps, then train the robot with rewards based on reaching those steps.",
+  "lead": "Training a robot to manipulate objects is hard because the robot needs rewards telling it when it is doing well. In the real world, you cannot easily measure exact distances like you can in simulation. This paper teaches a model to watch successful demonstrations and predict intermediate checkpoints the robot should hit—then gives rewards based on how close the robot gets to each checkpoint.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why reward design for robot learning is hard",
+    "paras": [
+      "A robot learning to manipulate objects needs a reward signal—a number telling it how well it did on each attempt. In a simulation, you can measure the exact distance from the gripper (robot hand) to a target, and give a reward based on that distance. But in the real world with video cameras, you cannot directly measure these exact distances because the image is 2D and ambiguous.",
+      "A naive approach is to train a separate model to predict goal positions from images, but this adds complexity and errors. Another approach is to train a discriminator (a classifier that learns what good demonstrations look like) and use its output as a reward, but discriminators are unstable to train when the input is high-dimensional visual data and they often overfit."
+    ],
+    "callout": {
+      "b": "The core insight.",
+      "html": "Train a model that watches successful videos and proposes a sequence of intermediate position targets (subgoals) that break a long task into simpler steps, then reward the robot for reaching each subgoal."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "brain",
+        "caption": "Robot must learn from video. How do you measure success without exact positions?"
+      },
+      {
+        "title": "2. Watch the demo",
+        "viz": "box",
+        "viz_args": "Video frames showing object moving from start to goal",
+        "caption": "Extract keypoints (bright corners on the object) at key moments in successful videos."
+      },
+      {
+        "title": "3. The anticipation model learns",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["moved", 35], ["moved", 50], ["moved", 65], ["hot", 80]],
+        "caption": "Model learns to predict next keypoint position (subgoal) from current image, building a chain."
+      },
+      {
+        "title": "4. Robot follows the trail",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["warm", 28], ["warm", 36], ["warm", 44], ["hot", 80]],
+        "caption": "Low-level policy trained to reach each subgoal, given current keypoint positions and next target."
+      },
+      {
+        "title": "5. Hierarchical learning pays off",
+        "viz": "box",
+        "viz_args": "Success rate climbing across training steps",
+        "caption": "Breaking task into steps makes learning faster and more stable than trying the full task at once."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Segment and track",
+        "text": "Use a segmentation model to find task-relevant objects in the first frame, then track keypoints (distinct corners or features) across all frames of the demonstration."
+      },
+      {
+        "b": "Extract subgoals",
+        "text": "Find moments in the video where the keypoint motion changes direction, and use those moments as intermediate targets (subgoals) the robot should aim for."
+      },
+      {
+        "b": "Train the anticipation model",
+        "text": "Teach a neural network to predict the next subgoal's keypoint position given the current image, learning from the subgoal sequence you extracted."
+      },
+      {
+        "b": "Generate rewards",
+        "text": "When the robot runs, the anticipation model predicts what the next subgoal should be; reward the robot based on how close its keypoints get to that predicted position."
+      },
+      {
+        "b": "Train the policy",
+        "text": "Use offline reinforcement learning (train only on recorded data, no live interaction) to teach the robot to reach subgoals step-by-step, with provably bounded error."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing the paper changes",
+    "paras": [
+      "Instead of designing rewards based on task-specific goals or training unstable discriminators, ReLAM generates rewards by extracting and anticipating keypoint-based subgoals from videos."
+    ],
+    "object": "Reward signals"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Subgoal validity",
+    "name": "Keypoint-position error at each step",
+    "paras": [
+      "The anticipation model predicts where keypoints should be at the next subgoal. The robot receives a reward equal to the negative distance (in pixels or normalized coordinates) between where the keypoints actually are and where the model predicted they should be. The lower this error, the higher the reward.",
+      "The paper estimates this quantity by running the anticipation model autoregressively: given the current image, it predicts the next keypoint position, then compares that prediction to where the robot's gripper actually placed the object. This error signal directly supervises the low-level policy during training."
+    ],
+    "heat": {
+      "cells": [
+        ["Start frame", 1, false],
+        ["Extract KPT", 2, false],
+        ["Predict next KPT", 4, true],
+        ["Compare to actual", 4, true],
+        ["Reward signal", 3, false],
+        ["Policy observes", 3, false],
+        ["Robot moves", 2, false],
+        ["New frame", 1, false],
+        ["Loop again", 2, false],
+        ["Subgoal reached?", 4, true],
+        ["Move to next", 3, false],
+        ["Task complete", 1, false]
+      ],
+      "caption": "Darker cells are where the anticipation model's predicted positions are compared to reality."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The anticipation model watches successful videos and learns to predict the next step in a sequence of keypoint positions. Each prediction becomes a mini-goal the robot tries to reach."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The anticipated subgoals allow the robot to measure a dense reward signal: how far each keypoint is from where the model predicted it should be. A dense signal (feedback after every short step) helps the robot learn faster because it gets frequent guidance on what is working, whereas a sparse signal (reward only at the end) leaves the robot guessing for most of the task. Training this way using hierarchical RL means the robot learns from recorded data, not trial-and-error, and the paper proves the error stays within a bounded limit."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why breaking the task into anticipation-predicted subgoals works",
+    "paras": [
+      "A long robotic manipulation task (pick an object, move it, place it) is difficult to learn in one shot because the robot's actions have delayed effects and errors accumulate. By dividing the task into many short subgoals—each a single keypoint position to reach—the robot only needs to learn one small movement at a time. This is called hierarchical learning: the high-level planner (the anticipation model) picks the waypoints, and the low-level policy learns to hit them.",
+      "Why is this faster? Because each short step is simpler: the policy sees the current keypoint position and the next target position, and just needs to decide an action that closes that specific gap. The reward is dense (given after every step) rather than sparse (only at the very end), so the robot gets frequent feedback. The anticipation model ensures the subgoals are on an optimal path through the demonstration videos, so the robot is learning a curriculum aligned with how successful demonstrations solve the task.",
+      "The paper proves that if the anticipation model's predictions are accurate, the robot's learning error is bounded—meaning the approach will not get stuck in a bad local solution. In practice, the anticipation model learns from many demonstrations, so its predictions capture common patterns in how to solve the task."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Video demonstration: start state to goal"
+        },
+        {
+          "t": "step",
+          "s": "Segment objects, track keypoints across frames",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Identify keyframes (moments of motion change)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Train anticipation model to predict next keypoint",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "During robot training, model proposes subgoals",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Reward policy for reaching each subgoal",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Robot learns hierarchical control: subgoal-level then keypoint-level"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The reward function based on keypoint distance",
+    "words": "Reward equals negative distance from current keypoint to predicted next keypoint, shaped by a smooth penalty.",
+    "equation": "R_t = -lambda * ||KPT_actual_t - KPT_predicted_t||^2 + bonus_if_subgoal_reached",
+    "symbols": [
+      ["R_t", "Reward given at timestep t"],
+      ["KPT_actual_t", "Actual 2D keypoint position of the gripper in the current image"],
+      ["KPT_predicted_t", "Next keypoint position predicted by the anticipation model"],
+      ["lambda", "Scaling factor (how much distance penalty matters; typical value 1.0)"],
+      ["|| ||^2", "Squared distance in pixels or normalized coordinates"],
+      ["bonus_if_subgoal_reached", "Extra reward when keypoint reaches the predicted subgoal"]
+    ],
+    "worked": {
+      "title": "Tiny worked example",
+      "lines": [
+        "Suppose current keypoint is at image coordinates (100, 150) pixels.",
+        "Anticipation model predicts next subgoal at (120, 160).",
+        "Distance = sqrt((120-100)^2 + (160-150)^2) = sqrt(400+100) = sqrt(500) ≈ 22.4 pixels.",
+        "With lambda=1.0, reward = -1.0 * 22.4^2 = -501.76 (negative, robot receives penalty for being far).",
+        "If robot moves to (119, 159), distance = sqrt(1+1) ≈ 1.4, reward = -1.0 * 1.4^2 ≈ -2.0 (much better).",
+        "When robot reaches (120, 160) exactly, distance = 0, reward = 0 + bonus = +10 (for example).",
+        "The reward shape encourages steady progress and gives a strong signal at the goal."
+      ]
+    },
+    "note": "The squared-distance penalty encourages the robot to move toward the predicted subgoal, and the bonus rewards actually reaching it."
+  },
+  "bars": {
+    "h2": "Learning progress: ReLAM vs baselines",
+    "charts": [
+      {
+        "title": "Discriminator-based reward (unstable baseline)",
+        "rows": [
+          ["After 1000 steps", 20, "bad"],
+          ["After 5000 steps", 45, "bad"],
+          ["After 10000 steps", 52, "bad"]
+        ],
+        "note": "High-dimensional visual input makes discriminators hard to train and unstable; performance plateaus low."
+      },
+      {
+        "title": "ReLAM with anticipated subgoals",
+        "rows": [
+          ["After 1000 steps", 45, "good"],
+          ["After 5000 steps", 78, "good"],
+          ["After 10000 steps", 88, "good"]
+        ],
+        "note": "Structured intermediate goals provide dense, stable rewards. Learning accelerates quickly and achieves high success on complex tasks."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Anticipation model predictions are inaccurate.",
+        "html": "If the model predicts wrong subgoals (because demonstrations were noisy or diverse), the robot receives misleading rewards and learns a poor policy. The paper assumes demonstrations are near-expert—if they are random or adversarial, this breaks."
+      },
+      {
+        "warn": true,
+        "b": "Keypoint tracking fails.",
+        "html": "If the tracker loses the keypoint (because of occlusion, lighting changes, or camera motion), the distance measurement becomes meaningless and rewards become unreliable."
+      },
+      {
+        "warn": true,
+        "b": "Different objects at test time.",
+        "html": "If the robot must manipulate objects with different shapes or sizes than in the demonstrations, the keypoints may not match up, and the learned policy fails."
+      },
+      {
+        "b": "Done right.",
+        "html": "When demonstrations cover many variations, keypoint tracking stays accurate, and the anticipation model learns general patterns for reaching intermediate steps. The robot then learns efficiently and solves new task instances."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple simulated robotic task: a 2D arm or gripper that must move a block from a start region to a goal region over 50 timesteps. Create 10 expert demonstration videos showing different ways to solve the task. Train an anticipation model on these videos to predict keypoint positions 5 steps ahead. Then train a goal-conditioned policy using only the distance-to-subgoal reward, without any oracle ground-truth distance signal. Compare success rate (does the robot reach the goal?) and sample efficiency (how many training steps until success?) versus training with sparse rewards (reward only at the very end) or with a discriminator-based reward."
+    ],
+    "metric_eq": "Success rate = tasks solved per 100 attempts; sample efficiency = training steps until 80% success rate",
+    "closing": "The demo proves that intermediate subgoals predicted by the anticipation model accelerate learning and stabilize training compared to end-goal-only or discriminator-based alternatives, even when the blocks or target positions change between trials."
+  }
+}

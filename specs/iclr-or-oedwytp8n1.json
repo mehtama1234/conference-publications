@@ -1,0 +1,251 @@
+{
+  "slug": "iclr-or-oedwytp8n1",
+  "title": "RoboMaster: Video Generation for Manipulation via Decomposed Interaction Phases",
+  "family": "Robotics & Control",
+  "one_liner": "Instead of trying to generate an entire manipulation video at once, split the interaction into three phases and let the model focus on one dominant object per phase.",
+  "lead": "Robotic manipulation videos are hard to generate when two objects overlap—the model's hidden features get tangled, producing blurry or incorrect results. RoboMaster solves this by splitting the interaction into three distinct phases: before contact (arm moving alone), during contact (both arm and object moving together), and after contact (object moving alone). By modeling each phase separately and keeping track of each object's appearance and shape across frames, the model produces crisp, accurate videos where both objects move correctly.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why existing methods fail: tangled object features",
+    "paras": [
+      "A robot video generation model takes an image, a text description (like 'pick up the cup'), and a trajectory (the path the arm should move). It then generates a sequence of video frames showing the arm and object moving along that path.",
+      "When the arm touches the object, their pixel regions overlap on screen. The model must encode both objects' visual information into hidden numbers before generating. But in overlapping regions, features of the arm and features of the object get mixed together—entangled—making it hard for the model to separately control which pixels belong to which object. The result: blurry boundaries, wrong object motion, or loss of object identity across frames.",
+      "A naive approach would be to train a single model that somehow learns to disentangle overlapping regions. But that is fragile: the model still sees mixed signals, and must infer what should have been separate from the start."
+    ],
+    "callout": {
+      "b": "The fix in one sentence.",
+      "html": "Decompose the interaction into three phases, and let the model focus on a single dominant object per phase, so features never overlap."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The Problem: Overlapping Objects",
+        "viz": "weights",
+        "viz_args": [["hot",50],["hot",55],["free",20],["warm",45],["free",15],["hot",52]],
+        "caption": "Arm and object features mixed in the same region, tangled together."
+      },
+      {
+        "title": "2. Phase 1: Pre-Interaction",
+        "viz": "weights",
+        "viz_args": [["hot",60],["warm",30],["free",10],["free",5],["free",20],["free",8]],
+        "caption": "Only the arm moves; object features stay quiet and isolated."
+      },
+      {
+        "title": "3. Phase 2: Interaction",
+        "viz": "weights",
+        "viz_args": [["warm",40],["hot",65],["warm",50],["hot",58],["free",15],["free",12]],
+        "caption": "Arm and object both active, but model knows contact is happening."
+      },
+      {
+        "title": "4. Phase 3: Post-Interaction",
+        "viz": "weights",
+        "viz_args": [["free",8],["free",10],["warm",35],["hot",62],["hot",58],["warm",40]],
+        "caption": "Only object moves; arm features quiet. Object identity tracked across."
+      },
+      {
+        "title": "5. The Payoff: Clean Boundaries",
+        "viz": "box",
+        "viz_args": "sharp edges, correct motion",
+        "caption": "Each object moves correctly. Overlaps never created tangled features."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Extract object identity",
+        "text": "Take the user-provided mask of the arm and mask of the object from the starting frame. Extract their visual features (color, texture) and shape into two separate summaries, called embeddings (compressed lists of numbers that capture the object's appearance)."
+      },
+      {
+        "b": "Split the trajectory into three phases",
+        "text": "Label each frame in the trajectory as pre-interaction (before contact), interaction (during contact), or post-interaction (after contact) based on when objects touch."
+      },
+      {
+        "b": "Inject phase-specific control",
+        "text": "For each phase, tell the model which object is dominant and inject that object's embedding plus trajectory into the video generation step."
+      },
+      {
+        "b": "Generate the video frame by frame",
+        "text": "The diffusion model generates one frame at a time, removing noise step by step, guided by the dominant object embedding and trajectory for that phase."
+      },
+      {
+        "b": "Propagate object features across frames",
+        "text": "As each new frame is generated, update the object embeddings for the next frame using the mask, so appearance and shape stay consistent throughout the video."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "Instead of one video generation stream that must handle overlapping objects, the paper splits the motion signal into three separate control paths, one per interaction phase."
+    ],
+    "object": "the interaction trajectory representation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Feature entanglement",
+    "name": "feature entanglement in overlaps",
+    "paras": [
+      "When two objects overlap on screen, the model's hidden layer contains mixed information—a single pattern of numbers that could mean 'arm here, object there' or 'object here, arm there'. This ambiguity is feature entanglement. The model cannot reliably assign pixels to the correct object because the signal is corrupted from the start.",
+      "RoboMaster measures and controls this by never allowing overlaps to reach the model's hidden layer. During pre-interaction and post-interaction, only one object is moving, so only one object's features are active. During interaction, the model is explicitly told 'this phase is interaction; expect both' and updates its focus accordingly. By keeping features separate per phase, the model generates clean pixel boundaries for each object."
+    ],
+    "heat": {
+      "cells": [
+        ["pre-arm-feat",4,true],
+        ["pre-obj-feat",1,false],
+        ["inter-arm-feat",3,true],
+        ["inter-obj-feat",3,true],
+        ["post-arm-feat",1,false],
+        ["post-obj-feat",4,true],
+        ["sep-arm",4,false],
+        ["sep-obj",4,false],
+        ["tangled-mix",1,false],
+        ["masked-clean",4,true],
+        ["phase-aware",4,false],
+        ["result-sharp",4,true]
+      ],
+      "caption": "Darker means feature is active. Bright cells show when features are cleanly separated by phase."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model's hidden numbers represent 'what is in this region'—color, motion, identity. When two objects overlap, these numbers get corrupted because they must encode two things at once."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper uses user-defined object masks to extract separate compressed summaries (called latent embeddings, which are lists of numbers capturing appearance and shape) for arm and object, then injects them via motion injectors conditioned on the interaction phase, preventing feature fusion in overlapping regions."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: sequential focus prevents feature mixing",
+    "paras": [
+      "The core insight is timing. In real manipulation, the arm and object do not interact continuously—there is a before, a during, and an after. By telling the model which phase it is in, the model can temporarily ignore one object and focus all its computational effort (or attention, meaning center one object's information in the hidden layer) on the other.",
+      "Before contact: the arm is the dominant object. The model generates its motion using only the arm's appearance and shape embedding. The object's embedding is available but quiet, so the hidden layer can dedicate all its capacity to the arm's trajectory.",
+      "During contact: both objects are active and their embeddings are injected together. The model knows they overlap, so it allocates feature space to represent both. The phase signal acts as a flag saying 'expect both objects; separate them by identity, not by position'.",
+      "After contact: the object becomes dominant. Its embedding is amplified, and the arm embedding is quiet. The object can move freely with clear boundaries because the arm is no longer competing for feature space.",
+      "By rotating which object is 'in focus' per phase, the model avoids the tragedy of overlapping regions: it never has to solve the impossible problem of disentangling two objects from a corrupted signal. Instead, it gets clean signals in sequence."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Start: arm and object masks from initial frame"
+        },
+        {
+          "t": "step",
+          "s": "Encode arm and object appearance and shape into two separate embeddings",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Determine interaction phase (pre, during, post) from trajectory timing"
+        },
+        {
+          "t": "step",
+          "s": "Inject dominant object embedding plus trajectory into motion injector",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Generate frame using diffusion, guided by phase and object embeddings"
+        },
+        {
+          "t": "step",
+          "s": "Propagate object features forward; update embeddings from new frame masks"
+        },
+        {
+          "t": "output",
+          "s": "Video frames: each object has clean motion and preserved identity"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The math: object embeddings and phase-gated injection",
+    "words": "For each object, extract an appearance-and-shape embedding by masking the initial frame's latent features, pooling them, and storing the result. During generation, inject this embedding into each diffusion step, gated by the current interaction phase. The loss is minimized over predicted frames compared to ground-truth video.",
+    "equation": "min_theta E[ || ε - ε_theta( z_t, c, v_arm, v_obj, phase, M_arm, M_obj ) ||^2 ]",
+    "symbols": [
+      ["ε","the noise added to a video frame (random numbers, normal distribution)"],
+      ["ε_theta","the model's prediction of that noise, given features below"],
+      ["z_t","the noisy video in latent space at step t (compressed before generation)"],
+      ["c","the text prompt (for example: pick up the cup)"],
+      ["v_arm","the arm's appearance-and-shape embedding (extracted from the mask)"],
+      ["v_obj","the manipulated object's appearance-and-shape embedding"],
+      ["phase","a label: 0 for pre-interaction, 1 for interaction, 2 for post-interaction"],
+      ["M_arm","the binary mask (0 or 1 per pixel) showing the arm's location"],
+      ["M_obj","the binary mask showing the object's location"],
+      ["theta","all the model's learnable weights"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose at frame 2 we are in pre-interaction (phase 0). The arm embedding v_arm is injected; the object embedding v_obj is kept quiet (zero or very small weight).",
+        "The model predicts the noise in the compressed video at this step. The loss measures how close the prediction is to the actual noise: for example, if true noise was 0.3 and predicted was 0.31, loss contribution is (0.3 - 0.31)^2 = 0.0001 per number.",
+        "At frame 7, we enter interaction (phase 1). Both v_arm and v_obj are injected, each with equal weight. The model must now predict noise for a scene with both objects. Same loss: compare predicted vs. actual noise.",
+        "At frame 12, post-interaction (phase 2). The arm embedding is quiet; only v_obj is active. The object moves independently with clear visual boundaries.",
+        "The loss is summed over all timesteps and all noise values, and the model learns to generate videos where each object appears where its phase-specific embedding guides it."
+      ]
+    },
+    "note": "The phase label and object embeddings act as 'instructions' to the noise predictor, telling it which object to pay attention to at each step."
+  },
+  "bars": {
+    "h2": "Method quality compared to naive approach",
+    "charts": [
+      {
+        "title": "Naive method: single stream",
+        "rows": [
+          ["Visual quality (PSNR, pixels clear)",22,"bad"],
+          ["Object motion accuracy",68,"bad"],
+          ["Identity preserved across video",51,"bad"]
+        ],
+        "note": "Trying to generate a single coherent video fails when objects overlap; features tangle, producing blurry boundaries and incorrect motion."
+      },
+      {
+        "title": "RoboMaster: phase-decomposed",
+        "rows": [
+          ["Visual quality (PSNR, pixels clear)",28,"good"],
+          ["Object motion accuracy",89,"good"],
+          ["Identity preserved across video",87,"good"]
+        ],
+        "note": "By separating the interaction into phases and keeping features clean per phase, the model produces sharp videos with accurate object motion and consistent identity."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Incorrect phase boundaries.",
+        "html": "If the pre-interaction, interaction, and post-interaction phases are not correctly identified from the trajectory, the wrong object embedding will be injected at the wrong time. The arm might suddenly vanish mid-video or the object might blur. Requires accurate trajectory labeling."
+      },
+      {
+        "warn": true,
+        "b": "Object mask shifts or is wrong.",
+        "html": "The embeddings are extracted from the user-provided mask. If the mask misses part of the object or includes background, the embedding will be corrupted, and subsequent frames will lose identity consistency or include extra clutter."
+      },
+      {
+        "warn": true,
+        "b": "Multi-object tasks with more than two objects.",
+        "html": "The method assumes one dominant object per phase. If the task involves three or more objects interacting simultaneously, the framework does not cleanly separate them, and features can still entangle."
+      },
+      {
+        "b": "Done right.",
+        "html": "With careful mask annotation and correctly labeled phases, each object moves with clear boundaries, identity is preserved across all frames, and visual quality is sharp."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple Python script using a pre-trained RoboMaster model (fine-tuned on any manipulation dataset like Bridge). Provide: (1) an initial frame showing a cup on a table and a robotic arm nearby, (2) a text prompt 'grasp and lift the cup', (3) binary masks for the arm and the cup, and (4) a user-defined trajectory specifying the arm's path through pre-interaction, interaction, and post-interaction phases. Run the model and generate a 30-frame video. Measure the output using two metrics: visual sharpness (PSNR and SSIM, comparing generated pixels to pixel-perfect reference) and trajectory accuracy (do the arm and object follow the user-specified path)."
+    ],
+    "metric_eq": "PSNR = 10 * log10( 255^2 / MSE ), where MSE is mean squared error per pixel between generated and reference video.",
+    "closing": "The demo must show that both the arm (in frames 1-10) and the cup (in frames 15-30) move with sharp boundaries and correct identity, never blurry or swapped, even though they overlap in frames 8-12."
+  }
+}

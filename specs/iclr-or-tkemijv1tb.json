@@ -1,0 +1,245 @@
+{
+  "slug": "iclr-or-tkemijv1tb",
+  "title": "OmniEVA: Task-Adaptive 3D Grounding for Robot Planning",
+  "family": "Robotics & Control",
+  "one_liner": "A robot planner that learns which tasks need 3D spatial information and which need only 2D images, then adjusts itself on the fly to respect real robot constraints.",
+  "lead": "Robots trained on language and images struggle in two ways: they either miss 3D depth information entirely or get locked into one rigid way of seeing it, and they generate plans that sound smart but are physically impossible. OmniEVA solves both by letting the model decide task-by-task whether to use depth, and by training it to never suggest moves that violate a robot's reach, joint limits, or workspace boundaries.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why robots trained on language fail in the real world",
+    "paras": [
+      "Language models trained on images can follow instructions. But when a robot needs to understand where something is in 3D space — its height, depth, exact reachable position — models trained only on flat 2D images go blind. Some researchers hard-code 3D information into the model, but that locks it to one rigid way of seeing, and if the 3D data is noisy or incomplete, it actually hurts.",
+      "Worse: even when the model generates a plan that sounds correct in abstract terms, robots run into physical reality. Joint angles go out of bounds. Reaching arms hit their limit. Gripper can only close 90 degrees but the plan assumes 180. The result: plans that work in theory fail on real hardware."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Robots can understand language and images, but they cannot decide when to use 3D space information, and they do not know their own physical limits."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Robot reads task",
+        "viz": "brain",
+        "caption": "Robot receives instruction: find and grasp the object."
+      },
+      {
+        "title": "2. Is 3D needed here?",
+        "viz": "box",
+        "viz_args": "Question mark: task or no task?",
+        "caption": "Some tasks need depth, others just need what is visible."
+      },
+      {
+        "title": "3. Gated router decides",
+        "viz": "weights",
+        "viz_args": [["use-3d", 75], ["skip-3d", 25], ["fused", 60], ["ignored", 40]],
+        "caption": "Router scores task context, opens gate only when needed."
+      },
+      {
+        "title": "4. Plan respects robot body",
+        "viz": "box",
+        "viz_args": "Arm angle: 45 deg (safe)",
+        "caption": "During training, embodiment reward blocks impossible moves."
+      },
+      {
+        "title": "5. Executable on real robot",
+        "viz": "brain",
+        "caption": "Plan works the first time because it knew the robot shape."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Read task and image",
+        "text": "Model receives a natural-language instruction and one or more images of the scene."
+      },
+      {
+        "b": "Score whether 3D is relevant",
+        "text": "Task-Adaptive Gated Router encodes the instruction and image features, producing a single gate value (open or close)."
+      },
+      {
+        "b": "Conditionally add depth information",
+        "text": "If gate is open, inject 3D positional features (depth numbers). If closed, skip them and use only 2D."
+      },
+      {
+        "b": "Generate a task plan",
+        "text": "The base language model produces the plan (e.g. move arm to X, open gripper by Y degrees)."
+      },
+      {
+        "b": "Enforce robot physical limits",
+        "text": "During training, reward system penalizes plans that exceed joint angles, reach distance, or collision boundaries."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "The paper changes how 3D information gets mixed into the model: instead of always injecting it the same way, a gated router learns to turn it on or off per task, and during training, a reward function penalizes any plan that violates the robot's physical constraints."
+    ],
+    "object": "3D feature injection and constraint enforcement"
+  },
+  "hidden": {
+    "h2": "The gating decision: when does a task need 3D?",
+    "name": "Task-adaptive gating probability",
+    "paras": [
+      "The gating probability is a single number between 0 and 1 for each task-image pair. It answers the question: does this specific task need 3D spatial information to be solved correctly? The model learns this by comparing the instruction text and image features to decide whether depth will help.",
+      "The paper estimates the gating probability by encoding the task instruction using a lightweight text model, pooling the image features down to a single vector, concatenating them, and passing them through a small neural network (an MLP — a simple layer that learns to compute yes/no). The output is fed through a Gumbel-Softmax (a smooth choice function that picks between two options) to produce a sharp binary decision: inject 3D or not."
+    ],
+    "heat": {
+      "cells": [
+        ["grasp-near", 4, true],
+        ["point-to", 2, false],
+        ["where-visible", 1, false],
+        ["count-objects", 1, false],
+        ["bbox-3d", 4, true],
+        ["navigate-room", 3, true],
+        ["describe-image", 1, false],
+        ["reach-target", 4, true],
+        ["avoid-obstacle", 3, true],
+        ["place-object", 4, true],
+        ["open-cabinet", 2, false],
+        ["inspect-surface", 2, false]
+      ],
+      "caption": "Darker task types benefit most from 3D. Gating learns to predict this per task."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The gating probability tells you whether the task model thinks 3D spatial information is useful here. Some tasks are inherently 2D (describe what you see), while others need precise 3D (reach exactly there without collision)."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The TAGR module outputs a gate value g computed via Gumbel-Softmax over the MLP scores. This gate is steered by a KL divergence penalty that keeps it from always being on or always off, pushing it toward roughly 50-50."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why task-adaptive gating plus embodiment training works",
+    "paras": [
+      "The mechanism has two parts. First, the gating router learns that different tasks have different geometric needs. A task like 'point to the object' only needs 2D image coordinates, so hard-coding 3D embeddings would just add noise. A task like 'grasp that bottle' needs precise 3D position, angle, and reachability, so 3D is mandatory. By learning to predict which tasks need which, the model stays clean in 2D cases and accurate in 3D cases.",
+      "Second, during training, the model gets two reward signals. A task reward measures whether the plan achieves the goal (correct object, correct action). An embodiment reward measures whether the plan is physically possible (does the arm reach? are joint angles in bounds? does the gripper fit?). Early training emphasizes the task reward heavily; gradually it shifts to emphasizing embodiment feasibility. This two-stage reward scheduling forces the model to learn both 'what to do' and 'what the robot can actually do', so it stops generating impossible plans."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Task instruction + image(s) + optional depth"
+        },
+        {
+          "t": "step",
+          "s": "Encode instruction and image features",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Gating router scores: does this task need 3D?",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Conditionally fuse 3D embeddings if gate opens",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Language model generates plan",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Embodiment reward blocks impossible moves",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Executable task plan (within robot limits)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The gating and reward equations",
+    "words": "The gate is a binary choice learned by applying a smooth softmax to the output of a small network that sees both the task and the image. The training reward is a weighted combination of task success and embodiment feasibility, with the weight shifting over time to enforce harder physical constraints.",
+    "equation": "g = GumbelSoftmax(MLP([V_T, V_I_avg])) ∈ {0,1}; r_total = r_task * (lambda_t * r_embodiment + (1 - lambda_t))",
+    "symbols": [
+      ["V_T", "task instruction encoded as a vector"],
+      ["V_I_avg", "image features averaged to a single vector"],
+      ["MLP", "small neural network that learns the decision"],
+      ["g", "the gate: 0 (skip 3D) or 1 (use 3D)"],
+      ["r_task", "reward for achieving the goal"],
+      ["r_embodiment", "reward for respecting robot physical limits"],
+      ["lambda_t", "schedule weight: starts near 0, increases to 1 over training"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Task: 'grasp the cup on the shelf.' Instruction vector V_T = [0.2, 0.8, 0.5]. Image vector V_I_avg = [0.6, 0.3, 0.4]. MLP computes logits [2.0, 0.5] (strong lean toward gate=1).",
+        "Gumbel-Softmax samples and outputs g = 1. The 3D embeddings are injected and used by the model.",
+        "Model proposes: move arm to (x=0.3m, y=-0.1m, z=0.5m), angle=45 degrees, grip_width=6cm.",
+        "At training step 100, lambda_t = 0.2. r_task = 0.9 (correct cup, correct pose). r_embodiment = 1.0 (within joint limits, no collision). r_total = 0.9 * (0.2*1.0 + 0.8) = 0.9 * 1.0 = 0.9. High reward, plan is learned.",
+        "At training step 500, lambda_t = 0.8. r_task = 0.9, but a different plan violates joint angle limit. r_embodiment = 0.3. r_total = 0.9 * (0.8*0.3 + 0.2) = 0.9 * 0.44 = 0.40. Low reward, bad plan is rejected."
+      ]
+    },
+    "note": "The gate is sharp (0 or 1), so 3D embeddings are either fully used or fully skipped. The reward schedule ensures the model cares about both goals and physics."
+  },
+  "bars": {
+    "h2": "How gating plus embodiment training improves performance",
+    "charts": [
+      {
+        "title": "Hard-coded 3D (baseline)",
+        "rows": [
+          ["Clean 2D task accuracy", 78, "good"],
+          ["Noisy 3D task accuracy", 52, "bad"],
+          ["Real-robot execution rate", 65, "bad"]
+        ],
+        "note": "Always injecting 3D hurts 2D-only tasks and generates infeasible plans."
+      },
+      {
+        "title": "OmniEVA (this paper)",
+        "rows": [
+          ["Clean 2D task accuracy", 82, "good"],
+          ["Noisy 3D task accuracy", 88, "good"],
+          ["Real-robot execution rate", 91, "good"]
+        ],
+        "note": "Gating keeps 2D clean, embodiment training ensures plans work on real robots."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Gating collapses to always-on or always-off.",
+        "html": "If the penalty for gating bias is too weak, the router learns to always inject 3D or never inject it, losing the task-adaptive benefit. The paper adds a bias term that pushes the gate toward 50-50 odds to keep it probabilistic."
+      },
+      {
+        "warn": true,
+        "b": "Embodiment constraints are incomplete.",
+        "html": "If the robot model does not capture all physical limits (e.g., gripper slip, dynamic forces), the embodiment reward will reward plans that are theoretically feasible but fail in practice. The paper assumes access to accurate kinematic and workspace models."
+      },
+      {
+        "warn": true,
+        "b": "3D data is noisy or missing.",
+        "html": "If depth sensors fail or produce jittery readings, the 3D embeddings will mislead the model. The gating router may learn to ignore noisy 3D, but if 3D is essential for the task, performance drops."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the gating router uses proper bias steering, embodiment constraints accurately model the robot, and 3D data is clean or optional, the model learns to use each modality precisely when it matters, yielding both high task success and reliable real-world execution."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should show three scenarios side by side. Scenario 1: a pure 2D task like 'point to the largest object in the image' — the gating router should output close to 0 (skip 3D), because 3D spatial embeddings would just add noise to a question that only needs image coordinates. The 2D path should be cleaner and faster than forcing 3D. Scenario 2: a 3D task like 'grasp the object on the middle shelf' — the gate should open, 3D embeddings should flow in, and the plan should specify exact coordinates, because position and height determine whether the grasp succeeds. Scenario 3: a task with noisy depth — the gate should partially open or close to hedge, and the embodiment reward should still block reaching moves that exceed the robot arm's joint limits, because even if the 3D data is fuzzy, the robot's physical constraints are absolute. Measure task success rate and real-robot execution success (whether the suggested plan physically works)."
+    ],
+    "metric_eq": "Task success rate = (plans that achieve stated goal) / (total plans generated); Execution feasibility = (plans that pass kinematic + workspace checks) / (total plans generated)",
+    "closing": "The demo proves the point when a 3D-only baseline and OmniEVA both try the same three tasks, and OmniEVA executes successfully on the real robot while the 3D-only model produces moves the robot cannot physically perform."
+  }
+}

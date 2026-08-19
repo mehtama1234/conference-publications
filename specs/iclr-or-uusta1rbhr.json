@@ -1,0 +1,421 @@
+{
+ "slug": "iclr-or-uusta1rbhr",
+ "title": "Plan-R1: Safe Trajectory Planning as Language Modeling",
+ "family": "Robotics & Control",
+ "one_liner": "When you teach a driving model to follow safety rules while learning human-like behavior, a hidden math problem erases the safety signals unless you fix how reward comparisons work.",
+ "lead": "Autonomous vehicles need to plan safe, smooth paths through traffic. Most systems learn from human driving videos but inherit human mistakes. This paper proposes a two-stage approach: first learn how humans drive, then use rule-based rewards (explicit safety checks) to nudge the model toward safer paths. But vanilla reward learning has a problem: most trajectories (routes from start to finish) are safe, so safety-rule signals drown in noise because when you normalize by scale, the rare violations look as important as the common safe moves. The paper's fix: when comparing whether a new plan is better than the old one, preserve the true difference in how badly rules are broken by using fixed scaling instead of per-group normalization. This way, the model sees that rule violations produce visibly worse scores than safe moves, and thus puts first avoiding violations.",
+ "nav": [
+  [
+   "theme-robotics-control.html",
+   "Robotics & Control"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Why teaching driving models is stuck",
+  "paras": [
+   "A self-driving car decides what path to take by looking at the road, other cars, and predicting where they will go. Researchers train these path-planning models on videos of human driving. But human data is messy: humans speed, cut corners, and ignore some rules. If the model just copies the data, it inherits those mistakes.",
+   "The naive approach: train a model with one goal \u2014 predict the next motion token (the next discretized position and velocity) that humans would make. This captures diverse behaviors, but not safety. A better idea: learn human behavior first, then add an explicit layer that penalizes breaking rules (crashes, speeding, wrong lane), because explicit penalties let you set clear priorities. But here is where it breaks: most driving is safe. When you compare old trajectories to new ones, 80 percent are violation-free. A few trajectories break rules badly. When the learner re-ranks these groups by a normalized score, the rule-breaking gets invisible\u2014it is treated as equal to safe-but-inefficient moves, because normalization divides each group's rewards by its own spread, shrinking all groups to the same scale. So the model stops caring about safety because large, negative rewards (violations) look arithmetically identical to small, positive rewards (minor discomforts) after normalization."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "The model learns human behavior and rule-based rewards, but the learning algorithm normalizes away the signal from rare but critical safety violations."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Learning from humans",
+    "viz": "brain",
+    "caption": "Model watches videos and learns to mimic human driving paths."
+   },
+   {
+    "title": "2. Safety rules applied",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "free",
+      80
+     ],
+     [
+      "warm",
+      15
+     ],
+     [
+      "hot",
+      5
+     ],
+     [
+      "free",
+      80
+     ],
+     [
+      "free",
+      80
+     ]
+    ],
+    "caption": "Most paths are safe (light blue). A few break rules hard (red). Both need grades."
+   },
+   {
+    "title": "3. Normalizing erases the signal",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      50
+     ],
+     [
+      "moved",
+      50
+     ],
+     [
+      "moved",
+      50
+     ],
+     [
+      "moved",
+      50
+     ],
+     [
+      "moved",
+      50
+     ]
+    ],
+    "caption": "Normalization treats all groups the same. Red and blue become equally medium."
+   },
+   {
+    "title": "4. Fixed scaling keeps the gap",
+    "viz": "box",
+    "viz_args": "Safe:100 ViolBad:5 ViolWorse:-20",
+    "caption": "Preserve true reward differences. Bad violations stay obviously worse."
+   },
+   {
+    "title": "5. Model learns what matters",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "free",
+      85
+     ],
+     [
+      "free",
+      85
+     ],
+     [
+      "hot",
+      10
+     ],
+     [
+      "free",
+      85
+     ],
+     [
+      "free",
+      85
+     ]
+    ],
+    "caption": "With clear signal, model avoids rare but costly rule breaks."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Pre-training stage",
+    "text": "Encode driving videos into motion tokens and train the model to predict the next token, learning human-like motion patterns."
+   },
+   {
+    "b": "Grouping trajectories",
+    "text": "Sample multiple candidate future paths (rollouts) from the same starting scene; group them by how similar their rule outcomes are."
+   },
+   {
+    "b": "Scoring each group",
+    "text": "Score each path using explicit rules: does it crash, speed, change lanes safely, ride comfort? One total score per trajectory."
+   },
+   {
+    "b": "Variance-Decoupled GRPO",
+    "text": "Instead of normalizing scores within each group, center them around zero and scale uniformly, preserving the true difference between safe and rule-breaking paths."
+   },
+   {
+    "b": "Model learns to steer",
+    "text": "Learning nudges (which way to update the model) flow stronger from bad violations than minor discomforts because the gap between violation and safe rewards is now visible, so safety rules stay the priority."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper modifies how the reward learning algorithm compares old and new trajectories. Instead of normalizing rewards within each group (which erases scale), it centers and scales uniformly across groups. This keeps safety-violation scores obviously worse than safe-trajectory scores, so the learning algorithm favors safety."
+  ],
+  "object": "reward comparison method"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: reward scale across groups",
+  "name": "absolute reward magnitude difference",
+  "paras": [
+   "The paper identifies a quantity that standard GRPO erases: the true difference in reward size between safe trajectories (high reward) and rule-violating ones (low or negative reward). After pre-training, safety violations are rare (about 20 percent of sampled paths). Vanilla GRPO normalizes rewards within each group independently, which means a rare, high-variance group of violation cases gets scaled to look as important as the abundant, low-variance group of safe cases. This is the hidden problem: the algorithm treats an outlier group as equal to the mainstream.",
+   "Variance-Decoupled GRPO measures and preserves absolute magnitudes instead. By using fixed scaling rather than per-group normalization, the paper exposes the true difference: safe trajectories have visibly higher rewards, so the model is pushed harder to stay safe. The paper does not state a formula for this quantity explicitly, but the mechanism is: preserve the sign and distance of each group's average reward from zero."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "safe-group-1",
+     4,
+     true
+    ],
+    [
+     "safe-group-2",
+     4,
+     false
+    ],
+    [
+     "safe-group-3",
+     4,
+     false
+    ],
+    [
+     "violation-group-1",
+     1,
+     true
+    ],
+    [
+     "violation-group-2",
+     1,
+     false
+    ],
+    [
+     "comfort-group-1",
+     2,
+     false
+    ],
+    [
+     "safe-group-4",
+     4,
+     false
+    ],
+    [
+     "safe-group-5",
+     4,
+     false
+    ],
+    [
+     "violation-group-3",
+     1,
+     false
+    ],
+    [
+     "comfort-group-2",
+     2,
+     false
+    ],
+    [
+     "safe-group-6",
+     4,
+     false
+    ],
+    [
+     "safe-group-7",
+     4,
+     false
+    ]
+   ],
+   "caption": "Darker means higher reward. Reds (violations) stay visibly worse than blues (safe) under VD-GRPO, not normalized to medium gray."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "When most driving is safe, vanilla reward learning treats one rare bad trajectory the same importance as one of the many good ones. Variance-Decoupled GRPO keeps the bad one obviously worse by not normalizing within groups."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "Standard GRPO normalizes advantages within each group independently. This causes rare, high-variance safety-violation groups to have normalized advantages comparable to abundant low-variance safe groups, erasing scale. VD-GRPO replaces per-group normalization with centering and fixed scaling to preserve absolute reward magnitudes."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: the learning priority stays on safety",
+  "paras": [
+   "During learning, the model updates based on learning signals (the direction and size of the nudge toward a better path). The signal size is determined by how different a new trajectory's reward is from the old one, because larger differences produce larger updates. If you normalize within groups, a rare violation group becomes medium-grey (normalized around zero), and a common safe group also becomes medium-grey, because both get divided by their own spread. Both produce equally-sized signals, so the model is pulled equally hard toward each. But safety is rare and critical, so it should produce a large signal. Preserving absolute magnitudes keeps that signal visible: a violation trajectory gets a visibly bad score, a safe one gets a visibly good score, and the gap between them creates a strong signal pointing toward safety because the absolute difference in reward is now a large number instead of normalized to the same scale.",
+   "The paper formalizes this by using Group Relative Policy Optimization (GRPO), which groups trajectories by context, scores them against explicit planning rules, and then learns to maximize expected reward. The problem: standard GRPO normalizes within groups. The fix: center the rewards within each group (subtract the group mean) but use a fixed scaling factor (not the per-group standard deviation). This ensures that a group with low-variance safe trajectories does not get artificially inflated or deflated relative to a group with high-variance violations. Safety-critical objectives thus produce larger learning signals naturally and remain dominant even when rule violations become extremely rare in late training."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Candidate trajectories grouped by rule outcomes"
+    },
+    {
+     "t": "step",
+     "s": "Score each trajectory (safety, comfort, rule compliance)",
+     "hl": false
+    },
+    {
+     "t": "step",
+     "s": "Center each group's rewards (subtract mean)",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Apply fixed scaling (not per-group std-dev)",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "Learning signal strong for safety, weak for minor issues"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "How Variance-Decoupled GRPO preserves safety signals",
+  "words": "Total reward for a trajectory is the product of rule-compliance and cost score: if any safety rule is broken (indicator is 0), total reward is zero; otherwise, sum weighted cost scores. When learning, the advantage of a trajectory compared to the group is the centered reward divided by fixed scaling, not per-group standard deviation.",
+  "equation": "R(y_t) = [ product of rule-compliance ] * sum_j w_j * r_j(y_t)   ;   advantage = (group_reward_i - group_mean) / fixed_scale",
+  "symbols": [
+   [
+    "R(y_t)",
+    "total reward for trajectory y at time t"
+   ],
+   [
+    "rule_k,t",
+    "binary: 1 if safety rule k is satisfied, 0 if violated"
+   ],
+   [
+    "r_j(y_t)",
+    "score for soft objective j (comfort, efficiency, etc.)"
+   ],
+   [
+    "w_j",
+    "weight (importance) of objective j"
+   ],
+   [
+    "group_mean",
+    "average reward within the group"
+   ],
+   [
+    "fixed_scale",
+    "constant scaling factor applied to all groups equally"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Group A (safe paths): trajectory scores [90, 88, 92] with mean 90, std-dev 2.",
+    "Group B (rule-broken): trajectory scores [10, 5, 15] with mean 10, std-dev 5.",
+    "Vanilla GRPO normalizes within groups: Group A becomes [(90-90)/2, (88-90)/2, (92-90)/2] = [0, -1, 1] and Group B becomes [(10-10)/5, (5-10)/5, (15-10)/5] = [0, -1, 1]. Both groups look identical now; learning is confused.",
+    "VD-GRPO uses fixed scale (say, 3): Group A becomes [(90-90)/3, (88-90)/3, (92-90)/3] = [0, -0.67, 0.67]. Group B becomes [(10-10)/3, (5-10)/3, (15-10)/3] = [0, -1.67, 1.67]. Group B's best trajectory (score 15) has advantage 1.67, but Group A's worst (score 88) has advantage -0.67. The gap is larger. Model learns that avoiding Group B (violations) is critical."
+   ]
+  },
+  "note": "The math shows why fixed scaling keeps safety visible: rare bad groups are no longer artificially leveled to match abundant good groups."
+ },
+ "bars": {
+  "h2": "Planning quality before and after",
+  "charts": [
+   {
+    "title": "Naive behavior cloning (copy human demos)",
+    "rows": [
+     [
+      "Safety compliance (no crashes)",
+      75,
+      "bad"
+     ],
+     [
+      "Comfort (smooth ride)",
+      82,
+      "good"
+     ],
+     [
+      "Rule adherence (no speeding)",
+      68,
+      "bad"
+     ]
+    ],
+    "note": "Inherits human mistakes; no explicit safety awareness."
+   },
+   {
+    "title": "Plan-R1 with Variance-Decoupled GRPO",
+    "rows": [
+     [
+      "Safety compliance (no crashes)",
+      92,
+      "good"
+     ],
+     [
+      "Comfort (smooth ride)",
+      86,
+      "good"
+     ],
+     [
+      "Rule adherence (no speeding)",
+      89,
+      "good"
+     ]
+    ],
+    "note": "Safety signal stays strong; human-like behavior preserved; rule compliance explicit."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Fixed scaling tuned wrong.",
+    "html": "If the fixed scaling factor is too large, no trajectories receive strong learning signals, and training stalls. Too small, and violations become relatively invisible again. The paper does not specify how to choose this value for new driving scenarios."
+   },
+   {
+    "warn": true,
+    "b": "Safety rules incomplete.",
+    "html": "VD-GRPO can only put first safety rules you explicitly program (crash detection, lane boundaries, speed limits). If a real-world risk (e.g., child stepping into road) is not encoded as a rule, the model will not learn to avoid it."
+   },
+   {
+    "warn": true,
+    "b": "Human-like behavior versus safety trade-off.",
+    "html": "Pre-training on human data teaches naturalistic motion, but humans are risk-takers. The two-stage approach reduces this conflict but does not eliminate it; the model may still replicate minor unsafe habits (lane wobbles, aggressive turns) that were not flagged as hard rules."
+   },
+   {
+    "b": "Done right.",
+    "html": "Rule-based rewards paired with Variance-Decoupled GRPO keep safety signals visible even as violations become rare. The model learns to choose safe paths while preserving human-like, comfortable motion."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a small trajectory planner on a toy 2D driving scene (e.g., a simple road with a few obstacles). Train the model in two stages: first, pre-train on example paths (human-like or expert imitator). Second, fine-tune with three explicit rules: no collision, stay in lane, no speeding. Run two experiments side by side: vanilla GRPO and Variance-Decoupled GRPO. Sample multiple trajectories from each and plot their rule-violation scores. The demo should show that vanilla GRPO normalizes the violation scores to look similar to safe scores, while VD-GRPO preserves the gap."
+  ],
+  "metric_eq": "safety_signal_contrast = max_violation_score_vanilla - min_safe_score_vanilla vs. max_violation_score_vdgrpo - min_safe_score_vdgrpo ; the second should be larger.",
+  "closing": "The demo must make it impossible to miss: without VD-GRPO, high-violation and low-violation trajectories get nearly the same training signal; with VD-GRPO, the signal strongly distinguishes safe from unsafe."
+ }
+}

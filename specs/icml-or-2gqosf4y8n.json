@@ -1,0 +1,206 @@
+{
+  "slug": "icml-or-2gqosf4y8n",
+  "title": "Mixture of Horizons in Action Chunking",
+  "family": "Robotics & Control",
+  "one_liner": "Use multiple action time horizons in parallel, then vote to pick which one to execute step by step.",
+  "lead": "Robots must balance two opposing needs: long-term planning (which path around obstacles?) and short-term precision (which exact finger movement?). This paper proposes a simple trick: split each planned action chunk into parallel streams that think at different time scales, process them together, then let them vote on which stream to follow at each step. It sounds complicated, but adds almost no training cost.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "The horizon trade-off in robot control",
+    "paras": [
+      "A robot policy must predict a sequence of actions (a chunk) — for instance, 30 steps ahead to manipulate an object. Predicting far ahead (long horizon) helps the robot see around obstacles and plan coherently, because a longer trajectory reveals which paths collide with distant obstacles and which are clear. But it forces the model to average over many futures; by step 25, the prediction is blurry and coarse.",
+      "Predicting only a few steps ahead (short horizon) keeps predictions sharp and precise. The robot can react accurately to where its hand needs to go right now. But it loses the big picture — it might paint itself into a corner or miss an obvious shortcut.",
+      "A naive engineer picks a single horizon (say, 15 steps) and lives with the trade-off. This paper asks: why choose? Run both in parallel and let them talk."
+    ],
+    "callout": {
+      "b": "The move in one sentence.",
+      "html": "Process action chunks in parallel streams with different time horizons, share the computation, then learn which horizon to execute at each step."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Setup: robot planning",
+        "viz": "brain",
+        "caption": "Robot sees a scene and must predict 30 steps of hand movement."
+      },
+      {
+        "title": "2. The problem: choose horizon length",
+        "viz": "weights",
+        "viz_args": [["hot",40],["warm",60],["free",30],["hot",50],["warm",55],["free",25]],
+        "caption": "Long horizons plan ahead but blur. Short horizons are precise but short-sighted."
+      },
+      {
+        "title": "3. Mixture of horizons: parallel streams",
+        "viz": "box",
+        "viz_args": "3-horizon transformer (2-step, 8-step, 30-step), shared weights",
+        "caption": "Split chunk into parallel paths; each sees the prediction task at a different speed."
+      },
+      {
+        "title": "4. Gating layer votes step by step",
+        "viz": "weights",
+        "viz_args": [["moved",70],["free",40],["moved",60],["moved",75],["free",35],["free",50]],
+        "caption": "At each step, vote which horizon best matches others. Pick stable, consensus action."
+      },
+      {
+        "title": "5. Result: best of both",
+        "viz": "brain",
+        "caption": "Sharp moves where needed, coherent plans where distant obstacles matter."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Input splits across horizons",
+        "text": "Same visual context flows to three parallel action transformers (one for 2-step, one for 8-step, one for 30-step predictions)."
+      },
+      {
+        "b": "Each horizon predicts independently",
+        "text": "Short-horizon stream: sharp, confident next moves. Long-horizon stream: smoother, broader strokes. All share the vision backbone."
+      },
+      {
+        "b": "Gating head scores each horizon",
+        "text": "A tiny learned layer outputs a score for each horizon at each step, indicating how much to trust that horizon."
+      },
+      {
+        "b": "Weighted average fuses predictions",
+        "text": "Final action at step k is a learned mixture of the three predictions, weighted by gating scores."
+      },
+      {
+        "b": "Dynamic execution: vote on when to replan",
+        "text": "If long-horizon and short-horizon predictions disagree, stop and replan. If they agree, keep executing. Since recomputation is slow, skipping it on safe steps cuts total compute time."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The object is the action chunk representation itself. Instead of predicting a single 30-step sequence, the model outputs three sequences in parallel (e.g., steps 1-2, 1-8, 1-30) and learns weights to blend them. The weights live in a small gating head (roughly 2,000 tunable numbers), added to the network layer that processes actions."
+    ],
+    "object": "action chunk representation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: horizon consensus",
+    "name": "cross-horizon disagreement at each step",
+    "paras": [
+      "This paper introduces and measures a quantity no prior robot control work tracked: how much do the different horizon streams agree at each future step? A low disagreement means the short-term and long-term predictions point in the same direction (stable). High disagreement means the robot is in a decision point (replan).",
+      "The paper estimates disagreement by measuring how far apart the three horizon predictions are at each step — this is the distance (how different the predicted actions are). Then it sets a threshold: if disagreement stays below the threshold for several steps, safely execute that whole prefix without recomputing, because agreement among different horizon streams means the action is stable to unseen future changes. This enables the 2.5 times faster execution, since the model can output many steps in advance and the robot trusts them."
+    ],
+    "heat": {
+      "cells": [["low disagreement",3,true],["low",2,false],["high",1,false],["low",2,false],["high",1,false],["medium",2,false],["low",3,true],["medium",2,false],["high",1,false],["low",2,false],["medium",2,false],["low",3,true]],
+      "caption": "Darker means horizons agree. Highlights show stable decision windows where execution is safe."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "At step k, each horizon predicts a slightly different action. If the three predictions cluster tightly, the robot can safely do what they all agree on. If they scatter, the robot must replan."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Disagreement is the sum over horizons of (gating weight times distance from fused action). Threshold is set to mean disagreement in first n steps times a tuning factor. Execute longest prefix with disagreement below threshold and at least m active horizons."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: parallel streams + learned arbitration",
+    "paras": [
+      "The core insight is that long and short horizons are not enemies—they are specialists at different tasks. Long-horizon predictions contain low-frequency patterns (arcs, general direction, avoiding far obstacles). Short-horizon predictions contain high-frequency detail (exact finger angles, immediate corrections). A single horizon must compress one into the other, losing information. Two horizons in parallel preserve both.",
+      "The gating head learns to route each prediction to the right place. At planning steps (corners, delicate manipulations), short-horizon dominates because disagreement signals uncertainty. On smooth, open-loop trajectories, long-horizon dominates because all streams agree. The fused output inherits the best of both.",
+      "The disagreement-based execution strategy exploits an observation: if short and long horizons agree, the action is stable and unlikely to fail as the world changes, so the robot can execute many steps without recomputation. If they disagree, the robot is at a decision point and must replan immediately. This adaptive replanning cuts computation time by 2.5 times while preserving task success."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Vision context (current image, instruction)"},
+        {"t": "step", "s": "Split to 3 parallel action transformers", "hl": true},
+        {"t": "step", "s": "Each predicts at its own horizon (2/8/30 steps)"},
+        {"t": "step", "s": "Gating layer scores each horizon"},
+        {"t": "step", "s": "Weighted fusion of three predictions"},
+        {"t": "output", "s": "Final action chunk (blended foresight + precision)"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The fusion equation",
+    "words": "Final action is a learned weighted sum of horizon-specific predictions, where weights come from a gating layer that sees the same input.",
+    "equation": "a_t,k = sum_h alpha_t,k,h * a^(h)_t,k",
+    "symbols": [
+      ["a_t,k", "the fused action at timestep t, step k in the chunk"],
+      ["a^(h)_t,k", "the prediction from horizon h at that step"],
+      ["alpha_t,k,h", "learned gating weight for horizon h at step k, computed by tiny linear layer"],
+      ["sum_h alpha_t,k,h", "weights sum to 1 (softmax ensures normalized blending)"]
+    ],
+    "worked": {
+      "title": "Tiny worked example with 2-step and 5-step horizons",
+      "lines": [
+        "At step k=1: 2-step predicts hand-move-left (0.3, -0.2), 5-step predicts hand-move-slightly-left (0.15, -0.1).",
+        "Gating scores: 2-step = 0.6, 5-step = 0.4 (learned by the model).",
+        "Fused action = 0.6 * (0.3, -0.2) + 0.4 * (0.15, -0.1) = (0.18 - 0.06, -0.12 - 0.04) = (0.24, -0.16).",
+        "At step k=4 near an obstacle: gating shifts to 2-step = 0.8, 5-step = 0.2 (short-term dominates for precision).",
+        "Fused action = 0.8 * (0.2, 0.1) + 0.2 * (0.25, 0.15) = (0.16 + 0.05, 0.08 + 0.03) = (0.21, 0.11)."
+      ]
+    },
+    "note": "The gating weights shift automatically as the model processes each step, letting different horizons lead depending on whether the robot needs precision (disagreement high) or lookahead (disagreement low)."
+  },
+  "bars": {
+    "h2": "Performance on standard benchmarks",
+    "charts": [
+      {
+        "title": "Fixed single horizon (baseline)",
+        "rows": [
+          ["Short horizon (4 steps): fine grasping",78,"bad"],
+          ["Short horizon: coarse global plans",45,"bad"],
+          ["Long horizon (30 steps): global plans",88,"good"],
+          ["Long horizon: fine grasping",52,"bad"]
+        ],
+        "note": "Forced choice: either be precise or far-sighted, not both."
+      },
+      {
+        "title": "Mixture of Horizons (this paper)",
+        "rows": [
+          ["Short-horizon paths for precision",82,"good"],
+          ["Global planning from long-horizon",88,"good"],
+          ["Replan only when horizons disagree",80,"good"],
+          ["2.5 times higher throughput (steps per chunk executed)",85,"good"]
+        ],
+        "note": "The gating layer lets both strengths coexist. Dynamic execution doubles throughput by skipping unnecessary recomputation."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Gating layer mode collapse.",
+        "html": "Without explicit regularization, the learned weights might ignore one of the horizons entirely (e.g., always pick the middle horizon). The paper adds a balance loss to penalize any horizon that goes unused too often. This forces all three streams to contribute."
+      },
+      {
+        "warn": true,
+        "b": "Disagreement threshold too loose.",
+        "html": "If the threshold for safe execution is too high, the robot commits to actions when horizons actually disagree. It then executes a bad plan without replanning. Setting the threshold too loose trades off replan frequency for safety."
+      },
+      {
+        "warn": true,
+        "b": "Minimum active horizons violated.",
+        "html": "If only one horizon remains active (others exhausted their steps), the fused action collapses to a single stream. The paper enforces that at least m horizons must be active to execute, forcing replan otherwise."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works well when the three horizons are truly complementary (short, medium, long) and the task has both precision-heavy phases (grasping) and planning-heavy phases (reaching). On open-loop tasks with no decision points, disagreement stays low and throughput stays high."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple 2D reach-and-grasp simulation (arm reaches toward a block, grasps it). Use two action horizons (4 steps and 16 steps). At the reach phase, measure that both horizons agree on the high-level direction. At the grasp phase, measure that they disagree on fine finger angles, triggering a replan. Show that: (a) the fused action combines both streams' strengths; (b) the disagreement metric correctly predicts replan points; (c) dynamic execution with the consensus rule executes all replan points correctly."
+    ],
+    "metric_eq": "throughput = number of action steps executed without recomputation / total predicted steps",
+    "closing": "The demo must show that without MoH, a single horizon fails either reach (too short) or grasp (too long), but with MoH, both phases succeed at 2.5 times throughput."
+  }
+}

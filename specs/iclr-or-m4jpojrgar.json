@@ -1,0 +1,217 @@
+{
+  "slug": "iclr-or-m4jpojrgar",
+  "title": "FlowAD: Ego-Scene Interactive Modeling for Autonomous Driving",
+  "family": "Robotics & Control",
+  "one_liner": "Autonomous driving plans better when the model predicts how the scene moves relative to the car itself, not just what objects are where.",
+  "lead": "Self-driving cars today know where other cars and obstacles are, but they miss something important: how that scene shifts and changes from the car's own perspective as it moves. This happens in every real drive. FlowAD fixes this by teaching the car to predict scene motion relative to itself first, then use those predictions to plan moves. The result: safer driving with fewer collisions.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Driving without understanding perspective",
+    "paras": [
+      "Current autonomous driving models see the scene as a fixed bird's-eye map: car A is here, building there, road ahead. But that is a lie. As the car moves forward and steers, the entire scene shifts from the car's viewpoint. A car 50 meters ahead gets closer; a pedestrian on the left slides rightward. Most systems ignore this feedback loop: they observe the world but do not reason about how their own motion reshapes what they see.",
+      "A naive attempt: just ask the model to output where the car should go next. It tries, but it does not truly understand the driving process — it learns only to copy what worked in recorded logs without modeling how motion connects observation to planning. The model stalls on corners, hesitates at the split second when choice matters most, because it never grasped the dynamic dance between the car's motion and the scene around it."
+    ],
+    "callout": {
+      "b": "The move.",
+      "html": "Model scene flow (how everything moves relative to the ego car) as a learned quantity, partition the scene using the car's steering and speed, predict that flow forward in time and space, then let planning use those predicted flows."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Static view: the lie",
+        "viz": "plain",
+        "caption": "Current model sees cars and lanes in a fixed map. No motion, no time."
+      },
+      {
+        "title": "2. Car steers left, scene tilts right",
+        "viz": "weights",
+        "viz_args": [["moved", 40], ["warm", 35], ["hot", 50], ["free", 25], ["moved", 60], ["warm", 45], ["hot", 55], ["free", 30], ["moved", 35], ["warm", 40], ["hot", 48], ["free", 20]],
+        "caption": "As ego car turns, surrounding objects shift in opposite direction from car's frame."
+      },
+      {
+        "title": "3. Partition by steering angle",
+        "viz": "box",
+        "viz_args": "Left zone | Center zone | Right zone",
+        "caption": "FlowAD divides the scene using the car's actual steering and speed command."
+      },
+      {
+        "title": "4. Predict flow forward",
+        "viz": "weights",
+        "viz_args": [["warm", 38], ["free", 28], ["warm", 52], ["warm", 30], ["warm", 42], ["free", 22], ["warm", 48], ["warm", 35], ["warm", 45], ["free", 25], ["warm", 50], ["warm", 40]],
+        "caption": "Model learns spatial and temporal rules: how each zone will move next."
+      },
+      {
+        "title": "5. Plan with flow knowledge",
+        "viz": "plain",
+        "caption": "Planner sees next-frame scene before deciding. Fewer surprises, faster safe reactions."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Ego-guided partition",
+        "text": "Divide scene into N zones using car's steering wheel angle and forward speed."
+      },
+      {
+        "b": "Build flow units",
+        "text": "Extract local feature patches for each zone, forming basic motion-prediction blocks."
+      },
+      {
+        "b": "Spatial flow learning",
+        "text": "For each zone, predict how neighbors shift next by comparing each zone to nearby zones."
+      },
+      {
+        "b": "Temporal flow learning",
+        "text": "Use zone history to forecast future zone state, accounting for inertia and steering."
+      },
+      {
+        "b": "Task-aware planning",
+        "text": "Feed predicted flows to planner, which now acts on expected scene, not current one."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the model changes",
+    "paras": [
+      "The object is the learned representation of how the scene moves from the car's perspective. Instead of storing a static map, FlowAD learns to predict scene flow—the velocity and direction each part of the scene will move in the next moment, relative to the ego vehicle."
+    ],
+    "object": "scene flow representation"
+  },
+  "hidden": {
+    "h2": "The quantity that drives the change: scene flow alignment",
+    "name": "scene flow alignment error",
+    "paras": [
+      "Scene flow alignment is how well the model's predicted next-frame scene matches what actually happens. It is the gap between predicted zone positions and real zone positions one frame ahead. The model estimates this by comparing predicted flows against ground truth flows extracted from the recorded driving logs—if the car went 2 meters forward and a car ahead moved 0.5 meters, the flow was 1.5 meters backward relative to ego.",
+      "FlowAD minimizes this error by training two separate predictors: one for spatial (left-right, up-down) shifts and one for temporal (future state) shifts. It uses a KL divergence loss—a measure of how different two probability distributions are—to grade each prediction. Smaller alignment error means the model understands ego-scene interaction better, and the planner can trust the forecast, because each zone's predicted position is now closer to where it actually appears in the next frame, so the planner's collision checks will catch real hazards instead of false alarms."
+    ],
+    "heat": {
+      "cells": [["left zone flow", 3, true], ["center zone flow", 4, true], ["right zone flow", 2, false], ["left history", 2, false], ["center history", 4, true], ["right history", 3, true], ["left pred next", 3, true], ["center pred next", 4, true], ["right pred next", 2, false], ["left error", 1, false], ["center error", 1, false], ["right error", 2, false]],
+      "caption": "Darker shading means higher scene flow prediction error. Zones with high error are where the model struggles most. FlowAD trains to reduce dark cells."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Scene flow is the per-zone motion prediction. If a zone will move 5 pixels left in 100ms, that is the scene flow for that zone. The model learns to predict it from the car's steering and recent history."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper measures spatial and temporal flow prediction accuracy via KL divergence—a way to score how well one distribution matches another. It compares the model's predicted zone positions (with their uncertainty ranges) against the ground-truth positions from the logged drives. Temporal prediction uses the same scoring method but compares predictions one step into the future."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why better scene flow means better planning",
+    "paras": [
+      "A planner that knows what the scene will look like in 100ms can make a safer decision now. Without that knowledge, it reacts to the present frame; with it, it acts on a prediction. Every moment of planning, the car is choosing between actions. A naive planner sees obstacle A is 20 meters away and decides safe to accelerate. But if the model predicted scene flow correctly, it knows obstacle A is actually approaching at 10 meters per second—same decision is now deadly.",
+      "FlowAD makes flow prediction work in two ways. First, ego-guided partitioning anchors the prediction to the car's own motion—if the car is turning left at 0.2 radians per second, zones on the right shift rightward predictably, and zones on the left shift less. The model learns this relationship. Second, spatial and temporal modules learn zone-to-zone dependencies: when the left zone moves, the center zone often moves too, with a lag. By splitting the problem into spatial (left-right, neighbors) and temporal (one frame to the next) components, each module specializes, reducing error. The planner receives these predictions and incorporates them into its trajectory search, selecting moves that work not just in the current frame but in the predicted future scene.",
+      "Why this works mechanically: planning is a search over possible next actions. Each action (steer angle, acceleration) produces a predicted path for the car. The planner scores paths by running a mock simulation of the scene forward and checking for collisions. With scene flow, that simulation is now grounded in learned predictions of real dynamics, not blind extrapolation. Fewer surprises happen after the decision; planning latency drops."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current camera frame and steering command"
+        },
+        {
+          "t": "step",
+          "s": "Partition scene into N zones using ego steering angle and speed",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Extract local features (patches) for each zone"
+        },
+        {
+          "t": "step",
+          "s": "Predict spatial flow (how zones shift relative to neighbors)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Predict temporal flow (how zones evolve over time)"
+        },
+        {
+          "t": "output",
+          "s": "Predicted next-frame scene flows to planner"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The flow prediction loss",
+    "words": "For each zone, predict its future state as a distribution over positions and velocities. Measure error as KL divergence: how different is the predicted distribution from the real one.",
+    "equation": "L_flow = L_spatial + L_temporal, where L_spatial = KL({mu_pred, sigma_pred} || {mu_gt, sigma_gt})",
+    "symbols": [
+      ["mu_pred", "predicted mean position of zone j"],
+      ["sigma_pred", "predicted uncertainty (spread) of position"],
+      ["mu_gt", "ground-truth mean position from log"],
+      ["sigma_gt", "ground-truth position spread"],
+      ["KL(...||...)", "how many bits of info are wasted if you use the predicted distribution instead of the true one"],
+      ["L_temporal", "same formula applied to future time steps instead of space"]
+    ],
+    "worked": {
+      "title": "Tiny worked example: one zone flow prediction",
+      "lines": [
+        "Zone 3 is at x=50 pixels. Model predicts next frame at x=48 pixels (mu_pred=48, sigma_pred=2).",
+        "Ground truth from log: actually moved to x=47 (mu_gt=47, sigma_gt=1).",
+        "KL divergence measures: predicted too confident by 1 pixel and placed it 1 pixel too far right.",
+        "KL loss = 0.6 bits (a small penalty). Sum this over all N zones and all frames; training reduces it.",
+        "After 30 epochs, KL drops to 0.05, meaning predictions align with real scene flows."
+      ]
+    },
+    "note": "Lower KL loss means the model's zone flow predictions match ground truth, because each zone's predicted position now sits exactly where it moved in reality, so when the planner simulates the next moment using these flows, the simulated scene reflects what will actually happen."
+  },
+  "bars": {
+    "h2": "Effect of flow prediction on planning success",
+    "charts": [
+      {
+        "title": "Naive planner (no scene flow)",
+        "rows": [["Easy straight drives", 92, "good"], ["Left turn approaching", 68, "bad"], ["Right turn with obstacle", 61, "bad"]],
+        "note": "Planner reacts to current frame only. Turns and close calls have high collision risk because it sees the scene too late."
+      },
+      {
+        "title": "FlowAD planner (with scene flow)",
+        "rows": [["Easy straight drives", 93, "good"], ["Left turn approaching", 84, "good"], ["Right turn with obstacle", 79, "good"]],
+        "note": "Planner sees predicted flow. Knows left zone will shift rightward soon, so it prepares the steering command early. Success rate rises across all scenarios."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Partition mismatch.",
+        "html": "If the ego car's steering angle sensor is noisy or delayed, the partition (which depends on steering) misaligns with the actual scene motion. Predictions fail. Requires accurate ego-state (steering, speed) to work."
+      },
+      {
+        "warn": true,
+        "b": "Occlusion and new objects.",
+        "html": "Scene flow prediction assumes zones evolve smoothly. A pedestrian stepping from behind a building breaks the learned pattern. The model predicts flow for an empty zone; planner is surprised. Works best in highway driving; city streets with sudden occlusions are harder."
+      },
+      {
+        "warn": true,
+        "b": "Long-horizon error accumulation.",
+        "html": "Predicting 1–2 frames ahead is more accurate than 5 frames, because each prediction uses the previous prediction as input, so small errors compound: if frame 1 is off by 0.5 pixels, frame 2 uses that wrong position to predict frame 3, making error bigger. Planner horizon (how far ahead it looks) must match the reliable prediction range. Too long a horizon, and flow predictions drift into fairy-tale territory."
+      },
+      {
+        "b": "Done right: ego-state is clean, planning horizon is short, and training data is logged real drives (not simulation).",
+        "html": "FlowAD works with existing recorded driving datasets without needing simulated scenarios. So long as recorded logs have accurate ego-state, scene flow is learnable. Works best on expressways and highways where occlusions are rare."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a minimal version: (1) record 100 short driving clips from nuScenes or a real dashcam; (2) extract ego steering angle, speed, and camera frame for each; (3) manually label 5 zones per frame (left, center-left, center, center-right, right) and mark their positions in the next frame; (4) train two small MLPs (one for spatial shift, one for temporal state) to predict zone positions 1 frame ahead using ego-state and current zone features; (5) measure KL divergence on a held-out test clip. Plot the KL loss over training epochs and show before-and-after zone position predictions on a test frame. The demo is successful if (a) KL loss decreases consistently, (b) predicted zones align visibly with ground truth on the test frame, and (c) a mock planner using predictions makes fewer collisions than one using static maps."
+    ],
+    "metric_eq": "KL_test = average KL divergence on held-out clips; collision rate = fraction of planning trajectories that hit an obstacle in the 1-frame-ahead simulated scene",
+    "closing": "The key is to show that predicting scene flow from ego-state works: zones move predictably when the car steers and accelerates, and the planner can use this to plan safer."
+  }
+}

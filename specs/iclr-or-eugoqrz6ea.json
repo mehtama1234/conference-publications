@@ -1,0 +1,201 @@
+{
+ "slug": "iclr-or-eugoqrz6ea",
+ "title": "Self-Improving Robot Control Models via Residual RL",
+ "family": "Robotics & Control",
+ "one_liner": "Teach a robot-control model to improve itself by training tiny specialist add-ons that rescue it when it fails, then distilling their recovery tricks back into the full model.",
+ "lead": "Training robot-control models from scratch is expensive: it requires hundreds of human demonstrations for each task. PLD teaches a pre-trained model to improve itself by training small add-on rescue modules that detect failure points and propose corrections. These corrections are then recycled back into the main model through retraining, which works because the main model already mastered common cases and only needs to learn how to recover from failures.",
+ "nav": [["theme-robotics-control.html","Robotics & Control"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Why collect more human demos?",
+  "paras": [
+   "A robot model trained to mimic human demonstrations works well on tasks it has seen, but falls apart on new tasks or tricky edge cases. The obvious fix: collect more and more human demonstrations. But that does not scale—paying someone to manually control a robot arm for weeks is prohibitively expensive, and there is no guarantee the new data will cover the cases that actually trip up the model.",
+   "A naive attempt: gather a bigger dataset. This spreads the training effort across more tasks, but the model still learns only what humans showed it—it has no way to discover what to do when something goes wrong."
+  ],
+  "callout": {
+   "b": "The core problem:",
+   "html": "VLA models rely on costly human demonstrations and cannot improve beyond what humans have shown them, because they are trained only by copying human actions and have no mechanism to discover better behaviors on their own."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Base model reaches a limit",
+    "viz": "weights",
+    "viz_args": [["warm",50],["free",20],["warm",45],["free",30],["warm",48],["free",25]],
+    "caption": "Pre-trained model handles common tasks but fumbles on unseen cases."
+   },
+   {
+    "title": "2. Task fails at state T",
+    "viz": "box",
+    "viz_args": "The base policy gets stuck here—time for rescue",
+    "caption": "Model acts for T steps, then tries the wrong move. Residual RL takes over."
+   },
+   {
+    "title": "3. Specialist learns to recover",
+    "viz": "weights",
+    "viz_args": [["moved",70],["free",10],["moved",65],["hot",55],["free",15],["moved",60]],
+    "caption": "Tiny add-on module trains to fix errors from state T onward."
+   },
+   {
+    "title": "4. Collect success trajectories",
+    "viz": "box",
+    "viz_args": "Gather rollouts with base then specialist, all task-solving",
+    "caption": "Successful episodes now come from model-plus-specialist, not humans."
+   },
+   {
+    "title": "5. Distill specialist tricks back",
+    "viz": "weights",
+    "viz_args": [["warm",60],["free",15],["warm",65],["free",12],["warm",62],["free",18]],
+    "caption": "Main model re-trains on the new data, absorbing specialist behavior."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {"b": "Stage 1: Train a rescue module","text": "Freeze the main model, train a tiny add-on that learns to take over when the base model would fail—this add-on only learns from the base model's own error states."},
+   {"b": "Stage 2: Collect self-generated data","text": "Roll out the base model for a few steps, then let the rescue module take over to finish the task successfully, capturing entire trajectories."},
+   {"b": "Stage 3: Absorb the lesson","text": "Re-train the main model on these new trajectories using standard supervised learning, so it internalizes what the rescue module learned."}
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "PLD modifies the training data pipeline, not the model architecture. Instead of collecting all trajectories from human demonstrators, it generates trajectories where the base model runs until it would fail, and then a learned residual (rescue) module completes the task. These 'base-then-specialist' trajectories are then used to retrain the main model."
+  ],
+  "object": "Training data source"
+ },
+ "hidden": {
+  "h2": "The alignment to deployment states",
+  "name": "Alignment to deployment states",
+  "paras": [
+   "The paper measures one hidden quantity: whether the collected training data matches the states the model actually encounters in real deployment (the real-world pattern of situations). If training data contains only pristine scenarios that humans carefully set up, but deployment throws hard edge cases at the model, there is a mismatch. PLD solves this by collecting data that starts with the base model running first—this naturally biases the data toward states where the base model does appear in practice.",
+   "The paper estimates this alignment by tracking which states the base policy visits during rollout, then ensuring the residual specialist focuses on recovering from those exact states. The claim is that if recovery trajectories are rooted in base-policy states, the final distilled model will generalize better to deployment, because the model retrains on realistic failure scenarios it will actually encounter rather than hand-crafted ones humans might imagine."
+  ],
+  "heat": {
+   "cells": [
+    ["State 1",1,false],
+    ["State 2",4,true],
+    ["State 3",2,false],
+    ["State 4",4,true],
+    ["State 5",1,false],
+    ["State 6",3,false],
+    ["State 7",4,true],
+    ["State 8",2,false],
+    ["State 9",3,false],
+    ["State 10",4,true],
+    ["State 11",1,false],
+    ["State 12",2,false]
+   ],
+   "caption": "Darker means states that appear during base-model rollout. Brighter box marks states where residual specialist trained."
+  },
+  "reads": [
+   {
+    "b": "Plain reading:",
+    "html": "The training data should contain the kind of situations the model will really face, not just clean examples."
+   },
+   {
+    "b": "Paper reading:",
+    "html": "The residual specialist is initialized from states visited by the base policy, so recovery trajectories are grounded in the pattern of situations the base model will encounter."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why this works: the causal chain",
+  "paras": [
+   "The base model has already learned the easy, common cases. It fails on rare edge cases because those situations barely appear in human demonstrations. Asking humans for more data to cover every edge case is expensive and slow.",
+   "PLD turns this around: it lets the base model run on tasks, identifies where it stumbles (the edge cases), and trains a tiny rescue module on exactly those situations. The rescue module only needs to learn a small adjustment from the model's action—this is cheap. The result is a trajectory that solves the task and reveals what needs to change when the model is wrong.",
+   "Then the main model retrains on these self-generated trajectories. Since the trajectories are rooted in where the base model actually fails (not in human-chosen starting points), the model now learns to handle the hard cases it will genuinely encounter. No additional human demonstrations needed."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {"t": "input","s": "Pre-trained base model and task specification"},
+    {"t": "step","s": "Base model rolls out for T random steps, starting a trajectory","hl": false},
+    {"t": "step","s": "Residual specialist RL policy trained to maximize return from state T onward","hl": true},
+    {"t": "step","s": "Run base for T steps, then specialist to completion, collect full trajectory","hl": true},
+    {"t": "step","s": "Retrain base model on collected trajectories via standard supervised learning","hl": false},
+    {"t": "output","s": "Improved model, absorbed specialist behavior without new human data"}
+   ]
+  }
+ },
+ "math": {
+  "h2": "The residual RL objective",
+  "words": "The residual policy learns by maximizing cumulative reward from the fallback state onward, using off-policy reinforcement learning (a learner watching past successful and failed rollouts, not interacting live). The base model contributes the initial T steps; the residual contributes actions afterward.",
+  "equation": "a_t = {a_base(s_t)  if t < T; a_base(s_t) + a_delta(s_t, a_base)  if t >= T}",
+  "symbols": [
+   ["a_t","the action (robot move) at time step t"],
+   ["a_base(s_t)","action from base model at state s_t"],
+   ["a_delta(s_t, a_base)","small adjustment (delta) learned by specialist, conditioned on state and base action"],
+   ["T","the number of steps the base model runs before specialist takes over"],
+   ["s_t","the world state (e.g. robot arm position, object locations)"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Step 1-3: Base model moves gripper toward cube. State t=3.",
+    "Step 3 (t >= T with T=3): Residual specialist takes over. Base would move gripper down 0.1 meters; specialist learns to move 0.2 meters further down to actually grasp.",
+    "Step 4-5: Specialist drives gripper + cube to goal. Success.",
+    "Result: one complete trajectory showing base-then-specialist path. Distill back into base model via supervised learning on this trajectory shape."
+   ]
+  },
+  "note": "The specialist only learns the small adjustment (delta), not a whole new policy—this is cheap and safe."
+ },
+ "bars": {
+  "h2": "Impact on success rate",
+  "charts": [
+   {
+    "title": "Pure human demonstrations",
+    "rows": [
+     ["Seen tasks",88,"good"],
+     ["New tasks",34,"bad"],
+     ["Real robot",42,"bad"]
+    ],
+    "note": "Human-only data covers seen tasks well but fails when domain shifts."
+   },
+   {
+    "title": "With PLD",
+    "rows": [
+     ["Seen tasks",99,"good"],
+     ["New tasks",78,"good"],
+     ["Real robot",85,"good"]
+    ],
+    "note": "Self-generated data grounded in base-model states generalizes to new tasks and real deployment."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Residual learns bad habits.",
+    "html": "If the base model is very weak, the residual may learn shortcuts instead of transferable behaviors, and retraining the base model will absorb those shortcuts. Solution: start with a reasonably-trained base model from good pretraining."
+   },
+   {
+    "warn": true,
+    "b": "Mismatch between specialist training and deployment on the fallback step T.",
+    "html": "If T is chosen poorly (e.g., always too early), the specialist only learns recoveries from easy states, not the states where the base actually fails. Solution: sweep over T and sample randomly to ensure coverage of real failure modes."
+   },
+   {
+    "warn": true,
+    "b": "Specialist overfits to training tasks.",
+    "html": "The residual RL policy trains on a specific task set. If retrained on identical tasks, the base model's improvement may not transfer to new embodiments or task families. Solution: the paper uses multiple tasks and validates on held-out tasks from the same family."
+   },
+   {
+    "b": "Done right.",
+    "html": "Use a pre-trained base model, randomize the fallback step T, collect residual-guided data across diverse tasks, and retrain base on all the collected trajectories together. Validate on new tasks not seen by the residual specialist."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a simple robotic manipulation simulator (e.g., PyBullet with a two-link arm and a cube to push). Train a base policy via behavior cloning on 20 human trajectories. Then apply PLD: train a residual specialist for 5 tasks, collect 50 new trajectories with base-then-specialist rollouts, and retrain the base model. Measure task success before and after."
+  ],
+  "metric_eq": "Improvement = (success_after_PLD - success_before_PLD) / success_before_PLD × 100%",
+  "closing": "The demo proves that RL-generated trajectories rooted in where the base model fails can teach the model to handle new tasks without human annotation."
+ }
+}

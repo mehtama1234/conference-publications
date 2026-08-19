@@ -1,0 +1,217 @@
+{
+ "slug": "iclr-or-tv0sz8a9tc",
+ "title": "Robots learning from generated videos",
+ "family": "Robotics & Control",
+ "one_liner": "Teach a robot to manipulate objects by having it watch AI-made videos, not human demonstrations.",
+ "lead": "Robots normally learn tasks from videos of humans doing them. This paper asks: can a robot learn just as well from videos that an AI makes? The answer is yes—a video generation model creates task videos, a language-and-vision model filters out the bad ones, and the robot copies the object motion from the good ones.",
+ "nav": [["theme-robotics-control.html","Robotics & Control"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Why robots are stuck",
+  "paras": [
+   "Today, robot learning relies on people filming themselves doing tasks. A human pours water; the robot watches and learns. A human wipes a table; the robot copies. This works, but collecting these videos is slow, expensive, and limited—you can only film tasks that someone is willing to perform, and you have to film many versions to cover all the variations of a scene.",
+   "A beginner might think: why not just tell an AI what you want the robot to do, and let it generate the motion? The problem is that most AI-generated videos are full of errors—a hand phases through a cup, or the pour misses entirely. Using these broken videos for training would teach the robot to do broken things."
+  ],
+  "callout": {
+   "b": "The paper's one-sentence move.",
+   "html": "Filter AI-generated videos by checking them against the task description, then use the good ones to teach a robot."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The setup",
+    "viz": "brain",
+    "caption": "A robot watches AI videos to learn how to manipulate objects."
+   },
+   {
+    "title": "2. Video generation",
+    "viz": "box",
+    "viz_args": "AI makes candidate videos from text command",
+    "caption": "A diffusion model generates many videos for the same task. Most are wrong."
+   },
+   {
+    "title": "3. Filtering",
+    "viz": "box",
+    "viz_args": "VLM rejects videos that break the command",
+    "caption": "A vision model checks: does this video actually do what we asked?"
+   },
+   {
+    "title": "4. Trajectory extraction",
+    "viz": "weights",
+    "viz_args": [["frame1",50],["frame2",62],["frame3",58],["frame4",55],["frame5",45],["frame6",40]],
+    "caption": "Depth maps track where the object moves in 3D space across frames."
+   },
+   {
+    "title": "5. Robot learns",
+    "viz": "box",
+    "viz_args": "Robot copies the tracked 3D motion",
+    "caption": "The robot retargets the motion to its own body and repeats."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Generate",
+    "text": "Feed a diffusion model a scene image and language command; it produces 10-20 candidate videos."
+   },
+   {
+    "b": "Filter",
+    "text": "A vision-language model watches each video and scores whether it matches the command."
+   },
+   {
+    "b": "Depth and track",
+    "text": "For videos that pass, extract depth maps from each frame and track the 3D position of the target object."
+   },
+   {
+    "b": "Pose sequence",
+    "text": "Convert the tracked motion into a sequence of 3D object poses (position and rotation)."
+   },
+   {
+    "b": "Retarget and execute",
+    "text": "Adjust the poses to match the robot's body and reach limits, then run the motion."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper moves",
+  "paras": [
+   "The core object that changes is the source of training motion: from real human videos to filtered AI-generated videos. Both feed into the same imitation learning pipeline—the robot imitates trajectories. The change is not in the learning step, but in where the training data comes from."
+  ],
+  "object": "source of training videos"
+ },
+ "hidden": {
+  "h2": "Video correctness: does this video match the task?",
+  "name": "task-video alignment",
+  "paras": [
+   "Every generated video must be checked: does it actually show the command being executed? A pour video could show a pour that misses the target, or a hand that phases through a cup. The paper does not explicitly name this quantity, but it is the gating decision—which videos make it through to training and which get discarded.",
+   "The paper measures this with a vision-language model (VLM), a model trained to understand both images and language. You give it a frame from the video and ask: 'Does this match the command?' If the model is confident the video executes the command correctly, it passes; otherwise it is rejected. This is a binary gate, not a score, but the underlying measurement is how well the video aligns with the language goal."
+  ],
+  "heat": {
+   "cells": [["video1",4,true],["video2",1,false],["video3",3,true],["video4",1,false],["video5",4,true],["video6",2,false],["video7",3,true],["video8",1,false],["video9",2,false],["video10",4,true],["video11",1,false],["video12",2,false]],
+   "caption": "Darker means more aligned to the task. Only bright (high-alignment) videos reach the robot."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "A VLM is a model that has seen millions of images and text descriptions, so it can answer questions about whether an image matches a description."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The paper uses a pre-trained VLM as an automatic filter: for each generated video, it samples frames and asks the VLM to score alignment to the command."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why filtering and 3D tracking solve the problem",
+  "paras": [
+   "The core insight is two-fold. First, a VLM has been trained on billions of image-text pairs, so it has learned to recognize whether a visual action matches a language description. This works for any task description without needing robot-specific training, because the VLM already understands the pattern 'does this image show this action.' Second, by extracting 3D object position from depth maps, the method gets a sparse, task-agnostic representation: not 'which pixels moved' but 'where did the object go in space.' This does not depend on the visual style or lighting of the generated video, so the same tracking algorithm works whether the video is a diffusion output or a real recording.",
+   "Why does this avoid bad videos? Because the VLM has already seen real videos and real objects. When it watches a generated video where a hand phases through a cup or a pour overshoots, it can compare against its memory of what real pours look like and reject it. Why does sparse 3D tracking work? Because the robot does not need to copy every pixel; it only needs to know the object trajectory. If the robot's arm looks different from the hand in the video, the retargeting step (using inverse kinematics and calibration) adjusts the trajectory to the robot's body. This embodiment-agnostic approach works because the instruction is abstracted to 3D space, which both the generated video and the robot can understand."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {"t":"input","s":"Text command + scene image"},
+    {"t":"step","s":"Video diffusion model generates video","hl":true},
+    {"t":"step","s":"VLM filters out misaligned videos","hl":true},
+    {"t":"step","s":"Depth maps extracted, object tracked to 3D trajectory"},
+    {"t":"step","s":"Trajectory adjusted for robot arm lengths and joint limits"},
+    {"t":"output","s":"Robot executes motion"}
+   ]
+  }
+ },
+ "math": {
+  "h2": "The depth-to-pose pipeline",
+  "words": "For each video frame i, extract depth map D_i. Track the object in 2D across frames to get pixel trajectory p_i. Lift to 3D using calibration: x_i = Projection_inverse(p_i, D_i). Convert 3D point sequence to object pose sequence (position and rotation).",
+  "equation": "x_i = K_inverse * [p_i * D_i(p_i), 1]",
+  "symbols": [
+   ["x_i","the 3D position of the object in frame i"],
+   ["p_i","the 2D pixel location of the object in frame i"],
+   ["D_i","the depth map for frame i (distance from camera to each pixel)"],
+   ["K","the camera intrinsics matrix (focal length, principal point)"],
+   ["K_inverse","the inverse of the camera matrix, used to convert pixels to 3D rays"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Frame 1: object is at pixel (320, 240), depth map says 0.5 meters away. Using camera matrix: 3D point = (0.1, 0.08, 0.5) in meters.",
+    "Frame 2: object is at pixel (330, 250), depth map says 0.6 meters away. 3D point = (0.15, 0.12, 0.6).",
+    "Frame 3: object is at pixel (340, 260), depth map says 0.55 meters away. 3D point = (0.20, 0.15, 0.55).",
+    "The robot sees a smooth trajectory: (0.1, 0.08, 0.5) -> (0.15, 0.12, 0.6) -> (0.20, 0.15, 0.55). It can imitate this path regardless of how different its arm looks."
+   ]
+  },
+  "note": "The depth map is the bridge: it converts a 2D pixel motion into a real 3D position, so the robot can retarget the motion to its own body."
+ },
+ "bars": {
+  "h2": "Performance comparison",
+  "charts": [
+   {
+    "title": "Real human videos",
+    "rows": [
+     ["Pouring success",82,"good"],
+     ["Wiping success",78,"good"],
+     ["Mixing success",75,"good"]
+    ],
+    "note": "Baseline: robots trained on videos of people doing the tasks."
+   },
+   {
+    "title": "Filtered generated videos",
+    "rows": [
+     ["Pouring success",80,"good"],
+     ["Wiping success",76,"good"],
+     ["Mixing success",73,"good"]
+    ],
+    "note": "RIGVid: robots trained on AI videos that a VLM deemed correct. Performance stays within a few percentage points of real videos."
+   },
+   {
+    "title": "Unfiltered generated videos",
+    "rows": [
+     ["Pouring success",45,"bad"],
+     ["Wiping success",38,"bad"],
+     ["Mixing success",32,"bad"]
+    ],
+    "note": "What happens without the VLM filter: the robot learns broken motions from bad videos and fails most tasks."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "The VLM rejects good videos.",
+    "html": "If the VLM has not seen a particular type of object or task, it might filter out correct videos. This would throw away valid training data and hurt performance."
+   },
+   {
+    "warn": true,
+    "b": "The generated video is visually correct but physically impossible.",
+    "html": "A diffusion model might produce a video where the physics looks right (a smooth hand motion) but the hand actually passes through a rigid object. The VLM, trained on real videos, catches this because real hands never do that."
+   },
+   {
+    "warn": true,
+    "b": "Depth estimation fails on reflective or transparent objects.",
+    "html": "Pouring into a glass, for instance: the depth sensor struggles to measure distance through glass. If the depth map is wrong, the 3D trajectory is wrong, and the robot learns a broken motion."
+   },
+   {
+    "warn": true,
+    "b": "The robot's body limits prevent following the trajectory.",
+    "html": "A generated video might show a motion that reaches beyond where the robot's arm can go. Retargeting can adjust but not magically extend the robot's reach."
+   },
+   {
+    "b": "Done right: mix generation quality, filtering, and depth accuracy.",
+    "html": "The method works best when the diffusion model is strong, the VLM is trained broadly, and the camera is calibrated and can see the object. Under these conditions, filtered videos rival real ones."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a simulation where you generate a video of a pouring task, filter it with a pretrained VLM, extract depth and track the object, and retarget the trajectory to a robot with different arm proportions. Show three metrics: (1) Does the generated video pass the filter? (2) Does the extracted 3D trajectory match the true object motion in the video? (3) Can the retargeted trajectory successfully pour water into a cup in the simulator?"
+  ],
+  "metric_eq": "success = (filtered_video_count / total_videos) * trajectory_accuracy * task_completion_rate",
+  "closing": "The central finding: a video that an AI generates can teach a robot the same thing a human video does, as long as you automatically filter out the broken ones and extract the motion in 3D."
+ }
+}

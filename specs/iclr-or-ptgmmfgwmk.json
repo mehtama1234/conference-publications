@@ -1,0 +1,230 @@
+{
+  "slug": "iclr-or-ptgmmfgwmk",
+  "title": "ResWorld: Temporal Residual World Model for Autonomous Driving",
+  "family": "Robotics & Control",
+  "one_liner": "Instead of predicting the entire future scene, predict only the dynamic objects by measuring how the scene changed since the last frame.",
+  "lead": "Autonomous driving systems need to predict where other cars and pedestrians will move next. Current world models predict the entire scene (both stationary roads and moving objects), wasting computation on unchanging parts. ResWorld changes the prediction target: instead of guessing the whole future scene, it predicts only what changed since the last moment, then combines that with what it knows is static.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "World models predict too much",
+    "paras": [
+      "Autonomous driving requires predicting the future scene: where other vehicles and pedestrians will be, what the road looks like ahead. A naive approach builds a world model that predicts the entire scene at every future moment—all the stationary elements (roads, buildings, lane markings) plus all the moving objects (cars, cyclists, pedestrians).",
+      "The problem: most of the scene is static. The road does not move. The lane lines do not move. Buildings stay where they are. A world model wastes computation redrawing these unchanging parts frame after frame. Meanwhile, predicting the exact position of moving objects requires precise information that the model often misses, because its focus is scattered across the entire scene. Without explicit feedback from the planned trajectory, the model has no signal to correct itself when its prediction drifts."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Predict only the dynamic objects by extracting what changed between frames, then layer that onto static knowledge."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Current approach",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["hot", 62], ["hot", 38], ["hot", 55], ["hot", 48]],
+        "caption": "World model predicts every pixel: static roads, buildings, and moving cars all together."
+      },
+      {
+        "title": "2. The problem",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["hot", 62], ["hot", 38], ["hot", 55], ["warm", 8]],
+        "caption": "Most predictions are the same as last frame. Only the cars moved slightly."
+      },
+      {
+        "title": "3. ResWorld's move",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["free", 3], ["free", 2], ["free", 1], ["moved", 8]],
+        "caption": "Calculate what changed: subtract old BEV from new BEV to isolate dynamic motion only."
+      },
+      {
+        "title": "4. Refining the guess",
+        "viz": "box",
+        "viz_args": "Prior path → Future scene → Refined path",
+        "caption": "Use predicted future road conditions to adjust the trajectory, avoid collisions."
+      },
+      {
+        "title": "5. Benefit",
+        "viz": "weights",
+        "viz_args": [["warm", 45], ["warm", 62], ["warm", 38], ["warm", 55], ["hot", 20]],
+        "caption": "More accurate dynamic predictions, fewer wasted computations on static parts."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Convert camera images to overhead view",
+        "text": "Take multiple camera views and transform them into a single top-down map (called BEV feature)."
+      },
+      {
+        "b": "Extract what changed",
+        "text": "Subtract the previous frame's map from the current one. This difference is the temporal residual: only the parts that moved."
+      },
+      {
+        "b": "Predict future motion",
+        "text": "Use a mechanism that learns which past residuals are relevant (self-attention) to forecast where dynamic objects will be."
+      },
+      {
+        "b": "Combine with static knowledge",
+        "text": "Overlay the predicted motion onto the known static BEV (roads, buildings) to get the complete future scene."
+      },
+      {
+        "b": "Refine the trajectory using future information",
+        "text": "Look at the predicted future scene and adjust the initial planned path to avoid obstacles and follow the road."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Most world models for driving take the full current scene as input and predict the full future scene. ResWorld changes the prediction target: it takes only the temporal residual (what changed between frames) as input and predicts only the future spatial positions of dynamic objects. This is a smaller, more focused prediction task. The model ignores the static parts entirely, freeing its capacity to predict moving objects accurately."
+    ],
+    "object": "prediction input and target"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: dynamic object position accuracy",
+    "name": "future spatial occupancy of dynamic objects",
+    "paras": [
+      "The paper does not explicitly name a single hidden quantity, but the core measure it uses is how accurately the model can predict where moving objects will be in the future. This is measured implicitly: the model learns to extract temporal residuals (the pixel-level differences between frames) and accumulate them to forecast the future occupancy grid (which pixels will contain moving objects). Unlike methods that predict a class label for each pixel (car, cyclist, pedestrian), ResWorld directly predicts occupancy—a continuous spatial map of where motion will occur.",
+      "The model estimates this via self-attention over temporal residuals: each residual frame is processed with self-attention (a mechanism that weights which past differences are relevant), then summed across multiple past frames to produce a single future occupancy prediction. This accumulated representation contains the learned model's belief about where dynamic objects will move."
+    ],
+    "heat": {
+      "cells": [["R1", 2, false], ["R2", 2, false], ["R3", 3, true], ["R4", 3, true], ["R5", 4, true], ["R6", 4, true], ["R7", 3, false], ["R8", 2, false], ["R9", 2, false], ["R10", 1, false], ["R11", 1, false], ["R12", 1, false]],
+      "caption": "Darker means higher occupancy confidence at that location. Highlights show predicted vehicle positions."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model measures how well it predicts where moving objects will be, by comparing its predicted future occupancy map to the real future positions."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The temporal residual world model accumulates self-attended residuals across frames to predict a future occupancy representation that is then decoded into spatial positions."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why temporal residuals work better",
+    "paras": [
+      "The core mechanism is a shift in what the model must learn. Instead of memorizing the static scene (roads, buildings) and then trying to predict motion on top of it, ResWorld gives the model only the motion to learn. By subtracting consecutive BEV frames, the static parts cancel out mathematically. What remains is a signal that is purely about what moved. The model's attention mechanisms can now focus entirely on dynamic objects because the static clutter is gone.",
+      "Second, the paper adds explicit feedback from the trajectory prediction. The model does not just predict the future scene in a vacuum. A separate module (FGTR) uses the predicted future scene to refine the initial trajectory guess. Importantly, this refined trajectory then provides supervision back to the world model: it tells the model which parts of the predicted future actually matter for safe driving. If the world model's prediction would cause a collision, the trajectory module catches it and steers the training signal back to the world model. This loop prevents the world model from drifting into useless predictions."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Camera images at times t, t-1, t-2, ..."
+        },
+        {
+          "t": "step",
+          "s": "Convert to overhead view (BEV) and align all frames to current position",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Calculate temporal residuals by subtracting previous BEV from current BEV",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply self-attention and sum residuals across recent frames",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Predict future dynamic occupancy; overlay onto static BEV",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Use future scene to refine trajectory and provide training supervision",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Refined driving trajectory"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The temporal residual accumulation",
+    "words": "Future dynamic occupancy equals the sum of self-attended temporal residuals across k recent frames",
+    "equation": "R_future = sum_{i=t-k+1}^{t} SelfAttention(R_i)",
+    "symbols": [
+      ["R_i", "the temporal residual (difference BEV) at frame i"],
+      ["R_future", "the predicted future occupancy of dynamic objects"],
+      ["SelfAttention(R_i)", "the self-attention module that reweights the residual based on what is relevant to predict motion"],
+      ["k", "the number of past frames used (e.g., 3 or 4 frames)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we have 3 past residual frames: R_1=[car at x=10], R_2=[car at x=12], R_3=[car at x=15].",
+        "Self-attention learns that R_3 (most recent) is most relevant for predicting the next car position, so it assigns weight 0.6 to R_3, 0.3 to R_2, and 0.1 to R_1.",
+        "Weighted sum: 0.1*10 + 0.3*12 + 0.6*15 = 1 + 3.6 + 9 = 13.6. This predicts the car will be at x=13.6 in the next frame (it actually moves from 15 to about 18, so the model learns to extrapolate by adjusting the weights).",
+        "Without summing residuals, the model would have to predict absolute positions from scratch; with summing, it only learns the incremental change."
+      ]
+    },
+    "note": "The self-attention weights are learned during training, so the model automatically learns which past frames are predictive of future motion, because it adjusts those weights whenever its prediction is wrong and updates them to match the correct future position."
+  },
+  "bars": {
+    "h2": "Planning accuracy before and after",
+    "charts": [
+      {
+        "title": "Naive world model",
+        "rows": [
+          ["Prediction of static parts", 94, "good"],
+          ["Prediction of moving objects", 62, "bad"],
+          ["Final trajectory success rate", 76, "bad"]
+        ],
+        "note": "The model wastes capacity on the static parts it has already seen. Moving objects are predicted poorly, leading to unsafe trajectories."
+      },
+      {
+        "title": "ResWorld (this paper)",
+        "rows": [
+          ["Prediction of static parts", 94, "good"],
+          ["Prediction of moving objects", 84, "good"],
+          ["Final trajectory success rate", 89, "good"]
+        ],
+        "note": "By focusing only on residuals and using trajectory feedback, the model achieves better motion prediction and safer planned paths."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Misalignment of BEV frames across time.",
+        "html": "If the overhead-view conversion is not geometrically precise, subtracting frames will leave ghost artifacts from static objects. The residual will be corrupted and motion prediction fails. Requires high-quality camera-to-BEV transformation."
+      },
+      {
+        "warn": true,
+        "b": "World model collapse without trajectory feedback.",
+        "html": "If the FGTR module does not provide training supervision to the world model, the model can drift into predicting unrealistic occupancy maps (e.g., motion where nothing is moving). The trajectory refinement step prevents this by constantly correcting the model when its predictions would cause unsafe paths."
+      },
+      {
+        "warn": true,
+        "b": "Failure on unfamiliar object types.",
+        "html": "The model learns to predict residuals for cars, pedestrians, and cyclists seen in training. An object type not in training data (e.g., a fallen tree branch, a police motorcycle, a wheelbarrow) will not have a learned residual pattern and motion will be missed."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use precise geometric BEV alignment, always train with trajectory supervision, and test on scenes with the same object types as training data."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A simple demo would take a short video of a driving scene (a real dashcam or simulator), run ResWorld's temporal residual extraction on consecutive frames, and display three outputs side by side: (1) the residual map (what changed), (2) the predicted future occupancy (where the model thinks objects will move), (3) the initial trajectory and the refined trajectory. The demo should show a case where the initial trajectory would collide with a car or pedestrian, and the FGTR refinement adjusts the path to avoid the predicted obstacle."
+    ],
+    "metric_eq": "trajectory_success = (num_collision_free_frames / total_frames) * 100%",
+    "closing": "The residual extraction should clearly show only motion; the future prediction should concentrate density on moving objects; the refined trajectory should swerve to avoid predicted obstacles."
+  }
+}

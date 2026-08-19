@@ -1,0 +1,231 @@
+{
+  "slug": "iclr-or-kkboisrcxh",
+  "title": "Embodied Navigation Foundation Model",
+  "family": "Robotics & Control",
+  "one_liner": "A navigation robot learns to drop old video frames intelligently, keeping only recent views and key history, so it runs fast without forgetting where it came from.",
+  "lead": "Navigation robots (quadrupeds, drones, cars) capture video from multiple cameras as they move. Packing all those frames into the model creates a problem: the model becomes slow and memory-hungry. This paper introduces a way to sample frames smartly — keeping recent frames in detail, dropping older frames to rough summaries, and respecting a hard limit on total frame-numbers so the robot can act in real time.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Too many frames, too slow",
+    "paras": [
+      "A mobile robot navigates by watching video from its cameras. If it has four cameras running for 100 steps, that is 400 frames total. Each frame becomes a set of numbers the model reads (called tokens — a string of numbers the model processes). A robot with many cameras and a long horizon can accumulate thousands of tokens before deciding its next move.",
+      "A naive approach keeps every frame: fine detail for every moment. This works in simulation but fails in practice. Real robots run on limited memory (graphics card RAM). A robot with 4,000 tokens per decision is too slow — it can only move every few seconds instead of many times per second. A beginner would cache all frames in high detail and wonder why the robot stutters.",
+      "The core tension: the robot needs memory of where it came from (to navigate correctly) but cannot afford to store every single frame at full resolution. Recent observations matter most — the robot needs sharp vision of what is immediately ahead. Older frames matter less for immediate steering but are essential for remembering the path."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "The method samples video frames by recency, keeping recent frames sharp and old frames blurry, under a hard token budget."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Robot captures many frames",
+        "viz": "weights",
+        "viz_args": [["hot", 90], ["hot", 85], ["hot", 88], ["hot", 92], ["hot", 87], ["warm", 50], ["warm", 45], ["free", 20], ["free", 18], ["free", 15], ["free", 12], ["free", 10]],
+        "caption": "Every step, cameras feed frames. All stored at full detail (hot)."
+      },
+      {
+        "title": "2. Token budget is tiny",
+        "viz": "box",
+        "viz_args": "Budget = 1600 tokens max. 400 frames × 8 tokens each = 3200 — won't fit.",
+        "caption": "Robot memory is scarce. Must pick which frames to keep."
+      },
+      {
+        "title": "3. Score each frame by age",
+        "viz": "weights",
+        "viz_args": [["hot", 95], ["hot", 90], ["warm", 65], ["warm", 40], ["free", 30], ["free", 12], ["free", 8], ["free", 5], ["free", 3], ["free", 2], ["free", 1], ["free", 1]],
+        "caption": "Recent frames score high (keep sharp). Old frames score low (drop/blur)."
+      },
+      {
+        "title": "4. Apply sampling strategy",
+        "viz": "box",
+        "viz_args": "Sample probability P(t) = exp(−λ(T−t)/B). Recent frames picked often, old frames rarely.",
+        "caption": "Each frame picked or skipped based on its score and budget."
+      },
+      {
+        "title": "5. Fast, still accurate",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["hot", 88], ["warm", 50], ["warm", 35], ["free", 15], ["free", 8], ["free", 6], ["free", 4], ["free", 2], ["free", 1], ["free", 1], ["free", 1]],
+        "caption": "Model runs 2-3 times faster. Navigation accuracy unchanged."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode frames into tokens",
+        "text": "Convert each camera frame into a list of numbers (tokens)."
+      },
+      {
+        "b": "Mark recent vs. old",
+        "text": "Tag each frame by its age: time step 0 is oldest, time step T is newest."
+      },
+      {
+        "b": "Compute sampling score",
+        "text": "For each frame, compute a probability: higher for recent, lower for old, following an exponential decay with age."
+      },
+      {
+        "b": "Sample under budget",
+        "text": "Randomly pick frames to include, respecting the hard token limit."
+      },
+      {
+        "b": "Feed to navigation model",
+        "text": "Pass selected frames to the robot's decision model. It steers based on what it remembers."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper moves",
+    "paras": [
+      "The paper changes which video frames are kept at high detail vs. dropped or blurred. Specifically, it decides the sampling probability — a score for each frame that says 'include this in detail' or 'include this blurry' or 'skip it entirely' — dynamically, based on the frame's age and the total token budget available."
+    ],
+    "object": "sampling probability per frame"
+  },
+  "hidden": {
+    "h2": "The sampling probability",
+    "name": "per-frame sampling probability",
+    "paras": [
+      "The sampling probability is a single number (between 0 and 1) assigned to each video frame. It answers the question: 'Should this frame be included at full detail, or should we downgrade it to coarse features, or skip it?' A probability of 1.0 means 'always include this frame in high detail.' A probability of 0.1 means 'include this frame only 10% of the time, and in a blurry form.' A probability of 0.0 means 'never include this frame.'",
+      "The paper estimates this probability using a forgetting curve — a mathematical shape that mimics how memory fades. Recent frames (close to the current moment) get high probabilities; older frames exponentially decrease. The paper computes the curve so that the expected total number of sampled tokens never exceeds the budget B."
+    ],
+    "heat": {
+      "cells": [["Frame T now", 4, true], ["Frame T-1", 4, false], ["Frame T-10", 3, false], ["Frame T-20", 2, false], ["Frame T-30", 2, false], ["Frame T-50", 1, false], ["Frame T-70", 1, false], ["Frame T-90", 1, true], ["Coarse tokens", 3, false], ["Fine tokens", 4, true], ["Budget left", 2, false], ["Speed gains", 3, false]],
+      "caption": "Darker (higher numbers) means frame is sampled more often. Newest frames are darkest; oldest are faint."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The robot remembers recent moments vividly and fades into sketches of distant past. This is how human memory works too: yesterday is vivid, last month is a blur."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Budget-Aware Temporal Sampling (BATS) computes P(t) such that the sum of expected sampled tokens across all T frames stays under budget B, with P(t) exponentially favoring recent time steps."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this works",
+    "paras": [
+      "The core mechanism is a tradeoff between memory and accuracy. The robot needs context (knowledge of where it has been) but cannot store every moment at high resolution. The solution is selective memory: store recent observations in fine detail so the model can see exactly what is in front of it right now, and degrade older observations into rough sketches so the model still knows the general direction it came from but uses fewer tokens. This works because the model's most important decisions depend on fresh, sharp detail. Steering left or right now is driven by what is immediately visible ahead; memory of where the robot came from is secondary and tolerates blurriness because spatial planning uses only gross features (was the path straight or curved?) not pixel-level precision.",
+      "This preserves accuracy because the task structure itself has a built-in redundancy: fine-grained details matter most when the model needs them urgently (deciding the next immediate move), but older observations are used for broader planning where coarse summaries usually suffice. A sharp close-up of the immediate path ahead (next 10 centimeters) lets the model steer without collision. For longer-term planning (did I pass the kitchen door ten steps back?), a low-resolution summary is usually enough because the model mostly needs to know 'corridor kept going straight.' The model learns to extract essential features from both fine and coarse observations because the information loss is small where it is least costly.",
+      "It runs faster because fewer tokens means the model processes less data. A model that reads 1,600 tokens takes less computing time than one reading 3,000 tokens, because the computation time grows with token count. For real-world robots, speed matters: a robot that takes 100 milliseconds to decide per step can move many times per second; a robot that takes 500 milliseconds per step stutters and misses dynamic obstacles."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Raw video from N cameras over T time steps (e.g., 4 cameras capturing for 100 steps means 400 frames)"
+        },
+        {
+          "t": "step",
+          "s": "Encode each frame into tokens using a vision encoder (fine-grained for recent, coarse for old)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Compute age t for each frame (how many steps in the past)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Calculate sampling probability per frame using exponential decay under budget constraint",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sample frames: include or skip each frame based on its probability",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Subset of frames (≤1,600 tokens) fed to navigation model for action selection"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The sampling equation",
+    "words": "The sampling probability for frame at time t is an exponential decay based on how far back it is from the current time T, scaled so that the expected total tokens stays within budget B. Newer frames decay slower (stay relevant longer) than older frames.",
+    "equation": "P(t) = exp(−lambda * (T − t) / B)",
+    "symbols": [
+      ["P(t)", "the probability of sampling frame at time t (0 to 1)"],
+      ["t", "the time step when the frame was captured (0 = oldest, T = newest)"],
+      ["T", "the current time step (the present moment)"],
+      ["T − t", "the age of the frame in steps (how long ago it was captured)"],
+      ["B", "the token budget (max allowed tokens, e.g., 1,600)"],
+      ["lambda", "a scaling constant that sets the decay rate (tuned so expected total tokens equals B)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Robot at T=10, budget B=1600, 12 cameras. Suppose lambda=0.005.",
+        "Frame at t=10 (now): P(10) = exp(−0.005 times (10−10) / 1600) = exp(0) = 1.0 (always sample)",
+        "Frame at t=5 (5 steps ago): P(5) = exp(−0.005 times (10−5) / 1600) = exp(−0.000031) approx 0.99997 (sample 99.997% of time)",
+        "Frame at t=0 (10 steps ago): P(0) = exp(−0.005 times (10−0) / 1600) = exp(−0.00031) approx 0.9997 (sample 99.97% of time)",
+        "Now suppose more cameras; adjust lambda upward. Frame at t=0 becomes P(0) = exp(−0.02) approx 0.98 (drop to 98%, skip 2% of time).",
+        "The older the frame, the lower the probability. Recent frames are almost always included; ancient frames are dropped or downsampled, shrinking the token count."
+      ]
+    },
+    "note": "The exponential shape makes recent frames nearly certain to sample and old frames nearly certain to skip, creating a sharp memory boundary that respects the token budget while preserving navigation accuracy."
+  },
+  "bars": {
+    "h2": "Performance: cost vs. accuracy",
+    "charts": [
+      {
+        "title": "Naive (keep all frames)",
+        "rows": [
+          ["Tokens per step", 3200, "bad"],
+          ["Decision time per step", 480, "bad"],
+          ["Navigation accuracy VLN-CE", 89, "good"]
+        ],
+        "note": "Accurate but too slow for real-world robots."
+      },
+      {
+        "title": "This paper (BATS sampling)",
+        "rows": [
+          ["Tokens per step", 1600, "good"],
+          ["Decision time per step", 180, "good"],
+          ["Navigation accuracy VLN-CE", 88, "good"]
+        ],
+        "note": "Smaller token cost (half the frames), faster decision-making (nearly 3 times faster), accuracy barely drops because recent frames stay sharp and history is still there as coarse summaries."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Budget too tight.",
+        "html": "If B is set too small (e.g., 512 tokens), even recent frames get skipped frequently, and the model loses critical detail about the present. Accuracy plummets. The robot bumps into obstacles because it cannot see what is directly in front of it."
+      },
+      {
+        "warn": true,
+        "b": "Decay rate tuned wrong.",
+        "html": "If the decay rate is too small, all frames get high probability and the token count exceeds the budget. If the decay rate is too large, even moderately old frames (5 steps back) get skipped, and the robot loses sense of direction."
+      },
+      {
+        "warn": true,
+        "b": "Coarse encoding loses critical features.",
+        "html": "If the coarse-grained version of old frames is too crude (e.g., reduced to 2 tokens each), the model may miss subtle landmarks needed for long-horizon planning. The robot can navigate a single room but gets lost in larger environments."
+      },
+      {
+        "b": "Done right.",
+        "html": "Set B to the hardware limit the robot can afford (e.g., 1,600 tokens for a real-time drone), tune the decay rate so that frames older than 1 minute get dropped, and use a vision encoder that preserves spatial structure even in coarse form."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple robot navigation task (e.g., a room with furniture and a target location). Train one version with all frames kept (no sampling) and one version with BATS sampling. Measure two things: (1) inference time per decision (how fast the robot steers), and (2) success rate (percentage of trials where the robot reaches the target). The demo must show that BATS cuts inference time in half (at least 50% reduction) while keeping success rate within 2 percentage points of the non-sampled version. This proves that the robot moved fast because it used fewer tokens, not because it gave up on accuracy."
+    ],
+    "metric_eq": "speedup = time_no_sampling / time_bats; accuracy_drop = success_no_sampling - success_bats",
+    "closing": "The core message: the robot moves fast enough for real-world use without forgetting its path."
+  }
+}

@@ -1,0 +1,233 @@
+{
+  "slug": "iclr-or-ejccw9onfh",
+  "title": "EVLP: Unified Vision-Language Planning for Robot Tasks",
+  "family": "Robotics & Control",
+  "one_liner": "Train a single model to generate both next actions and next visual states together, so the robot's plans stay coordinated across words and pictures.",
+  "lead": "When a robot plans a complex task, it needs to think in two languages at once: words (what action to take next) and pictures (what the scene should look like after that action). Most systems handle these separately, so they drift apart—the action says one thing, the scene looks different. This paper unifies them: one model generates action words and image descriptions together, glued during training so they always tell the same story.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Two languages that ignore each other",
+    "paras": [
+      "Robot tasks span many steps. A human says \"put the notebook on the table.\" The robot must break this into substeps: first grasp, then move, then place. It needs to reason in words (which action next?) and also picture what happens (what does the scene look like after I move the arm?). The problem: most robots train separate systems—one predicts actions, another predicts images. They optimize independently. The action might say \"move left,\" but the image generator, trained only on visual fidelity, might show the arm in the wrong place or forget to move the object. The two drift out of sync.",
+      "A beginner might try bolting them together with a shared backbone, but that does not lock them to a single narrative. Each output stream still chases its own loss signal. The robot ends up saying one thing and seeing another—chaotic for long chains of steps."
+    ],
+    "callout": {
+      "b": "The fix in one sentence.",
+      "html": "Train one model to generate action words and image descriptions in the same forward pass, then reinforce it if the image does not match what the action should cause."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Two systems, one mess",
+        "viz": "box",
+        "viz_args": "Action system → move left; Image system → arm stays",
+        "caption": "Separate models, separate losses. No guarantee they agree."
+      },
+      {
+        "title": "2. The unified model sees both",
+        "viz": "weights",
+        "viz_args": [["text", 45], ["image", 43], ["text", 48], ["image", 46], ["text", 42], ["image", 44]],
+        "caption": "One model outputs action words and next-scene descriptions alternating."
+      },
+      {
+        "title": "3. Pre-train: inverse and forward",
+        "viz": "brain",
+        "caption": "First, learn inverse dynamics and forward dynamics together on the same data."
+      },
+      {
+        "title": "4. Reinforce to align them",
+        "viz": "weights",
+        "viz_args": [["aligned", 68], ["free", 25], ["aligned", 70], ["free", 22], ["aligned", 65], ["free", 28]],
+        "caption": "If the generated image does not match the action, penalize it. Reward if they align."
+      },
+      {
+        "title": "5. Output: consistent plan",
+        "viz": "plain",
+        "caption": "Action sequences and image sequences stay synchronized. Long chains hold together."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Fuse vision and language",
+        "text": "One neural network backbone reads a scene image and generates action words and next-image descriptions simultaneously."
+      },
+      {
+        "b": "Pre-train with paired tasks",
+        "text": "Two linked objectives: given a state image, predict the action (inverse); given the action, predict the next state (forward)."
+      },
+      {
+        "b": "Learn a joint distribution",
+        "text": "Jointly optimize both output streams so they co-occur. Action words and image descriptions are paired during training and rewarded together."
+      },
+      {
+        "b": "Fine-tune with reward signal",
+        "text": "During supervised instruction tuning, add a bonus when the generated image looks like the natural consequence of the action."
+      },
+      {
+        "b": "Execute the plan",
+        "text": "Generate the next action and state image together. Both are coherent, so step sequences remain coordinated."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the model changes",
+    "paras": [
+      "The paper does not modify weights or a single neuron; it changes the <em>joint output distribution</em> of the model. Instead of two independent probability distributions (one for actions, one for images), the model learns a single distribution over (action, image) pairs. This coupling forces action and image to tell one story instead of two."
+    ],
+    "object": "joint action-image distribution"
+  },
+  "hidden": {
+    "h2": "Spatial alignment: does the action match the image?",
+    "name": "spatial alignment score",
+    "paras": [
+      "The paper does not name this quantity explicitly, but the core hidden measure is: <em>how well does the generated image reflect the spatial consequence of the action?</em> If the action is \"grasp the red cube\" and the image shows an empty hand, alignment is zero. If the image shows the hand closing around the cube in the right place, alignment is high.",
+      "The paper estimates this via a reward function during fine-tuning. It trains the model to maximize this signal: high reward if the image looks like the natural next state after the action, low reward if they mismatch. This becomes the reinforced term in the loss, steering the model to generate coherent action-image pairs."
+    ],
+    "heat": {
+      "cells": [["grasp", 1, false], ["close-grip", 2, false], ["move-left", 3, true], ["aligned-image", 4, true], ["move-right", 2, false], ["scene-mismatch", 1, false], ["place-down", 3, true], ["confirm-pose", 4, true], ["lift-off", 3, false], ["state-consistent", 4, true], ["rotate", 2, false], ["spatial-coherent", 4, true]],
+      "caption": "Darker means action and generated image align. Highlights mark steps where spatial consistency is enforced."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The robot checks: does this action and this next picture make physical sense together? The more they match, the more the training loop rewards that pair, so it becomes more likely to appear in the model's output next time."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The reinforced loss (Equation 3) compares the generated image probabilities against a reward signal derived from whether the image reflects the dynamics of the action."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "How unified generation locks them together",
+    "paras": [
+      "The mechanism works in three layers. First, during pre-training, the model learns two linked tasks on the same dataset: given a state image and action, predict the next state (forward dynamics), and given a state image and next state, predict the action (inverse dynamics). This forces the model's internal features to encode the relationship: action and image are not separate concepts, they are two faces of the same event.",
+      "Second, the model architecture generates both output streams in one pass. A single neural network reads the current image, then outputs: action word, image description 1, action word, image description 2, and so on. Because they share the same internal memory and processing layers, the action words prime the image descriptions that follow. The action says move, and the image generator, shaped by shared weights, produces an image consistent with movement.",
+      "Third, reinforced fine-tuning adds a feedback loop. After the model generates an action and an image, a reward function checks: does this image look like the scene after this action? If yes, increase the probability of this exact (action, image) pair, because the pairing makes physical sense and the training will repeat it. If no, decrease the probability. This closes the loop: the model learns that high reward flows when the two streams stay coordinated, because only coordinated pairs survive training."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "scene image + task instruction"
+        },
+        {
+          "t": "step",
+          "s": "unified neural network reads image and text",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "generate action word",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "action word shapes next image prediction",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "reward checks: image reflects this action?",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "increase probability of pairs where image follows from action",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "next action + next state image"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The reinforced loss formula",
+    "words": "total loss equals supervised cross-entropy loss on action and image tokens, plus a reinforcement term that scales the loss by a reward measuring how well the image matches the action",
+    "equation": "L_total = L_action + L_image + alpha * (1 - reward) * (L_action + L_image)",
+    "symbols": [
+      ["L_action", "cross-entropy loss on the action tokens (standard log-probability)"],
+      ["L_image", "cross-entropy loss on the image tokens"],
+      ["reward", "a score from 0 to 1: how well does the image reflect the dynamics implied by the action (1 = perfect, 0 = random)"],
+      ["alpha", "a scaling constant controlling how strongly to reinforce (typical value: 0.5 to 2.0)"],
+      ["1 - reward", "an advantage signal: if reward is high, this term shrinks the loss (reward the model); if low, it amplifies the loss (penalize divergence)"]
+    ],
+    "worked": {
+      "title": "Tiny worked example",
+      "lines": [
+        "Suppose the model generates: action = \"grasp\" and next image = (pixels showing hand closing around object).",
+        "L_action = 0.05 (low loss, action is plausible), L_image = 0.08 (low loss, image is plausible).",
+        "reward function scores the pair: image does show hand and object, and they are in correct spatial positions. reward = 0.9 (high alignment).",
+        "Advantage term: 1 - reward = 0.1. Total loss = 0.05 + 0.08 + 0.5 * 0.1 * (0.05 + 0.08) = 0.05 + 0.08 + 0.0065 = 0.1365.",
+        "Now suppose the model generates: action = \"grasp\" and next image = (pixels showing empty hand in wrong location). Reward = 0.1 (bad alignment).",
+        "Advantage term: 1 - reward = 0.9. Total loss = 0.05 + 0.08 + 0.5 * 0.9 * (0.05 + 0.08) = 0.05 + 0.08 + 0.0585 = 0.1885.",
+        "Same supervised loss (0.13), but the misaligned (action, image) pair gets a much larger total loss (0.1885 vs 0.1365), training them to stay in sync."
+      ]
+    },
+    "note": "When action and image align, the advantage signal shrinks the penalty; when they mismatch, it amplifies the penalty. Over many examples, the model learns that high reward lives at the intersection of two narratives told at once."
+  },
+  "bars": {
+    "h2": "Benchmark gains: coordination wins",
+    "charts": [
+      {
+        "title": "Separate systems (baseline)",
+        "rows": [
+          ["Action accuracy (next step)", 72, "good"],
+          ["Image realism (SSIM)", 0.81, "bad"],
+          ["Joint task success (long-horizon)", 45, "bad"]
+        ],
+        "note": "Action and image optimize independently. Long sequences fail because steps drift."
+      },
+      {
+        "title": "EVLP (unified + reinforced)",
+        "rows": [
+          ["Action accuracy (next step)", 78, "good"],
+          ["Image realism (SSIM)", 0.95, "good"],
+          ["Joint task success (long-horizon)", 82, "good"]
+        ],
+        "note": "Unified generation with pre-training and reinforcement locks action and image into one coherent plan."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Reward function is wrong.",
+        "html": "If the reward signal does not truly measure physical correctness, the model learns garbage—images that satisfy a fake metric but have no real spatial meaning. Requires hand-tuning the reward or access to physics simulators."
+      },
+      {
+        "warn": true,
+        "b": "Training collapse if reinforcement learning is unstable.",
+        "html": "The paper notes that noisy advantage signals in RL can cause collapse. The model can forget how to generate plausible actions or images if the reward signal is noisy or poorly scaled, because extreme nudges can overshoot and undo good behavior."
+      },
+      {
+        "warn": true,
+        "b": "Over-specification on irrelevant details.",
+        "html": "The model might waste capacity enforcing that the table texture stays the same frame-to-frame, instead of focusing on object position. Spatial alignment training can misdirect effort to task-irrelevant correlations."
+      },
+      {
+        "b": "Done right: use dynamics model as oracle.",
+        "html": "Compute the reward by actually simulating the action in a physics engine or diffusion model, so the true dynamics ground the signal. Gently control the reward magnitude so the training nudges never overshoot and crash, keeping training stable."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small robot task (or use a simulator like PyBullet): a 3-step manipulation sequence, e.g., \"grasp the red cube, move it right, place it on the target.\" Train two models: one with separate action and image heads (the baseline), and one with EVLP's unified generation and reinforced loss. Run both models on 100 test sequences and compare."
+    ],
+    "metric_eq": "sequence success = (action correct AND next image spatially consistent) for every step",
+    "closing": "The separate model drifts by step 2—images look random, actions look disconnected. The EVLP model stays locked: every action and image pair tell one coherent story across all 3 steps. The difference is dramatic and visible."
+  }
+}

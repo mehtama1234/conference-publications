@@ -1,0 +1,234 @@
+{
+  "slug": "iclr-or-c6zwfqlowd",
+  "title": "Block-wise Adaptive Caching for Accelerating Diffusion Policy",
+  "family": "Robotics & Control",
+  "one_liner": "Cache parts of a robotic policy model's intermediate results and skip some denoising steps, choosing when to refresh each cache block to stay accurate without recomputing.",
+  "lead": "Diffusion Policy is a way to train robotic arms and other robots by learning to reverse a process that turns clean actions into noise. Computing the full cleanup takes many steps, which is too slow for real-time control. This paper speeds it up by caching partial results and carefully deciding which steps actually need fresh computation, so the robot gets a new action command 3 times faster without retraining the model.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why robots cannot use diffusion policies in real time",
+    "paras": [
+      "A diffusion policy is a robot-control model trained by learning to reverse noise. To pick an action, the model starts with random noise and applies 50 or more learned cleanup steps, each one slightly denoising the action. Each step runs deep neural-network computation, so the full cleanup takes 50 milliseconds or more.",
+      "A robot arm needs a new action command 30 to 50 times per second to move smoothly; 50 milliseconds is too slow. A naive roboticist would just run fewer denoising steps, but skipping steps makes the actions noisier and worse. The paper observes that many of these steps reuse the same intermediate results, so some computation is wasted."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Use an Adaptive Caching Scheduler to find the best timesteps to refresh cached features, then use a Bubbling Union Algorithm to stop cached errors from spreading across layers."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The bottleneck",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["hot", 48], ["hot", 49], ["hot", 51], ["hot", 47]],
+        "caption": "Diffusion Policy runs 50 denoising steps. Each recomputes the full neural network."
+      },
+      {
+        "title": "2. Redundancy spotted",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["warm", 48], ["warm", 49], ["warm", 51], ["warm", 47]],
+        "caption": "Adjacent steps produce similar intermediate results; warm blocks reuse saved computation."
+      },
+      {
+        "title": "3. Adaptive schedule",
+        "viz": "box",
+        "viz_args": "Steps 1→5→10→15→20→30→40→50 recompute; others reuse cache.",
+        "caption": "Find the best subset of steps to fully recompute by maximizing feature overlap."
+      },
+      {
+        "title": "4. Error ripples upstream",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["hot", 48], ["warm", 49], ["warm", 51], ["warm", 47]],
+        "caption": "When one layer reuses stale features, the error spreads to the layers above."
+      },
+      {
+        "title": "5. Fixing the cascade",
+        "viz": "box",
+        "viz_args": "Upstream blocks force refresh if downstream FFN blocks refresh.",
+        "caption": "Update upstream layers early to stop error from spreading, cutting latency."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Start with a noisy action",
+        "text": "Draw random noise as the initial action guess."
+      },
+      {
+        "b": "Run the cleanup steps",
+        "text": "Apply the diffusion model (a series of neural-network layers) at each denoising step."
+      },
+      {
+        "b": "Choose which steps to cache-refresh",
+        "text": "Find the timesteps where the model's hidden features change the most, so you know when to fully recompute."
+      },
+      {
+        "b": "Reuse results at other steps",
+        "text": "At steps between refresh points, skip the neural-network computation and reuse the cached features from the last update."
+      },
+      {
+        "b": "Correct for error spread",
+        "text": "If a downstream layer (Feed-Forward block) sees stale cached inputs, force upstream layers to update too, to keep errors from compounding."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper modifies how the diffusion policy decides which intermediate results to reuse and when to recompute them. Instead of reusing the same cached result for all steps (which would accumulate errors), it picks a custom refresh schedule for each layer block in the neural network."
+    ],
+    "object": "cache refresh schedule (per block)"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Feature similarity",
+    "name": "similarity between consecutive denoising steps",
+    "paras": [
+      "The paper measures how much the model's internal features (the intermediate numerical results inside a layer) change between one denoising step and the next. If two consecutive steps produce nearly identical features, reusing the cached result from the earlier step is nearly free. If the features diverge, the cache must be refreshed.",
+      "The paper estimates this by computing the cosine similarity (a standard measure of how aligned two lists of numbers are) between the hidden features output by a layer at two different timesteps. High similarity means the cache is still good; low similarity means the cache is stale and must be recomputed."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 1", 4, true],
+        ["Step 5", 4, false],
+        ["Step 10", 3, false],
+        ["Step 15", 2, false],
+        ["Step 20", 2, false],
+        ["Step 30", 3, false],
+        ["Step 40", 2, false],
+        ["Step 45", 1, false],
+        ["Step 48", 1, false],
+        ["Step 49", 2, false],
+        ["Step 50", 4, true]
+      ],
+      "caption": "Darker means higher feature similarity to the previous timestep. Highlights are refresh points."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Features stay similar across several consecutive steps, so you can skip computation; when similarity drops, the cache needs refreshing."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Interval similarity ϕ(i,j) sums cosine similarities of layers between timesteps i and j. The paper solves for the update schedule C that maximizes total ϕ."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why selective caching works",
+    "paras": [
+      "The diffusion denoising process is highly structured. Early steps make large changes (removing obvious noise), but later steps make tiny refinements. Many consecutive steps leave the internal features almost unchanged. The paper's insight is to compute feature similarity across timesteps and identify which steps truly need a full neural-network pass.",
+      "A naive approach would reuse the same cached features for all subsequent steps, which causes errors to accumulate—downstream layers receive increasingly stale input, and the error spreads. This paper solves it in two pieces: first, a dynamic-programming scheduler finds the best refresh points by maximizing how similar consecutive cached features are. Second, a Bubbling Union Algorithm fixes error propagation: if a layer far downstream needs a fresh computation, it retroactively forces upstream layers to refresh too, stopping errors before they spread.",
+      "Because the refresh schedule is computed once and then reused (training-free), and because many steps can reuse cached results, the denoising loop runs roughly 3 times faster without changing the final action quality."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Noisy action at step k"
+        },
+        {
+          "t": "step",
+          "s": "Check if step k is in the refresh schedule",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "If yes: run all layers, update cache. If no: reuse cached features",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Propagate through all layer blocks (attention, feed-forward)"
+        },
+        {
+          "t": "output",
+          "s": "Clean action (or semi-clean at intermediate step)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The refresh schedule equation",
+    "words": "Choose the subset of timesteps C where the cache is updated so that the sum of feature similarities between all consecutive pairs of chosen timesteps is as large as possible.",
+    "equation": "max C⊆{1,...,K} ∑(m=0 to M) ϕ(c_m, c_{m+1}−1)",
+    "symbols": [
+      ["K", "total number of denoising steps (e.g., 50)"],
+      ["C", "the set of timesteps chosen to refresh the cache"],
+      ["M", "the target number of cache updates (e.g., 10)"],
+      ["c_m", "the m-th timestep in the refresh schedule C"],
+      ["ϕ(i,j)", "total feature similarity from step i to step j (sum of layer outputs' similarities)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we have 10 denoising steps and want M=3 cache updates. One schedule is C = {1, 4, 8, 10}.",
+        "ϕ(1, 3) = similarity of features between steps 1 and 4, summed across steps: say 2.5.",
+        "ϕ(4, 7) = similarity between steps 4 and 8: say 2.2.",
+        "ϕ(8, 9) = similarity between steps 8 and 10: say 1.8.",
+        "Total = 2.5 + 2.2 + 1.8 = 6.5. A different schedule {1, 3, 7, 10} might give ϕ = 7.2, so the algorithm prefers it."
+      ]
+    },
+    "note": "The schedule maximizes how stable the cached features are across gaps, which minimizes error when reusing them."
+  },
+  "bars": {
+    "h2": "Speed and accuracy tradeoff",
+    "charts": [
+      {
+        "title": "Naive early exit (skip to fewer steps)",
+        "rows": [
+          ["Action correctness (before acceleration)", 94, "good"],
+          ["Action correctness (after skipping steps)", 62, "bad"],
+          ["Speed improvement", 2.1, "good"]
+        ],
+        "note": "Crude step-skipping hurts the policy; fewer steps mean worse actions for robots."
+      },
+      {
+        "title": "Diffusion Policy with BAC (adaptive caching)",
+        "rows": [
+          ["Action correctness (before acceleration)", 94, "good"],
+          ["Action correctness (after adaptive cache)", 92, "good"],
+          ["Speed improvement", 3.0, "good"]
+        ],
+        "note": "Selective caching keeps quality high while tripling speed by reusing smart-chosen steps."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Stale feature reuse without correction.",
+        "html": "If you reuse cached features for too many consecutive steps, the error from each reuse compounds. A layer that receives stale inputs from its predecessor produces stale outputs, which are passed downstream, and the noise grows."
+      },
+      {
+        "warn": true,
+        "b": "Error propagation across layers.",
+        "html": "Feed-Forward Network (FFN) blocks are especially sensitive because they process the aggregated output of attention blocks. If an FFN receives stale cached attention output, its own output is doubly stale, and the error spreads to layers above."
+      },
+      {
+        "warn": true,
+        "b": "Wrong refresh schedule for a new robotic task.",
+        "html": "The refresh schedule is computed once for a specific diffusion model. If the task changes in major ways (different action space, new observations), the feature similarities may shift, and the cached schedule may no longer be optimal."
+      },
+      {
+        "b": "Done right.",
+        "html": "The Bubbling Union Algorithm catches error propagation by forcing upstream layers to refresh whenever downstream FFNs refresh, so error is truncated early. The refresh schedule is task-agnostic (depends only on the model structure, not the task)."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small diffusion policy (or use a pretrained one) on a simple robotic task such as a robot arm that reaches to a target or pushes a block across a table. Instrument the code to measure feature similarities at each layer and denoising step. Compute the adaptive cache schedule offline using dynamic programming. Then run the denoising loop twice: once with all steps computed fully, once with selective caching. Measure wall-clock time and the quality of the final action (e.g., success rate on 100 test trajectories)."
+    ],
+    "metric_eq": "speedup = (time_full_denoising / time_with_cache), quality_drop = (success_full - success_cached) / success_full",
+    "closing": "The demo should show speedup near 3.0 and quality_drop near zero, proving that feature-similarity-guided caching preserves the robot's behavior while cutting how long the model takes to produce a new action (inference time)."
+  }
+}

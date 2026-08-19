@@ -1,0 +1,236 @@
+{
+ "slug": "iclr-or-y1vglhbzcc",
+ "title": "Planning Domain Derivation from a Single Demo",
+ "family": "Robotics & Control",
+ "one_liner": "Instead of hand-writing planning domains, this method builds them automatically by watching one robot demo and asking an LLM to name the things the robot cares about.",
+ "lead": "Robot planners need to know what matters (like where the object is or whether the gripper is open). Normally an engineer writes this down by hand, which takes weeks. This paper watches one robot demonstration and has the LLM infer what matters, then connects it to the actual robot motion to get a working planner.",
+ "nav": [["theme-robotics-control.html","Robotics & Control"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "The manual domain bottleneck",
+  "paras": [
+   "Long-horizon robot tasks need a planner that thinks in abstract steps: put down the bowl, pick up the spoon, stir the mixture. But planners only work if you first hand-write what matters—the predicates, like bowl_on_table or gripper_open. An engineer studies the robot and its world and writes these rules by hand, a weeks-long process.",
+   "LLMs can generate task steps from language, but they often skip physical reality and get stuck on long tasks. The real problem: neither LLMs alone nor hand-coded domains alone work well for long chains of actions."
+  ],
+  "callout": {
+   "b": "The bottleneck.",
+   "html": "Watch one demo, have the LLM infer the predicates, then wire them up to the actual robot."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The old way: engineer writes domains by hand",
+    "viz": "box",
+    "viz_args": "Engineer stares at code, writes predicates for weeks",
+    "caption": "Engineer must manually list what matters to the task."
+   },
+   {
+    "title": "2. Robot does one demo: continuous motion over 1000 time steps",
+    "viz": "weights",
+    "viz_args": [["moved",90]],
+    "caption": "Gripper position changes, objects move: too much detail."
+   },
+   {
+    "title": "3. LLM + simulation observe the demo and infer predicates",
+    "viz": "weights",
+    "viz_args": [["hot",4],["warm",3],["free",2],["moved",1],["hot",3]],
+    "caption": "LLM names high-level facts: gripper_open, bowl_on_table, spoon_in_bowl."
+   },
+   {
+    "title": "4. LoCA adapter links each predicate to motion constraints from the demo",
+    "viz": "box",
+    "viz_args": "Predicate -> continuous constraint",
+    "caption": "Each abstract fact is tied to the exact joint angles and hand positions the demo used."
+   },
+   {
+    "title": "5. Planner executes new tasks using learned domain, 20% more reliable",
+    "viz": "weights",
+    "viz_args": [["moved",85],["moved",80],["hot",88]],
+    "caption": "New tasks succeed more often; planner now solves multi-step chains."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Ingest the demo",
+    "text": "Feed one robot trajectory (all arm positions over time) and a short task description into the system."
+   },
+   {
+    "b": "LLM names low-level facts",
+    "text": "The LLM reads the trajectory and generates first-order predicates: gripper_open(t), object_in_place(t), hand_above_table(t). These are facts that are true or false at each moment."
+   },
+   {
+    "b": "Compute physical constraints",
+    "text": "Simulation runs the demo and measures what regions of space each predicate occupies: if gripper_open is true between time steps 5-40, those correspond to specific gripper angles in 3D space."
+   },
+   {
+    "b": "LLM derives higher-order actions",
+    "text": "From the low-level predicates, the LLM infers higher-order actions: pick_object(object) requires gripper not open, then opens gripper, then object in hand. Each action lists preconditions and effects."
+   },
+   {
+    "b": "LoCA connects domain to motion",
+    "text": "The Logical Constraint Adapter retrieves the physical constraint regions for each predicate and hands them to the motion planner, so abstract steps become real motion commands."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper removes the need to hand-write planning domains. Instead of an engineer writing predicates and actions, the method watches one demo and has the LLM infer them, then ties each fact to the physical robot poses and joint angles the demo showed."
+  ],
+  "object": "planning domains"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: predicate grounding",
+  "name": "constraint region per predicate",
+  "paras": [
+   "A constraint region is the set of robot configurations (joint angles, hand positions, gripper openings) where one predicate is true. For example, gripper_open might be true for gripper angles > 40 degrees; that angle range is the constraint region. The demo shows exactly which configurations make each predicate true.",
+   "The paper measures constraint regions by running simulation on the demo trajectory: every time the demo changes from gripper_closed to gripper_open, the system records the exact joint angles and hand position. These snapshots define the boundary of the region. LoCA uses these regions to constrain the motion planner's search."
+  ],
+  "heat": {
+   "cells": [
+    ["gripper_open", 4, true],
+    ["object_in_place", 3, false],
+    ["hand_above_table", 3, false],
+    ["gripper_closed", 2, false],
+    ["hand_below_shoulder", 4, true],
+    ["object_moving", 1, false],
+    ["hand_left", 2, false],
+    ["hand_right", 3, false],
+    ["bowl_on_table", 4, true],
+    ["spoon_in_bowl", 2, false],
+    ["gripper_empty", 2, false],
+    ["hand_near_bowl", 3, false]
+   ],
+   "caption": "Darker color means predicate is true more often in the demo."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Predicate grounding is figuring out the physical space (the set of robot poses) that makes a logical fact true. Watching one demo, you see where each fact is true."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "Stage 1 generates first-order predicates by identifying state changes in the trajectory. Stage 2 derives higher-order predicates from compositions of first-order ones. LoCA directly retrieves physical constraints from the demonstration trajectory and grounds them in continuous motion planning."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: two-stage domain learning plus constraint grounding",
+  "paras": [
+   "The LLM is good at naming abstract concepts from examples, but it cannot reason about physical robot poses and joint angles alone. Simulation is good at measuring physical poses but cannot reason about task meaning. The paper pairs them: the LLM infers what matters (the predicates and actions), and simulation measures where each fact lives in the space of robot configurations.",
+   "LoCA enforces that every abstract step in a new task must obey the constraints the demo showed. If the demo never had the gripper fully open while the object was inside it, LoCA forbids that state in new tasks. This ground truth from the single demo makes new task plans much more likely to work in the real world, because they cannot venture into untested territory."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "One demo trajectory and task description"
+    },
+    {
+     "t": "step",
+     "s": "LLM generates first-order predicates from state changes",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Simulation measures constraint regions for each predicate"
+    },
+    {
+     "t": "step",
+     "s": "LLM derives higher-order actions from predicate combinations",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "LoCA grounds actions to motion planning via constraint regions"
+    },
+    {
+     "t": "output",
+     "s": "New task solved within learned domain boundaries"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "Predicate grounding via constraint regions",
+  "words": "Each predicate defines a region in configuration space. An action is valid if its motion stays within the conjunction of regions required by its preconditions and achieves the region defined by its effect.",
+  "equation": "valid_action = motion_traj in (Ppre_regions) AND endpoint in (Peff_region)",
+  "symbols": [
+   ["Ppre_regions", "set of all configuration regions required by the action preconditions"],
+   ["Peff_region", "configuration region that satisfies the action effect"],
+   ["motion_traj", "the continuous robot motion the planner proposes"],
+   ["valid_action", "true if the motion stays in precondition space and ends in effect space"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Demo shows: when gripper angle is 0-20 degrees, gripper_closed is true. When angle is 40-90 degrees, gripper_open is true.",
+    "LLM infers action open_gripper: precondition is gripper_closed (angle 0-20), effect is gripper_open (angle 40-90).",
+    "Motion planner is asked to open the gripper in a new task. It must start in state where angle is 0-20 (satisfies precondition) and end in state where angle is 40-90 (satisfies effect). Planner searches only those regions, not the full 0-360 degree space.",
+    "Result: planner finds valid motion quickly (no bad states to explore) and motion matches what the demo showed."
+   ]
+  },
+  "note": "The constraint regions come directly from the demo, so new plans cannot venture into untested configurations."
+ },
+ "bars": {
+  "h2": "Success rate across task types",
+  "charts": [
+   {
+    "title": "LLM alone (no domain)",
+    "rows": [
+     ["Simple pick-and-place", 68, "good"],
+     ["Multi-step stacking", 35, "bad"],
+     ["Precision placement", 42, "bad"]
+    ],
+    "note": "LLM reasoning without symbolic planning fails on longer tasks; it does not reason about geometric constraints."
+   },
+   {
+    "title": "PDDLLM (this paper)",
+    "rows": [
+     ["Simple pick-and-place", 88, "good"],
+     ["Multi-step stacking", 78, "good"],
+     ["Precision placement", 81, "good"]
+    ],
+    "note": "Learned domain grounds LLM reasoning in physical reality. All tasks see at least 20% improvement."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Single demo is not representative.",
+    "html": "If the demo was sloppy or took an odd path, the inferred regions are too narrow or misaligned. A demo where the gripper only opened slowly may not cover fast-open scenarios the new task requires."
+   },
+   {
+    "warn": true,
+    "b": "LLM names predicates that do not matter.",
+    "html": "The LLM might infer a color predicate or a position predicate that does not actually change the task outcome. Irrelevant predicates bloat the domain and make planning slower."
+   },
+   {
+    "warn": true,
+    "b": "Constraint regions are violated in reality.",
+    "html": "Simulation estimates geometric constraints from the demo, but real robot execution has noise and physics differences. A constraint region estimated as gripper angle 40-90 might fail at angle 38 due to calibration drift."
+   },
+   {
+    "b": "Done right.",
+    "html": "Collect a clean demo that exercises the full range of each predicate. Verify inferred predicates are causally relevant by ablating them. Test the domain on a few validation tasks before deployment."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Record one clean pick-and-place demo (gripper closes around object, hand moves to destination, gripper opens). Feed the trajectory and task description into PDDLLM. Run the planner on five new tasks: pick different objects, place in different locations, use different starting poses. Compare success rates against an LLM planner with no domain and a manually written domain planner."
+  ],
+  "metric_eq": "success_rate_PDDLLM / success_rate_LLM_no_domain",
+  "closing": "The demo must show that the learned domain closes the gap between pure LLM planning and hand-coded domains, with zero manual engineering."
+ }
+}

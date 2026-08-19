@@ -96,8 +96,8 @@ def fetch_one(pid):
         return slug, f"extract-fail:{str(e)[:40]}"
     header = (f"REAL METHOD of \"{p['title']}\" (arXiv {aid}). Extracted method-dense text follows; "
               f"base the explainer on THIS actual approach, not the abstract.\n\n")
-    open(fp, "w").write(header + brief)
-    open(os.path.join(FACTS, f"{slug}.status"), "w").write(f"found:{aid}")
+    open(fp, "w", encoding="utf-8", errors="replace").write(header + brief)
+    open(os.path.join(FACTS, f"{slug}.status"), "w", encoding="utf-8", errors="replace").write(f"found:{aid}")
     return slug, f"OK ({aid}, {len(brief.split())} words)"
 
 def main():

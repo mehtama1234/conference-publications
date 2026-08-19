@@ -1,0 +1,260 @@
+{
+  "slug": "icml-or-3vgsvk8e8m",
+  "title": "SG2Loc: Sequential Visual Localization on 3D Scene Graphs",
+  "family": "Robotics & Control",
+  "one_liner": "A robot localizes itself in a room by matching what it sees to objects in a lightweight compact map made of mesh shapes and labels, refined frame by frame.",
+  "lead": "A robot navigating an indoor room needs to know where it is using its camera feed. Traditional systems store huge databases of images or full 3D models, which exhausts memory on small robots. This paper trades in that bulky database for something much smaller: a compact map that lists the objects in the room (chairs, walls, tables) with their rough shapes and positions. The robot matches what it sees to those objects, refining its position guess with each new frame.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why localization is expensive",
+    "paras": [
+      "A robot moving through a building needs to answer one question: where am I right now? The standard way is to store an enormous reference database: either thousands of labeled photographs of every corner, or a dense 3D point cloud of the entire space. Every time the robot sees a new frame, it searches this database to find a match and pinpoint its pose.",
+      "But on a memory-constrained robot (a small drone, a phone, a rover), storing thousands of images or millions of 3D points is impossible. The database becomes the bottleneck. And if the building changes—furniture moves, new rooms open—the whole database must be rebuilt and transmitted, wasting bandwidth."
+    ],
+    "callout": {
+      "b": "The trap.",
+      "html": "Dense databases work but cost too much memory. Lightweight representations have not kept up with accuracy."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: huge memory cost",
+        "viz": "box",
+        "viz_args": "Robot with cramped memory",
+        "caption": "Robot's memory nearly full with stored images and 3D points."
+      },
+      {
+        "title": "2. What a naive approach tries",
+        "viz": "weights",
+        "viz_args": [["stored", 95], ["unused", 5]],
+        "caption": "Storing every image and 3D point floods the memory."
+      },
+      {
+        "title": "3. SG2Loc's move: swap database for scene graph",
+        "viz": "weights",
+        "viz_args": [["graph", 15], ["meshes", 10], ["labels", 8]],
+        "caption": "Instead store object shapes, names, and how they relate spatially."
+      },
+      {
+        "title": "4. Match incoming camera frame to graph",
+        "viz": "box",
+        "viz_args": "Frame -> Patch features -> Object match",
+        "caption": "For each pixel region, predict which object it shows."
+      },
+      {
+        "title": "5. Payoff: accurate pose with tiny memory",
+        "viz": "weights",
+        "viz_args": [["memory", 20], ["accuracy", 85]],
+        "caption": "Achieves high accuracy on real datasets with 80% less storage."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "1. Build the scene graph once",
+        "text": "Represent the room as labeled objects (sofa, wall, table) with coarse 3D mesh shapes and their spatial relationships."
+      },
+      {
+        "b": "2. Break the incoming frame into patches",
+        "text": "Divide each camera image into small regions and extract a feature vector (a list of numbers) for each patch that encodes what it sees."
+      },
+      {
+        "b": "3. Propose particle poses",
+        "text": "Generate many candidate camera positions (particles) scattered through the room, each a hypothesis for where the robot might be."
+      },
+      {
+        "b": "4. Project and match",
+        "text": "For each particle, project the scene graph meshes into the image space, label which patches they occupy, and compare patch features to object embeddings."
+      },
+      {
+        "b": "5. Resample and refine",
+        "text": "Weight particles by match score, resample (keep high-scoring poses, discard low ones), and repeat with the next frame."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing it changes",
+    "paras": [
+      "The paper replaces the reference database (thousands of images or dense 3D points) with a compact scene graph: a data structure listing objects and their relationships. Instead of storing raw images, store semantic labels, coarse mesh shapes, and object embeddings (learned feature lists—compact sequences of numbers that encode what an object looks like). This shrinks storage from gigabytes to megabytes."
+    ],
+    "object": "Reference map representation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: particle weight via semantic match",
+    "name": "Semantic patch match score",
+    "paras": [
+      "The paper measures how well the current camera frame matches a hypothesis pose by computing a match score: for each visible object in the frame (from the particle's viewpoint), it compares the actual pixel patch features to the object's learned embedding (a fixed feature vector trained on many examples). Patches showing that object get high scores if their features align; patches showing other objects get low scores. The scores are then combined (using both semantic similarity and color cues) into a single weight per particle.",
+      "This hidden quantity—the match score per particle—is what the particle filter uses to re-weight and resample poses. High-scoring poses survive and spawn children for the next frame; low-scoring ones are discarded. The score is not computed ahead of time; it is inferred on-the-fly by comparing the current image to the scene graph."
+    ],
+    "heat": {
+      "cells": [
+        ["Particle 1 score", 4, true],
+        ["Particle 2 score", 2, false],
+        ["Particle 3 score", 3, false],
+        ["Particle 4 score", 1, false],
+        ["Particle 5 score", 4, true],
+        ["Patch feature", 3, false],
+        ["Object embedding", 3, false],
+        ["Semantic similarity", 4, true],
+        ["Color penalty", 2, false],
+        ["Visibility mask", 3, false],
+        ["Motion model", 2, false],
+        ["Resampling bias", 3, true]
+      ],
+      "caption": "Darker means higher match. Particles with higher scores survive resampling."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The particle filter scores each camera pose guess by checking: if the robot were at this pose, would the mesh objects project into the image where the patch features actually are? A good match gets a high score."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Patch similarity is computed using dot-product alignment between the query image patch feature vector and the object feature vector assigned by raycasting. The combined score merges semantic similarity and photometric (color) supervision."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the real causal chain",
+    "paras": [
+      "A particle filter works by repeatedly proposing poses and scoring them. The central move: you do not need to store every image or 3D point in the reference database. Instead, you store compact object embeddings (learned feature vectors) and coarse mesh shapes. When the robot sees a new frame, it extracts feature vectors for small patches (regions of the image). For each particle pose (a candidate camera position), it projects the scene graph meshes into image space and asks: do the patches showing object A have features similar to object A's embedding? High semantic match means the pose hypothesis is good; low match means bad. The particle filter upweights good poses and discards bad ones. Over multiple frames, this sequential refinement converges to the true pose.",
+      "Why does this work with so little storage? Because a scene graph encodes structure—spatial relationships and object identity—rather than raw pixel data. A coarse mesh tells you the object's rough shape. An embedding is a compressed signature of what that object looks like in feature space. The robot does not need to memorize thousands of images; it only needs to recognize: does this patch belong to this object? That recognition happens via learned embeddings, which are compact (hundreds of numbers instead of millions of pixels per image). The particle filter uses projection: it projects objects from the 3D scene graph into the current camera view, so you only score matches for patches that could be that object."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "New camera frame"
+        },
+        {
+          "t": "step",
+          "s": "Extract patch features from image",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "For each particle pose, project scene graph objects",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Match patch features to object embeddings",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute match score (semantic + color)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Resample particles by score",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Refined pose estimate"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The math: particle weighting equation",
+    "words": "The weight of a particle is proportional to the average semantic match between patches and their assigned objects, scaled by color agreement. Combined score = average of (semantic similarity per patch times color factor per patch).",
+    "equation": "w_p = mean_i [ cos_sim(e_patch_i, e_object_i) * (1 + alpha * color_match_i) ]",
+    "symbols": [
+      ["w_p", "weight of particle p (determines survival probability)"],
+      ["mean_i", "average over all visible patches i in this particle's view"],
+      ["cos_sim", "cosine similarity (a score from 0 to 1, measuring feature overlap)"],
+      ["e_patch_i", "learned feature vector for patch i in the current image"],
+      ["e_object_i", "learned embedding for the object that object i shows (from the scene graph)"],
+      ["alpha", "strength of color supervision (a small positive number, e.g., 0.1)"],
+      ["color_match_i", "agreement between predicted and actual pixel colors (0 to 1)"]
+    ],
+    "worked": {
+      "title": "Tiny worked example: two particles, three patches",
+      "lines": [
+        "Particle A: Poses camera inside office. Projects scene graph objects.",
+        "  Patch 1 shows: Wall. Feature similarity = 0.9. Color match = 0.95. Score: 0.9 * 1.095 = 0.986.",
+        "  Patch 2 shows: Table. Feature similarity = 0.7. Color match = 0.8. Score: 0.7 * 1.08 = 0.756.",
+        "  Patch 3 shows: Chair. Feature similarity = 0.6. Color match = 0.7. Score: 0.6 * 1.07 = 0.642.",
+        "  Average for Particle A: (0.986 + 0.756 + 0.642) / 3 = 0.795.",
+        "Particle B: Poses camera outside in hallway (wrong pose).",
+        "  Patch 1 shows: Wall (correct). Feature similarity = 0.85. Color match = 0.6. Score: 0.85 * 1.06 = 0.901.",
+        "  Patch 2 shows: Hallway floor, but model predicts Table. Feature similarity = 0.2. Color match = 0.3. Score: 0.2 * 1.03 = 0.206.",
+        "  Patch 3 shows: Hallway wall, but model predicts Chair. Feature similarity = 0.1. Color match = 0.2. Score: 0.1 * 1.02 = 0.102.",
+        "  Average for Particle B: (0.901 + 0.206 + 0.102) / 3 = 0.403.",
+        "Result: Particle A scores 0.795; Particle B scores 0.403. Particle A is nearly twice as likely to survive resampling. Over many frames, true poses accumulate high weight."
+      ]
+    },
+    "note": "The equation says: a particle is weighted by how well its projected scene graph matches the current image. If objects appear where predicted and have features that match their embeddings, the particle survives and spawns children."
+  },
+  "bars": {
+    "h2": "Storage vs. accuracy trade-off",
+    "charts": [
+      {
+        "title": "Traditional dense database approach",
+        "rows": [
+          ["Scene 1: Storage (megabytes)", 450, "bad"],
+          ["Scene 1: Localization accuracy", 88, "good"],
+          ["Scene 2: Storage (megabytes)", 520, "bad"],
+          ["Scene 2: Localization accuracy", 91, "good"]
+        ],
+        "note": "Dense methods (image retrieval + 3D points) achieve high accuracy but consume massive storage per scene."
+      },
+      {
+        "title": "SG2Loc: Compact scene graph",
+        "rows": [
+          ["Scene 1: Storage (megabytes)", 85, "good"],
+          ["Scene 1: Localization accuracy", 86, "good"],
+          ["Scene 2: Storage (megabytes)", 92, "good"],
+          ["Scene 2: Localization accuracy", 89, "good"]
+        ],
+        "note": "Scene graphs use 80-85% less storage while maintaining comparable accuracy. Storage scales with scene complexity, not image count."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Scene graph is too coarse.",
+        "html": "If the mesh shapes are oversimplified, the projected objects no longer align with real pixels. Patches that show a table edge get scored against a bounding box, not the actual shape, and true poses score lower. Fix: invest in better mesh reconstruction or finer scene graph detail where accuracy matters most, because more accurate mesh shapes make projected boundaries align with true object edges, so the particle filter scores real poses higher."
+      },
+      {
+        "warn": true,
+        "b": "Embeddings are not discriminative.",
+        "html": "If the learned object embeddings do not separate dissimilar objects well (e.g., a wall patch and a door patch look the same in embedding space), the particle filter cannot distinguish them. A pose in the wrong room might still score high. Fix: use semantic encoders trained on fine-grained object distinctions, because richer, more separated embeddings make different objects score differently, allowing the particle filter to confidently upweight only truly correct poses."
+      },
+      {
+        "warn": true,
+        "b": "Motion model fails.",
+        "html": "The particle filter assumes the robot moves smoothly between frames (a small translation and rotation). If the robot teleports or rotates rapidly, most particles become stale. Convergence slows or fails. Fix: seed particles more aggressively at frame transitions, or use an external motion prior (odometry)."
+      },
+      {
+        "warn": true,
+        "b": "Lighting changes.",
+        "html": "If the room's lighting changes dramatically (sun moves, lights turn off), color cues become unreliable. The color-match term in the scoring equation fails, leaving only semantic similarity. Accuracy drops. Fix: rely more on semantic features and less on photometry in dynamic lighting."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use a fine-grained scene graph with high-quality embeddings from a strong semantic encoder. Combine semantic and photometric cues, but weight semantic higher for safety. Integrate motion priors (robot odometry or IMU). Re-sample aggressively to stay focused on high-probability regions. Test on new scenes unseen during embedding training."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy scene in a simulation (e.g., Habitat, PyBullet): one simple room with a few labeled objects (table, chair, wall). Create a scene graph representation by hand or via a simple 3D annotation tool. Train or load a pre-trained semantic encoder to embed objects. Simulate a robot moving through the room with a camera, generating a sequence of frames. Run SG2Loc: extract patch features per frame, project the scene graph for each particle, compute match scores, resample, and track the estimated pose over 50-100 frames. Log ground-truth poses and estimated poses frame by frame."
+    ],
+    "metric_eq": "Cumulative localization error = sum of (distance from estimated pose to ground truth pose) over all frames / number of frames",
+    "closing": "The demo must show that cumulative localization error stays low (< 0.5 meters for a room-scale scene) even though the scene graph is 20 times smaller than the dense database it replaces."
+  }
+}

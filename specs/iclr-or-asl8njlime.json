@@ -1,0 +1,74 @@
+{
+ "slug": "iclr-or-asl8njlime",
+ "title": "FastVGGT: Fast Visual Geometry Transformer",
+ "family": "Robotics & Control",
+ "one_liner": "Prune redundant tokens in visual transformers to run 4x faster on long image sequences without retraining.",
+ "lead": "A vision transformer (a neural network that reads images as small patches) processes long video sequences to figure out where objects are in 3D space. On 1000 images, it becomes extremely slow because each image gets split into many tokens (small pieces), and the model wastes computation asking where each token should look. FastVGGT speeds this up 4 times by intelligently dropping the tokens that do redundant work, keeping only the ones that measure something new.",
+ "nav": [["theme-robotics-control.html","Robotics & Control"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2":"Why long image sequences stall",
+  "paras":["Vision transformers process sequences of camera images to understand where objects sit in 3D space and how they move. On short sequences (say, 10 images), they work fine. But on 1000 images — a real video — they hit a wall: memory runs out, and computation crawls. A beginner's first try is simple: just feed all 1000 images in, same as 10 images. It fails because the transformer's scoring layer (which decides which past image regions matter for each small piece) compares every token from every image to every other token from every image. With 1000 images times 1000 tokens per image, that is 1 million tokens total. Comparing every token to every other token creates 1 million squared comparisons — 1 trillion scoring operations. Even one forward pass takes hours."],
+  "callout":{"b":"The bottleneck.","html":"Many tokens use the same scoring pattern to look at nearly identical regions, doing redundant work twice."}
+ },
+ "comic": {
+  "h2":"Five-panel picture",
+  "panels":[
+   {"title":"1. Long video arrives","viz":"plain","caption":"1000 images, each broken into ~1000 small pieces (tokens)."},
+   {"title":"2. Attention compares everything","viz":"weights","viz_args":[["hot",60],["hot",55],["free",20],["free",18],["hot",62],["free",22],["hot",58],["free",15],["free",25],["hot",60],["free",20],["hot",50]],"caption":"Tokens look at all prior frames; many stare at the same regions (redundant)."},
+   {"title":"3. Redundancy identified","viz":"box","viz_args":"Same region, different tokens","caption":"Model detects tokens attending to nearly identical spots."},
+   {"title":"4. Prune and keep anchors","viz":"weights","viz_args":[["hot",60],["hot",55],["hot",62],["hot",58],["hot",60],["hot",50]],"caption":"Drop redundant tokens; keep frame-1 stable reference, salient patches, random coverage."},
+   {"title":"5. 4x speedup achieved","viz":"plain","caption":"Same position estimates, but 4x faster, no retraining needed."}]
+ },
+ "flow": {
+  "h2":"What it actually does",
+  "steps":[
+   {"b":"Identify redundancy","text":"Measure which tokens attend to nearly identical image regions."},
+   {"b":"Anchor the first frame","text":"Preserve all tokens from the first image as a stable global reference."},
+   {"b":"Keep salient patches","text":"Retain tokens that look at rare or distinctive parts of the image."},
+   {"b":"Add random spatial coverage","text":"Sample extra tokens randomly to ensure no area is completely missing."},
+   {"b":"Drop the rest","text":"Discard tokens that add no new information, cutting memory and computation."}]
+ },
+ "object": {
+  "h2":"What changes",
+  "paras":["FastVGGT does not retrain the model or change its weights. Instead, it reduces the number of tokens (pieces of the image) fed into attention at each time step. Fewer tokens mean fewer comparisons, which means faster answers."],
+  "object":"token count"
+ },
+ "hidden": {
+  "h2":"Token redundancy: when two tokens watch the same thing",
+  "name":"token attention overlap",
+  "paras":["In the original transformer, each token outputs a list of scores showing where in prior frames it wants to look. If two tokens output nearly identical scores, they are looking at nearly the same regions and doing redundant work. FastVGGT estimates this overlap by comparing the attention scores (the look-at lists) of nearby tokens. Tokens with high overlap are marked as redundant.","The paper does not explicitly name a single formula for overlap, but the mechanism is clear: tokens whose attention patterns are nearly identical are pruned, while those with unique patterns are kept."],
+  "heat":{"cells":[["Frame 1",4,true],["Frame 1",4,true],["Frame 2",2,false],["Frame 2",1,false],["Frame 3",3,true],["Frame 3",1,false],["Frame 4",2,false],["Frame 4",3,true],["Frame 5",1,false],["Frame 5",2,false],["Frame 6",3,true],["Frame 6",1,false]],"caption":"Darker means a token's attention pattern is unique; lighter means redundant."},
+  "reads":[{"b":"Plain reading.","html":"A token is redundant if it looks at the same places as neighboring tokens."},{"b":"Paper reading.","html":"Global attention exhibits token collapse: many tokens converge to identical or near-identical attention patterns across frames."}]
+ },
+ "mechanism": {
+  "h2":"Why pruning redundant tokens speeds everything up",
+  "paras":["The bottleneck is the scoring layer computation: how many times do we ask 'where should this token look?' The answer depends on how many tokens exist. With 1 million tokens, that question is asked 1 trillion times. If we prune down to 250k tokens (one quarter), the question is asked only 62.5 billion times — 16 times fewer, because each token is scored against all prior tokens, so cutting the token count cuts the scoring operations by the same fraction. But there is a catch: pruning must preserve the information that the model needs to track object positions correctly. If we drop all tokens from frame 2, we lose the position and shape information from that frame. FastVGGT preserves frame 1 as an anchor (so the first reference stays constant), keeps salient tokens (tokens that look at unusual or important parts), and adds random spatial samples (so no region is entirely missing). This three-part strategy works because frame 1 gives a stable baseline, salient tokens catch changes in important regions, and random sampling fills gaps. The result is that position information stays intact even though most tokens are dropped."],
+  "visual":{"kind":"pipeline","stages":[{"t":"input","s":"1000 images, 1000 tokens each"},{"t":"step","s":"Measure score-pattern overlap between neighboring tokens","hl":true},{"t":"step","s":"Mark tokens as redundant if overlap is high"},{"t":"step","s":"Apply three-part strategy: anchor frame 1, keep salient, random-sample rest"},{"t":"step","s":"Drop redundant tokens"},{"t":"output","s":"250k tokens, faster scoring because fewer comparisons, position accurate because key tokens kept"}]}
+ },
+ "math": {
+  "h2":"The token selection strategy",
+  "words":"Token selected = (from frame 1) or (salient score above threshold) or (random sample from spatial grid)",
+  "equation":"keep_token = is_frame_1 OR (saliency_i > tau) OR (random_grid_sample)",
+  "symbols":[["keep_token","whether to include this token in computation"],["is_frame_1","true if this token is from the first frame"],["saliency_i","how unique this token's attention pattern is"],["tau","the cutoff score; tokens with saliency above tau are kept"],["random_grid_sample","one token randomly chosen from each spatial region"]],
+  "worked":{"title":"A tiny worked example","lines":["Suppose we have 12 tokens in one image. Frame 1 contributes 4 tokens (all kept). Remaining 8 tokens are checked: token-5 has saliency 0.8 (above tau=0.5, kept), token-6 has saliency 0.3 (below tau, dropped), token-7 saliency 0.7 (kept), token-8 saliency 0.2 (dropped). That is 3 + 2 = 5 salient tokens kept. Then random grid sampling adds 2 more tokens from blank regions. Total: 4 + 2 + 2 = 8 tokens kept out of 12. Pruning ratio = 8/12 = 67%, or 33% reduction."]},
+  "note":"The formula shows that frame 1 is always kept, high-uniqueness tokens are always kept, and random coverage fills gaps."},
+ "bars": {
+  "h2":"Speedup and error on long sequences",
+  "charts":[
+   {"title":"Naive: feed all tokens","rows":[["Speed on 100 images",20,"bad"],["Speed on 1000 images",2,"bad"],["Position error",15,"bad"]],"note":"Computation grows; error increases because small mistakes accumulate over long sequences."},
+   {"title":"FastVGGT: prune redundant tokens","rows":[["Speed on 100 images",22,"good"],["Speed on 1000 images",8,"good"],["Position error",8,"good"]],"note":"Speeds up without error growth because key position landmarks stay intact and frame 1 anchors the whole sequence."}]
+ },
+ "failures": {
+  "h2":"What can go wrong",
+  "items":[
+   {"warn":true,"b":"Salient threshold set too high.","html":"If tau is too strict, even important tokens are dropped. The position estimates become sparse and incomplete."},
+   {"warn":true,"b":"Random sampling too sparse.","html":"If the spatial grid is too coarse, large regions have no tokens. The model misses position and shape information in those areas."},
+   {"warn":true,"b":"Frame 1 not truly stable.","html":"If camera motion is large, frame 1 alone may not anchor the sequence. The model's position estimates drift over time."},
+   {"warn":true,"b":"Salient and redundant confuse each other.","html":"A token can look at a common region in a unique way (e.g., first to detect a moving object). Overlap-based pruning might drop it."},
+   {"b":"Done right.","html":"Set tau carefully (e.g., via validation on short sequences), ensure random sampling covers all quadrants, and test on sequences with large camera motion to verify frame 1 anchors positions correctly."}]
+ },
+ "demo": {
+  "h2":"What a runnable demo should prove",
+  "paras":["Build a simple tracking task: track the 3D position of a moving cube through a 100-frame video. (a) Run the original model (or a simple baseline) and record speed and final position error (how far the predicted position is from the true position). (b) Apply FastVGGT pruning (keep frame 1, keep tokens with saliency above 0.5, sample random grid every 4 by 4 pixels) and re-run with the exact same weights. (c) Confirm that speed increases at least 2x on 100 frames and error does not grow by more than 5%. On longer sequences (500 frames), the speedup should approach 4x. The speed gain comes from fewer tokens being scored against each other. The accuracy stays the same because frame 1 provides a stable baseline, salient tokens capture changes in key regions, and random sampling ensures no blind spots."],"metric_eq":"speedup = time_naive divided by time_pruned, position_error = distance from predicted position to true position","closing":"The core insight is visible: pruning redundant tokens cuts computation, but strategy keeps position output correct."}
+}
