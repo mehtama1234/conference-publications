@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPECS = os.path.join(ROOT, "specs")
 
 # fields that MAY contain notation (skip them)
-SKIP_KEYS = {"equation", "words", "symbols", "viz_args", "metric_eq", "slug", "id", "nav", "toc", "conf", "theme_slug", "title"}
+SKIP_KEYS = {"equation", "words", "symbols", "viz_args", "metric_eq", "slug", "id", "nav", "toc", "conf", "theme_slug", "title", "connects"}
 
 NOTATION = [
     (r"\b[a-zA-Z]_[a-z0-9]\b", "subscript notation (e.g. x_t)"),
