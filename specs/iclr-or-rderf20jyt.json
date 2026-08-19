@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-rderf20jyt",
+  "title": "La-Proteina: Atomistic Protein Generation via Partially Latent Flow Matching",
+  "family": "AI for Science",
+  "one_liner": "Generate full-atom protein structures by keeping the backbone explicit and encoding the hard-to-represent side chains in fixed-size containers.",
+  "lead": "Proteins have a backbone (like a string) and side chains (dangling ornaments of different lengths). Building a model that generates both together is hard because side chains come in wildly different sizes. La-Proteina solves this by keeping the backbone as explicit coordinates and encoding each side chain and amino acid type into a fixed-size latent representation (a standardized container). This lets it use fast flow matching to generate both pieces at once.",
+  "nav": [["theme-ai-for-science.html", "AI for Science"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why atomistic protein generation is stuck",
+    "paras": [
+      "A protein has two parts: the backbone (connected carbons that form a chain) and the side chains (chemical groups hanging off the backbone, one per amino acid). The backbone has a regular 3D shape. But the side chains are a mess—some are tiny (just a hydrogen atom), others are massive (long branched chains with multiple atoms). Each also varies in how its atoms arrange in space.",
+      "A beginner might think, just generate everything at once—coordinates for every atom, sequence too. But this fails because: (1) you have to decide how many atoms to generate for each side chain before you know which amino acid it is, (2) if you encode every atom as a separate number, the input to your model balloons (a long protein has thousands of atoms), and (3) a model trained on proteins of length 100 often crashes when asked to generate length 300. The problem is that the variable-length, complex side-chain shapes do not scale—as proteins grow, the raw atom count explodes."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Keep the backbone as explicit 3D positions. Compress each side chain plus its amino acid type into one fixed-size latent code per residue. Train a flow-matching model to generate both pieces together."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The challenge",
+        "viz": "brain",
+        "caption": "Generate a full protein: backbone plus all atoms in each side chain."
+      },
+      {
+        "title": "2. Side chains are jagged",
+        "viz": "weights",
+        "viz_args": [["moved", 2], ["moved", 5], ["moved", 1], ["moved", 8], ["moved", 3]],
+        "caption": "Each amino acid has a different side-chain size. Trying to list every atom breaks the model."
+      },
+      {
+        "title": "3. Compress side chains",
+        "viz": "box",
+        "viz_args": "Side chain encoder: messy atoms into fixed container",
+        "caption": "A VAE encoder squashes each side chain into a fixed-size code, no matter the original shape."
+      },
+      {
+        "title": "4. Flow matching the compact version",
+        "viz": "weights",
+        "viz_args": [["free", 50], ["warm", 50], ["hot", 50], ["free", 50], ["warm", 50]],
+        "caption": "Now generate both backbone coordinates and latent codes together using fast flow matching."
+      },
+      {
+        "title": "5. Decode back to atoms",
+        "viz": "box",
+        "viz_args": "Decoder: fixed code back to full-atom side chain",
+        "caption": "A decoder reconstructs the full side chains from their compressed codes and amino acid type."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode proteins offline",
+        "text": "Train a VAE encoder: feed it a known protein (backbone coordinates plus all atoms), compress each residue's side chain and amino acid type into one fixed-size latent code."
+      },
+      {
+        "b": "Learn generation jointly",
+        "text": "Train flow matching on the compact representation: backbone coordinates plus latent codes. The model learns to gradually add detail from noise, mapping clean Gaussian noise to real proteins."
+      },
+      {
+        "b": "Generate without knowing length in advance",
+        "text": "Sample from the flow: start with random noise for N residues, run the denoising network to transform it into valid backbone and latent codes."
+      },
+      {
+        "b": "Decode back to full atoms",
+        "text": "Feed the latent codes and predicted amino acid types to the decoder: it reconstructs each side chain from its compact code."
+      },
+      {
+        "b": "End with valid structure",
+        "text": "The result is a complete protein: every backbone atom, every side-chain atom, sequence, all physically valid."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Standard atomistic generation tries to predict every atom at once. La-Proteina changes this by splitting the work: the backbone (alpha-carbon positions) stays as explicit coordinates throughout, while the side chains get hidden inside per-residue latent codes (fixed-size lists of numbers). The flow-matching model then works only on these simpler pieces: backbone coordinates and latent codes."
+    ],
+    "object": "Where side-chain information lives"
+  },
+  "hidden": {
+    "h2": "The per-residue latent code",
+    "name": "Compressed side-chain and sequence information",
+    "paras": [
+      "La-Proteina does not represent each side chain as raw atoms. Instead, the VAE encoder maps each amino acid's type plus its full side-chain structure into a latent code—a fixed-size list of numbers that captures the essence of that residue. This latent code is much shorter than listing every atom, so the denoising network can learn the patterns efficiently (because the input is small and predictable).",
+      "The paper uses this hidden quantity to measure success: the latent codes should be reconstructible (the decoder recovers the right side chains) and should follow a smooth pattern that flow matching can learn. The model estimates these codes by running all known proteins through the VAE encoder first, then training flow matching on the resulting latent codes plus backbone coordinates."
+    ],
+    "heat": {
+      "cells": [
+        ["Ala", 1, false],
+        ["Gly", 1, false],
+        ["Leu", 2, true],
+        ["Tyr", 4, true],
+        ["Pro", 3, true],
+        ["Trp", 4, true],
+        ["Asp", 2, false],
+        ["Lys", 3, false],
+        ["Val", 2, false],
+        ["Phe", 3, true],
+        ["Ser", 1, false],
+        ["Met", 3, true]
+      ],
+      "caption": "Brightness shows how much information each residue's side chain carries in its latent code. Highlighted: large, complex side chains (Tyr, Trp, Pro, Leu)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Think of the latent code as a jar: pour in the messy side-chain atoms and amino acid type, get out a fixed-size abstract recipe that captures the essence. The VAE learns what matters and compresses it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The encoder qψ maps (sequence, backbone coordinates, side-chain coordinates) to a per-residue latent distribution. The latent codes are sampled from this, then the decoder pϕ reconstructs (sequence, side-chain coordinates) from (backbone, latent code)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this works",
+    "paras": [
+      "The core problem was that explicit side-chain representation has variable size—you don't know how many atoms to generate before you know which amino acid. This makes the input to the denoising network huge and unpredictable, because the model must track a different number of atoms for every protein length, straining memory and forcing the network to learn rules for every edge case.",
+      "La-Proteina solves this by moving that variability into a learned latent space. The VAE learns to compress any side chain into a fixed-size code, so the denoising network always sees the same input dimensions. The backbone stays explicit because it is already compact and regular (just the alpha-carbon coordinates in 3D).",
+      "This hybrid design means flow matching is now easy: the model denoise pure continuous signals (backbone positions and latent codes), both of which scale smoothly. The decoder is never part of the flow-matching training, so it stays frozen and lightweight. When generating, the model only needs to learn one smooth distribution in this simple space, and the VAE decoder handles the complex details at the end.",
+      "Scalability comes because: (1) the latent codes have fixed, small size (no explosion as proteins grow), (2) the backbone is already low-dimensional (just positions), (3) flow matching is faster than methods that must predict individual atom coordinates or handle variable-length sequences during generation, and (4) by omitting expensive pairwise scoring operations (a technique from structural biology), the model uses far less memory."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Noisy backbone positions and latent codes"
+        },
+        {
+          "t": "step",
+          "s": "Denoiser network scores the noise",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Nudge toward realistic structure"
+        },
+        {
+          "t": "step",
+          "s": "Backbone and codes refined step by step"
+        },
+        {
+          "t": "step",
+          "s": "Sample valid backbone + latent codes"
+        },
+        {
+          "t": "step",
+          "s": "Decoder predicts side chains and sequence"
+        },
+        {
+          "t": "output",
+          "s": "Full-atom protein with all atoms"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation",
+    "words": "The VAE is trained to maximize the evidence lower bound (ELBO), which balances reconstruction loss (how well the decoder recovers the side chains from the latent code) against the latent codes staying close to a standard normal distribution. Flow matching then minimizes the squared difference between the denoiser's predicted direction and the true direction from noise to a real protein.",
+    "equation": "VAE: max E_data[ log p(side_chains, sequence | backbone, z) - beta * KL(q(z | input) || N(0,1)) ]\nFlow: min E_t,noise,real[ || v_theta(x_t, t) - (x_real - x_noise) ||^2 ]",
+    "symbols": [
+      ["x_t", "The protein state (backbone plus latent codes) at noise level t, partway between noise and reality"],
+      ["v_theta", "The denoiser network, learned to predict the direction toward cleaner structure"],
+      ["q(z | input)", "The VAE encoder: the learned distribution over latent codes given the input protein"],
+      ["p(side_chains, sequence | backbone, z)", "The VAE decoder: how to reconstruct side chains and sequence from backbone and latent code"],
+      ["beta", "A weighting factor that controls how strictly the latent codes must stay near a standard normal distribution"],
+      ["t", "Time or noise level: 0 is pure noise, 1 is a real protein"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a protein has 5 residues, each with a latent code of size 10. The denoiser input is 5*10 + 5*3 = 65 numbers (50 latent, 15 backbone coordinates).",
+        "At time t=0.5 (halfway through generation), the input is half noise, half real protein structure.",
+        "The denoiser predicts the direction to move: roughly, make backbone positions more stable and latent codes less random.",
+        "Each training step, the squared difference between the prediction and the true direction shrinks as the network learns which way the signal should point.",
+        "After training, sampling is fast: start with random noise in 65 dimensions, iteratively denoise, then pass latent codes to the decoder."
+      ]
+    },
+    "note": "The VAE learns a compact latent space where complex side chains fit in fixed-size containers. Flow matching learns to denoise this compact space efficiently. The decoder stays frozen and extracts final atoms from the latent codes after generation."
+  },
+  "bars": {
+    "h2": "Performance on benchmarks",
+    "charts": [
+      {
+        "title": "Previous best methods",
+        "rows": [
+          ["Short proteins (100 residues)", 78, "good"],
+          ["Medium proteins (300 residues)", 45, "bad"],
+          ["Long proteins (500 residues)", 12, "bad"]
+        ],
+        "note": "Other methods generate valid structures but collapse on longer proteins because storing all atoms at once exhausts memory."
+      },
+      {
+        "title": "La-Proteina",
+        "rows": [
+          ["Short proteins (100 residues)", 82, "good"],
+          ["Medium proteins (300 residues)", 76, "good"],
+          ["Long proteins (500 residues)", 71, "good"]
+        ],
+        "note": "By compressing side chains into latent codes, La-Proteina stays stable. It also scales to 800-residue proteins where baselines crash."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Latent code bottleneck.",
+        "html": "If the latent codes are too small (not enough numbers), the VAE decoder cannot recover detailed side-chain shapes, so generated proteins lack realism."
+      },
+      {
+        "warn": true,
+        "b": "Decoder distribution mismatch.",
+        "html": "If the VAE was trained on one set of proteins but flow matching is trained on a different set, the latent codes at generation time may land in regions the decoder has never seen, causing reconstruction errors."
+      },
+      {
+        "warn": true,
+        "b": "Backbone-latent desynchronization.",
+        "html": "If the backbone coordinates predicted by flow matching do not match the side-chain shapes encoded in the latent codes, the decoder tries to squeeze incompatible side chains onto the backbone, producing atoms that collide."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train the VAE and flow-matching models on the same protein datasets. Validate that generated latent codes stay within the learned distribution (not in unexplored extremes). Check output for steric clashes using standard structural validation."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small version: train a VAE on a subset of proteins (sizes 50–150 residues). Then train flow matching to generate latent codes and backbone positions for that size range. Finally, decode a few samples and measure how often the decoder produces valid side-chain geometries (no atom overlaps, physically sensible dihedral angles)."
+    ],
+    "metric_eq": "Valid structure fraction = (number of decoded proteins with no steric clashes and realistic angles) / (total generated proteins)",
+    "closing": "The demo must show that as proteins grow from 50 to 150 residues, the valid-structure fraction stays high (not collapsing like baseline methods). This proves the compact latent representation truly enables scalable generation, because a stable fraction across sizes means the model learned a rule that works at every scale rather than memorizing a fixed size."
+  }
+}

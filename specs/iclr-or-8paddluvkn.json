@@ -1,0 +1,237 @@
+{
+  "slug": "iclr-or-8paddluvkn",
+  "title": "There and Back Again: Noise and Image Inversions in Diffusion Models",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "When you reverse-play a diffusion model to edit images, the first few reverse steps create correlated noise that limits editing; using forward diffusion instead fixes it.",
+  "lead": "Diffusion models are the best at generating images, but they lack a simple editable workspace. Researchers use a trick called inversion to turn an image back into noise, creating a latent space for editing. However, this inversion produces a hidden problem: smooth areas like sky or wall get less diverse noise predictions than textured areas, making edits look wrong. This paper reveals the culprit lives in the first inversion steps and proposes a simple fix: use forward diffusion for those early steps instead.",
+  "nav": [["theme-generative-models-diffusion.html","Generative Models & Diffusion"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Diffusion inversion breaks down on smooth image regions",
+    "paras": [
+      "Diffusion models work by learning to reverse a noise process: starting from pure noise, the model gradually removes noise to create an image. A natural question arises: can we run this process backward? If we could turn an image back into noise, we could edit it in that noise space and run the process forward again to get an edited image.",
+      "A method called DDIM inversion attempts exactly this: it reverses the denoising steps to recover the starting noise. The problem is that this reversed process is not accurate. The early reverse steps in particular make poor guesses about the noise, and these guesses have a hidden structure: smooth regions (plain sky, blank wall) get predicted to have less diverse noise than textured regions (grass, brick). This structural bias means the recovered noise-space representation is not a uniform blob of noise; it is a correlated, patterned thing. When you edit in this biased space and run forward diffusion, the edits look artificial.",
+      "A beginner might try just using more reverse steps, assuming more steps mean more accuracy. This does not solve the structural problem; the bias is baked into the first few steps' predictions."
+    ],
+    "callout": {
+      "b": "The core issue.",
+      "html": "DDIM inversion predicts less diverse noise in smooth image regions during the first reverse steps, creating structural patterns in the latent space that ruin editing quality."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Diffusion goes forward",
+        "viz": "weights",
+        "viz_args": [["free",2],["free",3],["free",1],["free",2],["free",3]],
+        "caption": "Start with random noise, gradually remove it to create an image."
+      },
+      {
+        "title": "2. Sky is smooth, grass is bumpy",
+        "viz": "box",
+        "viz_args": "Sky | Grass",
+        "caption": "Image regions have different texture complexity: sky has low detail."
+      },
+      {
+        "title": "3. DDIM inversion fails first",
+        "viz": "weights",
+        "viz_args": [["moved",2],["moved",1],["hot",3],["hot",2],["hot",3]],
+        "caption": "Reversing the process, first steps mispredict sky as less diverse than grass."
+      },
+      {
+        "title": "4. Early steps swapped with forward diffusion",
+        "viz": "box",
+        "viz_args": "Swap → Forward",
+        "caption": "Replace those bad early reverse steps with forward noise process."
+      },
+      {
+        "title": "5. Latent noise is uniform",
+        "viz": "weights",
+        "viz_args": [["free",2],["free",3],["free",1],["free",2],["free",3]],
+        "caption": "Now sky and grass get equally diverse noise; editing works right."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Measure the problem",
+        "text": "For 4000 images reversed through 50 steps, record where the model's noise prediction errors are biggest."
+      },
+      {
+        "b": "Find the culprit",
+        "text": "Errors concentrate in the first 10% of reverse steps, and only for smooth image pixels."
+      },
+      {
+        "b": "Understand the cause",
+        "text": "Early reverse steps lose track of noise diversity in flat regions; the model predicts less varied noise."
+      },
+      {
+        "b": "Apply the fix",
+        "text": "For the first t_prime steps, use the standard forward diffusion process instead of the reverse process."
+      },
+      {
+        "b": "Verify",
+        "text": "10000 test images show the latents become uniform noise, enabling good edits and smooth interpolations."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The thing that changes: first inversion steps",
+    "paras": [
+      "The paper replaces the first few steps of DDIM inversion (the reverse-playing process) with the standard forward diffusion process. Instead of guessing noise by reversing, those early steps simply add noise as in the original diffusion process."
+    ],
+    "object": "first inversion steps"
+  },
+  "hidden": {
+    "h2": "Latent diversity: how varied is the predicted noise",
+    "name": "noise diversity per region",
+    "paras": [
+      "This paper measures a quantity that was never named or tracked before: for each image region, how diverse are the noise predictions across the first inversion steps? Smooth regions (sky, wall) had low diversity; textured regions (grass) had high diversity. The paper shows this diversity imbalance as a correlation structure in the final latent encoding.",
+      "The paper estimates this by computing the fraction of noise variance preserved in each pixel during early inversion steps. A pixel with high variance preservation means the noise predictions there are diverse; low variance means they are repetitive."
+    ],
+    "heat": {
+      "cells": [
+        ["sky pixel 1",1,true],
+        ["sky pixel 2",1,false],
+        ["sky pixel 3",1,true],
+        ["grass pixel 1",4,false],
+        ["grass pixel 2",4,false],
+        ["grass pixel 3",4,false],
+        ["brick pixel 1",3,true],
+        ["brick pixel 2",3,false],
+        ["wall pixel 1",1,false],
+        ["wall pixel 2",1,true],
+        ["door pixel 1",2,false],
+        ["door pixel 2",2,false]
+      ],
+      "caption": "Darker means more noise diversity preserved. Sky stays light (low diversity) in early steps."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Some image regions (like sky) have noise predictions that are always similar to each other; other regions (like grass) have noise predictions that jump around wildly. This imbalance is the hidden problem."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper computes inversion approximation error ξ(t) as the difference between the model's prediction at step t using the previous step output versus the true prediction. It then measures variance preservation per pixel in early steps; smooth image regions show <5% of variance preserved, while texture regions show >40%."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why replacing early steps with forward diffusion fixes the problem",
+    "paras": [
+      "Diffusion models are trained to predict noise in one direction: given a slightly-noisy image, predict what noise was added. When you reverse the process, you are asking the model to do something it has never seen: given a noisier image, predict what tiny noise to add to get back to the previous state. In the very first reverse steps, this is hard because the image is almost pure noise, and the model's predictions are inaccurate.",
+      "Here is the mechanical reason it breaks: on smooth regions, the model has learned to predict that smooth images contain low-variance noise (because smooth images really do come from low-noise starting points in the forward process). When reversing, the model incorrectly applies this learned bias, predicting that noise in smooth areas should be repetitive. This bias gets baked into the latent code.",
+      "The fix works because forward diffusion does not rely on model predictions. Instead, it uses the mathematical formula for adding noise: take the current image, scale it down, and add in a measured amount of random noise. This formula treats all pixels the same way, adding equally diverse random noise everywhere. By replacing the error-prone early reverse steps with this formula, the latent encoding becomes uniform randomness, and editing now works correctly."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Image to edit"
+        },
+        {
+          "t": "step",
+          "s": "Steps 1-4: Use forward diffusion formula",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Steps 5-50: Use DDIM inversion reverse"
+        },
+        {
+          "t": "output",
+          "s": "Uniform random latent noise"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The hybrid inversion equation",
+    "words": "if timestep is early use the forward formula; otherwise use the reverse formula",
+    "equation": "x_t = {sqrt(alpha_bar_t)*x_0 + sqrt(1-alpha_bar_t)*epsilon,  if t <= t_prime (forward diffusion); sqrt(alpha_t)*x_{t-1} + (sqrt(1-alpha_bar_t) - sqrt(alpha_t*alpha_bar_t))*epsilon_theta(x_{t-1}),  if t > t_prime (DDIM inversion)",
+    "symbols": [
+      ["x_0","the original image"],
+      ["x_t","the noisy version at step t"],
+      ["t_prime","the threshold step (e.g., step 4 out of 50)"],
+      ["alpha_t","the noise schedule coefficient at step t (how much signal to keep)"],
+      ["alpha_bar_t","the cumulative product of alpha coefficients (overall signal level)"],
+      ["epsilon","random noise sampled from standard Gaussian"],
+      ["epsilon_theta(x_{t-1})","the model prediction for noise at step t-1"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with 5 steps total",
+      "lines": [
+        "Image x_0 has 100 sky pixels and 100 grass pixels. Alpha schedule is [0.99, 0.96, 0.91, 0.84, 0.75].",
+        "Threshold t_prime = 2, so first 2 steps use forward diffusion.",
+        "Step 1 forward: x_1 = sqrt(0.99)*x_0 + sqrt(0.01)*random_noise. Sky pixels and grass pixels each get fresh random noise.",
+        "Step 2 forward: x_2 = sqrt(0.96)*x_0 + sqrt(0.04)*random_noise. Again, all pixels get equally varied noise.",
+        "Step 3 DDIM: x_3 reverses using model prediction. Model says 'smooth sky should have low-variance noise' and predicts accordingly.",
+        "But steps 1-2 already added diverse noise everywhere. The low-variance prediction from step 3 onward cannot undo that diversity.",
+        "Result: latent code has uniformly distributed noise, not correlated patterns."
+      ]
+    },
+    "note": "The key is that forward diffusion adds noise uniformly by mathematical formula, not by the model's learned biases, so early steps create unbiased randomness."
+  },
+  "bars": {
+    "h2": "Latent quality improves after the fix",
+    "charts": [
+      {
+        "title": "Standard DDIM inversion",
+        "rows": [
+          ["Variance preserved (sky)",12,"bad"],
+          ["Variance preserved (grass)",42,"good"],
+          ["Correlation in latent code",68,"bad"],
+          ["Edit quality on sky areas",34,"bad"]
+        ],
+        "note": "Smooth areas show low diversity; latent code has structure."
+      },
+      {
+        "title": "DDIM + forward-diffusion fix",
+        "rows": [
+          ["Variance preserved (sky)",39,"good"],
+          ["Variance preserved (grass)",41,"good"],
+          ["Correlation in latent code",18,"good"],
+          ["Edit quality on sky areas",78,"good"]
+        ],
+        "note": "All regions now have consistent diversity; latent is uniform random noise."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Too much forward diffusion loses image information.",
+        "html": "If you replace too many early steps with forward diffusion, the latent code becomes so random that it no longer encodes the input image accurately. Image reconstruction will fail. The paper finds that replacing only the first 4% of steps (e.g., steps 1-2 out of 50) works; replacing more than 10% degrades reconstruction."
+      },
+      {
+        "warn": true,
+        "b": "The fix does not improve numerical inversion error.",
+        "html": "DDIM inversion error measures how well you recover the starting noise in a fixed number of steps. This hybrid method does not reduce that numerical error because it only changes the correlation structure of the noise, not the magnitude of prediction mistakes; it only improves latent diversity by redistributing the same total randomness more evenly. If your goal is pixel-perfect reconstruction, this is not the right tool."
+      },
+      {
+        "warn": true,
+        "b": "Hyperparameter tuning required.",
+        "html": "Different diffusion models and image datasets may need different values of t_prime (the swap threshold). You cannot use the same threshold for all models without testing."
+      },
+      {
+        "b": "Done right.",
+        "html": "Keep t_prime small (first 4-8 steps out of 50), verify that reconstruction still works on your test set, and measure latent diversity (variance preserved per region) to confirm the fix is working."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a demo that takes a real photograph, inverts it to latent space using both standard DDIM and the hybrid DDIM-plus-forward method, then edits the latent (e.g., brighten sky, darken grass), and reconstructs the edited image. Compute variance preservation per region (sky, grass, texture) during inversion."
+    ],
+    "metric_eq": "edit_quality = (variance_preserved_sky + variance_preserved_grass) / 2; correlation_reduction = correlation_standard - correlation_hybrid",
+    "closing": "The demo makes it impossible to miss: edits on smooth regions look natural with the fix because uniform noise lets the edit signal propagate evenly, while standard DDIM edits look broken because correlated noise drowns out edits in smooth areas. The latent space shifts from patterned randomness to uniform randomness."
+  }
+}

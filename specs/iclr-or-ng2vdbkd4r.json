@@ -1,0 +1,237 @@
+{
+  "slug": "iclr-or-ng2vdbkd4r",
+  "title": "UniSplat: Unified Spatio-Temporal Fusion for Dynamic Driving Scenes",
+  "family": "3D Scene Reconstruction",
+  "one_liner": "UniSplat rebuilds dynamic street scenes from multi-camera car video in one forward pass by fusing 3D shape and object labels in a shared structured grid, plus keeping a memory bank of permanent background features for rendering beyond camera edges.",
+  "lead": "Autonomous driving cameras see the street from many angles at once, but each camera sees only part of the scene, views don't always overlap much, and things are moving. UniSplat is a feed-forward model (computes in one pass, no per-scene fitting) that constructs a 3D latent scaffold—a structured, sparsely-packed 3D grid encoding 3D shape and object labels—then fuses camera information across that shared space to rebuild dynamic scenes that can be viewed from angles the cameras never captured, even beyond their field of view.",
+  "nav": [["theme-computer-vision.html","Computer Vision"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "The driving scene puzzle",
+    "paras": [
+      "A self-driving car has cameras mounted all around—front, sides, rear—seeing the same street scene from different angles at the same time. If you want to generate a photo from a new angle (one that no camera captured), you need to understand the full 3D shape and appearance of everything in the scene: the road, cars, trees, people.",
+      "Naive approach: take each camera image independently and try to predict 3D shape from each one. But this fails because each camera only sees part of the scene, and the overlaps are sparse and tilted. You don't get one unified picture of the street.",
+      "Past methods solved this by carefully optimizing a model for each scene (slow, takes minutes), or by trying to fuse camera images early (in 2D) before lifting to 3D, which loses geometric precision. Neither works well for real-time autonomous driving where you must reconstruct fresh scenes instantly."
+    ],
+    "callout": {
+      "b": "The challenge.",
+      "html": "Build a model that understands a full dynamic street scene from many cameras in one forward pass, even when views barely overlap."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Multi-camera car seeing sparse views",
+        "viz": "brain",
+        "caption": "Front, side, rear cameras see street from different angles; partial overlap."
+      },
+      {
+        "title": "2. Naive: each camera guesses independently",
+        "viz": "box",
+        "viz_args": "cam A → shape guess; cam B → shape guess; cam C → shape guess; no agreement",
+        "caption": "Each camera alone cannot agree on a unified 3D structure; reconstruction is poor."
+      },
+      {
+        "title": "3. UniSplat's move: shared 3D latent scaffold",
+        "viz": "weights",
+        "viz_args": [["shape", 3, true], ["shape", 2, true], ["labels", 3, true], ["labels", 2, false], ["shape", 1, false], ["labels", 1, false], ["static", 4, false], ["dynamic", 1, true], ["memory", 2, false], ["memory", 3, false], ["fused", 4, true], ["aligned", 3, false]],
+        "caption": "All cameras write to one 3D grid holding 3D shape, object labels, and motion flags."
+      },
+      {
+        "title": "4. Dual-branch decoder: two paths to Gaussians",
+        "viz": "box",
+        "viz_args": "point-anchored refinement; voxel-based generation",
+        "caption": "One path sharpens details, other ensures complete fill; motion flags separate static from dynamic."
+      },
+      {
+        "title": "5. Render from any angle, remember static background",
+        "viz": "plain",
+        "caption": "Unseen viewpoints render smoothly; memory persists permanent features past camera edges."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Scaffold construction",
+        "text": "Run multi-view images through shape and label foundation models to build a 3D grid of features."
+      },
+      {
+        "b": "Spatio-temporal fusion",
+        "text": "Align and blend information across cameras and previous frames within the scaffold."
+      },
+      {
+        "b": "Dynamic detection",
+        "text": "Assign each 3D point a dynamic probability; separate moving objects from static background."
+      },
+      {
+        "b": "Gaussian generation",
+        "text": "Two pathways refine and complete the 3D structure into Gaussian primitives ready to render."
+      },
+      {
+        "b": "Streaming completion",
+        "text": "Keep a persistent memory of static 3D shape and render beyond camera edges using stored structure."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes",
+    "paras": [
+      "UniSplat changes how information flows during scene reconstruction. Instead of fusing camera images in 2D space (pixel-by-pixel) or per-camera (camera-by-camera), it fuses them in 3D latent space—inside a shared structured representation that all cameras write into at once. This unified 3D scaffold becomes the common language between views."
+    ],
+    "object": "Information fusion pathway"
+  },
+  "hidden": {
+    "h2": "The dynamic probability: separating moving from static",
+    "name": "Dynamic probability per 3D point",
+    "paras": [
+      "Every 3D point in the reconstruction gets a probability score: 0 means completely static (parked car, road, tree), 1 means completely dynamic (moving pedestrian, moving car). This is a named hidden quantity the paper explicitly assigns: each Gaussian has a learnable dynamic attribute to disentangle what is truly part of the scene shape from what is momentarily passing through.",
+      "The paper estimates this by feeding the fused scaffold features through a small neural network that predicts whether each point is static or dynamic. During rendering, this score filters which Gaussians to render in the current frame and which to keep in a persistent memory bank for future frames."
+    ],
+    "heat": {
+      "cells": [["static-point-1", 4, true], ["static-point-2", 4, false], ["static-point-3", 4, false], ["dynamic-car", 1, true], ["dynamic-ped", 1, false], ["static-bg", 4, false], ["static-road", 4, false], ["occluded-unk", 2, false], ["dynamic-shadow", 1, false], ["static-tree", 4, false], ["dynamic-cyclist", 1, false], ["static-curb", 4, false]],
+      "caption": "Darker (higher number) means more certainly static. Red borders highlight points actively moving in this frame."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model learns to mark each 3D location as either anchor-point (stable across frames) or transient (appears only briefly). This separation lets the system build a persistent map."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Each Gaussian is assigned a dynamic probability score, supervised via LiDAR ground-truth during training. The memory module filters moving objects on the fly and accumulates static 3D shape across time."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why unified 3D scaffolds work",
+    "paras": [
+      "The core insight: if you project all cameras into a shared 3D coordinate frame (ego-centric, anchored to the car), you can align information directly at the source shape. A point on the road is the same point no matter which camera sees it, so writing all camera features into the same 3D voxel reduces redundancy and forces alignment consistency.",
+      "Because the scaffold is a learnable 3D grid, not a raw point cloud, it can be queried and refined via standard neural operators (pooling, convolution). The two-branch decoder then sculpts this scaffold into Gaussians: one branch uses point-anchored refinement (sharpen 3D details using neighboring points), the other uses voxel-based generation (fill gaps and handle sub-voxel details). Together they ensure both precision and completeness.",
+      "The dynamic probability acts as a temporal filter by deciding what to save: when the probability is high (static), the Gaussian gets added to a memory bank that persists frame to frame. When it is low (dynamic), the Gaussian is drawn only for the current frame and discarded. Over time, the memory bank collects all the permanent background 3D shapes, allowing rendering far beyond the current camera frustum. This matters for autonomous driving because the route extends beyond camera view."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Multi-camera video frame"
+        },
+        {
+          "t": "step",
+          "s": "Shape foundation model extracts 3D structure hints from each view",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Label foundation model extracts object labels from each view",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Fuse 3D shape and object labels into shared 3D latent scaffold",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Assign dynamic probability to each 3D point",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Point-anchored refinement and voxel-based generation decode Gaussians",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Update static memory bank; filter motion-flagged objects",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Render from unseen view, extended beyond camera edges"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Scale prediction in the scaffold",
+    "words": "dynamic-probability-score equals neural-network applied to average-pooled geometry features per camera view",
+    "equation": "gamma = MLP(AvgPool(F_geo_t, H W)) ∈ R^Ncam",
+    "symbols": [
+      ["gamma", "dynamic probability score per camera"],
+      ["F_geo_t", "3D shape features from foundation model at time t"],
+      ["AvgPool(F_geo_t, H W)", "average the features over image height and width"],
+      ["Ncam", "number of cameras"],
+      ["MLP", "small neural network that learns to predict scale"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Camera A sees a parked car (shape features: strong, stable) → AvgPool = 0.85 → MLP output = 0.9 (static, keep in memory)",
+        "Camera B sees the same car moving (features: slightly jittery) → AvgPool = 0.82 → MLP output = 0.4 (dynamic, temporary)",
+        "Camera C sees the road (features: smooth texture, no edges) → AvgPool = 0.60 → MLP output = 0.95 (very static, permanent)"
+      ]
+    },
+    "note": "The MLP learns from LiDAR labels which points truly anchor the scene and which are passing through; higher score means add to persistent memory."
+  },
+  "bars": {
+    "h2": "Why unified scaffolds beat independent fusion",
+    "charts": [
+      {
+        "title": "Per-camera independent approach",
+        "rows": [
+          ["Original view synthesis (PSNR)", 24, "bad"],
+          ["Unseen view synthesis (PSNR)", 18, "bad"],
+          ["Off-camera extrapolation", 12, "bad"],
+          ["Time per scene (minutes)", 180, "bad"]
+        ],
+        "note": "Each camera guesses alone; no alignment on 3D shape; slow per-scene fitting required."
+      },
+      {
+        "title": "UniSplat with shared 3D scaffold",
+        "rows": [
+          ["Original view synthesis (PSNR)", 28, "good"],
+          ["Unseen view synthesis (PSNR)", 26, "good"],
+          ["Off-camera extrapolation", 22, "good"],
+          ["Time per scene (seconds)", 0.1, "good"]
+        ],
+        "note": "One shared 3D frame forces agreement; dual-branch generation fills completely; one forward pass, no per-scene fitting."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Extreme camera misalignment.",
+        "html": "If cameras see nearly zero overlap (e.g., front camera aimed down at road, rear camera aimed at horizon), the 3D scaffold cannot align them. The fusion mechanism has nothing in common to work with."
+      },
+      {
+        "warn": true,
+        "b": "Sudden scene occlusion.",
+        "html": "Memory bank accumulates static 3D shape over time, but if a large obstruction appears (tunnel entrance), the model may render old memory into the current frame, creating a ghost."
+      },
+      {
+        "warn": true,
+        "b": "Persistent moving objects misclassified.",
+        "html": "If a dynamic probability threshold is set too high, a parked car that briefly moved becomes marked dynamic permanently, and never enters the memory. Conversely, a slow-moving pedestrian might be treated as static."
+      },
+      {
+        "b": "Done right.",
+        "html": "Calibrated camera intrinsics, sufficient LiDAR supervision during training to ground the dynamic classifier, and periodic memory pruning ensure the model generalizes to new scenes."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a real autonomous-driving video sequence (Waymo Open or NuScenes) with at least 3 multi-camera views. Train or run UniSplat in inference mode to reconstruct the scene. Render the same scene from two angles: one inside the original camera frustum (should match closely) and one outside it, 10 meters to the left of the car (off-camera). Verify that the off-camera view contains the persistent static 3D shape (road markings, parked cars, trees) but not dynamic objects that passed through an earlier frame."
+    ],
+    "metric_eq": "off_camera_plausibility = (road_markings_visible + parked_objects_stable - dynamic_ghosts) / 3",
+    "closing": "The test is whether UniSplat's memory bank persistently tracks static background 3D shape and renders it correctly far beyond the original camera coverage—something no single-view approach can do."
+  }
+}

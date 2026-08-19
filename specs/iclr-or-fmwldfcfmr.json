@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-fmwldfcfmr",
+  "title": "VeloxSeg: Lightweight 3D Medical Segmentation",
+  "family": "Computer Vision",
+  "one_liner": "Split the work between a fast-scan model and a detail-grabber to shrink lightweight 3D medical models without losing accuracy.",
+  "lead": "Medical imaging of organs is expensive: a computer reading a 3D scan needs to find tiny variations in tissue type, but doing this cheaply (on a phone or bedside device) usually forces you to lose accuracy. VeloxSeg solves this with a two-track design: one path rushes across multiple zoom levels to spot the big shapes, the other digs into one patch at a time to catch the fine details, using a mathematical trick from physics that packs more information into fewer numbers.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Fast models lose accuracy; accurate models are too slow",
+    "paras": [
+      "A 3D medical scan (a CT or MRI of a heart, liver, or tumor) is huge: thousands of slices, each a grid of numbers. To automatically label each piece of tissue (tumor vs. healthy, organ boundary vs. background), the computer must look at neighborhoods of voxels (the 3D equivalent of a pixel) and decide the label for the center.",
+      "A naive lightweight model just shrinks the network: fewer numbers to store, faster to run, because every number in the model must be loaded into memory and processed. But shrinking loses information because all patterns (both coarse and fine) must fit into far fewer numbers, forcing the model to forget details. The model forgets fine details in texture and boundary shapes, so it mislabels tissue. A beginner tries to fix this by adding more numbers to the small model—but then it is no longer lightweight. You are trapped.",
+      "The real problem: a lightweight model must compress the information in the scan into very few numbers, but the scan has both coarse patterns (the organ's overall outline) and fine patterns (the exact boundary, the texture inside). Packing both into a tiny budget fails."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Use a fast model to spot big shapes, then a dense model on one patch to grab fine details, and fuse them."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem setup",
+        "viz": "brain",
+        "caption": "A 3D scan is huge: many slices, each with many pixels."
+      },
+      {
+        "title": "2. Lightweight model fails",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["free", 22], ["free", 18], ["moved", 40], ["moved", 38]],
+        "caption": "Fewer numbers lose fine texture; the boundary is blurry."
+      },
+      {
+        "title": "3. VeloxSeg's first track: the fast scan",
+        "viz": "box",
+        "viz_args": "Multi-scale shortcuts across the scan",
+        "caption": "One path reads every zoom level quickly, outlines the organ."
+      },
+      {
+        "title": "4. VeloxSeg's second track: the detail grabber",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["hot", 62], ["warm", 45], ["warm", 48], ["free", 20]],
+        "caption": "One dense path re-reads the boundary zone in detail."
+      },
+      {
+        "title": "5. Fused prediction",
+        "viz": "plain",
+        "caption": "Both outputs merge; the edge is sharp and accurate."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Fast scan path",
+        "text": "Read the full 3D scan at coarse scales; spot organ outlines fast."
+      },
+      {
+        "b": "Patch extraction",
+        "text": "Based on the outline, identify the boundary zone where tissue labels change."
+      },
+      {
+        "b": "Dense detail path",
+        "text": "Re-read just the boundary patch with a larger model; recover fine texture."
+      },
+      {
+        "b": "Knowledge injection",
+        "text": "Pre-trained model has learned texture patterns; copy them into the lightweight model."
+      },
+      {
+        "b": "Fused prediction",
+        "text": "Combine the fast scan and dense patch predictions; output final label map."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of forcing one model to do both the fast scan and the fine detail, VeloxSeg splits the job into two streams: a lightweight CNN for multi-scale scanning, and a dense context-aware patch-reader for boundaries. The second stream works on a small region only, so it does not blow up the budget."
+    ],
+    "object": "Network structure"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: information density",
+    "name": "Information density in the number budget",
+    "paras": [
+      "When you compress a 3D scan into a lightweight model, you are really asking: how many numbers do I need to store the scan's key patterns? Texture and fine shapes need more numbers per region. The paper measures this as how much of the number budget is spent encoding each type of information. In the fast path, each number carries coarse shape. In the patch path, each number carries local texture. By splitting, you avoid wasting coarse-path numbers on texture details.",
+      "The paper estimates this by tracking which numbers activate most when the model reads texture-dense regions vs. coarse-outline regions. Paired Window Attention (the fast path) focuses on multi-scale context; Johnson-Lindenstrauss guided convolution (the detail path) packs dense local features into a tiny space using a linear-algebra trick."
+    ],
+    "heat": {
+      "cells": [
+        ["Scan coarse", 4, true],
+        ["Scan med", 3, false],
+        ["Scan fine", 1, false],
+        ["Patch texture", 2, false],
+        ["Patch edge", 4, true],
+        ["Patch shadow", 2, false],
+        ["Knowledge src", 4, false],
+        ["Knowledge inject", 3, true],
+        ["Fuse coarse", 2, false],
+        ["Fuse detail", 4, true],
+        ["Fuse quality", 3, false],
+        ["Output stable", 4, true]
+      ],
+      "caption": "Darker means more numbers used in that component. Highlights show where fine texture is stored."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper splits one big budget into two paths that each store different things, so neither path wastes numbers on patterns it does not need."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Paired Window Attention retrieves multi-scale features; Johnson-Lindenstrauss convolution projects local neighborhoods into a low-dimensional subspace without losing key local structure."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the two-path design wins",
+    "paras": [
+      "A single lightweight model is forced to use every number for both tasks: scanning and detailing. A number that finds coarse shape cannot also encode fine texture (it runs out of precision). By splitting into two streams, the fast-scan path uses its numbers only for shape, and the detail-patch path uses its numbers only for texture. Neither wastes budget on the other's job.",
+      "The fast path (Paired Window Attention) uses a trick from vision: look at the image as a series of non-overlapping windows at different scales. This is much cheaper than scanning every location, because you process far fewer locations and re-use computations across scales, reducing the total calculation. The detail path (Johnson-Lindenstrauss convolution) uses a trick from linear algebra: when you take a local neighborhood and pick out its key dimensions (the directions where points are most spread out), you can store those directions in far fewer numbers without losing the shape information that boundaries need.",
+      "Finally, the model copies texture patterns from a larger pre-trained model (Spatially Decoupled Knowledge Transfer). Instead of learning these patterns from scratch (which wastes the lightweight model's small budget), it inherits them. The transfer works by extracting surface texture patterns (Gram matrices) from the large model and injecting them into the lightweight one before training."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Full 3D scan"
+        },
+        {
+          "t": "step",
+          "s": "Fast-scan path: windowed multi-scale attention",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Identify boundary region from coarse outline"
+        },
+        {
+          "t": "step",
+          "s": "Detail-patch path: Johnson-Lindenstrauss convolution",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Inject texture patterns from pre-trained model"
+        },
+        {
+          "t": "step",
+          "s": "Fuse predictions from both paths"
+        },
+        {
+          "t": "output",
+          "s": "Final tissue label map"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation",
+    "words": "Final prediction is a weighted blend of the fast-scan output and the detail-patch output, where the weights depend on confidence at each location.",
+    "equation": "pred_final = alpha * pred_scan + (1 - alpha) * pred_patch; alpha = softmax(conf_scan / temperature)",
+    "symbols": [
+      ["pred_scan", "coarse outline prediction from fast path"],
+      ["pred_patch", "fine texture prediction from detail path"],
+      ["alpha", "how much to trust the fast path (ranges from 0 to 1)"],
+      ["conf_scan", "the fast path's confidence at this location"],
+      ["temperature", "a tuning knob that sharpens or smooths the blend"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the fast scan predicts organ boundary (class 1) with confidence 0.8.",
+        "The detail patch predicts tissue interior (class 2) with confidence 0.9.",
+        "alpha = softmax(0.8) / temperature = 0.6 (after tuning).",
+        "Final = 0.6 * (class 1) + 0.4 * (class 2) = blend leaning toward class 1.",
+        "The detail patch pulls the prediction toward class 2 where it has high confidence.",
+        "At regions where the scan is uncertain, the patch path takes over."
+      ]
+    },
+    "note": "The blend favors whichever path is more confident at each location, avoiding the cost of running the detail path everywhere."
+  },
+  "bars": {
+    "h2": "The tradeoff: speed vs. accuracy",
+    "charts": [
+      {
+        "title": "Lightweight model alone",
+        "rows": [
+          ["Dice score (accuracy)", 76, "bad"],
+          ["GPU throughput", 30, "bad"],
+          ["Memory used", 8, "good"]
+        ],
+        "note": "Small model is fast but inaccurate; texture is lost."
+      },
+      {
+        "title": "VeloxSeg (two paths)",
+        "rows": [
+          ["Dice score (accuracy)", 96, "good"],
+          ["GPU throughput", 330, "good"],
+          ["Memory used", 0.4, "good"]
+        ],
+        "note": "Two small models together are fast, accurate, and still lightweight."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Texture pattern mismatch.",
+        "html": "If the pre-trained model was trained on a different scan type (ultrasound vs. CT), the texture patterns it learned do not match. The transfer injects wrong priors, and accuracy drops. Fix: retrain the texture extractor on the target domain, or use domain-agnostic features."
+      },
+      {
+        "warn": true,
+        "b": "Boundary zone is too small or too large.",
+        "html": "If the fast path mislabels the organ outline badly, the detail path focuses on the wrong region because it is told to look in the zone the fast path identified. The boundary zone (the patch location) is misaligned, and detail features do not help because they are applied to the wrong tissue. Fix: improve the fast path's coarse accuracy before running the detail path, because a correct coarse boundary ensures the detail path looks in the right place."
+      },
+      {
+        "warn": true,
+        "b": "Number budget is exhausted.",
+        "html": "If both paths combined still exceed the allowed model size (phone memory, edge device), the method gains no advantage. Fix: shrink the detail-patch path further, or reduce the number of zoom levels in the fast path."
+      },
+      {
+        "b": "Works correctly when both paths are well-trained.",
+        "html": "If the fast path is accurate enough to find the organ, and the detail path has enough numbers to store texture, the two-path design uses every number efficiently and achieves both speed and accuracy."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a minimal VeloxSeg on a public 3D medical dataset (e.g., a single organ segmentation task like spleen or liver). Implement three variants: (1) a single lightweight model, (2) a single large model, (3) the two-path VeloxSeg. Run each on the same test scans. Measure Dice accuracy (how much of the predicted label matches the true label) and GPU memory used when the model answers a new scan. The demo should show that VeloxSeg achieves accuracy close to the large model but with memory close to the lightweight model."
+    ],
+    "metric_eq": "Dice = 2 * (predicted intersect true) / (predicted union true); memory_ratio = VeloxSeg_memory / large_model_memory",
+    "closing": "The demo makes impossible to miss: two small paths working together outpace one small path alone, and use far less memory than training a large model."
+  }
+}

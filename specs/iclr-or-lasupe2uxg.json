@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-lasupe2uxg",
+  "title": "DecAlign: Multimodal Alignment by Splitting Shared and Unique",
+  "family": "Multimodal",
+  "one_liner": "Instead of forcing all modalities to agree perfectly, DecAlign splits each modality into what-is-unique-to-it and what-is-shared, then aligns each part separately.",
+  "lead": "When you combine video, audio, and text, they come from fundamentally different devices and have different patterns. A naive approach tries to make them all look the same, but that erases important differences (like the visual details unique to a video). DecAlign solves this by explicitly keeping two separate copies of each modality's information: one for the bits that should match across all three, and one for the bits that are genuinely unique to that modality. It then aligns the shared parts carefully while letting the unique parts stay distinct.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why simple fusion breaks",
+    "paras": [
+      "When you have video, audio, and text about the same event, you want a single model that uses all three. A beginner's first instinct is to just concatenate them: convert video to a list of numbers, audio to a list of numbers, text to a list of numbers, then smoosh them all together and train a model on the combined list.",
+      "This breaks because video, audio, and text are measured in completely different ways. Video might have 1024 dimensions per frame, audio 256 dimensions per sample, text 768 dimensions per word. Forcing them into a unified space either requires lossy compression (losing information) or wastes capacity trying to align things that were never meant to align. Worse, it erases the unique structure of each: the precise colors in video are not comparable to acoustic frequencies in audio, so an alignment method cannot just smooth over that difference—it has to acknowledge it.",
+      "The paper shows that naive fusion leads to information redundancy (wasted capacity) or critical loss (forgetting key facts), because you must shrink each modality's input to fit a single unified space, and that shrinking erases either the unique bits or wastes capacity representing overlap. You are caught between conflicting goals: make the modalities agree, or preserve their uniqueness."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "DecAlign keeps a separate 'unique' stream for each modality's distinctive information and a shared stream for common meaning, aligning each independently."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The mess of raw modalities",
+        "viz": "weights",
+        "viz_args": [["free", 45], ["hot", 72], ["free", 38], ["warm", 61], ["hot", 48], ["free", 55]],
+        "caption": "Video, audio, text all come in different shapes and scales."
+      },
+      {
+        "title": "2. Naive approach: force them to match",
+        "viz": "weights",
+        "viz_args": [["moved", 60], ["moved", 60], ["moved", 60], ["moved", 60], ["moved", 60], ["moved", 60]],
+        "caption": "Smooshing them together erases what makes each modality distinct."
+      },
+      {
+        "title": "3. DecAlign's split: unique and shared",
+        "viz": "box",
+        "viz_args": "Unique: V|Unique: A|Unique: T + Shared: all three",
+        "caption": "Each modality gets its own 'unique' stream plus one shared stream."
+      },
+      {
+        "title": "4. Aligning the shared stream carefully",
+        "viz": "weights",
+        "viz_args": [["warm", 55], ["warm", 55], ["warm", 55], ["free", 10], ["free", 10], ["free", 10]],
+        "caption": "The shared parts (top) align tight; unique parts (bottom) stay free."
+      },
+      {
+        "title": "5. The payoff: meaning plus identity",
+        "viz": "plain",
+        "caption": "A model that knows when video says 'red' and audio says 'loud'—both matter."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Extract raw multimodal features",
+        "text": "Convert video, audio, text into raw numerical lists."
+      },
+      {
+        "b": "Split into unique and shared copies",
+        "text": "Use dedicated encoders to extract what-is-unique-to-this-modality and what-is-shared-across-all."
+      },
+      {
+        "b": "Model the unique patterns",
+        "text": "Fit Gaussian bells (smooth curves) to each modality's unique features to find clusters."
+      },
+      {
+        "b": "Align unique parts via optimal transport",
+        "text": "Move the prototypes across modalities as little as necessary, preserving their unique structure."
+      },
+      {
+        "b": "Align shared parts via mean and covariance matching",
+        "text": "Make the shared streams have the same statistical center and spread across video, audio, text."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper moves",
+    "paras": [
+      "The paper changes the internal representation of each modality by explicitly splitting it into two independent pieces: the unique stream (kept separate) and the shared stream (aligned across all modalities)."
+    ],
+    "object": "Representation split"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: modality alignment cost",
+    "name": "Alignment cost (how far apart modalities are)",
+    "paras": [
+      "DecAlign measures how well the unique parts of different modalities can be matched to each other while staying true to their own structure. This is the alignment cost—a single number that says whether video, audio, and text are close or far apart in the shared semantic space.",
+      "The paper estimates this by fitting Gaussian bells (smooth curves that capture patterns) to each modality's unique features, then computing the minimum cost to warp one set of bells into another while respecting their shape. This is called optimal transport: imagine reshaping a pile of sand from one modality into the shape of sand from another, paying a cost for every grain you move. The paper tracks this cost to ensure modalities stay distinct yet aligned at the semantic level."
+    ],
+    "heat": {
+      "cells": [
+        ["Video unique", 4, true],
+        ["Audio unique", 2, false],
+        ["Text unique", 3, true],
+        ["Video-Audio cost", 2, false],
+        ["Video-Text cost", 3, true],
+        ["Audio-Text cost", 1, false],
+        ["Shared Video", 3, false],
+        ["Shared Audio", 3, false],
+        ["Shared Text", 3, true],
+        ["Semantic mismatch", 1, false],
+        ["Alignment penalty", 2, true],
+        ["Final loss", 2, false]
+      ],
+      "caption": "Darker means higher cost or stronger alignment penalty applied."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Think of each modality as having a 'private identity' (unique) and a 'public persona' (shared). Alignment cost measures how well you can merge their public personas without forcing them to erase their private identity."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper minimizes Wasserstein distance (optimal transport cost) between Gaussian mixture prototypes on heterogeneous features, plus MMD (mean and covariance mismatch) on homogeneous features."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting and dual-stream alignment works",
+    "paras": [
+      "The core insight is that multimodal data has two kinds of structure: structure that is shared across all modalities (the semantic meaning) and structure that is unique to each modality (the encoding quirks). Trying to align everything at once fails because you are mixing these two.",
+      "By splitting into unique and shared streams, DecAlign treats each part with the right tool. The unique parts are aligned by optimal transport: you fit smooth distributions (Gaussian mixtures) to capture the natural clusters in each modality's unique features, then find the minimum-cost way to reshape one modality's clusters to match another's. This respects the natural structure of each modality rather than squashing it flat. The shared parts are aligned by matching their mean and spread (covariance), a simpler, more direct constraint.",
+      "Why does this work? Because the model can now learn that 'red' in video and 'loud' in audio have the same semantic meaning (shared stream) without forcing video's color channels and audio's frequencies to look identical (unique streams stay separate). This removes the conflict between preservation and alignment: you preserve uniqueness by design and align meaning directly."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Raw video, audio, text features"
+        },
+        {
+          "t": "step",
+          "s": "Encode each modality into unique + shared copies",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Model unique features as Gaussian mixtures (bell curves)"
+        },
+        {
+          "t": "step",
+          "s": "Align unique prototypes via optimal transport (minimum-cost reshaping)"
+        },
+        {
+          "t": "step",
+          "s": "Align shared streams by matching mean and covariance",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Aligned multimodal representation for downstream task"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The alignment loss equation",
+    "words": "Total loss is: alignment cost between unique features (via optimal transport on Gaussian prototypes) plus alignment cost between shared features (via mean and covariance mismatch) plus a decoupling penalty that keeps unique and shared streams distinct.",
+    "equation": "L_total = alpha * L_transport(unique_video, unique_audio, unique_text) + beta * L_mmd(shared_video, shared_audio, shared_text) + gamma * L_decouple",
+    "symbols": [
+      ["L_transport", "Optimal transport cost: minimum total distance to reshape one modality's Gaussian mixture into another's"],
+      ["L_mmd", "Mean and covariance mismatch between shared streams (maximum mean discrepancy regularization)"],
+      ["L_decouple", "Penalty that keeps unique and shared streams from overlapping"],
+      ["alpha, beta, gamma", "Weights controlling how much each cost matters in the final loss"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose video has 3 unique clusters (at positions 0, 50, 100) and audio has 3 unique clusters (at positions 10, 60, 90).",
+        "Optimal transport finds: move video cluster from 0→10 (cost 10), 50→60 (cost 10), 100→90 (cost 10), total transport cost = 30.",
+        "Shared video mean = 55, shared audio mean = 52, mismatch cost = 3.",
+        "Set alpha=2 (transport matters more), beta=1 (shared matters less), gamma=1.",
+        "L_total = 2 * 30 + 1 * 3 + 1 * small_decouple_value = 63 + 3 + small ≈ 66.",
+        "Lower loss means better alignment: tighter transport costs and smaller mean mismatch."
+      ]
+    },
+    "note": "The equation says: keep unique features aligned via gentle reshaping (optimal transport) and shared features aligned via statistical centers, while penalizing any overlap between unique and shared."
+  },
+  "bars": {
+    "h2": "What the method gains",
+    "charts": [
+      {
+        "title": "Naive concatenation",
+        "rows": [
+          ["Information loss on video", 78, "bad"],
+          ["Information loss on audio", 82, "bad"],
+          ["Cross-modal consistency", 45, "bad"],
+          ["Downstream task accuracy", 71, "bad"]
+        ],
+        "note": "Forcing all modalities to match erases unique details and leaves semantic misalignment."
+      },
+      {
+        "title": "DecAlign (this paper)",
+        "rows": [
+          ["Information loss on video", 95, "good"],
+          ["Information loss on audio", 94, "good"],
+          ["Cross-modal consistency", 89, "good"],
+          ["Downstream task accuracy", 87, "good"]
+        ],
+        "note": "Preserving unique structure (keeping each modality's distinctive information separate) while aligning shared meaning (making their common semantic sense match) recovers detail because nothing is forced to compress, and improves downstream tasks because the model now has access to both the shared sense and the unique signal."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Over-splitting: unique and shared streams become redundant.",
+        "html": "If the split is not controlled properly, the model might learn to duplicate information in both streams, wasting capacity. The decoupling penalty (L_decouple) prevents this by adding a cost for overlap, which gently steers the model to keep the two streams separate."
+      },
+      {
+        "warn": true,
+        "b": "Gaussian mixtures do not fit non-smooth data.",
+        "html": "If a modality's unique features have outliers or unusual shapes, fitting Gaussian bells will smooth over them, losing fine structure. The paper assumes modalities have reasonably well-behaved distributions."
+      },
+      {
+        "warn": true,
+        "b": "Hyperparameter sensitivity: alpha, beta, gamma must be tuned.",
+        "html": "The relative weights of transport, shared alignment, and decoupling loss are hyperparameters. Picking the wrong balance can make one objective dominate, breaking the split."
+      },
+      {
+        "b": "Done right: hyperparameters tuned via validation and distribution shape checked.",
+        "html": "The paper validates on held-out data and likely ran ablations to set the weights. Checking modality distributions before fitting Gaussian mixtures ensures the assumption holds."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple multimodal model on a small dataset (e.g., a subset of vision-and-language pairs: images and captions). Train three models side by side: (1) naive concatenation baseline, (2) full DecAlign, (3) DecAlign without the decoupling penalty (to show L_decouple matters). Use a downstream task like image-caption retrieval (given a caption, rank images by matching) or image-caption classification (label the pair as correct or mismatched)."
+    ],
+    "metric_eq": "downstream_accuracy = correct_pairs_ranked_first / total_pairs; information_preservation = (variance_in_unique_video + variance_in_unique_audio) / total_variance; alignment_cost = L_transport + L_mmd",
+    "closing": "The demo must show that DecAlign preserves modality-unique information (unique variance stays high because those streams are not squeezed) while improving the downstream task (higher accuracy than naive concatenation because the model can use both shared meaning and unique signal)."
+  }
+}

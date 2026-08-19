@@ -1,0 +1,251 @@
+{
+  "slug": "iclr-or-quj0kucumd",
+  "title": "MixLinear: Extreme Low Resource Multivariate Time Series Forecasting",
+  "family": "Time Series & Sequential",
+  "one_liner": "MixLinear predicts future time series by splitting the work: local patterns handled by one lightweight linear layer per segment, global trends by a second lightweight layer in frequency space.",
+  "lead": "Transformers forecast time series well but eat enormous compute—too heavy for phones, sensors, and embedded devices. MixLinear gets the same accuracy with just 100 weights. It does this by treating local and global patterns as fundamentally different jobs: one pathway learns short-term wiggles within chunks of the data, another learns long-term trends by compressing the frequencies (pitch and harmonic content) down to a handful of numbers.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Transformers are bloated for constrained devices",
+    "paras": [
+      "When a transformer forecasts time series—predicting tomorrow's temperature from three months of hourly history—it remembers every day's pattern against every other day's. For 365 daily snapshots, that is 365 squared comparisons: over 133,000 weights just to hold the attention (a comparison score between every pair of days). A beginner might try padding data onto a tiny device and running the transformer anyway.",
+      "That fails. A phone has a few megabytes of free memory; a transformer on months of data needs gigabytes. Researchers compressed transformers with pruning, distillation, and clever tricks, but the core problem remains: they force one universal mechanism (attention—comparing each day to every other) to grab both short wiggles (hourly fluctuations) and long trends (seasons) with the same dial, wasting adjustable numbers (weights) on jobs that do not need all that machinery."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "MixLinear splits the job into two tiny pathways—one for local shape, one for global frequency—so each pathway can stay thin."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: one architecture tries two jobs",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["hot", 72], ["hot", 58], ["hot", 61], ["hot", 68], ["hot", 55], ["hot", 70], ["hot", 64], ["hot", 62], ["hot", 75], ["hot", 59], ["hot", 67]],
+        "caption": "Transformer compares every day to every other; weights wasted on short wiggles."
+      },
+      {
+        "title": "2. Split strategy: segment data by time windows",
+        "viz": "box",
+        "viz_args": "Hours [0-6] | Hours [6-12] | Hours [12-18] | Hours [18-24]",
+        "caption": "Break the series into small chunks; each chunk gets one quick linear layer."
+      },
+      {
+        "title": "3. Local pathway: learn within-segment slopes and curves",
+        "viz": "weights",
+        "viz_args": [["warm", 22], ["free", 8], ["warm", 18], ["free", 5], ["warm", 20], ["free", 7]],
+        "caption": "Separate layer captures short-term rises, dips, repeats per segment."
+      },
+      {
+        "title": "4. Global pathway: compress frequencies to dominant tones",
+        "viz": "weights",
+        "viz_args": [["moved", 15], ["moved", 12], ["moved", 18]],
+        "caption": "Daily, weekly, seasonal frequencies become three learnable numbers."
+      },
+      {
+        "title": "5. Fused output: merge both paths without blowing up the total",
+        "viz": "plain",
+        "caption": "Local and global forecasts combined; total is 100 weights versus millions."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Downsample the input",
+        "text": "Shrink time series by a factor (e.g., 4x) to strip high noise, keep trends."
+      },
+      {
+        "b": "Split into segments",
+        "text": "Divide the downsampled series into M equal-length chunks (e.g., 24-hour windows)."
+      },
+      {
+        "b": "Process segments locally",
+        "text": "Feed each segment through a unique tiny linear layer that maps r timesteps into d summary numbers (e.g., 6 hours into 3 numbers)."
+      },
+      {
+        "b": "Extract frequency content globally",
+        "text": "Take FFT (fast Fourier transform: convert time-series to which frequencies dominate) and keep only top-k frequency components in a low-rank factorization."
+      },
+      {
+        "b": "Combine and upsample",
+        "text": "Merge local segment forecasts and global frequency forecasts via a learned blend; upsample back to original granularity."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "The paper swaps a single heavy module (attention) for two parallel lightweight branches: one handling local correlations (how one hour relates to the next within a window), one handling global spectral content (which frequencies persist). Each pathway stays thin and specialized."
+    ],
+    "object": "architecture design"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: local versus global coupling strength",
+    "name": "intra-segment learning speed",
+    "paras": [
+      "The paper measures how much the local patterns inside each segment drive the forecast. This is the direction and size of the nudge (learning signal) that updates weights when the model gets a forecast wrong. High signal means the segment-based pathway is learning rapidly; low signal means it is stuck.",
+      "MixLinear isolates the within-segment learning by separating the linear layer for within-segment changes (how a 6-hour window's internal shape affects output) from the inter-segment layer (how one window's trend flows to the next). This separation ensures each pathway sees clean signal without interference. The paper estimates this by watching how each pathway's learning nudges flow during training: if they are balanced, both pathways train stably; if one dominates, that pathway drowns out the other."
+    ],
+    "heat": {
+      "cells": [
+        ["hour1-2", 4, true],
+        ["hour2-3", 4, true],
+        ["hour3-4", 3, false],
+        ["hour4-5", 3, false],
+        ["hour5-6", 2, false],
+        ["hour6-dayshift", 1, false],
+        ["daily_freq", 4, true],
+        ["weekly_freq", 4, true],
+        ["seasonal_freq", 3, false],
+        ["noise", 1, false],
+        ["stale_hour2", 2, false],
+        ["unused_param", 1, false]
+      ],
+      "caption": "Darker means stronger learning signal; bold boxes show pathways learning fastest."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Inside each time window, does the segment learn quickly? Or do the updates stay small and muddy? The paper checks by looking at the learning step sizes."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Linear<sub>intra</sub> and Linear<sub>inter</sub> learning nudges are tracked separately; balanced sizes indicate both pathways receive equally strong training signals, avoiding mode collapse where one pathway drowns out the other."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: dual factorization avoids the mismatch",
+    "paras": [
+      "Transformers treat all temporal dependencies the same way. A 6-hour cycle and a 365-day season use identical machinery—every timestep compares itself to every other, burning attention weights on every pair. Most of those weights go unused. MixLinear removes the mismatch by giving each pattern type its own, tiny tool.",
+      "Locally, within a 6-hour window, shape matters (is the curve going up or down? is it flat or jagged?). A simple linear layer can capture this: feed in 6 numbers, output 3 (e.g., average, slope, curvature). No cross-window attention needed.",
+      "Globally, seasons and daily cycles repeat in the frequency domain—the same pitch comes back every 24 hours, every 7 days, every 365 days. Instead of watching millions of timestep pairs, the paper runs an FFT (which separates a signal into its frequencies) and keeps only the top few frequencies. A rank-constrained filter (a table of numbers, using a mathematical trick called singular value decomposition, that learns which frequencies matter most) compresses them into a handful of numbers. This is thousands of times smaller than storing raw timesteps.",
+      "The final forecast blends both pathways: local segment predictions + global frequency predictions. Because each pathway is lean, the blend remains tiny."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "raw time series L timesteps"
+        },
+        {
+          "t": "step",
+          "s": "downsample by factor (cut noise)"
+        },
+        {
+          "t": "step",
+          "s": "segment into M chunks"
+        },
+        {
+          "t": "step",
+          "s": "branch 1: linear per segment (intra + inter)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "branch 2: FFT to frequency, keep top-k",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "blend branches via learned weights"
+        },
+        {
+          "t": "step",
+          "s": "upsample to original length"
+        },
+        {
+          "t": "output",
+          "s": "forecast H timesteps ahead"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: two independent projections plus frequency filtering",
+    "words": "For each segment s, the local forecast is the intra-segment linear transformation (capturing within-window shape) plus the inter-segment transformation (capturing window-to-window flow). The global forecast comes from the FFT of the signal, filtered to keep only the top R frequency components in a low-rank decomposition. Final output = local forecast plus global frequency forecast.",
+    "equation": "h_intra(s) = Linear_intra(x(s))  ; h_inter(s) = Linear_inter(x(s))  ;  h_global = U * S[:R] * V^T  ;  output = blend(h_intra, h_inter, h_global)",
+    "symbols": [
+      ["x(s)", "the s-th segment of the downsampled time series"],
+      ["r", "number of timesteps per segment"],
+      ["d", "number of output dimensions per segment"],
+      ["Linear_intra", "a learnable matrix that maps r timesteps to d summary numbers within one segment"],
+      ["Linear_inter", "a learnable matrix that maps segment-to-segment dependencies"],
+      ["h_global", "global forecast from frequency domain"],
+      ["U, S, V^T", "singular value decomposition of the FFT matrix"],
+      ["R", "number of dominant frequency components to keep"],
+      ["blend", "learnable combination of local and global forecasts"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Segment 1: 6 hours of temperature [72, 73, 74, 75, 74, 73]. Linear_intra maps this to [73.5, 0.4, 0.1] (center, slope, curvature). Parameters used: 6 × 3 = 18.",
+        "Segment 2: [73, 72, 71, 70, 71, 72]. Linear_intra outputs [71.5, -0.3, 0.2]. Same 18 parameters (shared across all segments).",
+        "Global frequency: FFT reveals strong 24-hour cycle (daily heating) and 168-hour cycle (weekly). After rank-3 compression, we keep 3 frequency coefficients. Parameters: 3 × 3 = 9.",
+        "Blend weights (how much to trust local vs global): [0.7, 0.3]. Parameters: 2.",
+        "Total: 18 + 9 + 2 = 29 parameters for entire forecaster. (Realistic models use ~100 because of upsampling and other details, but the core is still O(n) tiny.)"
+      ]
+    },
+    "note": "The trick: both Linear_intra and Linear_inter are reused across all segments (no quadratic explosion in size), and the FFT plus rank-R filter compress frequency content to a fixed handful of numbers regardless of sequence length."
+  },
+  "bars": {
+    "h2": "Forecasting accuracy on test data",
+    "charts": [
+      {
+        "title": "Transformer baseline",
+        "rows": [
+          ["1-step ahead", 0.082, "good"],
+          ["7-step ahead", 0.18, "bad"],
+          ["30-step ahead", 0.35, "bad"]
+        ],
+        "note": "Transformer has high accuracy on short horizons but degrades rapidly. Uses millions of adjustable weights (numbers that get tuned during learning)."
+      },
+      {
+        "title": "MixLinear (0.1K parameters)",
+        "rows": [
+          ["1-step ahead", 0.085, "good"],
+          ["7-step ahead", 0.14, "good"],
+          ["30-step ahead", 0.16, "good"]
+        ],
+        "note": "MixLinear maintains accuracy across all horizons with 0.1K parameters—a 10,000-fold reduction in model size."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Segment boundaries misalign with true patterns.",
+        "html": "If the natural periodicity (e.g., 8-hour thermal cycle) does not align with segment boundaries (e.g., 6-hour windows), the intra-segment layer misses important correlations. The forecast becomes noisy."
+      },
+      {
+        "warn": true,
+        "b": "Downsampling erases high-frequency detail.",
+        "html": "Shrinking the series by a factor trades resolution for speed. If important features live at high frequencies (e.g., short electrical spikes in power grids), downsampling kills them, and the forecast fails on those events."
+      },
+      {
+        "warn": true,
+        "b": "Rank R is set too low.",
+        "html": "If the series has many significant frequencies (e.g., multiple competing periodicities), keeping only top-3 frequencies may miss the tail that affects the forecast. Performance degrades."
+      },
+      {
+        "b": "Done right: use domain knowledge to set segment size and downsampling factor to preserve the patterns that matter; cross-validate R on a held-out test set.",
+        "html": "Align segment boundaries with known periodicities; experiment with the downsampling factor and the frequency-keep count on real data before deployment."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "On a standard benchmark (e.g., ECL, Traffic, or Weather dataset), train MixLinear with only 100 weights. Use a phone or Raspberry Pi (an embedded Linux computer with a few hundred megabytes of RAM). Measure three things: final forecast error (mean absolute percentage error, MAPE), how fast the finished model answers new questions on the embedded device, and peak memory usage. The demo proves MixLinear stays under 50 MB of memory while matching or beating a full transformer's accuracy."
+    ],
+    "metric_eq": "improvement = (transformer_mape - mixlinear_mape) / transformer_mape ; speedup = transformer_time / mixlinear_time",
+    "closing": "The moment the model runs live on a real phone or sensor, forecasting in real-time with negligible memory, is when the efficiency guarantee becomes undeniable."
+  }
+}

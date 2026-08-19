@@ -1,0 +1,203 @@
+{
+ "slug": "iclr-or-cvjmvjlczz",
+ "title": "DynamicInfer: Runtime-Aware Sparse Offloading for LLMs",
+ "family": "Efficiency & Systems",
+ "one_liner": "Instead of deciding which LLM neurons stay on the GPU once at startup, DynamicInfer moves them in real time based on what each input actually needs.",
+ "lead": "Running a large language model on a cheap consumer GPU is memory-starved: the weights alone (millions of numbers) barely fit. Prior solutions freeze a plan upfront (some neurons on GPU, others on slower main memory), which wastes GPU power when those neurons sit idle. DynamicInfer watches each input as it flows through the model and reshuffles neurons dynamically, keeping busy ones cached and prefetching the next batch while compute is still running.",
+ "nav": [["theme-efficiency-systems.html","Efficiency & Systems"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "The memory squeeze: LLMs don't fit, and static plans waste GPU time",
+  "paras": [
+   "A modern language model has hundreds of millions of weights—numbers that steer how the model thinks. On a consumer GPU (maybe 8GB of memory), these weights alone consume most of the available space, leaving barely any room for the input question or the model's scratch work while it thinks.",
+   "A naive first attempt: buy a bigger machine. But consumer GPUs are the constraint; users cannot afford data-center hardware. So prior work (like PowerInfer) splits the neurons: some live on the fast GPU memory, others on slower main RAM. The GPU runs its assigned neurons at full speed while the CPU painfully loads other neurons from main memory on demand. The problem is that this split is decided once at startup, before seeing any input. If the first question needs neurons that are stuck on the main RAM, the GPU sits idle waiting. If the second question needs completely different neurons, the plan is wrong again.",
+   "Static partitioning beats randomness but leaves money on the table: the GPU is starved because the plan cannot adapt."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "Watch what each input actually needs, move neurons dynamically, and overlap the shuffling with active computation."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The cold start",
+    "viz": "brain",
+    "caption": "Billions of numbers fit barely; static plan splits them: GPU (colored) vs RAM (gray)."
+   },
+   {
+    "title": "2. Problem: the plan is wrong",
+    "viz": "weights",
+    "viz_args": [["hot",70],["free",30],["hot",60],["free",40],["hot",50],["free",50],["hot",65],["free",35],["hot",55],["free",45],["hot",75],["free",25]],
+    "caption": "Input asks for neurons in RAM (free); GPU waits idle. Static split bets wrong."
+   },
+   {
+    "title": "3. DynamicInfer listens",
+    "viz": "box",
+    "viz_args": "Router watches activations, scores each neuron.",
+    "caption": "As input flows through, a fast router predicts which neurons fire next."
+   },
+   {
+    "title": "4. Neurons move; compute overlaps",
+    "viz": "weights",
+    "viz_args": [["moved",70],["free",30],["moved",60],["hot",40],["moved",50],["hot",50],["hot",65],["free",35],["hot",55],["free",45],["hot",75],["free",25]],
+    "caption": "Hot neurons prefetch while the GPU is still computing. Zero idle time."
+   },
+   {
+    "title": "5. Speedup: the GPU stays full",
+    "viz": "plain",
+    "caption": "Pipeline overlap hides the shuffle cost; 253% faster than baseline."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Input arrives",
+    "text": "A question (a sequence of words) enters the model one layer at a time."
+   },
+   {
+    "b": "Router scores neurons",
+    "text": "A lightweight predictor watches the current hidden layer state and scores: which neurons in the next layer will fire (contribute)?"
+   },
+   {
+    "b": "Prefetch hot neurons",
+    "text": "While the GPU is still computing, shuffle high-score neurons from main RAM into GPU cache (hierarchical cache strategy adapts to what fits)."
+   },
+   {
+    "b": "Compute on GPU",
+    "text": "Run the GPU neurons that are already loaded; skip (zero out) the cold ones on main RAM."
+   },
+   {
+    "b": "Accumulate and repeat",
+    "text": "Move to the next layer, the router scores again, and prefetch accordingly. Pipeline overlaps so shuffles hide in compute idle time."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The key move: the decision of which neurons live on GPU versus RAM is no longer baked in at startup. Instead, it is remade every layer based on what the current input is actually asking for."
+  ],
+  "object": "neuron residency (which neurons load when)"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: which neurons fire for this input",
+  "name": "input-dependent neuron firing patterns",
+  "paras": [
+   "Not every neuron fires (produces a significant output) on every input. Some neurons stay active across all questions; others fire only for certain kinds (math, poetry, code). This pattern—which neurons wake up—is the fingerprint of what this particular input needs.",
+   "DynamicInfer measures this by training a lightweight router network: a fast model that watches the hidden state (the intermediate work the main model has done so far) and predicts which neurons in the next layer will fire strongly. The paper uses a learned router and a confidence threshold to decide which neurons to prefetch. This turns the static resource plan into a dynamic one keyed to the input."
+  ],
+  "heat": {
+   "cells": [["n1",4,true],["n2",1,false],["n3",3,true],["n4",2,false],["n5",4,true],["n6",1,false],["n7",2,false],["n8",3,true],["n9",1,false],["n10",2,false],["n11",4,true],["n12",1,false]],
+   "caption": "Darker means higher predicted firing for this input; highlights show which neurons prefetch first."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Not all neurons matter for every question. A math problem might light up numerical neurons; a poem might light up semantic neurons. If you listen to the input, you know which neurons to prepare."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The paper trains a router on firing patterns and uses it to rank neurons by importance. High-ranked neurons prefetch immediately; low-ranked neurons stay on main RAM and load on demand (or are skipped if the model can zero them out safely)."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: overlapping shuffle with compute",
+  "paras": [
+   "The static-partition method (PowerInfer) suffers from a pipeline stall: GPU runs until it needs a neuron that is on main RAM, then freezes and waits for the load. DynamicInfer breaks this by predicting future needs early (via the router) and prefetching while the GPU is still busy with the current layer.",
+   "Here is the concrete chain: (1) The router watches the hidden state after layer L finishes and scores which neurons in layer L+1 will matter. (2) The GPU is still running layer L compute; the CPU/cache simultaneously begins pulling high-score neurons from main RAM into a hierarchical cache (L2, L3, or GPU memory depending on what fits). (3) By the time layer L finishes and GPU asks for layer L+1, the hot neurons are already waiting. (4) The load-aware scheduler maps sparse neuron patterns to the actual GPU/CPU memory hierarchy, respecting bottlenecks (PCIe bandwidth, cache size). (5) The result: zero or nearly-zero GPU idle time, because shuffle cost hides in the compute overlap.",
+   "A secondary gain comes from sparse activation: neurons that the router predicts will be cold can be skipped entirely (set to zero) rather than loaded and computed, trimming both memory traffic and GPU cycles."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {"t": "input", "s": "question words"},
+    {"t": "step", "s": "layer L compute on GPU", "hl": true},
+    {"t": "step", "s": "router watches hidden state"},
+    {"t": "step", "s": "prefetch layer L+1 hot neurons (CPU/cache overlap)"},
+    {"t": "step", "s": "layer L+1 compute (neurons ready)"},
+    {"t": "output", "s": "next word"}
+   ]
+  }
+ },
+ "math": {
+  "h2": "The cost model: prefetch time must hide in compute",
+  "words": "GPU idle time equals (time to load neurons from main RAM) minus (time spent computing the current layer). Minimize idle by prefetching predictively.",
+  "equation": "idle_time = max(0, load_latency - compute_time_layer_L)",
+  "symbols": [
+   ["load_latency","time in milliseconds to shuffle neurons from main RAM to GPU cache"],
+   ["compute_time_layer_L","time in milliseconds for the GPU to run layer L"],
+   ["idle_time","wasted GPU time (goal: zero)"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose layer L takes 10ms to compute on the GPU.",
+    "Layer L+1 neurons need 8ms to load from main RAM (because the router prefetched them early).",
+    "GPU finishes layer L at time 10ms; neurons are ready at time 10ms. Idle = max(0, 8 - 10) = 0ms. No stall.",
+    "Without prefetch: neurons arrive at time 10 + 8 = 18ms. Idle = max(0, 18 - 10) = 8ms. 8ms wasted.",
+    "Prefetch saves 8ms per layer. Over 40 layers, that is 320ms saved (significant on a query that normally takes 2 seconds)."
+   ]
+  },
+  "note": "The pipeline works because the router decides what to load while the GPU is already busy, not after it finishes."
+ },
+ "bars": {
+  "h2": "Performance gains",
+  "charts": [
+   {
+    "title": "Static partition (PowerInfer)",
+    "rows": [
+     ["Layer 1 GPU stalled waiting", 45, "bad"],
+     ["Layers 2-10 static split happens right", 72, "good"],
+     ["Layer 20+ static split was wrong", 38, "bad"]
+    ],
+    "note": "The static plan sometimes happens to match the input, sometimes does not. Average throughput suffers."
+   },
+   {
+    "title": "DynamicInfer (this paper)",
+    "rows": [
+     ["Layer 1 router scores + prefetch starts", 92, "good"],
+     ["Layers 2-10 neurons ready on time", 88, "good"],
+     ["Layer 20+ prefetch adapts to new input", 85, "good"]
+    ],
+    "note": "Router prediction keeps the GPU busy across all layers because prefetch runs proactively."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Router prediction is wrong.",
+    "html": "If the router scores a neuron as hot but it is actually cold (false positive), bandwidth is wasted prefetching dead weight. If the router misses a hot neuron (false negative), the GPU stalls anyway. Mitigation: train the router on diverse inputs so it learns to predict patterns accurately."
+   },
+   {
+    "warn": true,
+    "b": "Memory hierarchy does not match the model.",
+    "html": "If the GPU cache is too small, even the prefetched neurons spill back to slow main RAM. The method assumes a three-tier hierarchy (GPU VRAM, CPU cache, main RAM) with known bandwidth. On unusual hardware, the speedup may not materialize."
+   },
+   {
+    "warn": true,
+    "b": "Router overhead eats the savings.",
+    "html": "The router itself is a neural network; it must run on every layer. If the router is too large or slow, the time spent predicting eats into the compute time that was supposed to overlap with prefetch."
+   },
+   {
+    "b": "Router learned well, hardware aligned.",
+    "html": "With a small, fast router trained on the target model and hardware, prefetch costs stay hidden; GPU stays busy; speedup is real."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a mock LLM inference pipeline: one or two layers of a small model (e.g., a 100M-parameter version). Simulate a consumer GPU (8GB) and slower main RAM (128GB). Implement the static partition scheme (fix which neurons go where) and the dynamic scheme (a tiny router that predicts the next layer's activation). Run the same batch of 10–20 prompts through both. Measure total time and GPU idle time per layer."
+  ],
+  "metric_eq": "speedup = time_static_partition / time_dynamic_infer; idle_reduction = idle_time_static - idle_time_dynamic",
+  "closing": "The demo must show that dynamic prefetch cuts GPU idle time to near zero and that the total end-to-end speedup beats static partitioning by at least 50% on diverse prompts."
+ }
+}

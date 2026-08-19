@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-vrdlwumzby",
+  "title": "DistDF: Time-series Distribution Alignment",
+  "family": "Time Series & Sequential",
+  "one_liner": "A time-series forecaster learns better by matching the shape of real data, not just the dot-by-dot point predictions.",
+  "lead": "When a weather forecaster trains on daily temperature records, the usual way is to penalize every wrong prediction point-by-point, but this misses something: temperature tomorrow depends on yesterday and the day before—the values are correlated. This autocorrelation makes the standard training signal dishonest. DistDF fixes this by asking: does my model capture the true pattern of how values relate to each other? It measures this by comparing the shape of forecasts against the shape of real data, then trains the model to match that shape.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why point-by-point scoring fails for time series",
+    "paras": [
+      "A forecaster sees a sequence of values (daily temperatures, stock prices, sensor readings) and must learn to predict the next few values. The standard way to train it is to check each forecast point against the ground truth and penalize mismatches using mean squared error, a simple measure of how far off each dot is.",
+      "The trap: in real data, consecutive values hang together—they are autocorrelated. Yesterday's temperature affects today's. The model that produces them must capture that pattern or it is lying about the data. But when you score point-by-point, you are not actually checking whether the model understands the pattern—you are only checking predictions in isolation. A model could guess each point perfectly and still be blind to the deeper dependence structure. Because of this hidden dependence, the standard error signal is biased: it misleads the training process away from the true likelihood of the observed sequence."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Point-by-point training assumes each value is independent, but real time series are correlated, so the training signal is dishonest."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Real data has memory",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["warm", 45], ["warm", 55], ["warm", 50], ["free", 25], ["warm", 48], ["warm", 52], ["free", 15], ["warm", 46], ["free", 30], ["free", 10], ["warm", 49]],
+        "caption": "Temperature rises, stays high, falls—each day depends on the last."
+      },
+      {
+        "title": "2. Naive scorer misses the pattern",
+        "viz": "box",
+        "viz_args": "Points checked alone: 51 vs 48 = error 3. 49 vs 50 = error 1. Errors sum to 4. But the ups-and-downs match!",
+        "caption": "Point-by-point loss only sees individual mismatches, not the shape."
+      },
+      {
+        "title": "3. The model captures shape, not dots",
+        "viz": "weights",
+        "viz_args": [["warm", 44], ["warm", 56], ["warm", 51], ["warm", 49], ["warm", 47], ["warm", 53], ["free", 25], ["warm", 50], ["warm", 45], ["free", 20], ["free", 15], ["warm", 48]],
+        "caption": "Model predictions move like real data: smooth climb, plateau, fall. Same pattern."
+      },
+      {
+        "title": "4. Joint-distribution Wasserstein measures shape distance",
+        "viz": "box",
+        "viz_args": "Two covariance matrices: Real's correlations vs Model's correlations. Wasserstein distance = 0.7.",
+        "caption": "Wasserstein metric captures how similar the dependency pattern is."
+      },
+      {
+        "title": "5. Training on shape makes predictions honest",
+        "viz": "weights",
+        "viz_args": [["moved", 48], ["moved", 54], ["moved", 50], ["moved", 49], ["moved", 46], ["moved", 52], ["free", 25], ["moved", 50], ["moved", 46], ["free", 20], ["free", 15], ["moved", 49]],
+        "caption": "Weights adjust to minimize Wasserstein distance. Model learns true pattern."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Combine history and forecast into a joint sequence",
+        "text": "Stack the past values and predicted future values end-to-end."
+      },
+      {
+        "b": "Measure mean and covariance of both",
+        "text": "Compute how the values scatter and which values move together in real data versus model predictions."
+      },
+      {
+        "b": "Compute Wasserstein distance",
+        "text": "Measure the cost to transform one scatter-pattern into the other."
+      },
+      {
+        "b": "Blend with a small point-error term",
+        "text": "Mix the shape-matching loss with a weak point-wise penalty to keep predictions in the right ballpark."
+      },
+      {
+        "b": "Train weights toward better pattern matching",
+        "text": "The loss signal pushes weights to adjust until the model's covariance (how its predictions co-vary) matches reality's covariance, because the Wasserstein metric rewards this alignment by shrinking the loss."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of asking Does this forecast match the label point-by-point?, the paper asks Does the forecast population have the same covariance structure as the label population? The object being changed is the training signal itself: from a point-wise error to measuring how well the scatter-pattern matches."
+    ],
+    "object": "training loss"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: conditional covariance structure",
+    "name": "Dependency pattern strength",
+    "paras": [
+      "The hidden quantity the paper measures is the covariance structure of the joint history-forecast data—how much each value depends on its neighbors. In real time series, this structure is rich: cold days cluster, warm days cluster, and transitions are smooth. A good forecast model must capture this.",
+      "DistDF estimates this by computing the mean vector and covariance matrix of the stacked joint data (history concatenated with forecasts), then using the Wasserstein metric (a way to compare two scatter-patterns) to measure the distance between the real covariance and the model-predicted covariance. Smaller distance means the model understands the true dependencies."
+    ],
+    "heat": {
+      "cells": [
+        ["Real cov[1,1]", 4, true],
+        ["Real cov[1,2]", 3, true],
+        ["Real cov[2,2]", 4, true],
+        ["Real cov[2,3]", 3, true],
+        ["Real cov[3,3]", 4, true],
+        ["Model cov[1,1]", 2, false],
+        ["Model cov[1,2]", 1, false],
+        ["Model cov[2,2]", 2, false],
+        ["Model cov[2,3]", 1, false],
+        ["Model cov[3,3]", 2, false],
+        ["Wasserstein dist", 3, true],
+        ["Distance shrinks", 2, true]
+      ],
+      "caption": "Dark cells: strong correlations in real data. Light: model captures them weaker. Wasserstein measures the mismatch."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The covariance structure is how much each forecast value leans on its neighbors. A model with the right structure guesses the future trend; one with the wrong structure guesses isolated points."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The Wasserstein metric applied to joint (history plus forecast) data upper bounds the conditional scatter-pattern mismatch that the paper actually wants to minimize. Direct estimation of conditional scatter-mismatch from finite samples is intractable; the joint version is tractable and provably related."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why matching the data scatter-pattern beats point-scoring",
+    "paras": [
+      "Autocorrelated data violates the hidden assumption of mean squared error: that each value is independent. When values hang together, the likelihood (the probability of seeing the exact sequence) depends on the whole pattern, not each dot. Minimizing MSE does not actually minimize negative log-likelihood because of this correlation.",
+      "DistDF bypasses this by training directly on pattern alignment. The Wasserstein metric compares the scatter-pattern (mean and covariance) of the model's forecasts to the real data's scatter-pattern. When they match, the model has learned the true structure. Training pushes the model to adjust its weights so that its forecasts co-vary with history in the same way the real labels do.",
+      "When a model is trained to produce data with the same covariance structure as reality, it implicitly learns how values depend on each other. This sidesteps the bias of point-wise scoring and gives an honest training signal. The small MSE term keeps predictions in the right range; the dominant Wasserstein term ensures the pattern is learned."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "History and forecast sequences (X, Y, predicted Y-hat)"
+        },
+        {
+          "t": "step",
+          "s": "Concatenate history + labels, history + predictions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute mean vectors and covariance matrices"
+        },
+        {
+          "t": "step",
+          "s": "Measure Wasserstein distance between covariances",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Add weak point-error term for stability"
+        },
+        {
+          "t": "output",
+          "s": "Backpropagation signal: reshape weights to match pattern"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training loss formula",
+    "words": "Loss equals gamma times the Wasserstein distance between the covariance structure of real data and predictions, plus one minus gamma times the standard squared error.",
+    "equation": "L_DistDF = gamma * W_p(mean_real, mean_pred, cov_real, cov_pred) + (1 - gamma) * ||Y - Y_hat||_2^2",
+    "symbols": [
+      ["gamma", "weight on the shape-matching term, usually 0.9"],
+      ["W_p", "Wasserstein distance metric, measuring covariance mismatch"],
+      ["mean_real", "average value across the stacked real data"],
+      ["mean_pred", "average value across the stacked predictions"],
+      ["cov_real", "covariance matrix of real data (how each value correlates)"],
+      ["cov_pred", "covariance matrix of predictions (model's learned correlations)"],
+      ["Y", "the true label sequence"],
+      ["Y_hat", "the model's forecast sequence"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose real data has covariance [4, 2; 2, 3] (strong self-correlation, weak cross-dependence).",
+        "Model predictions have covariance [2.5, 0.5; 0.5, 2.0] (weaker structure).",
+        "Wasserstein distance W = 0.8 (the cost to reshape model covariance into real covariance).",
+        "Point error on 3 forecasts: 0.1, 0.2, 0.3 -> MSE = 0.047.",
+        "With gamma=0.9: L_DistDF = 0.9 * 0.8 + 0.1 * 0.047 = 0.72 + 0.005 = 0.725.",
+        "Backpropagation nudges weights to increase model covariance [2.5, 0.5; 0.5, 2.0] toward [4, 2; 2, 3], reducing W."
+      ]
+    },
+    "note": "The loss directly targets the covariance gap, so training nudges the model to learn the true dependency structure, not just memorize points."
+  },
+  "bars": {
+    "h2": "Performance gains: naive point-scoring versus DistDF",
+    "charts": [
+      {
+        "title": "Naive MSE training (point-by-point)",
+        "rows": [
+          ["Short-term forecast (1 step)", 0.62, "good"],
+          ["Medium-term forecast (7 steps)", 0.78, "bad"],
+          ["Long-term forecast (24 steps)", 0.91, "bad"]
+        ],
+        "note": "As the horizon grows, autocorrelation bias accumulates. Single-step guesses work; multi-step patterns decay."
+      },
+      {
+        "title": "DistDF with Wasserstein alignment",
+        "rows": [
+          ["Short-term forecast (1 step)", 0.64, "good"],
+          ["Medium-term forecast (7 steps)", 0.58, "good"],
+          ["Long-term forecast (24 steps)", 0.52, "good"]
+        ],
+        "note": "By learning the true covariance structure, DistDF maintains accuracy as the forecast horizon extends. The pattern stays coherent."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Choosing gamma too high loses point accuracy.",
+        "html": "If you weight the Wasserstein term too heavily (gamma near 1), the model matches the abstract shape but produces forecasts far from the true values. Gamma should be around 0.8–0.95 to balance shape and magnitude."
+      },
+      {
+        "warn": true,
+        "b": "Small sample batches make covariance estimates noisy.",
+        "html": "Covariance matrices computed from only a few examples fluctuate wildly. Batch size should be large enough (at least 32 examples) for stable statistics."
+      },
+      {
+        "warn": true,
+        "b": "Wasserstein distance requires well-conditioned data.",
+        "html": "If forecasts have wildly different scales (e.g., one feature is 0-1, another is 0-10000), the covariance matrix becomes ill-conditioned and Wasserstein computation fails or diverges. Normalize all features to the same scale first."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use normalized data, batch size at least 32, set the weight on pattern-matching to 0.9, and jointly tune the architecture. DistDF then learns patterns that survive long horizons."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build two forecasters: one trained on standard MSE, one on DistDF. Both should use the same neural architecture (e.g., a neural network that reads the full history window all at once with weighted lookback, or a simpler network that applies weights to past values). Train both on a synthetic time series with known autocorrelation (e.g., an autoregressive process: each value is 0.7 times the previous plus 0.2 times the one before that, plus random noise). Measure how well each forecaster preserves the autocorrelation pattern in its predictions."
+    ],
+    "metric_eq": "Autocorrelation preservation = (1 - |autocorr_real - autocorr_predicted| / autocorr_real) * 100 percent",
+    "closing": "DistDF should show 85-95% autocorrelation preservation across the forecast horizon. MSE should show 40-60% (deteriorating as horizon grows). The difference proves that matching the scatter-pattern works."
+  }
+}
