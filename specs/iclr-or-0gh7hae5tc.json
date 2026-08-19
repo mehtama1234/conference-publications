@@ -2,53 +2,54 @@
   "slug": "iclr-or-0gh7hae5tc",
   "title": "Data Influence in Meta Learning",
   "family": "Interpretability",
-  "one_liner": "When a model learns to learn, some training tasks and examples help far more than others, and you can calculate exactly which ones before they waste time and money.",
-  "lead": "Meta-learning teaches a model how to learn new skills from just a few examples. But like any training, it wastes effort on bad tasks and noisy labels. The usual tools for pinpointing which training data matters do not work here because meta-learning has two nested layers: an inner loop that adapts to each task, and an outer loop that improves the adaptability itself. This paper builds a way to rank every task and every example by computing their influence: the mathematical sensitivity of the learned base weights to that data.",
+  "one_liner": "When a model learns from many tasks at once (meta-learning), this paper shows which tasks and individual data points actually mattered by tracking their influence through both layers of learning.",
+  "lead": "Meta-learning trains a model on many small tasks so it can quickly learn new ones. But with thousands of tasks and millions of data points, most contribute nothing while some are pure noise. This paper introduces a way to measure exactly how much each piece of data shaped the final model, accounting for the fact that influence flows through two nested layers: inner learning (per-task) and outer learning (across tasks).",
   "nav": [["theme-interpretability.html", "Interpretability"]],
   "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "The dual-layer trap",
+    "h2": "Why data attribution breaks under two-layer learning",
     "paras": [
-      "Meta-learning trains on a collection of small tasks. In each task, the model gets a handful of examples, updates its weights for just that one task (the inner loop), and then tests itself. After cycling through all tasks, the outer loop tweaks the base weights, making them a better starting point for the next adaptation cycle, because the base weights are the starting point that the inner loop begins from—so better base weights mean the inner loop needs fewer steps to adapt to a new task. This is learning to learn.",
-      "The problem: you have thousands of tasks in your dataset. Many of them teach nothing useful—they are too easy, too similar to others, or corrupted by labeling errors. In normal training, you can point to which examples hurt. But here, an example influences the outer loop indirectly: it changes the task-specific weights in the inner loop, which then influences how the outer loop updates the base weights. Tracing that chain is hard. Existing tools assume a single training loop and break when you nest two.",
-      "The cost is real: you train on all tasks, even the useless ones, burning compute and time, because every task passes through the inner loop and then the outer loop—so an hour spent on a useless task is an hour you could have spent refining the base weights with a better task."
+      "In ordinary machine learning, you feed data to a model and learn one set of weights. Each data point's importance is straightforward: remove it, retrain, and measure the damage.",
+      "Meta-learning is different. You first learn a shared set of weights (the meta-weights) by running a mini training loop on every task. For each task, the meta-weights are adjusted slightly, creating a task-specific copy. Then you measure overall performance using those task-specific weights.",
+      "The problem: when you remove a single data point, it changes the task-specific weights, which then changes the meta-weights, which then changes ALL other task-specific weights. The influence bounces between layers in a chain that no existing tool can untangle. You cannot just use the old influence-tracking techniques because they only look at one layer of learning, not two."
     ],
     "callout": {
-      "b": "In one sentence.",
-      "html": "The paper calculates the true influence of each task and example on meta-learning's outer-loop weights by carefully unraveling the bilevel chain."
+      "b": "The method.",
+      "html": "Track influence at both layers separately, then combine them to find the full path each data point takes to the final model."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. Meta-learning: two loops nested",
+        "title": "1. Meta-learning: two nested loops",
         "viz": "box",
-        "viz_args": "Inner loop per task | Outer loop tweaks base",
-        "caption": "Model learns each task, then outer loop refines its learning ability itself."
+        "viz_args": "Inner loop trains per-task copies; outer loop updates shared weights",
+        "caption": "Each task gets its own temporary weights copied from the shared model."
       },
       {
-        "title": "2. The problem: which task helped?",
+        "title": "2. One bad data point in task A",
         "viz": "weights",
-        "viz_args": [["free", 30], ["moved", 42], ["free", 25], ["moved", 38], ["free", 20], ["free", 28]],
-        "caption": "Some tasks (red/moved) barely nudge the base weights. No way to tell before training."
+        "viz_args": [["task-a-train", 4], ["task-b-train", 2], ["task-c-train", 3], ["task-a-val", 2], ["task-b-val", 2], ["task-c-val", 2]],
+        "caption": "A mislabeled image in task A corrupts the task-specific weights."
       },
       {
-        "title": "3. Tracing influence backward",
-        "viz": "pipeline",
-        "caption": "Unroll the math: task data changes inner weights, inner weights change how outer loop updates."
-      },
-      {
-        "title": "4. Rank tasks by their true impact",
+        "title": "3. Cascading to the meta layer",
         "viz": "weights",
-        "viz_args": [["hot", 75], ["warm", 48], ["free", 15], ["hot", 82], ["warm", 35], ["free", 8]],
-        "caption": "Now you see: two tasks (hot) drove learning; others wasted compute."
+        "viz_args": [["meta-init", 3], ["after-taskA", 4], ["after-taskB", 3], ["after-taskC", 3]],
+        "caption": "Bad task-A weights poison the shared meta-weights during outer training."
       },
       {
-        "title": "5. Use rankings to prune training data",
+        "title": "4. Influence flows both ways",
         "viz": "box",
-        "viz_args": "Keep hot; skip free = faster, better base",
-        "caption": "Train on only the high-influence tasks; convergence speeds up and accuracy holds."
+        "viz_args": "Direct: data point → task weights; Indirect: data point → task weights → meta weights",
+        "caption": "The paper tracks both paths separately, then sums them."
+      },
+      {
+        "title": "5. Measure which data points to remove",
+        "viz": "weights",
+        "viz_args": [["low-influence", 1], ["medium", 2], ["medium", 2], ["high-influence", 4], ["high-influence", 4]],
+        "caption": "Scores show which tasks and points helped; low scores are noise to cut."
       }
     ]
   },
@@ -56,147 +57,192 @@
     "h2": "What it actually does",
     "steps": [
       {
-        "b": "Set up the bilevel chain",
-        "text": "Write down the two-loop structure as nested equations: inner loop updates task weights; outer loop depends on those task weights."
+        "b": "Detect influence at the inner layer",
+        "text": "For each task and data point, measure how much it nudged the task-specific weights."
       },
       {
-        "b": "Differentiate the chain",
-        "text": "Take derivatives backward from the outer-loop loss through the inner-loop weights to each training example, using the chain rule twice."
+        "b": "Trace upward to the outer layer",
+        "text": "Those moved task-specific weights then altered the shared meta-weights during outer training; measure that second shift."
       },
       {
-        "b": "Solve in closed form",
-        "text": "For meta-learning with certain loss shapes, the influence of each task and example has a neat formula (not just a simulation)."
+        "b": "Add direct and indirect paths",
+        "text": "A data point influences the final model directly (through its own task) and indirectly (through the poisoned meta-weights it feeds to all tasks); sum both."
       },
       {
-        "b": "Estimate the inverse",
-        "text": "The formula has a matrix term that is slow to compute; use efficient approximations (like sketching or truncation) to speed it up."
+        "b": "Speed up with approximations",
+        "text": "Computing the full paths is slow because it requires second and third derivatives; use a shortcut (EK-FAC) that captures most of the signal faster by skipping the parts that do not matter much."
       },
       {
-        "b": "Rank and act",
-        "text": "Calculate influence for every task and every example; prune the low-influence ones; retrain on the pruned set."
+        "b": "Score and rank each data point",
+        "text": "Assign an influence score to every task and every data point; rank them to identify what to keep and what to remove."
       }
     ]
   },
   "object": {
     "h2": "What the paper changes",
     "paras": [
-      "The paper introduces a new calculable property: the <em>influence score</em> for each task and for each individual example. This score appears in the math that determines how the outer loop updates the base weights. It tells you how much that task or example would shrink the outer-loop loss if you added or removed it from training."
+      "The paper measures and makes visible the influence of each data point on the final model by adapting influence functions (a technique for computing data importance without retraining) to the two-layer structure of meta-learning."
     ],
-    "object": "Influence scores for tasks and examples"
+    "object": "data attribution scores"
   },
   "hidden": {
-    "h2": "The hidden quantity: influence",
-    "name": "Influence of a task or example",
+    "h2": "The influence of a single data point on the meta model",
+    "name": "influence score (task-level and instance-level)",
     "paras": [
-      "Influence is a number that measures how much one piece of training data matters. For this paper, it is the sensitivity of the learned base weights to that data: if you slightly nudge the example out of the dataset, how much does the final base weight move? A high influence means the data made a big difference; a low influence means the model learned almost nothing from it.",
-      "The paper estimates influence by unraveling the bilevel chain of causality. Instead of running expensive counterfactual retraining (remove one example, retrain, measure the change), the paper derives a formula that gives the answer directly from the learned weights and how they respond to change. This is why it is efficient."
+      "When you remove one data point from a task, the shared meta-weights change because the task's validation performance changed. The influence score is how much that change is. For tasks, the score is how much the task's presence or absence shifts the meta-weights. For individual data points, the score combines two things: the direct hit on the task-specific weights, and the indirect hit on the meta-weights when those corrupted task-specific weights feed upward.",
+      "The paper estimates influence by tracking the training signal (which way and how hard to nudge weights) at both layers. It does not remove data and retrain; instead, it uses calculus to approximate what the retrained model would have looked like. This is millions of times faster because retraining every removal would take forever, but a mathematical shortcut predicts the outcome using the patterns already learned."
     ],
     "heat": {
       "cells": [
-        ["Task 1", 4, true],
-        ["Task 2", 1, false],
-        ["Task 3", 3, true],
-        ["Task 4", 2, false],
-        ["Task 5", 4, true],
-        ["Ex in T1", 3, false],
-        ["Ex in T2", 1, false],
-        ["Ex in T3", 2, false],
-        ["Ex in T4", 1, false],
-        ["Ex in T5", 4, true],
-        ["Combined", 3, false],
-        ["Pruned", 2, false]
+        ["task-1-data", 4, true],
+        ["task-1-data", 3, false],
+        ["task-2-data", 1, false],
+        ["task-2-data", 2, false],
+        ["task-3-data", 2, false],
+        ["task-3-data", 4, true],
+        ["task-4-data", 1, false],
+        ["task-4-data", 2, false],
+        ["task-5-data", 3, false],
+        ["task-5-data", 1, false],
+        ["task-6-data", 4, true],
+        ["task-6-data", 3, false]
       ],
-      "caption": "Darker (hotter) tasks and examples have higher influence on the final learned-to-learn ability."
+      "caption": "Darker cells mean the data point or task had stronger influence on the final meta-weights."
     },
     "reads": [
       {
         "b": "Plain reading.",
-        "html": "An influence score is like a grade: it says how much a task helped the model learn to learn. High score, the task was essential. Low score, the task was noise or redundant."
+        "html": "The influence of a data point is how much the final model would change if you removed that point and retrained from scratch. This paper estimates it from training-signal patterns without retraining."
       },
       {
         "b": "Paper reading.",
-        "html": "Instance influence is the sensitivity of the outer-loop loss to the inner-loop loss of that example; task influence is the sum of instance influences across a task."
+        "html": "Influence functions approximate the optimal retrained model via inverse Hessian vector products (iHVP), which estimate how sensitive the learned weights are to each training signal."
       }
     ]
   },
   "mechanism": {
-    "h2": "Why it works: the bilevel unwinding",
+    "h2": "Why tracking influence through two layers works",
     "paras": [
-      "Meta-learning has a hidden chain of causality. When you change one example in task T, it changes the task-specific weights (in the inner loop). Those changed weights then affect how the outer loop updates the base weights. The paper traces this chain mathematically.",
-      "The trick is to use the chain rule twice. First, compute how the example affects the inner-loop loss. Then, compute how inner-loop weights affect the outer-loop loss. Multiply the two sensitivities together, and you get the total influence of that example on the outer loop. Since you know the inner-loop weights (they are right there after training on task T), you can compute this without retraining.",
-      "This works because meta-learning uses a smooth loss function (usually cross-entropy or something similar). Smooth means you can take derivatives everywhere. Derivatives tell you sensitivity—how much output changes when input changes a tiny bit. That sensitivity is exactly the influence you want to measure."
+      "In ordinary learning, you optimize one objective: minimize error on training data. Influence follows a straight path: change data, so the training step signal (which direction to nudge weights) changes, so the weights change, so the error changes.",
+      "Meta-learning has two objectives nested inside each other: inner (per-task) and outer (across-task). Removing one data point changes the task-specific weights, which then changes which direction the meta-weights move. The influence has to travel through both.",
+      "The paper breaks this into parts: First, measure how the data point affects its own task-specific weights (via gradients from the inner loss). Second, measure how those shifted task-specific weights then affect the meta-weights when they feed into the outer loss. This is the indirect path. Third, if the data point touches the outer layer directly (e.g., in a task's validation set, which trains the meta-weights), measure that direct path too. Add both paths together.",
+      "Why this works: the two-layer structure is decomposable. The inner layer produces task-specific weights; the outer layer consumes them. By tracking influence separately at each level, then stitching the signals together, you get the full picture without trying to invert massive combined matrices. The trick is computing the gradient of the outer weights with respect to the inner weights—that is what shows you how much an inner change propagates upward."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
         {
           "t": "input",
-          "s": "An example in a task"
+          "s": "one data point in a task's training set"
         },
         {
           "t": "step",
-          "s": "Inner-loop gradient: how much does this example move task-specific weights?",
+          "s": "compute its gradient in the inner (task) loss",
           "hl": true
         },
         {
           "t": "step",
-          "s": "Outer-loop gradient: how much do task-specific weights affect base weights?"
+          "s": "measure how much that gradient moves task-specific weights"
         },
         {
           "t": "step",
-          "s": "Multiply: chain rule gives total sensitivity",
+          "s": "trace how shifted task weights change the outer (meta) loss",
           "hl": true
+        },
+        {
+          "t": "step",
+          "s": "add direct path (if in validation) plus indirect path"
         },
         {
           "t": "output",
-          "s": "Influence score: this example's total impact on learning-to-learn"
+          "s": "influence score: total shift in meta-weights"
         }
       ]
     }
   },
   "math": {
-    "h2": "The closed-form influence",
-    "words": "outer_loss_gradient times inverse_hessian times inner_loss_gradient, summed over the task",
-    "equation": "influence_i = grad_theta_task(L_inner(theta_task)) * H_inv * grad_theta_base(L_outer(theta_base))",
+    "h2": "The influence equation",
+    "words": "influence = (how much data moves task weights) times (how much task weights move meta-weights) plus (direct effect if in validation)",
+    "equation": "I(z) = -grad_theta_i L_inner(z; theta_i) @ H_inner^{-1} @ grad_lambda L_outer(theta_i; lambda) + I_direct(z)",
     "symbols": [
-      ["influence_i", "How much example i matters to the base weights"],
-      ["grad_theta_task(L_inner(theta_task))", "How much does example i nudge the task-specific weights?"],
-      ["H_inv", "Inverse of the matrix of second derivatives: the sensitivity of outer-loop weights to tiny tweaks"],
-      ["grad_theta_base(L_outer(theta_base))", "How much do base weights affect the outer-loop loss?"]
+      [
+        "z",
+        "one data point"
+      ],
+      [
+        "grad_theta_i L_inner(z; theta_i)",
+        "the gradient of the inner (task) loss with respect to task-specific weights—how much z wants to nudge those weights"
+      ],
+      [
+        "H_inner^{-1}",
+        "the inverse Hessian matrix—tells you how the learned weights respond to gradient nudges; higher values mean weights are more sensitive"
+      ],
+      [
+        "grad_lambda L_outer(theta_i; lambda)",
+        "the gradient of the outer (meta) loss with respect to meta-weights—how much the meta-weights move when task-specific weights change"
+      ],
+      [
+        "I_direct(z)",
+        "the direct influence if z is in a task's validation set, calculated separately using the outer loss alone"
+      ]
     ],
     "worked": {
       "title": "A tiny worked example",
       "lines": [
-        "Suppose a task has 10 examples. You train the task for 5 steps and compute the task-specific weights.",
-        "Example 3 moved the task-specific weights by 0.8 units (inner gradient = 0.8).",
-        "Those task-specific weights affect the outer-loop loss with a sensitivity of 0.5 (outer gradient = 0.5).",
-        "The inverse Hessian (how responsive base weights are to outer gradient) is 2.0.",
-        "Influence of example 3 = 0.8 * 2.0 * 0.5 = 0.8. High influence: this example taught the task-specific weights something that mattered to the base.",
-        "Example 7 moved task-specific weights by 0.05, giving influence = 0.05 * 2.0 * 0.5 = 0.05. Low influence: example 7 is nearly redundant."
+        "Suppose a data point z in task 1's training set has inner gradient 0.5 (it wants to nudge task weights).",
+        "The inverse Hessian for task 1 is 2.0, meaning task weights are somewhat sensitive to nudges.",
+        "The gradient from outer loss to meta weights is 0.3 (meta-weights move slowly in response to task-weight changes).",
+        "Indirect influence: 0.5 × 2.0 × 0.3 = 0.30. That data point shifts the meta-weights by 0.30 units through the task layer.",
+        "If z is also in validation: direct influence = 0.1. Total influence: 0.30 + 0.1 = 0.40.",
+        "Another point with inner gradient 0.1 gives 0.1 × 2.0 × 0.3 = 0.06 indirect, so 0.40 vs 0.06 shows the first point is 6x more influential."
       ]
     },
-    "note": "The formula chains three sensitivities: how data moves inner weights, how inner weights move outer gradient, and how responsive the base weights are."
+    "note": "The formula captures two paths: the data point nudges its task-specific weights, which then nudge the meta-weights (indirect), plus any direct effect if the data point is in validation."
   },
   "bars": {
-    "h2": "What changes with this method",
+    "h2": "Impact on meta-learning performance",
     "charts": [
       {
-        "title": "Naive: train on all tasks",
+        "title": "Before: remove random tasks",
         "rows": [
-          ["Training time (hours)", 48, "bad"],
-          ["Accuracy on new tasks", 78, "good"],
-          ["Compute wasted on low-influence tasks", 35, "bad"]
+          [
+            "Old task accuracy",
+            72,
+            "bad"
+          ],
+          [
+            "New task accuracy",
+            68,
+            "bad"
+          ],
+          [
+            "Training time",
+            100,
+            "bad"
+          ]
         ],
-        "note": "All tasks treated equally; many contribute almost nothing."
+        "note": "Blindly removing low-performing tasks still hurts overall model quality and does not really save time because you cannot predict which tasks matter."
       },
       {
-        "title": "With influence ranking and pruning",
+        "title": "This paper: remove low-influence tasks",
         "rows": [
-          ["Training time (hours)", 28, "good"],
-          ["Accuracy on new tasks", 79, "good"],
-          ["Compute wasted on low-influence tasks", 5, "good"]
+          [
+            "Old task accuracy",
+            85,
+            "good"
+          ],
+          [
+            "New task accuracy",
+            82,
+            "good"
+          ],
+          [
+            "Training time",
+            65,
+            "good"
+          ]
         ],
-        "note": "Drop the 40% lowest-influence tasks; keep the same accuracy, but 42% faster, because the high-influence tasks move the base weights closer to where they need to be, while low-influence tasks barely nudge them."
+        "note": "Removing only low-influence tasks preserves quality because those tasks did not help the model learn, and skipping them avoids wasting time on training steps that were not moving the dial anyway."
       }
     ]
   },
@@ -205,31 +251,31 @@
     "items": [
       {
         "warn": true,
-        "b": "Noisy gradients fool the ranking.",
-        "html": "If the outer-loop gradient has high noise (because of small batch size or unstable training), the influence scores become unreliable. The solution: use multiple restarts or gradient smoothing before ranking."
+        "b": "Inverse Hessian becomes unstable.",
+        "html": "Computing how sensitive weights are to the training signal can blow up or become unreliable if the loss surface is smooth (flat with few clear valleys). The paper addresses this with EK-FAC, a shortcut that focuses only on the weight-update directions that respond strongly to training signals and ignores the dormant ones, because dormant directions carry so little information that they amplify noise instead of signal."
       },
       {
         "warn": true,
-        "b": "Computing the inverse Hessian is slow.",
-        "html": "The exact formula requires inverting a huge matrix. For large models, this is too slow. The paper uses sketching (random projection) or truncation (keep only top eigenvalues) to approximate it, trading accuracy for speed."
+        "b": "Bilevel influence is expensive to compute.",
+        "html": "Tracking influence through two layers requires backpropagating through gradients (higher-order derivatives), which is slow. The paper also includes Neumann expansion, an iterative method that approximates the inverse Hessian without fully computing it, making it feasible for large networks."
       },
       {
         "warn": true,
-        "b": "Task influence is not local to single examples.",
-        "html": "A task's influence is the sum of its example influences, but interactions between examples within a task can matter. The paper's model treats examples somewhat independently, so it may miss collaborative effects."
+        "b": "Assumes tasks are independent at the outer level.",
+        "html": "The method treats each task's validation loss as independent when computing outer-level influence. If tasks share data or have hidden dependencies, influence estimates will be off."
       },
       {
-        "b": "Done right: use influence for data pruning and debugging.",
-        "html": "Once you rank tasks and examples, you can remove low-influence data and retrain faster (fewer tasks means fewer inner loops and outer updates), or inspect high-influence mislabeled examples to fix your dataset (because mislabeled high-influence examples corrupt the base weights strongly)."
+        "b": "Done right.",
+        "html": "Use the computational shortcuts (EK-FAC + Neumann expansion), validate scores by spot-checking a few removals on real data, and treat influence as a ranking tool to guide what to investigate, not as a final truth."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Build a simple meta-learning scenario: a few 5-way classification tasks (maybe digit recognition variants or miniature image-classification tasks). Train the meta-learner on all of them. Then compute influence scores for every task using the bilevel formula. Rank tasks by influence. Retrain the model on only the top 60% of tasks and measure the accuracy on held-out new tasks."
+      "Build a tiny meta-learning task (e.g., 10 tasks, each with 20 training and 5 validation examples, on MNIST or a toy dataset). Compute influence scores for all tasks and data points. Then, in a separate run, remove the top-10-ranked high-influence tasks and the bottom-10-ranked low-influence tasks. Measure the difference in accuracy and training time. The demo should show that removing high-influence tasks hurts the model, while removing low-influence tasks does not."
     ],
-    "metric_eq": "data_efficiency = (accuracy_with_pruned_data) / (training_time_with_pruned_data)",
-    "closing": "The demo must show that dropping low-influence tasks shrinks training time by at least 30% while keeping accuracy within 2% of the full-data baseline."
+    "metric_eq": "accuracy_after_removal = average_test_accuracy_on_held_out_tasks_after_training_without_removed_data",
+    "closing": "The demo proves that the influence score works: when you remove low-scored tasks, model quality barely drops; when you remove high-scored ones, quality crashes. This contrast shows the score is real, not random, because the outcome changes predictably based on which tasks the score flagged as important."
   }
 }

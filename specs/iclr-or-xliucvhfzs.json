@@ -2,53 +2,54 @@
   "slug": "iclr-or-xliucvhfzs",
   "title": "Post-hoc Probabilistic Vision-Language Models",
   "family": "Uncertainty estimation",
-  "one_liner": "Vision-language models can estimate their own confidence over predictions without retraining by fitting a probability distribution over their final layers.",
-  "lead": "Vision-language models like CLIP match images to text by turning them both into lists of numbers and measuring how similar those lists are. But they give point-blank predictions — this image matches this text — with no idea if they are right or wrong. When the image is unlike anything the model saw before, its confidence should drop, but it does not. This paper adds self-doubt: a lightweight Bayesian wrapper that lets the model measure its own uncertainty over predictions, without any retraining.",
+  "one_liner": "Bolt uncertainty bands onto pre-trained image-text models without retraining by measuring how confident the final projection layers are.",
+  "lead": "Pre-trained image-text models like CLIP map images and text to shared spaces, but they give single deterministic answers with no sense of confidence. When the model encounters data from a different domain or a tricky example, it commits to a guess without admitting uncertainty. This paper adds a confidence layer on top of the frozen model by asking: how much wiggle room is there in the final projection layers (the small networks that reshape the outputs before similarity scoring) if we tried to retrain them? The answer is a pair of numbers for each image-text pair: a point estimate and a confidence band around it.",
   "nav": [["theme-other.html", "Other"]],
   "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "Models that never doubt themselves",
+    "h2": "Pre-trained models hide their confusion",
     "paras": [
-      "A vision-language model takes an image, turns it into a list of numbers (a compressed summary of what the image contains), then measures how similar it is to a text description. The similarity score is a single number: 0.95 is very similar, 0.1 is not. When you use the model on a new task — say, classifying animal photos when it was trained on everyday pictures — the model still outputs a crisp score. But the truth is: this image is far outside what the model trained on, so the score is nearly meaningless.",
-      "A beginner would assume the model knows when it is lost. It does not. CLIP and similar models give the same kind of confident answer whether the image matches the description perfectly or happens to be close by accident. For safety-critical work — medical imaging, autonomous vehicles — that lack of self-awareness is dangerous."
+      "A standard vision-language model like CLIP takes an image and a text description, encodes each separately, then measures how similar they are via a single cosine similarity score. That score determines if they match. But the score is just a number with no tag that says how confident the model is.",
+      "A beginner might try fine-tuning the model on new data to learn when it should be uncertain, but that wastes the pre-training and demands retraining from scratch every time. A safer beginner idea is adding a separate neural net on top to predict uncertainty, but that net also needs training, adding compute cost and slowing down when the model answers new questions.",
+      "The real bind: pre-trained models are locked (frozen); adding uncertainty without training new numbers seems impossible."
     ],
     "callout": {
-      "b": "The core problem.",
-      "html": "Vision-language models produce point-estimates with no measure of how much the model doubts its own answer when the image or task is unfamiliar."
+      "b": "The core move.",
+      "html": "Estimate uncertainty by mathematically asking how the final projection layers would shift if lightly retrained, without actually retraining them."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. Model learns on familiar data",
+        "title": "1. Normal inference",
         "viz": "weights",
-        "viz_args": [["warm", 70], ["warm", 65], ["warm", 72], ["hot", 88], ["warm", 68], ["free", 20]],
-        "caption": "Model trained on common images. Final layer weights are firm."
+        "viz_args": [["warm", 40], ["warm", 35], ["warm", 45], ["warm", 38], ["warm", 42], ["warm", 37], ["warm", 41], ["warm", 39], ["warm", 43], ["warm", 36], ["warm", 44], ["warm", 38]],
+        "caption": "Pre-trained model outputs one confidence number per image-text pair."
       },
       {
-        "title": "2. Old way: confident on new data",
+        "title": "2. Projection layers act like gates",
         "viz": "box",
-        "viz_args": "Similarity: 0.87 (no doubt)",
-        "caption": "Given an unfamiliar photo, model outputs single score. No warning it is uncertain."
+        "viz_args": "Image output → Projection gate → Similarity score",
+        "caption": "Last layer (projection) reshapes the output before matching against text."
       },
       {
-        "title": "3. Bayesian wrapper fitted",
+        "title": "3. Measure the local curvature",
         "viz": "weights",
-        "viz_args": [["moved", 75], ["moved", 68], ["moved", 71], ["moved", 91], ["moved", 74], ["free", 22]],
-        "caption": "Method adds probability distribution over final-layer weights. No retraining."
+        "viz_args": [["hot", 65], ["free", 20], ["hot", 70], ["warm", 45], ["free", 15], ["warm", 50], ["hot", 68], ["free", 22], ["warm", 48], ["free", 18], ["hot", 72], ["warm", 52]],
+        "caption": "Hot regions resist change strongly; free regions shift easily under retraining."
       },
       {
-        "title": "4. New way: uncertainty quantified",
+        "title": "4. Curvature becomes uncertainty",
         "viz": "box",
-        "viz_args": "Similarity: 0.87 ± 0.14 (honest doubt)",
-        "caption": "Same score, but now with a confidence band. Wide band means unsure."
+        "viz_args": "High curvature → Low uncertainty | Low curvature → High uncertainty",
+        "caption": "Steep terrain means stable, confident predictions; flat terrain means wobbly."
       },
       {
-        "title": "5. Payoff: active learning picks uncertain cases",
+        "title": "5. Attach confidence bands",
         "viz": "weights",
-        "viz_args": [["moved", 30], ["free", 20], ["moved", 85], ["free", 15], ["moved", 25], ["free", 18]],
-        "caption": "System labels the uncertain examples first. Learning is much faster."
+        "viz_args": [["warm", 35], ["warm", 40], ["warm", 38], ["warm", 42], ["warm", 36], ["warm", 45], ["warm", 39], ["warm", 43], ["warm", 37], ["warm", 44], ["warm", 41], ["warm", 40]],
+        "caption": "Each similarity score now carries a confidence interval, no retraining."
       }
     ]
   },
@@ -56,151 +57,149 @@
     "h2": "What it actually does",
     "steps": [
       {
-        "b": "Take a pre-trained model",
-        "text": "Start with CLIP or SigLIP. Do not retrain."
+        "b": "Fix the model.",
+        "text": "Keep the pre-trained image and text encoders frozen; only the projection layers are movable."
       },
       {
-        "b": "Collect a small reference dataset",
-        "text": "Run images through the model and save the internal numbers before the final layer."
+        "b": "Measure curvature.",
+        "text": "Compute the Hessian (a matrix that says how steeply the loss rises in each direction) of the projection layers using the pre-training data or a proxy dataset."
       },
       {
-        "b": "Fit a probability model over those numbers",
-        "text": "Use Bayesian statistics to build a distribution of plausible final weights, not just one point."
+        "b": "Apply Laplace.",
+        "text": "Use the Laplace approximation (a mathematical recipe) to estimate what the range of plausible projection layer weights would be."
       },
       {
-        "b": "Compute uncertainty for new images",
-        "text": "For a new image, sum up the range of possible predictions under that distribution."
+        "b": "Convert to similarity uncertainty.",
+        "text": "Transform the projection layer uncertainty into uncertainty over the cosine similarity scores between images and text."
       },
       {
-        "b": "Use the band to pick which examples to label",
-        "text": "Ask for labels on high-uncertainty predictions first. Training learns faster because examples where the model doubts itself are where retraining helps the most."
+        "b": "Output scores with bands.",
+        "text": "For any new image-text pair, produce both a point similarity score and a confidence interval around it, when answering questions."
       }
     ]
   },
   "object": {
-    "h2": "The one thing the paper changes",
+    "h2": "What the paper changes",
     "paras": [
-      "The paper replaces the model's single fixed final layer with a <em>distribution over possible final layers</em> — a cloud of plausible weight vectors instead of one point. This distribution is estimated post-hoc (after training) from the model's own behavior on a reference set."
+      "The paper modifies only the projection layers—the small neural networks at the end of the image and text processing models that shape the outputs before similarity scoring. Everything upstream (the main image and text processing models) stays untouched. By placing a probabilistic model over the projection layers (instead of deterministic numbers), the paper converts single similarity scores into pairs of (mean score, confidence band)."
     ],
-    "object": "final-layer weights"
+    "object": "projection layer weights"
   },
   "hidden": {
-    "h2": "Prediction uncertainty: the honest doubt measure",
-    "name": "uncertainty over similarity predictions",
+    "h2": "The hidden quantity: how steeply the loss rises",
+    "name": "Hessian of the projection layer loss",
     "paras": [
-      "The hidden quantity is: how much should we doubt the prediction on this particular image? Not the model's training loss or test accuracy, but a measure of <em>how variable the prediction is</em> when you average over the distribution of possible final layers. If the prediction stays nearly the same under all plausible weight settings, the model is sure. If the prediction swings wildly, the model is uncertain.",
-      "The paper estimates this by computing how the cosine similarity (the image-text match score) changes as you sample different weight vectors from the fitted Bayesian distribution. A wide range of possible scores means high uncertainty; a narrow range means low uncertainty."
+      "The hidden quantity is the Hessian—a matrix that records how sharply the training loss rises or falls in every direction around the current projection layer weights. A high Hessian value means the loss is steep in that direction: if you nudge that weight, the loss shoots up. A low Hessian value means the loss is flat: nudges barely change anything.",
+      "The paper estimates this Hessian by scanning through the pre-training data and accumulating how the loss changes with respect to each projection weight. This curvature map is the foundation: high-curvature weights are confident (locked in by the training data); low-curvature weights are uncertain (the training data was indifferent to their exact values)."
     ],
     "heat": {
       "cells": [
-        ["new_image_1", 4, true],
-        ["new_image_2", 1, false],
-        ["new_image_3", 3, true],
-        ["new_image_4", 2, false],
-        ["reference_1", 1, false],
-        ["reference_2", 2, false],
-        ["reference_3", 3, true],
-        ["reference_4", 4, true],
-        ["reference_5", 1, false],
-        ["reference_6", 2, false],
-        ["reference_7", 3, true],
-        ["reference_8", 4, true]
+        ["p1", 4, true],
+        ["p2", 1, false],
+        ["p3", 4, true],
+        ["p4", 2, false],
+        ["p5", 1, false],
+        ["p6", 3, false],
+        ["p7", 4, true],
+        ["p8", 1, false],
+        ["p9", 2, false],
+        ["p10", 3, false],
+        ["p11", 4, true],
+        ["p12", 2, false]
       ],
-      "caption": "Darker means higher uncertainty (wider range of possible predictions). Reference set (light) is low-uncertainty; new domain examples (dark) show doubt."
+      "caption": "Darker means higher Hessian value, steeper loss rise, and lower uncertainty."
     },
     "reads": [
       {
         "b": "Plain reading.",
-        "html": "Uncertainty tells you when a prediction might be wrong because the example is out of the ordinary."
+        "html": "The loss is like a valley floor; steep walls mean the weight is pinned down; flat floors mean it can wander."
       },
       {
         "b": "Paper reading.",
-        "html": "The paper uses Bayesian approximation (building a probability distribution over possible final weights) to analytically compute the variance of the predicted similarity score."
+        "html": "The Laplace approximation assumes the weights form a bell-curve pattern (a probability shape) centered at the trained values, with width determined by the Hessian inverse."
       }
     ]
   },
   "mechanism": {
-    "h2": "Why it works: plausible weight ranges",
+    "h2": "Why it works: from curvature to confidence",
     "paras": [
-      "The core idea is simple: if you have a range of plausible final-layer weights (not just one best guess), you can ask: across all of these plausible weight vectors, what range of predictions do I get for this image? Vision-language models work by converting an image to an internal list of numbers, then multiplying by the final-layer weights to get a similarity score. Different plausible weights give different scores. If all plausible weights agree, the prediction is solid. If they disagree, the model is uncertain — and rightfully so, because it has less evidence to commit.",
-      "The paper uses Bayesian posterior approximation: it starts with the trained weights and the covariance of the training errors, then builds a Gaussian distribution (a bell curve) over plausible weight settings. This distribution captures the assumption that weight-combinations close to the learned values are more likely than far-away ones. For a new image, you sample many weight vectors from this distribution, compute the similarity prediction under each one, and measure the spread. That spread is the uncertainty."
+      "When a model's projection layers have high curvature (the loss rises steeply), the pre-training data has tightly constrained those weights: moving them slightly breaks the training loss. This means new examples that rely on those weights get stable, reproducible predictions. Conversely, flat regions indicate that many different weight settings worked equally well on the training data. For a new example, those uncertain weights can swing around without violating training loss, so the final similarity score becomes wobbly.",
+      "The Laplace approximation converts this intuition into math: it models the projection weights as a bell-curve pattern (a probability shape) of plausible values centered at the trained point, with width determined by the Hessian. Given this pattern over weights, the paper analytically computes a similar pattern over the cosine similarity scores (via a formula involving the weight pattern and the outputs). The result is a similarity score plus an uncertainty band, derived purely from how steep or flat the loss terrain is, without touching the model.",
+      "The mechanism is mechanical: steep terrain near good weights means stable, narrow predictions; flat terrain means wide, uncertain predictions. No new numbers to train, no retraining, just measuring the terrain."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
         {
           "t": "input",
-          "s": "New image, pre-trained model"
+          "s": "Pre-trained image-text model with frozen encoders"
         },
         {
           "t": "step",
-          "s": "Extract internal numbers from penultimate layer",
-          "hl": false
-        },
-        {
-          "t": "step",
-          "s": "Sample weight vectors from Bayesian distribution",
+          "s": "Compute Hessian of projection layers from pre-training data",
           "hl": true
         },
         {
           "t": "step",
-          "s": "Compute similarity for each sampled weight vector",
-          "hl": false
+          "s": "Apply Laplace to find the range of plausible projection weights"
         },
         {
           "t": "step",
-          "s": "Measure range of predictions",
-          "hl": true
+          "s": "Push weight uncertainty through to similarity score uncertainty"
         },
         {
           "t": "output",
-          "s": "Mean prediction and uncertainty (width of range)"
+          "s": "Similarity score with confidence interval at test time"
         }
       ]
     }
   },
   "math": {
-    "h2": "The equation for uncertainty",
-    "words": "The predicted similarity is a dot product of the image vector and the final-layer weights. Uncertainty is the variance of this dot product when weights are sampled from a Bayesian distribution. The variance comes from two sources: the randomness in which weights are plausible, and the sensitivity of the dot product to weight perturbations.",
-    "equation": "variance(similarity) = z^T * Sigma * z + epsilon^2",
+    "h2": "The equation: from weight uncertainty to score uncertainty",
+    "words": "The similarity score is the cosine of the projected image embedding and projected text embedding. If the projection layer weights are uncertain (distributed as a Gaussian), then the score is also uncertain. The Laplace approximation gives the covariance of that score uncertainty.",
+    "equation": "sim(x_img, x_txt) = cos(P(phi(x_img)) / ||P(phi(x_img))||, Q(psi(x_txt)) / ||Q(psi(x_txt))||); var[sim] ≈ g^T * H^{-1} * g where g is the gradient of sim w.r.t. weights, H is the Hessian",
     "symbols": [
-      ["similarity", "the image-to-text match score you want to predict"],
-      ["z", "the internal image representation (list of numbers from the second-to-last layer)"],
-      ["Sigma", "the covariance matrix capturing which weight combinations are plausible"],
-      ["epsilon^2", "the variance of prediction error from the reference dataset"],
-      ["z^T", "transpose of z (rotate the vector so it can multiply against the matrix)"]
+      ["sim(x_img, x_txt)", "the cosine similarity between projected image and text embeddings"],
+      ["P, Q", "the projection layer weight matrices for image and text"],
+      ["phi, psi", "the frozen pre-trained image and text encoders"],
+      ["H", "the Hessian matrix (second derivatives of training loss)"],
+      ["g", "the gradient of the similarity score w.r.t. projection weights"],
+      ["var[sim]", "the variance (squared width) of uncertainty around the similarity score"]
     ],
     "worked": {
       "title": "A tiny worked example",
       "lines": [
-        "Suppose the image vector has 256 numbers and covariance is small: z^T * Sigma * z = 0.02.",
-        "Reference dataset showed prediction errors scattered with variance 0.003, so epsilon^2 = 0.003.",
-        "Total variance = 0.02 + 0.003 = 0.023, so uncertainty = sqrt(0.023) ≈ 0.15 (about 15% width).",
-        "For a different image with larger z^T * Sigma * z = 0.08, variance = 0.083, uncertainty = 0.29 (29% width — this image is more uncertain)."
+        "Suppose an image-text pair has similarity score 0.85 with the frozen model.",
+        "The Hessian at the projection layers shows: dimension 1 has value 100 (steep), dimension 2 has value 5 (flat).",
+        "The rate of change of similarity with respect to each dimension is rate_1 = 0.1, rate_2 = 0.2.",
+        "Uncertainty in dimension 1: (0.1) times (0.1) divided by 100 = 0.0001 (small, because steep terrain).",
+        "Uncertainty in dimension 2: (0.2) times (0.2) divided by 5 = 0.008 (larger, because flat terrain).",
+        "Total variance ≈ 0.0081, so standard deviation ≈ 0.09.",
+        "Final answer: similarity = 0.85 plus-or-minus 0.09, a confidence interval built from how steep or flat the loss terrain is."
       ]
     },
-    "note": "The variance grows when the image vector is far from the training distribution (when the first term is large) or when reference data was noisy (when the second term is large)."
+    "note": "Steep loss terrain makes the projection weights insensitive to nudges, so similarity predictions are tight; flat terrain makes weights swing freely, so similarity predictions are wide."
   },
   "bars": {
-    "h2": "What the method buys you",
+    "h2": "How it compares to baselines",
     "charts": [
       {
-        "title": "Without uncertainty (old way)",
+        "title": "Naive fine-tuning",
         "rows": [
-          ["Test accuracy", 82, "good"],
-          ["Calibration: confident wrong answers", 18, "bad"],
-          ["Active learning: labels needed to reach 85%", 900, "bad"]
+          ["Cost per answer", 100, "bad"],
+          ["Calibration error", 28, "bad"],
+          ["Requires retraining", 1, "bad"]
         ],
-        "note": "Model gives high scores even when wrong. You do not know which predictions to trust."
+        "note": "Fine-tuning for uncertainty loses efficiency and forces retraining for every new dataset."
       },
       {
-        "title": "With post-hoc Bayesian uncertainty",
+        "title": "This paper (BayesVLM)",
         "rows": [
-          ["Test accuracy", 82, "good"],
-          ["Calibration: confident wrong answers", 4, "good"],
-          ["Active learning: labels needed to reach 85%", 320, "good"]
+          ["Cost per answer", 102, "good"],
+          ["Calibration error", 8, "good"],
+          ["Requires retraining", 0, "good"]
         ],
-        "note": "Same final accuracy, but predictions now carry honest confidence bands. Active learning labels high-uncertainty examples first and learns faster, because uncertain predictions are exactly the ones where the model lacks good training signal."
+        "note": "Post-hoc Bayesian uncertainty adds negligible compute (barely any extra arithmetic per example) and improves confidence bands because it measures the steep or flat terrain instead of guessing, and never needs to retrain."
       }
     ]
   },
@@ -209,31 +208,36 @@
     "items": [
       {
         "warn": true,
-        "b": "Reference dataset mismatch.",
-        "html": "If the reference set you use to fit the Bayesian distribution is very different from your actual task, the uncertainty estimates will be miscalibrated. The model will be confidently wrong or falsely uncertain."
+        "b": "Requires access to training data.",
+        "html": "The Hessian computation must scan pre-training data (or a large proxy dataset), which may not be available for proprietary models. This breaks the pure post-hoc dream on closed models."
       },
       {
         "warn": true,
-        "b": "Out-of-distribution examples fool the model differently.",
-        "html": "The Bayesian wrapper assumes that uncertainty from weight variation is the right kind of doubt. But if the domain shift causes the image vector itself to land in an unexpected region of the internal number space, the uncertainty may not capture that strangeness."
+        "b": "Assumes outputs are bell-shaped.",
+        "html": "The Laplace approximation assumes the projection layer outputs follow a bell curve pattern (a probability shape). Real outputs may have outliers or skew, breaking the assumption and inflating or deflating uncertainty bands."
       },
       {
         "warn": true,
-        "b": "Computational cost of sampling.",
-        "html": "Computing uncertainty requires sampling many weight vectors and predicting under each. This is slower than a single point-prediction (because you must do dozens of forward passes), but much cheaper than retraining, because you reuse the pre-trained model."
+        "b": "Only touches projection layers.",
+        "html": "The uncertainty only accounts for the projection layer weights, not variations in the frozen encoders. Uncertainty in the encoder outputs themselves is ignored, potentially undercounting total uncertainty."
       },
       {
-        "b": "Works best when reference set is representative.",
-        "html": "If you pick a reference set that is statistically close to your task, the Bayesian posterior captures real epistemic doubt. The method shines when you have even a small labeled set from the target domain."
+        "warn": true,
+        "b": "Assumes independence between modalities.",
+        "html": "The math treats image and text projection layer uncertainties as independent, which is an approximation. In reality, the encoders may be coupled, violating this assumption."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the data is in-distribution and the model is well-trained, the uncertainty bands are well-calibrated: scores that the model flags as uncertain are genuinely harder to predict, and confident scores are stable across domains."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Build a simple active-learning loop on a held-out test set. (1) Take a vision-language model (CLIP or SigLIP). (2) Fit the Bayesian posterior on a small reference set (e.g., 100 random examples from the training distribution). (3) On a new domain (e.g., sketches, or photos from a different camera), rank predictions by uncertainty. (4) Label the high-uncertainty examples first; train a linear classifier on top of the image embeddings. (5) Measure how many labels you need to reach a target accuracy. Compare to baseline (random labeling, or labeling by model confidence alone)."
+      "Build a small active learning loop: train a classifier on a small labeled subset of a vision-text dataset (e.g., a domain-shifted split of CIFAR or ImageNet captions), then use BayesVLM uncertainty to pick the next images to label. Compare against random selection or uncertainty from a naive fine-tuned model. The demo should show that BayesVLM picks harder, trickier examples (ones near decision boundaries or from rare regions), leading to faster accuracy growth per labeled example because the learner focuses effort on the toughest cases first."
     ],
-    "metric_eq": "sample_efficiency = (labels_needed_with_random - labels_needed_with_uncertainty) / labels_needed_with_random * 100%",
-    "closing": "The demo is not passed until the uncertainty-ranked active learning learns faster than random or confidence-only baselines, because uncertainty correctly identifies the examples the model is most likely wrong on."
+    "metric_eq": "sample efficiency = number of labels needed to reach 90% accuracy; lower is better. Active learning gain = (random labels needed) / (BayesVLM labels needed) = should be > 1.5 for a meaningful result.",
+    "closing": "The demo must make impossible to miss that the model knows which examples it is uncertain about—and that certainty comes from measuring how steep or flat the loss terrain is, not from retraining."
   }
 }

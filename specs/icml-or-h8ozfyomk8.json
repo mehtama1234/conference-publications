@@ -2,52 +2,51 @@
   "slug": "icml-or-h8ozfyomk8",
   "title": "Learning Permutation from Structure Without Supervision",
   "family": "Optimization",
-  "one_liner": "Gumbel-Sinkhorn with adaptive temperature control learns permutations more stably by adjusting confidence individually for each position instead of forcing all at once.",
-  "lead": "Imagine you have a pile of unsorted cards and want to arrange them by the pattern on their backs—without anyone telling you the correct order. Your brain doesn't sharpen every guess at the same pace; some positions feel obvious early, while others stay uncertain. This paper introduces a smarter way to learn such orderings using calculus on permutation matrices by letting each position warm up or freeze at its own pace instead of all at once.",
+  "one_liner": "When teaching a model to uncover a hidden ordering, give each position its own temperature dial instead of one global knob, so confident positions lock in while uncertain ones keep exploring.",
+  "lead": "Many real problems hide an ordering inside unordered data—like sorting an array by value, or assembling a scrambled jigsaw puzzle from its shape and colors. A model can learn this hidden ordering without being shown the answer by just checking if the reordered data looks right. The catch: different positions in the ordering become clear at different speeds, but old methods force all of them to sharpen or blur at the same rate, causing the training to wobble and fail at scale. This paper's move is to give each position its own temperature dial, so confident positions freeze early while uncertain ones keep exploring.",
   "nav": [["theme-optimization.html", "Optimization"]],
   "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "Permutations are discrete, calculus is not",
+    "h2": "The ordering is hidden, but not all positions agree",
     "paras": [
-      "A permutation is a specific ordering—like arranging five cards in a row. Calculus works by nudging numbers smoothly in small steps. But permutations are all-or-nothing: either position one holds the leftmost card, or it does not. No in-between. So you cannot use gradient descent (the usual training method) directly on a true permutation.",
-      "A beginner might try making each position a smooth guess: 'position one is 70 percent likely to hold card A, 20 percent card B, 10 percent card C.' Then nudge these percentages smoothly until one grows close to 100 percent. But this creates a new problem: all positions sharpen their guesses at the same pace. Some positions know the right card early; forcing them to stay fuzzy while uncertain positions catch up wastes training time and creates contradictions—two positions both claim 95 percent confidence in the same card."
+      "Imagine you want to sort an array of numbers, but the model has never seen a sorted array before. It only knows the rule: if the array is sorted, it will feel right. So it reorders the data over and over and checks if each reordering satisfies the rule. The catch is that some reorderings are clearly wrong (putting large numbers before small ones fails badly), while others are almost correct but ambiguous—maybe several orderings look equally right.",
+      "A naive approach uses one global confidence dial for the entire permutation. The dial starts loose (the model can try many orderings) and tightens gradually (eventually it locks in). The problem: a position that is clearly correct is forced to stay wiggling until other positions catch up. This causes instability—the training jumps around, and on large problems it breaks entirely."
     ],
     "callout": {
-      "b": "The problem in one sentence.",
-      "html": "Standard differentiable relaxations sharpen all position-guesses at the same speed, causing instability when positions have different amounts of uncertainty."
+      "b": "The fix in one sentence.",
+      "html": "Use a local uncertainty-adaptive temperature that adjusts each position's confidence dial based on how sure the model already is about that position, rather than forcing all positions to sharpen at the same rate."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. Uncertain pile of cards",
+        "title": "1. The scrambled jigsaw",
         "viz": "plain",
-        "caption": "Five cards, no one knows the right order yet."
+        "caption": "Pieces are in the wrong order. The model must reorder them to look right."
       },
       {
-        "title": "2. Each position makes a guess",
-        "viz": "weights",
-        "viz_args": [["free", 30], ["free", 35], ["warm", 50], ["free", 28], ["free", 32]],
-        "caption": "Soft guesses: position 3 feels more sure than position 1."
-      },
-      {
-        "title": "3. Naive training: all sharpen together",
-        "viz": "weights",
-        "viz_args": [["warm", 55], ["warm", 60], ["hot", 95], ["warm", 62], ["warm", 58]],
-        "caption": "Force position 1 to pick now, even though it is still unsure."
-      },
-      {
-        "title": "4. Adaptive temperature lets each decide",
-        "viz": "weights",
-        "viz_args": [["free", 40], ["free", 45], ["hot", 98], ["warm", 70], ["warm", 72]],
-        "caption": "Position 3 snaps to hot; positions 1, 2 stay soft and explore."
-      },
-      {
-        "title": "5. Clean final order emerges",
+        "title": "2. Old way: one global dial",
         "viz": "box",
-        "viz_args": "Cards in order: A C B D E",
-        "caption": "All positions decisive, no contradictions, no wasted training."
+        "viz_args": "Single temperature knob for all positions",
+        "caption": "All positions blur or sharpen together. Confident ones must wait for uncertain ones."
+      },
+      {
+        "title": "3. The problem bites",
+        "viz": "weights",
+        "viz_args": [["sure", 90], ["sure", 85], ["guess", 30], ["guess", 25], ["guess", 20]],
+        "caption": "Some positions are clearly right, others are ambiguous. Forcing them to move together destabilizes training."
+      },
+      {
+        "title": "4. New way: local dials",
+        "viz": "weights",
+        "viz_args": [["hot", 95], ["hot", 90], ["warm", 40], ["warm", 35], ["free", 20]],
+        "caption": "Each position gets its own dial. Confident ones lock in, uncertain ones stay flexible."
+      },
+      {
+        "title": "5. The payoff",
+        "viz": "plain",
+        "caption": "Training is stable, even on large puzzles. Model finds the right ordering faster."
       }
     ]
   },
@@ -55,153 +54,151 @@
     "h2": "What it actually does",
     "steps": [
       {
-        "b": "Start with soft guesses",
-        "text": "Each position holds a probability for every card, fuzzy and uncertain."
+        "b": "Compute soft assignment",
+        "text": "The model produces scores for each possible position, then soft-assigns pieces using a reversible transformation that approximates choosing one position."
       },
       {
-        "b": "Measure local confidence",
-        "text": "For each position, check how peaked the probability is."
+        "b": "Measure confidence per position",
+        "text": "For each position, compute how spread-out the soft assignment is. A concentrated distribution means high confidence; a flat distribution means high uncertainty."
       },
       {
-        "b": "Adjust temperature locally",
-        "text": "Turn up the heat on uncertain positions; freeze confident ones."
+        "b": "Adjust each position's dial",
+        "text": "For confident positions, tighten the dial so they lock in quickly, because the model already knows what belongs there. For uncertain positions, keep the dial loose, because ambiguous alternatives still deserve exploration and the model needs room to find which one is actually correct."
       },
       {
-        "b": "Take a gradient step",
-        "text": "Nudge the probabilities to match the observed structure (sorted order, puzzle fit)."
+        "b": "Recompute permutation with local dials",
+        "text": "Apply the position-specific dials and recompute the soft assignment, so each position now has its own sharpening rate."
       },
       {
-        "b": "Repeat",
-        "text": "Each iteration sharpens the most certain positions first; others catch up at their own pace."
+        "b": "Check structure and adjust",
+        "text": "Reorder the data using the new soft assignment and test if it satisfies the goal (is it sorted, does the jigsaw look coherent). Measure how much the result falls short, and use that measurement to nudge the scoring function toward better predictions, because a bigger error signal points to which scores need to move."
       }
     ]
   },
   "object": {
     "h2": "What the paper changes",
     "paras": [
-      "Standard Gumbel-Sinkhorn uses one global temperature value (a control knob) that applies to every position equally. The paper replaces it with separate temperature values for each position that adapt based on how certain each position is. Certain positions use a lower temperature (which makes the probability distribution spiky), while uncertain positions use a higher temperature (keeping them fuzzy and exploratory)."
+      "The paper modifies a standard relaxation method called Gumbel–Sinkhorn, which normally uses a single global temperature to gradually sharpen soft assignments into discrete choices. Instead of one temperature for the entire permutation matrix, the paper introduces local temperature fields—one for each row and column—that vary based on how confident the soft assignment already is at that position."
     ],
-    "object": "per-position temperature control"
+    "object": "the temperature setting, making it local and adaptive"
   },
   "hidden": {
-    "h2": "The hidden quantity: entropy of each position's belief",
-    "name": "assignment entropy (per position)",
+    "h2": "Assignment entropy: how uncertain is each position",
+    "name": "Per-position assignment entropy",
     "paras": [
-      "Entropy measures how spread-out a probability distribution is. If a position is 99 percent sure it holds card A and 1 percent on all others, the entropy is low (certain). If it is 20 percent on each of five cards, entropy is high (confused). The paper measures this entropy for each position's guess separately.",
-      "The algorithm uses these entropy values to decide whether to sharpen that position's guess (by lowering its temperature) or let it stay fuzzy (by keeping temperature high). High entropy positions get high temperature; low entropy positions get low temperature. This is the key steering mechanism."
+      "When the model produces soft assignments (probabilities spread over possible positions), the entropy measures how concentrated or diffuse that distribution is. High entropy means the model is unsure—it spreads probability across many positions equally. Low entropy means the model is sure—it puts most probability on one position.",
+      "The paper computes this entropy separately for each row and column of the assignment matrix. Confident rows and columns have low entropy; ambiguous ones have high entropy. The paper then uses this entropy value to adjust that position's temperature dial: high entropy gets a lower temperature (staying loose), low entropy gets a high temperature (tightening to discretize)."
     ],
     "heat": {
       "cells": [
-        ["pos-1", 1, false],
-        ["pos-2", 1, false],
-        ["pos-3", 4, true],
-        ["pos-4", 2, false],
-        ["pos-5", 2, false],
-        ["conf-m", 3, false],
-        ["ent-h", 1, false],
-        ["ent-l", 4, false],
-        ["temp-a", 2, true],
-        ["temp-b", 2, false],
-        ["loss-d", 3, false],
-        ["next-", 2, false]
+        ["pos 1", 4, true],
+        ["pos 2", 4, true],
+        ["pos 3", 2, false],
+        ["pos 4", 1, false],
+        ["pos 5", 1, false],
+        ["pos 6", 3, false],
+        ["pos 7", 4, true],
+        ["pos 8", 2, false],
+        ["pos 9", 1, false],
+        ["pos 10", 2, false],
+        ["pos 11", 4, true],
+        ["pos 12", 1, false]
       ],
-      "caption": "Darker shade means lower entropy (more certain). Position 3 (highlighted) is already confident."
+      "caption": "Darker means lower entropy (confident position). Highlighted positions lock in early; faint ones keep exploring."
     },
     "reads": [
       {
         "b": "Plain reading.",
-        "html": "Entropy is how spread out a guess is. If you think the card in position 1 is almost definitely A (99%), entropy is low. If you are equally confused among five cards (20% each), entropy is high."
+        "html": "Entropy is just how spread-out a probability distribution is. If the model assigns 99% confidence to one position and 1% to others, entropy is low. If it assigns 50% to one and 50% to another, entropy is high."
       },
       {
         "b": "Paper reading.",
-        "html": "The algorithm computes per-position entropy and uses it to set each position's temperature inversely. The fewer alternatives a position entertains (lower entropy), the lower its temperature, which makes the guess snap to a single choice. Confident positions freeze early this way because they have few remaining alternatives to explore."
+        "html": "The paper defines entropy as the sum of negative probabilities times their logarithms, computed per row and column. It then passes this through a scaling function to compute the per-position temperature adjustment, ensuring confident assignments sharpen while uncertain ones stay diffuse."
       }
     ]
   },
   "mechanism": {
-    "h2": "Why adaptive temperature improves stability",
+    "h2": "Why local entropy control beats a global temperature",
     "paras": [
-      "Imagine teaching a child to sort cards. If you say 'everyone must decide now,' a fast learner who knows card 3 is obviously wrong at position 1 has to pretend to be uncertain while slow thinkers catch up. This creates noise and contradictions: person A and person B both claim 90 percent confidence in different cards for the same position. But if fast learners can decide and step aside while slow thinkers keep thinking, the group organizes more cleanly.",
-      "Mathematically, the paper measures which positions are confident (low entropy in their probability distribution) and which are still undecided (high entropy). For confident positions, it applies a lower temperature to Gumbel-Sinkhorn. Lower temperature acts like turning down the heat on a simmer—the probability distribution becomes spiky, with one item dominating and others dropping away. For uncertain positions, it keeps the temperature high, which spreads the probability evenly across remaining alternatives, allowing the training to explore and shift them without forcing an early choice. This local, per-position adjustment prevents the artificial pressure that forces premature commitment and the contradictions that follow, because each position's sharpness depends on how much uncertainty it actually contains."
+      "Here is the core reason the method works. In a typical assignment problem, some rows and columns of the assignment matrix naturally become confident early—the model quickly learns that certain pieces must go in certain positions. Other rows and columns remain ambiguous because multiple orderings satisfy the goal equally well, like a jigsaw puzzle rotated 90 degrees looking just as coherent.",
+      "With a single global temperature, the training dial is either loose (all assignments stay soft and explore) or tight (all assignments push toward discrete choices). This creates a mismatch: confident positions that are ready to lock in cannot, because the dial is still loose. When the dial finally tightens, ambiguous positions are forced to commit prematurely and jump around, destabilizing the entire system.",
+      "The adaptive local temperature solves this by letting each position use its own dial. Confident positions see a high effective temperature (strong push toward discretization) and lock in early, anchoring that part of the solution. Ambiguous positions see a low effective temperature (gentle push, room for exploration) and continue exploring, finding the right answer at their own pace. This heterogeneous sharpening removes the bottleneck: the training no longer waits for the slowest position, and the model reaches a stable, discrete permutation much more reliably."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
         {
           "t": "input",
-          "s": "Soft permutation matrix (all fuzzy guesses)"
+          "s": "Scoring matrix: each position scored for each possible assignment"
         },
         {
           "t": "step",
-          "s": "Compute entropy per position",
-          "hl": false
-        },
-        {
-          "t": "step",
-          "s": "Set temperature: high entropy -> high temp, low entropy -> low temp",
+          "s": "Soft assignment via Sinkhorn normalization",
           "hl": true
         },
         {
           "t": "step",
-          "s": "Apply Gumbel-Sinkhorn with per-position temperature"
+          "s": "Measure entropy per position"
         },
         {
           "t": "step",
-          "s": "Backpropagate loss (structure mismatch) to nudge the weights"
+          "s": "Adjust temperature: high entropy lowers temperature, low entropy raises it",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Recompute soft assignment with local temperatures"
         },
         {
           "t": "output",
-          "s": "Sharper permutation matrix, fewer contradictions"
+          "s": "Permutation matrix: confident positions discrete, uncertain ones soft"
         }
       ]
     }
   },
   "math": {
-    "h2": "Entropy-adaptive Gumbel-Sinkhorn",
-    "words": "The temperature for position i is base_temperature divided by (one plus the entropy of position i). The loss is the mismatch between the learned permutation and the observed structure (like the number of inversions in sorting, or the pixel overlap error in jigsaw).",
-    "equation": "T_i = base_temp / (1 + H_i)\nwhere H_i = -sum_j p_ij * log(p_ij)\nloss = structure_mismatch(learned_perm, ground_structure) + L2_penalty_on_weights",
+    "h2": "The temperature adjustment formula",
+    "words": "For each row and column, the local inverse temperature is the base inverse temperature divided by one plus a scaling function applied to the entropy at that position. This causes high-entropy positions to get lower effective temperatures and low-entropy positions to get higher effective temperatures.",
+    "equation": "beta_row_i = beta_0 / (1 + b(H_row_i))   ,   beta_col_j = beta_0 / (1 + b(H_col_j))",
     "symbols": [
-      ["T_i", "the temperature for position i; lower T makes the distribution spikier"],
-      ["base_temp", "the starting temperature; a hyperparameter you choose"],
-      ["H_i", "the entropy of position i's probability distribution"],
-      ["p_ij", "the probability that position i holds item j"],
-      ["structure_mismatch", "error between the ordered output and the target (e.g. sorted array)"]
+      ["beta_row_i", "local inverse temperature for row i (higher means sharper, more discrete)"],
+      ["beta_0", "base inverse temperature at training step (annealed over time)"],
+      ["H_row_i", "entropy of the soft assignment in row i (high entropy = uncertain, low entropy = confident)"],
+      ["b(H)", "a scaling function that maps entropy to a positive adjustment (higher entropy gives higher value)"],
+      ["beta_col_j", "same adjustment applied per column j"]
     ],
     "worked": {
-      "title": "A tiny worked example",
+      "title": "A tiny worked example with five positions",
       "lines": [
-        "Position 1 has probabilities [0.5, 0.3, 0.2], entropy H_1 = 1.1 (fairly uncertain)",
-        "Position 2 has probabilities [0.95, 0.03, 0.02], entropy H_2 = 0.25 (confident)",
-        "Using base_temp = 1.0:",
-        "T_1 = 1.0 / (1 + 1.1) = 0.48 (moderate, allows exploration)",
-        "T_2 = 1.0 / (1 + 0.25) = 0.8 (higher, keeps it sharp)",
-        "Lower T_2 sharpens position 2 even more; higher T_1 lets position 1 keep exploring."
+        "Suppose base beta_0 = 10, and at this training step we compute row entropies:",
+        "  Row 1 entropy: 0.1 (very confident) -> b(0.1) = 0.2 -> beta_row_1 = 10 / (1 + 0.2) = 8.3",
+        "  Row 3 entropy: 1.2 (very uncertain) -> b(1.2) = 4.0 -> beta_row_3 = 10 / (1 + 4.0) = 2.0",
+        "Row 1 sees effective temperature 8.3 (tight, sharpen fast). Row 3 sees temperature 2.0 (loose, explore).",
+        "After Sinkhorn normalization with these local temperatures, Row 1 assignments are nearly deterministic (close to 0 or 1), while Row 3 assignments stay soft (spread across values like 0.4, 0.3, 0.2)."
       ]
     },
-    "note": "The entropy-based temperature acts as a brake: confident positions freeze early, uncertain ones keep moving."
+    "note": "The division in this formula is the core mechanism: high uncertainty increases the denominator, lowering the effective temperature and keeping that position soft and exploring; low uncertainty decreases the denominator, raising the effective temperature and making that position discretize."
   },
   "bars": {
-    "h2": "Training stability and final quality",
+    "h2": "What the improvement looks like",
     "charts": [
       {
-        "title": "Naive fixed-temperature baseline",
+        "title": "Global temperature baseline",
         "rows": [
-          ["Sorting error at step 100", 28, "bad"],
-          ["Sorting error at step 500", 12, "good"],
-          ["Sorting error at step 1000", 6, "good"],
-          ["Training instability (variance)", 14, "bad"]
+          ["Small problem (10 positions)", 92, "good"],
+          ["Medium problem (50 positions)", 61, "bad"],
+          ["Large problem (200 positions)", 28, "bad"]
         ],
-        "note": "All positions sharpen at once, causing jumpy loss and conflicting assignments."
+        "note": "Performance collapses at scale. One global dial cannot handle the mix of confident and uncertain positions."
       },
       {
-        "title": "Entropy-adaptive temperature",
+        "title": "Adaptive entropy control",
         "rows": [
-          ["Sorting error at step 100", 20, "good"],
-          ["Sorting error at step 500", 8, "good"],
-          ["Sorting error at step 1000", 3, "good"],
-          ["Training instability (variance)", 4, "good"]
+          ["Small problem (10 positions)", 93, "good"],
+          ["Medium problem (50 positions)", 87, "good"],
+          ["Large problem (200 positions)", 84, "good"]
         ],
-        "note": "Confident positions sharpen early; uncertain ones explore steadily. Smooth convergence."
+        "note": "Performance is stable and consistent across problem sizes. Local dials let each position solve at its own pace."
       }
     ]
   },
@@ -210,31 +207,31 @@
     "items": [
       {
         "warn": true,
-        "b": "Entropy is zero for already-discrete choices.",
-        "html": "If a position's guess is already a one-hot (100 percent on one item, zero on others), the entropy is zero and temperature explodes toward infinity. The algorithm needs a numerical floor: never let entropy drop below a tiny epsilon."
+        "b": "Entropy function is noisy early in training.",
+        "html": "In the first few training steps, the soft assignments are nearly uniform, so all entropies are high and all local temperatures are low. The method does not sharpen anything and training stalls. Fix: use a warm-up phase with a fixed global temperature before switching to adaptive control, or bias the entropy measurement toward the model's strongest scores."
       },
       {
         "warn": true,
-        "b": "Misalignment between entropy and true confidence.",
-        "html": "Entropy is based on the current soft guess. Early in training, the model might have high entropy on an easy position (guessing wildly) and low entropy on a hard one (stuck on a wrong guess). Entropy alone cannot distinguish true confidence from confident wrongness. If wrong early choices harden too fast, the updates become weak and cannot correct that incorrect choice to point toward the right one."
+        "b": "The scaling function b(H) must be chosen carefully.",
+        "html": "If b(H) is too aggressive (grows too fast with entropy), uncertain positions stay so soft they never converge. If b(H) is too weak, it reverts to near-global behavior and the stability gains disappear. The paper uses a learned or heuristic function; the right choice depends on the problem."
       },
       {
         "warn": true,
-        "b": "Large permutations with many valid orderings.",
-        "html": "If the problem has multiple correct answers (several valid puzzle solutions), high entropy on some positions might be honest, not a sign of confusion. Adaptive temperature will push these toward forced commitment anyway."
+        "b": "Blocking feedback is critical.",
+        "html": "The paper blocks the learning signal from flowing backward through the entropy-based controller when computing entropy, so the entropy measurement stays stable and does not get caught in a feedback loop. Without this blocking, the entropy signal becomes circular: it adjusts temperature, which changes the assignment, which changes entropy, which reinforces the adjustment. This reinforcing cycle can cause the assignments to oscillate and destabilize."
       },
       {
-        "b": "Adaptive temperature works best when structure is clear.",
-        "html": "When the ground-truth structure is unambiguous (strict sorting, clear spatial fit), adaptive temperature shines. Each position's true answer becomes evident, entropy falls naturally, and temperature follows. The method exploits structure; it does not create it."
+        "b": "Done right, the method converges reliably.",
+        "html": "When entropy is computed cleanly, the scaling function is well-calibrated, and stop-gradient is applied, the local dials self-adjust smoothly: confident positions discretize and anchor the solution, while uncertain positions explore and eventually converge to the right answer."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Build a permutation-learning task: sorting (reorder a shuffled list of integers) or jigsaw (rotate and position puzzle pieces to minimize gaps). Train two versions: one with fixed global temperature (the baseline) and one with entropy-adaptive temperature per position. Measure sorting accuracy and the number of contradictions (positions claiming the same item with high confidence). Run the training step-by-step and log the loss curve and final error. The adaptive version should converge faster because each position's temperature matches its own uncertainty—confident positions commit early, saving training steps—and it should achieve lower final error because positions are never forced to sharpen before they have enough information, reducing contradictory early choices that waste gradient steps fixing later."
+      "Build a simple jigsaw-puzzle solver that scrambles a 10-by-10 image into 100 random tiles, then trains the model to reassemble it. Use a smoothness objective: adjacent tiles in the reordered image should have similar colors, so discontinuous boundaries are penalized. Train two models side by side: one using fixed global temperature, one using adaptive uncertainty-based local temperatures. Plot the stability metric (how much the assignment oscillates between steps) and the final reconstruction quality (how many adjacent pairs have low-color-distance) for both over 500 training steps. The adaptive model should show lower oscillation early on because confident positions lock in and stay locked, anchoring the solution and reducing thrashing, while still achieving better final quality because uncertain positions explore longer and find genuinely better answers."
     ],
-    "metric_eq": "final_error = number_of_incorrectly_positioned_items / total_items\ntraining_stability = variance_of_loss_across_steps",
-    "closing": "Adaptive temperature should produce a smoother loss curve and lower final error than fixed temperature, with the gap widening as problem size increases or structure ambiguity rises."
+    "metric_eq": "stability = mean absolute change in assignment matrix between step t and step t+1; quality = fraction of adjacent tile pairs with color difference less than 30 in RGB space",
+    "closing": "The demo must show that the adaptive model locks in confident positions early and keeps them locked (stabilizes faster because no more energy is wasted on positions that are already solved), while uncertain positions continue exploring and improve (final quality is higher because exploration time is spent only where it helps), whereas the fixed temperature model wobbles unpredictably as it tries to force all positions to sharpen together, wasting training on positions already solved and shortchanging positions that need exploration."
   }
 }

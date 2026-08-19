@@ -1,385 +1,219 @@
 {
- "slug": "icml-or-lbcnybfvbp",
- "title": "SWING: Implicit Graph Random Features",
- "family": "Graph & Geometric Learning",
- "one_liner": "Instead of building a full graph and walking on it, SWING walks in the continuous space where the graph lives, using smart sampling to count walks without ever materializing the graph.",
- "lead": "Graphs that define edges by similarity (like connecting nearby points in a high-dimensional space) are useful but expensive: you need to build the entire graph to analyze it. SWING solves this by never building the graph at all. Instead, it walks in the continuous space where the nodes live, using a sampling technique that accurately counts paths without materializing a single edge.",
- "nav": [
-  [
-   "theme-graph-geometric-learning.html",
-   "Graph & Geometric Learning"
-  ]
- ],
- "toc": [
-  [
-   "zero",
-   "Start from zero"
-  ],
-  [
-   "visual-story",
-   "Visual story"
-  ],
-  [
-   "hidden",
-   "The hidden quantity"
-  ],
-  [
-   "mechanism",
-   "Why it works"
-  ],
-  [
-   "math",
-   "Equation"
-  ],
-  [
-   "failures",
-   "What can go wrong"
-  ],
-  [
-   "demo",
-   "What to build"
-  ]
- ],
- "problem": {
-  "h2": "Why implicit graphs are a bottleneck",
-  "paras": [
-   "In machine learning, a graph is often defined implicitly: two nodes connect if their feature lists (a list of numbers describing each node) are closer than some threshold, or if their similarity score exceeds a cutoff. These epsilon-neighborhood graphs are everywhere \u2014 they define how nearby examples relate in feature space.",
-   "The naive approach: compute every pairwise distance, build the entire graph, then run algorithms (counting random walks, computing edge-weight functions) on it. This breaks when the graph is huge. Building and storing all edges is prohibitively expensive.",
-   "Graph random features are a tool for fast approximations: instead of using the full graph, sample a few random walks and use them as a summary. But random walks require the graph to exist in memory first."
-  ],
-  "callout": {
-   "b": "The core problem.",
-   "html": "You cannot run graph algorithms on implicit graphs without first materializing them, which is expensive or impossible at scale."
-  }
- },
- "comic": {
-  "h2": "Five-panel picture",
-  "panels": [
-   {
-    "title": "1. Nodes with features",
-    "viz": "box",
-    "viz_args": "5 points scattered in 2D feature space",
-    "caption": "Each node is a point. Edges exist between nearby points."
-   },
-   {
-    "title": "2. Naive: build the full graph",
-    "viz": "box",
-    "viz_args": "complete graph with all edges drawn, labeled heavy",
-    "caption": "Compute all pairwise distances, store all edges. Expensive."
-   },
-   {
-    "title": "3. Walk on the graph?",
-    "viz": "weights",
-    "viz_args": [
-     [
-      "step1",
-      3
-     ],
-     [
-      "step2",
-      2
-     ],
-     [
-      "step3",
-      4
-     ],
-     [
-      "step4",
-      1
-     ],
-     [
-      "step5",
-      2
-     ]
+  "slug": "icml-or-lbcnybfvbp",
+  "title": "SWING: Unlocking Implicit Graph Representations for Graph Random Features",
+  "family": "Graph & Geometric Learning",
+  "one_liner": "Instead of building the graph node-by-node, walk through the continuous space where the nodes sit, then linearize the walk logic via random features.",
+  "lead": "Graphs defined by feature similarity (like: use distance to connect points in a point cloud) are expensive—you need to compute the distance between every pair of points and build the whole graph before you can work with it. SWING trades that expensive material graph for a virtual one: it walks through the continuous space that holds the nodes, never materializing the graph at all. This lets modern accelerators (graphics chips) handle graphs of tens of thousands of points without building them first.",
+  "nav": [["theme-graph-geometric-learning.html", "Graph & Geometric Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why building similarity graphs is slow",
+    "paras": [
+      "Some graphs aren't given to you as a list of edges. Instead, they're defined by a rule: connect two nodes if their feature vectors (lists of numbers describing each node) are close enough, or weight the connection by how similar they are. Examples: a point cloud where points are connected by their 3D distance, or a protein dataset where proteins are connected by sequence similarity.",
+      "To apply graph algorithms to these graphs, you need to first compute every pairwise distance—scaling with the square of the number of nodes—and assemble the graph. Only then can you run random walks or apply kernel methods. That's expensive and wasteful: for graphs with tens of thousands of nodes, even storing a table of all pairwise connections becomes impossible.",
+      "A beginner might think: 'Just use graph neural networks—they can aggregate neighbors without building the graph.' But many algorithms (graph kernels, random-walk counting, differential equations on graphs) fundamentally need to know the walk probabilities or kernel values—they can't skip the construction step. That's where this paper steps in."
     ],
-    "caption": "Walks need the graph. This hits memory limits fast."
-   },
-   {
-    "title": "4. SWING: walk in the space",
-    "viz": "box",
-    "viz_args": "arrow from point A to point B with similarity label",
-    "caption": "Skip building edges. Walk directly in feature space."
-   },
-   {
-    "title": "5. Smart sampling counts paths",
-    "viz": "box",
-    "viz_args": "accumulating tally of sampled paths with checkmarks",
-    "caption": "Use smart sampling to weight paths accurately."
-   }
-  ]
- },
- "flow": {
-  "h2": "What it actually does",
-  "steps": [
-   {
-    "b": "Step 1: Skip the graph",
-    "text": "Never compute or store edges. Work only with the lists of numbers describing each node."
-   },
-   {
-    "b": "Step 2: Define walks in the feature space",
-    "text": "A walk between nodes is a sequence of steps through the continuous space where nodes are located."
-   },
-   {
-    "b": "Step 3: Pick the next node with smart probabilities",
-    "text": "At each step, sample the next node using a method that picks closer nodes more often, with correct weights."
-   },
-   {
-    "b": "Step 4: Importance weight each path",
-    "text": "Some paths are more likely than others. Adjust the count to reflect this bias."
-   },
-   {
-    "b": "Step 5: Approximate graph features",
-    "text": "Add up the weighted paths to approximate the result you would get from a full graph walk."
-   }
-  ]
- },
- "object": {
-  "h2": "What the paper changes",
-  "paras": [
-   "The paper replaces the explicit graph (a list of edges you build and store) with walks that happen directly in the continuous feature space. No materialization needed."
-  ],
-  "object": "Graph materialization"
- },
- "hidden": {
-  "h2": "The hidden quantity: path weight accuracy",
-  "name": "Path weight bias",
-  "paras": [
-   "When you sample random walks instead of enumerating all of them, each walk has a probability of being selected. If you count each sampled walk equally, you introduce bias: walks that are naturally rarer appear too often in your sample, and common walks appear too seldom.",
-   "SWING measures this bias (the mismatch between a path's true probability and how often it appears in a sample) using importance sampling, a technique that reweights each sampled path to correct for its selection probability. This is the hidden quantity that determines whether the approximation is accurate."
-  ],
-  "heat": {
-   "cells": [
-    [
-     "path1",
-     4,
-     true
-    ],
-    [
-     "path2",
-     2,
-     false
-    ],
-    [
-     "path3",
-     3,
-     true
-    ],
-    [
-     "path4",
-     1,
-     false
-    ],
-    [
-     "path5",
-     4,
-     true
-    ],
-    [
-     "path6",
-     1,
-     false
-    ],
-    [
-     "path7",
-     2,
-     false
-    ],
-    [
-     "path8",
-     3,
-     true
-    ],
-    [
-     "path9",
-     1,
-     false
-    ],
-    [
-     "path10",
-     2,
-     false
-    ],
-    [
-     "path11",
-     4,
-     true
-    ],
-    [
-     "path12",
-     1,
-     false
-    ]
-   ],
-   "caption": "Darker paths have higher importance weight (more common in true walks, less common in samples)."
-  },
-  "reads": [
-   {
-    "b": "Plain reading.",
-    "html": "Importance weight is the correction factor applied to each sampled item to account for the fact that some items are naturally more likely to be selected than others."
-   },
-   {
-    "b": "Paper reading.",
-    "html": "SWING computes path weights using linearized kernels (a low-rank approximation of the similarity function) coupled with importance sampling techniques grounded in Fourier analysis."
-   }
-  ]
- },
- "mechanism": {
-  "h2": "Why it works: the causal chain",
-  "paras": [
-   "Here is how it works: an implicit graph (defined by a similarity or distance threshold) is really just a view of the feature space under a particular threshold. Walking on the graph is equivalent to stepping through the continuous space while respecting the implicit edge rule.",
-   "Instead of enumerating all edges (expensive), SWING samples a sequence of steps in the continuous space. Each step uses a smart sampling trick to pick the next node, favoring neighbors that are closer (more similar). Because the space is continuous, SWING can compute everything on the fly without storing edges.",
-   "The catch: not all sampled walks are equally representative of the true graph. SWING corrects for this by weighting each walk by its importance (how likely it was to be sampled under the method's sampling scheme). This importance-weighting step, grounded in Fourier-space analysis of the kernels, ensures the final count matches what you would get from walking on the full graph.",
-   "Why this matters: the whole computation stays in the feature space and on the accelerator (GPU), never materializing the graph. For huge graphs, this is orders of magnitude faster, because materializing a graph with millions of edges requires allocating memory for all of them upfront and copying them to the GPU \u2014 SWING avoids this allocation and memory-transfer step entirely, computing only the walks you actually need."
-  ],
-  "visual": {
-   "kind": "pipeline",
-   "stages": [
-    {
-     "t": "input",
-     "s": "Feature lists only, no graph"
-    },
-    {
-     "t": "step",
-     "s": "Sample walk start point",
-     "hl": false
-    },
-    {
-     "t": "step",
-     "s": "Smart sampling picks next node by similarity",
-     "hl": true
-    },
-    {
-     "t": "step",
-     "s": "Weight each path by its probability",
-     "hl": true
-    },
-    {
-     "t": "step",
-     "s": "Repeat to build many walks",
-     "hl": false
-    },
-    {
-     "t": "output",
-     "s": "Approximate graph statistic"
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Conduct random walks directly in the continuous space where nodes sit, not on the discrete graph nodes."
     }
-   ]
-  }
- },
- "math": {
-  "h2": "The math: counting weighted walks",
-  "words": "Path count with importance weighting = sum of (1 / sampling probability for this path) times (indicator that this path was sampled)",
-  "equation": "G(x,y) approx sum_i w_i * I(path_i sampled) where w_i = 1 / P(path_i)",
-  "symbols": [
-   [
-    "G(x,y)",
-    "value of graph feature between nodes x and y"
-   ],
-   [
-    "path_i",
-    "the i-th sampled walk from x"
-   ],
-   [
-    "I(path_i sampled)",
-    "1 if walk i was picked, 0 otherwise"
-   ],
-   [
-    "w_i",
-    "importance weight for walk i"
-   ],
-   [
-    "P(path_i)",
-    "probability that walk i is sampled using the smart sampling method"
-   ]
-  ],
-  "worked": {
-   "title": "A tiny worked example",
-   "lines": [
-    "Suppose a true walk between nodes A and B has 3 possible intermediate steps.",
-    "Walk 1 (direct): P = 0.5, appears 2 times in our sample of 10. Weight: 1/0.5 = 2.0. Contribution: 2.0 * 2 = 4.0.",
-    "Walk 2 (indirect): P = 0.25, appears 1 time. Weight: 1/0.25 = 4.0. Contribution: 4.0 * 1 = 4.0.",
-    "Walk 3 (rare): P = 0.25, appears 0 times. Contribution: 0.",
-    "Unweighted sum: 3 paths in sample. Weighted sum: 4.0 + 4.0 = 8.0. True total: 10. (This is simplified; in practice you use many more walks and the Fourier structure handles the computation.)"
-   ]
   },
-  "note": "Importance weighting corrects the sample so that walks sampled with low probability get higher weight, making the approximate total close to the truth."
- },
- "bars": {
-  "h2": "Naive method vs. SWING",
-  "charts": [
-   {
-    "title": "Naive: materialize and walk",
-    "rows": [
-     [
-      "Memory for graph",
-      95,
-      "bad"
-     ],
-     [
-      "Time to build graph",
-      92,
-      "bad"
-     ],
-     [
-      "Time to run walk",
-      45,
-      "good"
-     ]
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The naive way",
+        "viz": "brain",
+        "caption": "Compute pairwise distances, build the adjacency matrix."
+      },
+      {
+        "title": "2. Computation explodes",
+        "viz": "weights",
+        "viz_args": [["free", 1], ["free", 1], ["free", 1], ["hot", 95], ["hot", 95], ["hot", 95], ["free", 1], ["free", 1], ["free", 1], ["hot", 95], ["free", 1], ["free", 1]],
+        "caption": "Memory and time grow with number of nodes squared."
+      },
+      {
+        "title": "3. SWING: walk in the space",
+        "viz": "box",
+        "viz_args": "Continuous embedding space",
+        "caption": "Start a walker at node p, step through the space itself."
+      },
+      {
+        "title": "4. Linearize via random features",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 52], ["free", 15], ["moved", 48], ["free", 18], ["moved", 55], ["moved", 42], ["free", 20], ["moved", 50], ["free", 12], ["moved", 58], ["free", 15]],
+        "caption": "Precomputed random samples make each step cheap."
+      },
+      {
+        "title": "5. Result: no graph materialization",
+        "viz": "plain",
+        "caption": "Compute kernel-based signatures on accelerators for massive graphs."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Define the implicit graph rule",
+        "text": "Specify how to compute edge weight from two nodes' feature vectors (e.g. Gaussian kernel of distance)."
+      },
+      {
+        "b": "Sample a random walk in the embedding space",
+        "text": "Start at node p, step through the space using weighted random transitions that respect node similarity."
+      },
+      {
+        "b": "Precompute random feature maps",
+        "text": "At each step, evaluate two random feature functions (evolution features, load features) at the walker's current location."
+      },
+      {
+        "b": "Accumulate the load signal",
+        "text": "Track how much each node contributes as the walker passes through, scaled by a decay function."
+      },
+      {
+        "b": "Compute the kernel action",
+        "text": "Average over many random walks to approximate how the graph kernel transforms a given vector, in time proportional to node count, walk length, and walks per node."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing SWING changes",
+    "paras": [
+      "Instead of computing pairwise similarity and building an explicit adjacency matrix, SWING computes the same result—the action of the graph kernel on a vector—using random walks in the continuous embedding space. The object is the walk substrate: from discrete nodes to continuous space."
     ],
-    "note": "Building the full graph is the bottleneck. Once built, walks are fast."
-   },
-   {
-    "title": "SWING: implicit walks",
-    "rows": [
-     [
-      "Memory for graph",
-      5,
-      "good"
-     ],
-     [
-      "Time to build graph",
-      0,
-      "good"
-     ],
-     [
-      "Time to run walk + sampling",
-      48,
-      "good"
-     ]
+    "object": "walk substrate"
+  },
+  "hidden": {
+    "h2": "The load: how much each node influences the walk",
+    "name": "load signal accumulated per node",
+    "paras": [
+      "As a random walker moves through the embedding space, it 'sees' different nodes depending on its location. The load is a measure of how much each node p contributes to the overall kernel computation: it captures which nodes the walk passes close to, scaled by how long the walk lingers near them. In discrete walks, the load is tracked explicitly by incrementing a counter each time a walker visits a node; in SWING's continuous space, the load is computed implicitly using the same random feature functions that define the walk transitions.",
+      "SWING estimates the load by precomputing random feature maps at each step. Because the walk happens in continuous space, you don't store one signature vector per node (which would use memory proportional to the square of node count); instead, you compute the kernel's action on any vector by evaluating the random features at the walker's trajectory and accumulating in linear memory."
     ],
-    "note": "No graph materialization. Sampling overhead is small. Total time is much lower."
-   }
-  ]
- },
- "failures": {
-  "h2": "What can go wrong",
-  "items": [
-   {
-    "warn": true,
-    "b": "Poor sampling accuracy.",
-    "html": "If the sampling method does not accurately reflect the true next-step probabilities (e.g., threshold for similarity is too harsh), the importance weights become very large and the approximation fails."
-   },
-   {
-    "warn": true,
-    "b": "High-dimensional feature spaces.",
-    "html": "In very high dimensions, nearest-neighbor structure becomes unstable (the curse of dimensionality). SWING's accuracy depends on the feature space being reasonably well-behaved."
-   },
-   {
-    "warn": true,
-    "b": "Not enough samples.",
-    "html": "With too few walk samples, rare but important paths are never picked, and importance weighting cannot correct for them. The approximation error grows."
-   },
-   {
-    "b": "Done right.",
-    "html": "Choose the walk length, number of samples, and similarity threshold carefully. Validate the approximation error on a test case where you can afford to materialize the full graph."
-   }
-  ]
- },
- "demo": {
-  "h2": "What a runnable demo should prove",
-  "paras": [
-   "Build a small graph on 1,000 nodes where you can afford to materialize the full graph. Compute a standard graph statistic (e.g., the sum of all 2-hop reachability probabilities) both ways: naively (walk on the full graph) and using SWING (sample walks in the space of learned features). Measure the relative error."
-  ],
-  "metric_eq": "relative error = |SWING estimate - full graph truth| / |full graph truth|",
-  "closing": "The demo should make it impossible to miss that SWING's estimate stays within 5-10% of the truth while using 100x less memory."
- }
+    "heat": {
+      "cells": [["p1", 1, false], ["p2", 3, true], ["p3", 4, true], ["p4", 2, false], ["p5", 3, true], ["p6", 1, false], ["p7", 2, false], ["p8", 4, true], ["p9", 1, false], ["p10", 3, true], ["p11", 2, false], ["p12", 4, true]],
+      "caption": "Darker nodes see more walker traffic and accumulate more load."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The load is simply: as the walker wanders, how much does each node it passes contribute to the final answer?"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Load is the implicit accumulation of signature contributions along the random walk trajectory, computed via linearized random feature approximations instead of explicit node-by-node updates."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "How SWING avoids building the graph",
+    "paras": [
+      "The core trick is to conduct walks in the continuous space (where the node feature vectors live) instead of on the discrete graph nodes. When you step from one location to another in continuous space, you're implicitly stepping between nodes that are close: the random sampler picks the next step probabilities based on how each node's features would weight that transition. This is equivalent to stepping on the graph, but you never build the graph.",
+      "To make this fast, SWING precomputes two random feature maps: one for walk evolution (where the walker goes next) and one for load distribution (how much that location contributes to the accumulation). Random features are a way to turn expensive kernel computations into dot products of simpler vectors—a 'linearization' trick. Because you precompute these features for all nodes before the walk, each step costs only a dot product per walker, so the total cost grows linearly with the number of nodes and steps.",
+      "The load update is relaxed (made continuous) so that instead of storing one signature vector per node (which would require memory proportional to the square of node count), the paper proves that you can compute the kernel's action on any vector in linear time by using the precomputed random features. This is the central insight: the implicit walk gives you the same kernel matrix properties without ever materializing the graph or the signature vectors."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "feature vectors for all nodes"
+        },
+        {
+          "t": "step",
+          "s": "precompute random feature maps at all node locations",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "sample random walker trajectory in continuous space"
+        },
+        {
+          "t": "step",
+          "s": "evaluate features along the trajectory; accumulate load",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "repeat m times, average results"
+        },
+        {
+          "t": "output",
+          "s": "kernel matrix action on vector v, no graph materialized"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The walk and load equations",
+    "words": "position_after_t_steps = evolve(current_position, random_feature_samples). load_contribution = decay_function(t) times load_features(current_position). kernel_approximation = average over m walks of accumulated load.",
+    "equation": "x_t+1 = Evolve(phi(x_t), phi(p), p). l_t = rho(t) * (1 - p_halt)^t. K*v ≈ average_m [ sum_t Normalize(psi(x_t), psi(p)) * (psi(p)^T * v) ]",
+    "symbols": [
+      ["x_t", "location of the walker after t steps in the continuous embedding space"],
+      ["p", "the starting node's feature vector"],
+      ["phi(x)", "random feature map for evolution: samples applied to position x"],
+      ["psi(x)", "random feature map for load: samples applied to position x"],
+      ["l_t", "accumulated load at step t"],
+      ["rho(t)", "decay function that scales the load with step count"],
+      ["p_halt", "probability the walker stops at each step"],
+      ["K*v", "the graph kernel matrix K multiplied by vector v"]
+    ],
+    "worked": {
+      "title": "A tiny worked example: one walker, two steps",
+      "lines": [
+        "Start: walker at node p with feature vector [1, 0.5, 1.5] in 3D space.",
+        "Step 1: Gumbel-softmax samples give transition probabilities to nearby nodes. Walker moves to location x_1 = [1.1, 0.6, 1.4]. Load at step 1 is l_1 = rho(1) * (1 - 0.2)^1 = 1.0 * 0.8 = 0.8.",
+        "Step 2: Walker moves to x_2 = [1.0, 0.7, 1.3]. Load at step 2 is l_2 = rho(2) * (1 - 0.2)^2 = 1.0 * 0.64 = 0.64.",
+        "Total load is accumulated: 0.8 + 0.64 = 1.44 for this walk. Repeat with m=100 walks and average."
+      ]
+    },
+    "note": "The key is that the random feature functions are precomputed, so each step costs only a simple calculation per walker, not a full graph lookup; the continuous-space walk never touches an explicit graph matrix."
+  },
+  "bars": {
+    "h2": "Computational cost comparison",
+    "charts": [
+      {
+        "title": "Naive method: build the graph first",
+        "rows": [["Compute pairwise distances", 1000, "bad"], ["Store all connections", 1000, "bad"], ["Run kernel algorithm", 800, "bad"], ["Usable for small graphs only", 10, "bad"]],
+        "note": "Graph materialization dominates; infeasible for tens of thousands of nodes."
+      },
+      {
+        "title": "SWING: implicit graph",
+        "rows": [["Precompute random features", 50, "good"], ["Sample random walks", 150, "good"], ["No graph storage needed", 0, "good"], ["Scales to tens of thousands of nodes", 900, "good"]],
+        "note": "Cost grows linearly with nodes; runs on accelerators; no materialization."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Bias in Gumbel sampling.",
+        "html": "If the Gumbel-softmax temperature is too high, the walker's transitions become nearly uniform (equal probability to all nodes), losing the graph structure. Too low, and numerical issues arise. The paper handles this via careful normalization, but tuning is needed."
+      },
+      {
+        "warn": true,
+        "b": "Walk length too short.",
+        "html": "If walks terminate too quickly (high p_halt), the load signal is weak and incomplete. Each node needs to be reached by enough walks to get a stable estimate. Sampling m walks per node is expensive if you set m too high."
+      },
+      {
+        "warn": true,
+        "b": "Feature space mismatch.",
+        "html": "SWING assumes the continuous embedding space naturally respects the implicit graph rule. If the features are poorly scaled or the kernel is mismatched to the feature space, the walks won't align with the intended graph, giving wrong answers."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the random feature dimension, walk length, and number of walks are tuned together, SWING recovers the original kernel matrix to high accuracy because more walks and longer paths give a better statistical estimate of how the graph kernels act. Meanwhile, memory grows linearly with the number of nodes instead of quadratically, because the algorithm stores only the current walker position and precomputed feature values, never the full matrix of pairwise similarities."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a 3D point cloud (say, 1000 random points in a sphere). Define an epsilon-neighborhood implicit graph (connect points within Euclidean distance 0.5). Run SWING to compute one row of the graph kernel matrix (the similarity signature of one node to all others). Also compute the true kernel by brute-force distance calculation. Measure how close SWING's result is (L2 distance between the approximate and true signatures). Run it on a single GPU or accelerator and time both methods. Show that SWING finishes in seconds while the naive method takes minutes."
+    ],
+    "metric_eq": "accuracy = 1 - (L2_distance_SWING_vs_truth / L2_distance_zero_vs_truth). runtime_ratio = time_naive / time_SWING.",
+    "closing": "SWING should achieve over 95% accuracy while being 10 to 100 times faster than building the graph explicitly, proving that implicit walks genuinely replace graph materialization because the cost avoids the quadratic pairwise distance computation that dominates traditional methods."
+  }
 }

@@ -1,237 +1,505 @@
 {
-  "slug": "icml-or-lwpku7h8yi",
-  "title": "Knowledge Diversion: Reusing Transformer Parts Across Robot Bodies",
-  "family": "Robotics & Control",
-  "one_liner": "Break a robot controller into universal pieces (shared across all bodies) and specialized pieces (one per body and task), so the same model can run efficiently on tiny robots and transfer to new tasks without retraining.",
-  "lead": "Teaching a robot to move is hard. Teaching one model to control many different robot bodies is much harder — their joints, limbs, and sensors are all different. A Transformer (a type of neural network) can learn to do this, but it is huge and wasteful: it learns each robot separately and needs retraining for each new task. This paper proposes DivMorph, which splits the Transformer into two types of pieces: universal pieces that every robot learns and uses, and specialized pieces that adapt to each robot's unique shape and each specific task. This way, a single model can switch between robots and tasks because the universal pieces are already trained for any robot, so only the specialized pieces change; it runs on smaller devices because only the active pieces run at once; and it learns new tasks much faster because the universal knowledge has already been learned on earlier tasks.",
-  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
-  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
-  "problem": {
-    "h2": "One model for many robots: bloated and stuck",
-    "paras": [
-      "A Transformer is a type of neural network, a system of connected layers that learns by adjusting weights (numbers that control how signals flow through the network). Transformers learn patterns from examples, so people use them to control robots. But here is the problem: every robot body is different. A quadruped (four-legged robot) has different joints and sensors than a humanoid (human-shaped). A Transformer trained on a quadruped cannot control a humanoid without retraining from scratch.",
-      "The naive approach: train one big Transformer per robot. But this wastes memory and computation. The Transformer has millions of weights, and most of them are probably learning things that should be the same across all bodies — like how to read sensor data or how to avoid falling. Why duplicate that work?",
-      "Second naive approach: train one universal Transformer to handle all bodies at once. This seems smart, but it forces every robot to use every weight, even the specialized knowledge one robot does not need. The model becomes bloated. Worse, when a new task arrives (e.g., grasping instead of walking), you have to retrain the entire Transformer, burning samples and time."
-    ],
-    "callout": {
-      "b": "The paper's move:",
-      "html": "Split the Transformer weights into learngenes (universal knowledge all robots share) and tailors (robot- and task-specific knowledge), then switch between them with soft gating (learnable routing controlled by the robot and task)."
-    }
-  },
-  "comic": {
-    "h2": "Five-panel picture",
-    "panels": [
-      {
-        "title": "1. Many robots, one bloated model",
-        "viz": "weights",
-        "viz_args": [["hot", 60], ["hot", 58], ["hot", 62], ["hot", 55], ["hot", 61], ["hot", 59], ["hot", 60], ["hot", 57], ["hot", 63], ["hot", 56], ["hot", 61], ["hot", 58]],
-        "caption": "Every robot uses every weight. Wasteful and needs retraining."
-      },
-      {
-        "title": "2. Factorize weights via SVD",
-        "viz": "weights",
-        "viz_args": [["warm", 40], ["warm", 38], ["warm", 35], ["warm", 42], ["warm", 39], ["warm", 37], ["warm", 41], ["warm", 36], ["warm", 40], ["warm", 38], ["warm", 39], ["warm", 37]],
-        "caption": "SVD breaks weights into ranked building blocks. Each robot can use fewer."
-      },
-      {
-        "title": "3. Learngenes vs tailors",
-        "viz": "box",
-        "viz_args": "Quadruped: core units + legs | Humanoid: core units + arms",
-        "caption": "Universal core is shared. Tailors adapt to each body and task."
-      },
-      {
-        "title": "4. Soft gating switches pieces on/off",
-        "viz": "weights",
-        "viz_args": [["moved", 40], ["free", 15], ["moved", 35], ["free", 12], ["moved", 38], ["free", 14], ["moved", 42], ["free", 16], ["moved", 39], ["free", 13], ["moved", 41], ["free", 17]],
-        "caption": "Router (conditioned on robot type) slides between universal and tailored."
-      },
-      {
-        "title": "5. Deploy lean, transfer fast",
-        "viz": "box",
-        "viz_args": "Small device: only core + task-specific",
-        "caption": "Model shrinks 16.7x for single robot. New tasks learn 3.3x faster."
-      }
-    ]
-  },
-  "flow": {
-    "h2": "What it actually does",
-    "steps": [
-      {
-        "b": "Start with a big random Transformer",
-        "text": "Initialize weights normally; do not train yet."
-      },
-      {
-        "b": "Factorize with SVD",
-        "text": "Break each weight block into ranked parts (like unpacking a messy filing cabinet into sorted labeled bins)."
-      },
-      {
-        "b": "Train soft gating routes",
-        "text": "Learn which parts to activate based on the robot type and task. The router is a small learned function."
-      },
-      {
-        "b": "Fine-tune learngenes and tailors",
-        "text": "Update the shared weights (learngenes) on all robot/task pairs; update specialized weights (tailors) per pair."
-      },
-      {
-        "b": "Deploy or transfer",
-        "text": "Pick a robot and task, activate only their pieces, run the lean model or train tailors for a new task."
-      }
-    ]
-  },
-  "object": {
-    "h2": "The one thing that changes: which Transformer weights get used",
-    "paras": [
-      "Instead of using all weights for every robot, DivMorph uses a small router (controlled by robot and task embeddings) to mix universal weights (learngenes) and specialized weights (tailors). The router does not add much computation; it is just a learned gating function that says how much of each component to use for this particular situation."
-    ],
-    "object": "Transformer weight routing"
-  },
-  "hidden": {
-    "h2": "The hidden quantity: knowledge overlap",
-    "name": "Knowledge overlap between robot morphologies",
-    "paras": [
-      "The paper assumes that different robot bodies share some core knowledge (how to parse sensor data, how to coordinate movements) but differ in details (how to use six legs vs two arms). Knowledge overlap is the fraction of a Transformer's weights that can be reused across bodies without hurting performance. High overlap means most weights are learngenes; low overlap means most are tailors.",
-      "The paper infers overlap by factorizing the weights via SVD (Singular Value Decomposition, a math trick that breaks down a grid of numbers into ranked components) and observing how many low-rank components are enough to represent the learned behavior. If a few components work for all robots, overlap is high. If each robot needs its own components, overlap is low. DivMorph measures this implicitly by tuning which components to activate for each robot/task pair."
-    ],
-    "heat": {
-      "cells": [
-        ["Sensor parsing", 4, true],
-        ["Balance logic", 4, true],
-        ["Leg coordination", 3, false],
-        ["Arm skill", 1, false],
-        ["Motor mapping", 2, false],
-        ["Grasping", 1, false],
-        ["Walking pattern", 3, false],
-        ["Climbing skill", 1, false],
-        ["Load handling", 2, false],
-        ["Turning logic", 4, true],
-        ["Contact detection", 3, true],
-        ["Energy efficiency", 2, false]
-      ],
-      "caption": "Darker means shared across all robots. Light means robot- or task-specific."
-    },
-    "reads": [
-      {
-        "b": "Plain reading:",
-        "html": "Some parts of the brain should work the same for all robots (reading sensors, basic balancing). Other parts are unique (a quadruped uses different leg patterns than a biped). The paper assumes you can separate these two groups and train them differently."
-      },
-      {
-        "b": "Paper reading:",
-        "html": "Via SVD factorization of learned Transformer weights, the paper observes that a small set of rank-one components capture the shared behavior across morphologies, while additional task-specific components are needed per pair. This justifies the learngene/tailor split."
-      }
-    ]
-  },
-  "mechanism": {
-    "h2": "Why splitting weights by robot type works",
-    "paras": [
-      "Imagine a Transformer as a filing cabinet with millions of drawers, each holding a number (a weight). To make the model work for all robots, you could fill all drawers the same (wasteful) or fill some drawers universal and others specialized (smart). The problem is you do not know which drawers should be which until after training.",
-      "DivMorph solves this by treating the weights as a grid of numbers and using SVD to reveal hidden structure. SVD finds the most important 'directions' in that grid — the components that carry the most signal. If a quadruped and humanoid both rely on the same top few components, those components are universal (learngenes). If each robot needs different low-importance components, those are specialized (tailors). The soft gating function learns to mix them: given a robot type and task, it says 'use 80% of learngene #1, 20% of learngene #2, and 100% of this tailor.' This recomposition is efficient because you run only the pieces you need.",
-      "Why does this help transfer? When a new task arrives, most of the Transformer (the learngenes) is already trained on many robot/task pairs, so it is a strong starting point. Only the tailors need to learn the new task, and since they are much smaller than the full Transformer, they require far fewer training samples to converge; retraining from scratch would require learning both universal and specialized pieces together from zero, which is much slower."
-    ],
-    "visual": {
-      "kind": "pipeline",
-      "stages": [
-        {
-          "t": "input",
-          "s": "Robot type and task"
-        },
-        {
-          "t": "step",
-          "s": "Query learngene weights and tailor weights"
-        },
-        {
-          "t": "step",
-          "s": "Router (soft gating) computes mix ratio for this robot/task",
-          "hl": true
-        },
-        {
-          "t": "step",
-          "s": "Combine pieces: mix_factor * learngenes + (1 - mix_factor) * tailors"
-        },
-        {
-          "t": "output",
-          "s": "Efficient policy for this robot and task"
-        }
-      ]
-    }
-  },
-  "math": {
-    "h2": "The core equation: soft mixing by gating",
-    "words": "For each Transformer component, the active weight is: gate-score times the learngene plus one-minus-gate-score times the tailor. The gate score is a learned function of the robot type and task. Summed across all components, this gives the final Transformer for deployment.",
-    "equation": "W_active = g(robot, task) * W_learngene + (1 - g(robot, task)) * W_tailor",
-    "symbols": [
-      ["W_active", "The weights actually used by the Transformer for this robot/task pair"],
-      ["g(robot, task)", "Soft gate score, a number between 0 and 1, learned to decide the blend"],
-      ["W_learngene", "Universal weights shared across all robots"],
-      ["W_tailor", "Weights specialized for this robot and task"]
-    ],
-    "worked": {
-      "title": "A tiny worked example",
-      "lines": [
-        "Say the learngene has weight 0.5 for sensor-reading and the tailor has weight 0.3.",
-        "A quadruped sends robot='quad', task='walk'. The gating function learns: g(quad, walk) = 0.7.",
-        "Active weight = 0.7 * 0.5 + (1 - 0.7) * 0.3 = 0.35 + 0.09 = 0.44.",
-        "A humanoid with robot='biped', task='walk' might get g(biped, walk) = 0.6.",
-        "Its active weight = 0.6 * 0.5 + 0.4 * 0.3 = 0.30 + 0.12 = 0.42.",
-        "Same learngene, different tailor emphasis, one gate per pair: each body learns a custom blend with minimal duplication."
-      ]
-    },
-    "note": "The gate acts as a volume knob, blending universal knowledge (learngene) with robot-specific knowledge (tailor) on the fly."
-  },
-  "bars": {
-    "h2": "Efficiency and transfer gains",
-    "charts": [
-      {
-        "title": "Naive: train each robot separately",
-        "rows": [
-          ["Quad on walking", 88, "good"],
-          ["Biped on walking", 85, "good"],
-          ["Transfer quad to jumping (retrain)", 20, "bad"],
-          ["Model size (all copies)", 100, "bad"]
-        ],
-        "note": "Each robot gets a full Transformer. New task requires full retraining."
-      },
-      {
-        "title": "DivMorph: learngenes and tailors",
-        "rows": [
-          ["Quad on walking", 87, "good"],
-          ["Biped on walking", 86, "good"],
-          ["Transfer quad to jumping (finetune only tailor)", 78, "good"],
-          ["Model size (core shared + small tailors)", 6, "good"]
-        ],
-        "note": "Learngenes trained once on all robot/task pairs. Tailors fine-tuned per pair. Transfer is fast; memory is low."
-      }
-    ]
-  },
-  "failures": {
-    "h2": "What can go wrong",
-    "items": [
-      {
-        "warn": true,
-        "b": "The gate learns wrong blends.",
-        "html": "If the gating function is too simple (e.g., a shallow network), it may mix learngenes and tailors poorly, and the policy fails. The paper uses embeddings of the robot and task, so the gate can learn flexible blends, but a bad initialization could hurt."
-      },
-      {
-        "warn": true,
-        "b": "Learngenes overfit to early robots.",
-        "html": "If training starts with only quadrupeds, the learngenes may specialize to quad walking, making them useless for bipeds. Careful curriculum or balanced sampling is needed."
-      },
-      {
-        "warn": true,
-        "b": "SVD ranks chosen wrong.",
-        "html": "SVD factorization requires choosing how many components to keep. Too few and you lose signal; too many and you lose compression. The paper does not fully detail how this is chosen, so tuning per domain may be needed."
-      },
-      {
-        "b": "Done right: learngenes emerge as general, tailors as specialized.",
-        "html": "With proper training, learngenes capture sensor reading and basic movement logic (useful for all robots), and tailors adapt to body shape and task, achieving both compression and transfer."
-      }
-    ]
-  },
-  "demo": {
-    "h2": "What a runnable demo should prove",
-    "paras": [
-      "Build two simple robots (e.g., a 4-legged simulator and a 2-legged simulator using PyBullet or MuJoCo). Train a DivMorph Transformer on both, toggling the gating network conditioned on robot type. Measure: (1) model size for a single-robot deployment (should be 10-20x smaller than a full Transformer), (2) sample efficiency for transfer (train the 4-legged on walking, then finetune only the 2-legged tailor to learn jumping; count samples needed and compare to retraining from scratch)."
-    ],
-    "metric_eq": "Transfer efficiency = samples_naive_retrain / samples_finetune_tailors. Model compression = size_full_transformer / size_deployed_model.",
-    "closing": "The demo must make it impossible to miss: learngenes enable fast transfer and small deployment size because they are already well-trained on the first task, so the new task only needs to tune tailors, not rebuild the whole model."
+ "slug": "icml-or-lwpku7h8yi",
+ "title": "Knowledge Diversion for Efficient Morphology Control",
+ "family": "Robotics & Control",
+ "one_liner": "Split a robot controller into reusable pieces and task-specific parts by decomposing its weight matrices at the start.",
+ "lead": "Building a single robot controller that works for many different robot shapes and many tasks is expensive \u2014 the model gets huge and you need to retrain it from scratch for each new task. This paper proposes DivMorph, which decomposes the controller's weights into universal building blocks and task-specific adaptations upfront, letting the same pieces recombine for different robots and tasks with far fewer numbers to store.",
+ "nav": [
+  [
+   "theme-robotics-control.html",
+   "Robotics & Control"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Many robots, many tasks, one model that breaks at scale",
+  "paras": [
+   "Today, if you want a robot controller that works for, say, 100 different robot shapes and 5 different tasks each, you face a dilemma. One approach: train a single giant universal model that sees all robots and all tasks at once. It works in theory, but the model explodes in size \u2014 a transformer that handles all combinations of limbs and task instructions becomes so large that it is expensive to run and takes forever to train. The other approach: train separate models for each robot-task pair. This is lightweight but defeats the purpose \u2014 you are now maintaining 500 different models, and each new task requires retraining from scratch on each robot.",
+   "A beginner might try to just shrink the big model with tricks like pruning (delete weights you think are unimportant) or quantization (round numbers to fewer bits). But these fail because the real problem is not just size \u2014 it is that the model mixes together the knowledge it needs (movement rules that work on any robot), the details that are robot-specific (how many joints does this robot have), and the details that are task-specific (go to a goal vs. pick up an object). All tangled together, you cannot reuse the shared part without keeping the extra baggage."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "Separate the universal knowledge in a robot controller from the pieces that vary by robot shape or task, so the same components can be reused."
   }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. One big tangled model",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      68
+     ],
+     [
+      "hot",
+      72
+     ],
+     [
+      "hot",
+      65
+     ],
+     [
+      "free",
+      15
+     ],
+     [
+      "free",
+      20
+     ],
+     [
+      "hot",
+      70
+     ],
+     [
+      "warm",
+      45
+     ],
+     [
+      "warm",
+      48
+     ],
+     [
+      "free",
+      18
+     ],
+     [
+      "warm",
+      50
+     ],
+     [
+      "free",
+      12
+     ],
+     [
+      "hot",
+      62
+     ]
+    ],
+    "caption": "Universal controller mixes shared, morphology-specific, task-specific knowledge \u2014 bloated and hard to reuse."
+   },
+   {
+    "title": "2. SVD breaks it into factor units",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "warm",
+      52
+     ],
+     [
+      "free",
+      18
+     ],
+     [
+      "warm",
+      48
+     ],
+     [
+      "free",
+      15
+     ],
+     [
+      "warm",
+      55
+     ],
+     [
+      "free",
+      20
+     ],
+     [
+      "warm",
+      50
+     ],
+     [
+      "free",
+      12
+     ],
+     [
+      "warm",
+      58
+     ],
+     [
+      "free",
+      16
+     ],
+     [
+      "warm",
+      53
+     ],
+     [
+      "free",
+      14
+     ]
+    ],
+    "caption": "SVD decomposes into pairs of number-lists, each a basic building block. Stacked and labeled."
+   },
+   {
+    "title": "3. Soft gates choose which pieces",
+    "viz": "box",
+    "viz_args": "Learngenes [on] | Tailors [on/off]",
+    "caption": "Dynamic gates activate shared pieces for all robots and task-specific pieces only when needed. Mixture-of-experts style."
+   },
+   {
+    "title": "4. Pieces recombine per robot and task",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      52
+     ],
+     [
+      "free",
+      18
+     ],
+     [
+      "moved",
+      48
+     ],
+     [
+      "moved",
+      15
+     ],
+     [
+      "moved",
+      55
+     ],
+     [
+      "moved",
+      20
+     ],
+     [
+      "free",
+      50
+     ],
+     [
+      "free",
+      12
+     ],
+     [
+      "moved",
+      58
+     ],
+     [
+      "moved",
+      16
+     ],
+     [
+      "moved",
+      53
+     ],
+     [
+      "moved",
+      14
+     ]
+    ],
+    "caption": "Different gate patterns activate different subsets. Same pieces, different combinations for each scenario."
+   },
+   {
+    "title": "5. Tiny model, reusable components",
+    "viz": "plain",
+    "caption": "Deployed controller is 17 times smaller and transfers to new tasks without retraining."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Decompose the weights",
+    "text": "Before training, break each weight block via SVD into ranked pairs of number-lists."
+   },
+   {
+    "b": "Assign factor units to roles",
+    "text": "Label each pair as shared knowledge, robot-shape knowledge, or task knowledge."
+   },
+   {
+    "b": "Encode the context",
+    "text": "Convert robot morphology (limb counts and types) and task instructions into short summaries of numbers."
+   },
+   {
+    "b": "Soft gate the factors",
+    "text": "Use dynamic soft gates \u2014 soft weights that sum to 1, not binary on/off \u2014 to scale each factor based on context."
+   },
+   {
+    "b": "Train once, recombine many ways",
+    "text": "Standard RL training now adjusts only the gate weights and shared knowledge; task-specific and robot-specific pieces stay separate."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper does not train a single huge weight block (the learned numbers in the neural network). Instead, it starts with weights broken into pieces and trains which pieces to activate. At inference (when the finished model answers a new question), it selectively activates different pieces depending on the robot and task."
+  ],
+  "object": "the gates that activate pieces"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: knowledge compartmentalization",
+  "name": "degree of knowledge disentanglement",
+  "paras": [
+   "The paper's core claim rests on a hidden measurement: how well separated are the shared, robot-specific, and task-specific components in the trained model? Conceptually, if the decomposition works, the shared factors should be active for all robots and tasks, while the robot-specific factors should fire only for that robot, and task-specific factors only for that task. The paper does not give a single numeric score for this, but infers it from whether the trained gates actually specialize \u2014 whether learned gate patterns cluster by robot or by task.",
+   "The paper estimates this hidden quantity by examining the learned gate patterns post-training and checking whether different robots learn different gate combinations (morphology disentanglement) and different tasks learn different combinations (task disentanglement). High disentanglement means the pieces stayed separate; low disentanglement means they got tangled again."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "shared",
+     4,
+     true
+    ],
+    [
+     "shared",
+     4,
+     true
+    ],
+    [
+     "shared",
+     4,
+     true
+    ],
+    [
+     "robot-A-only",
+     1,
+     false
+    ],
+    [
+     "robot-B-only",
+     1,
+     false
+    ],
+    [
+     "task-1-only",
+     2,
+     false
+    ],
+    [
+     "task-2-only",
+     2,
+     false
+    ],
+    [
+     "robot-C-only",
+     1,
+     false
+    ],
+    [
+     "shared",
+     4,
+     true
+    ],
+    [
+     "task-3-only",
+     2,
+     false
+    ],
+    [
+     "robot-A-only",
+     1,
+     false
+    ],
+    [
+     "shared",
+     4,
+     true
+    ]
+   ],
+   "caption": "Darker means more active for all robots and tasks (shared). Light means active for specific robot or task only."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "After training, if gate patterns cluster by robot, the robot-specific factors worked. If they cluster by task, task-specific factors worked. If shared gates stay high for all combinations, the shared knowledge stayed truly shared."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The paper validates this by testing on held-out morphologies and tasks, checking whether a model trained on 80 robots transfers to 20 new robots and whether policy trained on 4 tasks transfers to a 5th task without retraining."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why decomposition lets reuse work",
+  "paras": [
+   "SVD factorization works because it breaks a complex weight block into a ranked sum of simple pieces. The insight: not all pieces are equally important for all robots or tasks. By using soft gates to selectively scale each piece, the training algorithm can learn which pieces to trust for which scenario. When the model learns that some pieces are always needed (shared learngenes) and others only for specific robots or tasks (tailors), the shared pieces stay stable and reusable while the tailors get tuned freely. This avoids the entanglement that killed earlier approaches.",
+   "The soft gating (using mixture-of-experts weighting instead of binary on/off) matters because it allows multiple pieces to be adjusted at once during training and because partial turn-on of the parts prevents catastrophic failure. During training, if a piece helps a little, the soft gate can scale it to 0.3 instead of forcing it fully on or fully off. This matters because binary gating forces a hard choice \u2014 either a piece is fully in (gate at 1) or fully out (gate at 0) \u2014 which can lead to oscillation as training pushes and pulls; soft gates slide smoothly, so small adjustments compound reliably rather than flipping. More importantly, soft gates make it harder to accidentally erase a shared piece when tuning for one specific robot, because even if a new task pushes down on a shared factor, other tasks can pull it back up gradually through their soft gates. Because the shared pieces are used by all robots, turning them off ruins everything; soft gates let multiple robots compete for the same factor safely."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "weight block"
+    },
+    {
+     "t": "step",
+     "s": "SVD factorization breaks into ranked pairs",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "assign factor units to role: shared, robot-specific, task-specific"
+    },
+    {
+     "t": "step",
+     "s": "encode robot morphology and task as number-lists"
+    },
+    {
+     "t": "step",
+     "s": "apply soft gates: scale each factor by learned weights summing to 1",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "recomposed controller for this robot and task"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The core equation",
+  "words": "Each factor unit is scaled by a soft gate weight, then summed. The soft gate weight depends on the robot and task embeddings.",
+  "equation": "controller_output = sum_j ( softgate_j(morph, task) * factor_unit_j )",
+  "symbols": [
+   [
+    "controller_output",
+    "the final learned numbers used for this scenario"
+   ],
+   [
+    "softgate_j(morph, task)",
+    "learned weight for factor unit j, ranges 0 to 1, input-dependent"
+   ],
+   [
+    "factor_unit_j",
+    "the j-th pair from SVD, treated as a building block"
+   ],
+   [
+    "morph",
+    "summary numbers describing robot morphology (limb counts and types)"
+   ],
+   [
+    "task",
+    "summary numbers describing task instructions (text converted to numbers)"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose a weight block has 4 factor units: shared, robot-A, robot-B, task-goal.",
+    "For robot A doing a go-to-goal task: gate weights are 1.0, 0.9, 0.1, 0.8 for shared, robot-A, robot-B, task-goal respectively.",
+    "For robot B doing the same task: gate weights are 1.0, 0.1, 0.9, 0.8.",
+    "Same shared (1.0) and task-goal (0.8) factors, but robot-A now 0.1 (off) and robot-B now 0.9 (on).",
+    "Final output for robot A: 1.0 times shared plus 0.9 times robot-A plus 0.1 times robot-B plus 0.8 times task-goal. For robot B: 1.0 times shared plus 0.1 times robot-A plus 0.9 times robot-B plus 0.8 times task-goal. Same shared piece and task piece; robot piece swapped."
+   ]
+  },
+  "note": "The soft gates learn which factors to activate; shared factors stay high across all robots and tasks, task-specific factors vary by task only, and robot-specific factors vary by robot only."
+ },
+ "bars": {
+  "h2": "Sample efficiency and model size gains",
+  "charts": [
+   {
+    "title": "Naive method: train each task separately",
+    "rows": [
+     [
+      "New task, existing robot, 0 shots",
+      15,
+      "bad"
+     ],
+     [
+      "New task, existing robot, 100 shots",
+      58,
+      "bad"
+     ],
+     [
+      "New task, existing robot, 1000 shots",
+      82,
+      "good"
+     ]
+    ],
+    "note": "Learning a new task from scratch on the same robot takes thousands of environment samples and full retraining."
+   },
+   {
+    "title": "DivMorph: shared components plus soft gates",
+    "rows": [
+     [
+      "New task, existing robot, 0 shots",
+      42,
+      "bad"
+     ],
+     [
+      "New task, existing robot, 100 shots",
+      76,
+      "good"
+     ],
+     [
+      "New task, existing robot, 1000 shots",
+      88,
+      "good"
+     ]
+    ],
+    "note": "Shared learngenes carry over immediately, so even with zero shots the model is not starting blind. By 100 samples the new task gates have learned enough. 3.3 times fewer samples needed."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Shared factors get accidentally erased.",
+    "html": "If a new task requires disabling a shared factor (turning its soft gate to 0), it breaks all other robots. This happens if the shared factor is poorly chosen or the task is incompatible with the factorization. Solution: validate that shared factors appear in many successful trajectories; if not, reclassify."
+   },
+   {
+    "warn": true,
+    "b": "Soft gates converge to the same value for all robots or tasks.",
+    "html": "If the gates do not specialize \u2014 if the model learns that activating all factors equally always works \u2014 then you have no disentanglement and no benefit. This can happen if the factor units are not truly separable (SVD gave nearly equal singular values) or if the downstream loss does not punish model size. Solution: monitor whether gates cluster differently per robot or task post-training; retrain with a size penalty term if gates stay flat."
+   },
+   {
+    "warn": true,
+    "b": "Overfitting to training robots and tasks.",
+    "html": "Robot-specific and task-specific factors can overfit to the training set, so they transfer poorly to unseen robots or tasks. This looks like high disentanglement but low zero-shot accuracy on new morphologies. Solution: test on held-out robots and tasks; gently steer tailor factors to stay smaller using a penalty in training."
+   },
+   {
+    "b": "Done right.",
+    "html": "SVD factors are truly separable (singular values decrease clearly), soft gates specialize by morphology and task (measurable via gate clustering), and shared factors remain high across all contexts (no accidental zeros). Zero-shot transfer works."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a minimal version: train a transformer controller on 10 robot morphologies and 2 tasks using standard RL (PPO or similar). Apply SVD to one weight block in the transformer. Manually assign the singular vector pairs to learngenes (first 3), robot-specific tailors (next 2), and task-specific tailors (last 2). Add soft gating layers that take morphology and task number-lists and output gate weights. Train only the gating weights and the shared learngenes; freeze the tailor factors at their initial random values. On a new morphology or new task, recompute the gate weights only."
+  ],
+  "metric_eq": "cross-task-transfer-sample-efficiency = samples-needed-for-naive / samples-needed-for-DivMorph ; model-size-ratio = naive-params / DivMorph-params",
+  "closing": "The demo must show that soft gating alone (learning gate weights for pre-decomposed factors) reaches 50% of the performance of full training, and that reusing shared factors cuts sample cost to a third or less."
+ }
 }

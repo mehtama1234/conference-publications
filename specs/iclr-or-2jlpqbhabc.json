@@ -1,219 +1,235 @@
 {
- "slug": "iclr-or-2jlpqbhabc",
- "title": "VideoAnchor: Reinforcing Visual Cues Across Frames",
- "family": "Multimodal",
- "one_liner": "A plug-and-play module that anchors a vision-language model's focus to the same objects across video frames by using a mathematical fact: points in a cluster can be written as mixtures of other points in that cluster.",
- "lead": "When a vision-language model (a system that looks at images and answers questions about them) watches a video, it should recognize the same objects in each frame. But instead, language words hog all the model's focus (the mechanism that decides which pieces to emphasize), drowning out the visual pieces. VideoAnchor fixes this by using a mathematical fact from clustering: when objects form a tight group, each object can be written as a mixture of the others in that group. It uses this fact to find which visual pieces (small patches of pixels) across frames are likely the same object by measuring how well they blend with each other, then boosts those pieces' importance, without retraining the whole model.",
- "nav": [["theme-multimodal.html","Multimodal"]],
- "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
- "problem": {
-  "h2": "Vision-language models forget visual cues in videos",
-  "paras": [
-   "A vision-language model processes a video by breaking each image into pieces (small patches of pixels). When answering a question, the model uses a focus system (the part that decides which pieces matter most) to weight each piece by importance. The problem: language pieces (the words in the question) dominate, so picture pieces get pushed to the background. Worse, when watching a sequence of frames, the model treats each frame alone. If a box appears in frames 1, 3, and 5, the model might spot it once and forget it the other times.",
-   "A beginner might try making the model bigger or retraining on videos. Both are slow and fragile. The deeper problem: the focus weights are driven by language alone, with nothing tying the same picture objects together across frames."
-  ],
-  "callout": {
-   "b": "The core problem.",
-   "html": "Picture pieces fade into the background because language pieces attract all the focus, and there is nothing tying the same picture objects together across frames."
-  }
- },
- "comic": {
-  "h2": "Five-panel picture",
-  "panels": [
-   {
-    "title": "1. A video frame",
-    "viz": "box",
-    "viz_args": "Frame with red box and dog",
-    "caption": "Each frame has the same dog (red box outline)."
-   },
-   {
-    "title": "2. Focus split unfairly",
-    "viz": "weights",
-    "viz_args": [["hot", 80], ["free", 10], ["free", 5], ["free", 3], ["free", 2]],
-    "caption": "Language pieces (first bar) dwarf picture pieces (the rest)."
-   },
-   {
-    "title": "3. Model forgets the pattern",
-    "viz": "weights",
-    "viz_args": [["free", 15], ["free", 20], ["free", 12], ["free", 8], ["free", 5]],
-    "caption": "In frame 2, same dog fades to noise."
-   },
-   {
-    "title": "4. VideoAnchor anchors to similar pieces",
-    "viz": "box",
-    "viz_args": "Frames linked by match lines",
-    "caption": "Finds which pieces in frame 2 best match frame 1's dog."
-   },
-   {
-    "title": "5. Focus reinforced",
-    "viz": "weights",
-    "viz_args": [["warm", 35], ["hot", 55], ["free", 8], ["free", 2]],
-    "caption": "Dog pieces rise; model answers spatial questions correctly now."
-   }
-  ]
- },
- "flow": {
-  "h2": "What it actually does",
-  "steps": [
-   {
-    "b": "Compute picture piece similarity",
-    "text": "For each frame, build a small table showing how similar each picture piece is to every other piece."
-   },
-   {
-    "b": "Find cluster affinity",
-    "text": "Use the similarity pattern to estimate which pieces belong to the same cluster (a group of related objects)."
-   },
-   {
-    "b": "Link pieces across frames",
-    "text": "When similar clusters appear in consecutive frames, mark which pieces in the new frame match the old frame's cluster."
-   },
-   {
-    "b": "Boost focus scores",
-    "text": "Increase the focus weight for pieces that match, so they rise above language noise."
-   },
-   {
-    "b": "No retraining needed",
-    "text": "Plug the module in front of the model and run the model on new questions. The model itself stays unchanged."
-   }
-  ]
- },
- "object": {
-  "h2": "What the paper changes",
-  "paras": [
-   "VideoAnchor modifies one thing: the focus scores (the raw weights before the final step that turns raw scores into percentages adding to 100%) for picture pieces in video frames. It does not retrain the model's numbers, add new numbers, or change how the model is built. It computes a small bonus based on which pieces are similar across frames and adds that bonus to the focus scores, lifting important picture pieces out of the shadow of language."
-  ],
-  "object": "Focus scores for picture pieces"
- },
- "hidden": {
-  "h2": "Cluster matching strength: the glue holding frames together",
-  "name": "How tightly pieces cluster across frames",
-  "paras": [
-   "This is the central quantity the method measures. When objects form a tight group, each object can be written as a blend of the others in that group. For video pieces, this means: if a dog appears in frame 1 and frame 2, the dog pieces in frame 2 should be expressible (writable as a blend) using dog pieces from frame 1. This blend strength is high when the pieces are truly the same object and low when they are unrelated.",
-   "VideoAnchor estimates this by building a similarity table (a grid where each cell is a score) and looking for which piece pairs have the highest match score (closeness). A high match score between frame 1's piece and frame 2's piece means they are likely the same picture object."
-  ],
-  "heat": {
-   "cells": [["frame1-dog", 4, true], ["frame1-bg", 1, false], ["frame2-dog", 4, true], ["frame2-bg", 1, false], ["frame3-dog", 4, true], ["frame3-bg", 1, false], ["noise", 0, false], ["noise", 0, false], ["coherence", 4, true], ["frame-link", 3, true], ["match", 3, true], ["consistency", 4, true]],
-   "caption": "Darker means pieces are more similar. Marked cells are the dog across frames."
-  },
-  "reads": [
-   {
-    "b": "Plain reading.",
-    "html": "Match strength is how much one piece can be built from others. High match means they are the same thing."
-   },
-   {
-    "b": "Paper reading.",
-    "html": "Self-expressiveness property: when pieces form a cluster, any piece can be written as a blend of cluster neighbors. A match table detects which piece sets form coherent patterns across time."
-   }
-  ]
- },
- "mechanism": {
-  "h2": "Why tying frames together fixes the problem",
-  "paras": [
-   "The root cause is that focus is purely local: each frame is scored independently, with no memory of past frames. Language pieces win every time because the model learned from text, so it favors language by default. VideoAnchor breaks this by adding a second scoring channel: cluster match strength, which is mathematical and does not care if a piece is a noun or a number. When the same picture cluster (the dog, the background, a moving hand) appears in the next frame, its pieces get a boost because the match score says they belong to the same cluster as before. This boost is small (0.1 times the match score), so it does not change the model's core learned weightings; but it is consistent and cumulative across frames, so picture pieces with matching neighbors gradually climb above noise. The mechanism is a shortcut: instead of retraining the model to care more about pictures, we add a hint saying this picture piece matches a past picture piece, so focus on it."
-  ],
-  "visual": {
-   "kind": "pipeline",
-   "stages": [
-    {
-     "t": "input",
-     "s": "Frame sequence and picture pieces from all frames"
-    },
-    {
-     "t": "step",
-     "s": "Build similarity table for each frame's pieces",
-     "hl": false
-    },
-    {
-     "t": "step",
-     "s": "Compute cluster match strength (blend scores)",
-     "hl": true
-    },
-    {
-     "t": "step",
-     "s": "Match high-score pieces across consecutive frames",
-     "hl": true
-    },
-    {
-     "t": "step",
-     "s": "Add match bonuses to picture piece focus scores",
-     "hl": false
-    },
-    {
-     "t": "output",
-     "s": "Boosted focus scores; picture pieces now visible to the model"
+  "slug": "iclr-or-2jlpqbhabc",
+  "title": "VideoAnchor: Anchoring Visual Cues Across Frames",
+  "family": "Multimodal",
+  "one_liner": "When a vision-language model watches a video, anchor its attention to visual cues that appear consistently across frames instead of always listening to the words.",
+  "lead": "A vision-language model (a system that reads images and understands text together) struggles with video questions because language tokens (words) drown out visual tokens (image pieces). VideoAnchor finds which visual pieces show up in similar places across frames, then makes those consistent pieces louder in the attention mechanism — the process by which the model decides what to focus on — without retraining anything.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Words drown out pictures in video",
+    "paras": [
+      "Vision-language models (systems that see images and read text) can answer simple questions about a single picture. But with video—multiple frames of the same scene—they hit a wall. When the model tries to answer a spatial question like 'What is next to the sofa?', the language tokens (the words in the question) are so loud in attention (the process of deciding what to focus on) that the visual tokens (the picture pieces) get ignored. The model keeps re-reading the question instead of carefully tracking the sofa across frames.",
+      "A naive fix would be to force the model to look at each patch (a small square of the image) separately. But that treats each patch as an island; it never notices that the sofa looks the same in frame 1, frame 2, and frame 3. The model needs to see not just individual pixels, but the fact that certain visual chunks belong to the same object or region across time."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "VideoAnchor finds visual pieces that stay consistent across video frames and tells the attention mechanism to trust them more than it trusts the language tokens."
     }
-   ]
-  }
- },
- "math": {
-  "h2": "The match boost formula",
-  "words": "focus_bonus = alpha * blend_strength * frame_match",
-  "equation": "B = alpha * SE(P_i, P_j) * M(t_k, t_k+1)",
-  "symbols": [
-   ["B", "the focus score increase for piece P_j"],
-   ["alpha", "a small constant controlling boost strength (e.g., 0.1)"],
-   ["SE(P_i, P_j)", "blend strength: how much piece j can be written as a mix of piece i"],
-   ["M(t_k, t_k+1)", "match score: 1 if piece j in frame k+1 is the same object as i in frame k, else 0"],
-   ["P_i, P_j", "picture pieces from consecutive frames"],
-   ["t_k, t_k+1", "frame k and frame k+1"]
-  ],
-  "worked": {
-   "title": "A tiny worked example",
-   "lines": [
-    "Piece A (frame 1 dog): blend strength = 0.9, cross-frame match = 1.0, alpha = 0.1",
-    "Boost = 0.1 * 0.9 * 1.0 = 0.09",
-    "Piece B (frame 1 background): blend strength = 0.3, cross-frame match = 0.0 (no match in frame 2)",
-    "Boost = 0.1 * 0.3 * 0.0 = 0.0",
-    "Piece A's focus score rises by 0.09 (small but visible), while B stays flat."
-   ]
   },
-  "note": "The formula multiplies three numbers: alpha (set to 0.1), blend strength (how well the piece fits its cluster), and frame match (whether the piece is the same object in the next frame)."
- },
- "bars": {
-  "h2": "Spatial reasoning before and after",
-  "charts": [
-   {
-    "title": "Without VideoAnchor",
-    "rows": [["Recognizes object in frame 1", 92, "good"], ["Remembers it in frame 3", 38, "bad"], ["Spatial question accuracy", 45, "bad"]],
-    "note": "The model sees the object once then forgets."
-   },
-   {
-    "title": "With VideoAnchor",
-    "rows": [["Recognizes object in frame 1", 92, "good"], ["Remembers it in frame 3", 71, "good"], ["Spatial question accuracy", 68, "good"]],
-    "note": "Anchoring picture pieces across frames keeps them in focus."
-   }
-  ]
- },
- "failures": {
-  "h2": "What can go wrong",
-  "items": [
-   {
-    "warn": true,
-    "b": "Fast-moving objects confuse the matcher.",
-    "html": "If an object moves too fast or rotates sharply between frames, piece similarity drops below the threshold, and the match fails. The dog jumps suddenly; the dog in frame 2 looks too different from frame 1."
-   },
-   {
-    "warn": true,
-    "b": "Multiple similar objects trick the anchor.",
-    "html": "If two dogs are in the scene, the cluster match might link the wrong one across frames, pulling focus to the wrong place. Similarity alone does not solve identity."
-   },
-   {
-    "warn": true,
-    "b": "Occlusions break the match chain.",
-    "html": "If the dog is hidden behind a tree in frame 3, the model cannot see the dog pieces in that frame (they are physically absent from the image), so there are no pieces to boost; the anchor fails silently because it only works when a matching piece is visible in both frames."
-   },
-   {
-    "b": "Done right.",
-    "html": "Slow or moderate motion, distinct objects, and simple scenes are where VideoAnchor works well."
-   }
-  ]
- },
- "demo": {
-  "h2": "What a runnable demo should prove",
-  "paras": [
-   "Build a small test: take a 5-frame video of a hand moving slowly across a table, with the same hand visible in frames 1, 2, 3, 4, 5. Write a simple question: 'Where is the hand in frame 3?' Without VideoAnchor, the model guesses randomly or defaults to early frames. With the module, it should track the hand and place it in the correct position in frame 3. The metric is spatial accuracy: did the model point to the right region?"
-  ],
-  "metric_eq": "accuracy = (correct_position_predictions / total_spatial_questions) * 100",
-  "closing": "The demo must show that the module keeps picture pieces visible across frames, not just in the first frame."
- }
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Video arrives",
+        "viz": "plain",
+        "caption": "A video: three frames of a living room with a sofa."
+      },
+      {
+        "title": "2. Tokens get made",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["free", 2], ["free", 2], ["hot", 8], ["hot", 8], ["hot", 8], ["warm", 5], ["warm", 5], ["warm", 5], ["warm", 5], ["warm", 5], ["warm", 5]],
+        "caption": "Visual tokens (image pieces) and language tokens (words in the question) all compete for attention."
+      },
+      {
+        "title": "3. Find the shared chunks",
+        "viz": "box",
+        "viz_args": "Cluster: sofa stays sofa",
+        "caption": "Subspace clustering spots which visual tokens cluster together across frames: the sofa."
+      },
+      {
+        "title": "4. Amplify the consistent ones",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["free", 2], ["free", 2], ["hot", 12], ["hot", 12], ["hot", 12], ["warm", 5], ["warm", 5], ["warm", 5], ["moved", 2], ["moved", 2], ["moved", 2]],
+        "caption": "Sofa tokens get louder; language tokens get quieter, making visual reasoning sharper."
+      },
+      {
+        "title": "5. Answer with sight",
+        "viz": "plain",
+        "caption": "Model now says 'the lamp is next to the sofa' because it tracked the sofa."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Visual tokens arrive from the encoder",
+        "text": "The image is chopped into pieces; each piece becomes a token (a list of numbers)."
+      },
+      {
+        "b": "Compute self-expressiveness for each visual token",
+        "text": "Ask: can this token be built from other visual tokens in the same frame or across frames? Strong tokens can; weak ones cannot."
+      },
+      {
+        "b": "Convert expressiveness into scalers",
+        "text": "Turn the expressiveness scores into weights — numbers between 0 and 2 that multiply the attention scores."
+      },
+      {
+        "b": "Amplify attention for visual anchors, dampen for language tokens",
+        "text": "When computing which tokens to focus on, multiply the scores by the scalers: consistent visual tokens get boosted, language tokens get quieted."
+      },
+      {
+        "b": "Generate the answer",
+        "text": "With visual anchors now louder, the model concentrates on spatial relationships: 'the lamp is next to the sofa.'"
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes: the attention scalers",
+    "paras": [
+      "VideoAnchor does not retrain the model or change the weights. Instead, at test time (when answering a question), it inserts scalers—small numbers that multiply the attention scores. A scaler of 1.2 makes a visual token's score 20% louder; a scaler of 0.8 makes a language token 20% quieter. The scalers are computed on the fly from the visual tokens themselves."
+    ],
+    "object": "attention scalers"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: self-expressiveness",
+    "name": "self-expressiveness score",
+    "paras": [
+      "Self-expressiveness is a single number for each visual token that says: 'How much can this token be built from the other visual tokens in the same subspace?' A sofa token that looks the same across frames gets a high score—maybe 0.9 out of 1.0—because it is stable. A random noise token gets a low score—maybe 0.1—because it is unique and unrepeatable.",
+      "The paper estimates this using sparse subspace clustering: a technique that reorganizes tokens into groups where tokens in the same group can express each other. Within each group, calculate how much of token A can be written as a sum of other tokens in the group. That fraction is the self-expressiveness score."
+    ],
+    "heat": {
+      "cells": [
+        ["sofa-1", 4, true],
+        ["sofa-2", 4, true],
+        ["sofa-3", 4, true],
+        ["lamp", 3, false],
+        ["carpet", 3, false],
+        ["wall", 2, false],
+        ["noise-1", 1, false],
+        ["noise-2", 1, false],
+        ["text-token", 1, false],
+        ["text-token", 1, false],
+        ["text-token", 1, false],
+        ["text-token", 1, false]
+      ],
+      "caption": "Darker means the token is more self-expressive, more stable across frames, more worth amplifying in attention."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Self-expressiveness is how much a visual piece resembles the other visual pieces near it in the subspace. The sofa always looks like a sofa; the noise never looks the same twice."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Sparse subspace clustering constructs a self-expression matrix where entry (i,j) measures the strength with which token i can be linearly reconstructed from the subspace neighbors. The diagonal of this matrix (how much token i expresses itself via others in its cluster) is the self-expressiveness score."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: consistent visual cues matter more",
+    "paras": [
+      "The core idea: if a visual token can be expressed as a combination of other visual tokens—especially across multiple frames—then it belongs to a stable, persistent structure in the video (like a sofa or a face). Tokens that matter are self-expressive; tokens that are random or spurious are not.",
+      "In the attention mechanism, the model computes scores for each pair of tokens—how much should token A attend to token B? Normally, language tokens (words) get high scores because they are frequent and specific. VideoAnchor multiplies these scores by the self-expressiveness scalers: high-scoring visual tokens go higher still; low-scoring language tokens go lower. This forces the model to concentrate on the stable visual structures instead of the words.",
+      "Why does this fix spatial reasoning? Because spatial reasoning depends on tracking objects across frames. The sofa in frame 1 and frame 2 are the same object, and they cluster together in the subspace. By amplifying self-expressive tokens, the model learns to glue them together in its reasoning."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "video frames and text question"
+        },
+        {
+          "t": "step",
+          "s": "encode frames into visual tokens"
+        },
+        {
+          "t": "step",
+          "s": "cluster tokens into subspaces",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "compute self-expressiveness score for each token",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "amplify attention scores for high-scoring visual tokens"
+        },
+        {
+          "t": "output",
+          "s": "sharper spatial reasoning"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The scaler equation",
+    "words": "For each token, the attention scaler equals one plus the self-expressiveness score times a strength parameter.",
+    "equation": "scaler_i = 1 + alpha * expressiveness_i",
+    "symbols": [
+      ["scaler_i", "the multiplier for token i in attention"],
+      ["expressiveness_i", "the self-expressiveness score for token i, between 0 and 1"],
+      ["alpha", "the strength knob: how much to amplify high-expressiveness tokens (e.g., 1.5 or 2.0)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Sofa token: expressiveness = 0.9, alpha = 1.5 -> scaler = 1 + 1.5 * 0.9 = 2.35",
+        "Lamp token: expressiveness = 0.6, alpha = 1.5 -> scaler = 1 + 1.5 * 0.6 = 1.90",
+        "Noise token: expressiveness = 0.1, alpha = 1.5 -> scaler = 1 + 1.5 * 0.1 = 1.15",
+        "Language token: expressiveness = 0.05, alpha = 1.5 -> scaler = 1 + 1.5 * 0.05 = 1.075",
+        "Result: sofa's attention score is multiplied by 2.35; language token by 1.075. Sofa is now 2x louder relative to words."
+      ]
+    },
+    "note": "The scaler amplifies visual anchors proportional to their stability in the video, making the model focus on what stays the same across frames instead of being distracted by question words."
+  },
+  "bars": {
+    "h2": "Performance on spatial reasoning benchmarks",
+    "charts": [
+      {
+        "title": "Without VideoAnchor (baseline)",
+        "rows": [
+          ["Spatial task accuracy", 72, "moderate"],
+          ["Text-to-image attention", 65, "bad"],
+          ["Object co-location error", 15, "bad"]
+        ],
+        "note": "Language tokens dominate; spatial errors are high because the model loses track of objects across frames."
+      },
+      {
+        "title": "With VideoAnchor",
+        "rows": [
+          ["Spatial task accuracy", 76, "good"],
+          ["Text-to-image attention", 42, "good"],
+          ["Object co-location error", 8, "good"]
+        ],
+        "note": "Visual anchors dominate; object co-location errors drop because the model now sees the sofa consistently across frames. Performance gain: 3.2% to 4.6% on benchmarks like VSI-Bench and Video-MME."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Subspace clustering fails when tokens do not cluster neatly.",
+        "html": "If the video is chaotic (rapid cuts, dynamic lighting, many moving objects), tokens do not form clean subspaces, and self-expressiveness scores become noisy. The scalers amplify noise instead of signal."
+      },
+      {
+        "warn": true,
+        "b": "The scaler strength alpha is a hyperparameter.",
+        "html": "If alpha is too high (say, 5.0), language tokens are nearly silenced and the model cannot answer non-spatial questions. If alpha is too low (say, 0.2), the fix has no effect."
+      },
+      {
+        "warn": true,
+        "b": "VideoAnchor is test-time only, so it cannot learn the right subspace structure for a specific domain.",
+        "html": "If a domain has visual patterns not seen during pretraining (e.g., infrared video, medical scans), the clustering may not find the right structure."
+      },
+      {
+        "b": "Done right: on clear, well-lit videos of natural scenes where objects have consistent appearance, VideoAnchor reliably anchors spatial reasoning to visual evidence.",
+        "html": "The benchmarks (VSI-Bench, Video-MME) show consistent gains across models (InternVL2-8B, Qwen2.5VL-72B), confirming the fix works in its intended domain."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small script that takes a 3-frame video of a simple scene (e.g., a room with a sofa, lamp, and bookshelf), encodes the frames into visual tokens, runs sparse subspace clustering to compute self-expressiveness scores, and applies the attention scalers. Ask the model: 'What is next to the sofa?' Measure whether the model's attention map (a heat map showing which tokens it focused on) locks onto the sofa region in all three frames, and whether the text-to-image attention (how much the model attended to words versus images) shifts from 65% words to 40% words."
+    ],
+    "metric_eq": "attention_improvement = (baseline_text_attention - videoanchor_text_attention) / baseline_text_attention",
+    "closing": "The demo must show that by making visual anchors louder, the model actually spends less attention on language tokens and more on the stable visual structures."
+  }
 }

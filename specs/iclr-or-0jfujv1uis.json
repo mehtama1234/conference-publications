@@ -1,252 +1,216 @@
 {
-  "slug": "iclr-or-0jfujv1uis",
-  "title": "GeoEdit: Geometric Transformations in Image Editing",
-  "family": "Computer Vision",
-  "one_liner": "Edit images by moving, rotating, or scaling objects while keeping the lighting and shadows realistic, using a diffusion model trained on labeled transformations.",
-  "lead": "Imagine you want to shift a person to the left in a photo, rotate a car, or make a building taller. Existing image editors either leave visible artifacts or make the lighting look fake. GeoEdit solves this by training a neural network on 120,000 carefully labeled examples where objects are transformed and re-lit realistically, teaching it to apply geometric changes while automatically fixing shadows and highlights.",
-  "nav": [["theme-computer-vision.html", "Computer Vision"]],
-  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
-
-  "problem": {
-    "h2": "Why geometric editing breaks",
-    "paras": [
-      "When you move an object in a photo—slide a person left, rotate a chair, stretch a window taller—the image has no idea how lighting should change. A shadow that fell on the left side now should fall elsewhere. Highlights on a rotated face shift direction. A stretched wall changes how light bounces off it.",
-      "A beginner tries: 'Just cut out the object, move it, and paste.' But now the lighting is frozen in place. The shadow stays where it was. The background looks cut and pasted because the light is all wrong. A fancier attempt: 'Blend the boundaries and add blur.' Still wrong, because blur cannot fix a shadow that is geometrically in the wrong place."
-    ],
-    "callout": {
-      "b": "The core problem:",
-      "html": "Changing the position, angle, or size of an object means the light hitting it has changed, so shadows and highlights must move and reshape too—but image editors do not know this connection."
-    }
-  },
-
-  "comic": {
-    "h2": "Five-panel picture",
-    "panels": [
-      {
-        "title": "1. Original photo",
-        "viz": "brain",
-        "caption": "A person stands in daylight. Shadow falls on the ground to the left."
-      },
-      {
-        "title": "2. Naive move: just paste",
-        "viz": "weights",
-        "viz_args": [["warm", 40], ["hot", 60], ["warm", 35], ["free", 20], ["warm", 45], ["hot", 55]],
-        "caption": "Person moved right, but shadow stays in old spot. Looks glued on."
-      },
-      {
-        "title": "3. Paper's move: geometric transform token",
-        "viz": "box",
-        "viz_args": "geom=[move 120px right, recalc light]",
-        "caption": "Feed the model the move command and the original image together."
-      },
-      {
-        "title": "4. Model predicts new lighting",
-        "viz": "weights",
-        "viz_args": [["moved", 55], ["free", 20], ["moved", 40], ["warm", 45], ["free", 30], ["moved", 50]],
-        "caption": "Shadow repositions to the right. Highlights rotate with the person."
-      },
-      {
-        "title": "5. Output: realistic geometry and light",
-        "viz": "plain",
-        "caption": "Person in new place with matching shadows. All lighting consistent."
-      }
-    ]
-  },
-
-  "flow": {
-    "h2": "What it actually does",
-    "steps": [
-      {
-        "b": "Take an original image and a geometric command",
-        "text": "E.g., 'move the car left 50 pixels' or 'rotate the box 30 degrees.'"
-      },
-      {
-        "b": "Encode both into lists of numbers",
-        "text": "The image becomes small square patches; the command (like 'move right 50') becomes a list of numbers that tells the model what to do."
-      },
-      {
-        "b": "A neural network processes image and command together",
-        "text": "It learns: if the object moved, its shadow must follow; if rotated, its highlights turn."
-      },
-      {
-        "b": "Special focus on lighting edges",
-        "text": "The model uses special pathways that watch for lighting boundaries and preserve their realism."
-      },
-      {
-        "b": "Generate the edited image, lighting fixed",
-        "text": "The model iteratively refines the output, each step keeping object position and lighting consistent."
-      }
-    ]
-  },
-
-  "object": {
-    "h2": "What the model learns to change",
-    "paras": [
-      "The paper changes how the diffusion model receives instructions. Instead of only seeing the original image, it also sees a geometric-command token—a single number or short list that encodes 'move object by X pixels' or 'rotate by Y degrees.' The model learns to treat this command as a hint: 'if the object moved, recalculate where its light comes from.'"
-    ],
-    "object": "Geometric-command tokens"
-  },
-
-  "hidden": {
-    "h2": "The hidden quantity: Light-position alignment",
-    "name": "Shadow-to-object-position consistency",
-    "paras": [
-      "The paper introduces a hidden quantity: how well the shadows and highlights align with the object's new position. In the original image, light rays hit the object at a certain angle. After a transformation, those rays should still appear to come from the same direction in the world—if the light source did not move.",
-      "The model estimates this by predicting the full new image and checking: does the shadow fall where the moved object says it should? A shadow 20 pixels to the left of the object, before moving, should be 20 pixels to the left after the object shifts. This alignment score guides training—high score means realistic lighting."
-    ],
-    "heat": {
-      "cells": [
-        ["object_pos", 4, true],
-        ["object_angle", 3, true],
-        ["shadow_left", 3, true],
-        ["shadow_right", 2, false],
-        ["highlight_top", 4, true],
-        ["highlight_bottom", 1, false],
-        ["bg_shadow", 2, false],
-        ["edge_light", 3, true],
-        ["corner_dark", 1, false],
-        ["mid_tone", 2, false],
-        ["penumbra_soft", 3, true],
-        ["occlusion_hard", 2, false]
-      ],
-      "caption": "Darker means more constrained by where the object sits. Brighter means background or soft transitions."
-    },
-    "reads": [
-      {
-        "b": "Plain reading.",
-        "html": "After you move an object, does its shadow move with it, by the same amount and direction?"
-      },
-      {
-        "b": "Paper reading.",
-        "html": "Spatial correspondence between the transformed object position and recalculated lighting; measured as position-consistency loss in training."
-      }
-    ]
-  },
-
-  "mechanism": {
-    "h2": "Why it works: feed both image and command",
-    "paras": [
-      "The core insight: if you tell the model 'translate the object right by 120 pixels,' and you show it examples where this always caused the shadow to move right by 120 pixels too, the model learns the association. It is not magic—it is memorization of a pattern in the training data: object moves, light moves, shadows follow.",
-      "But why is that enough? Because diffusion models are extremely good at pattern-matching from images. When you show them 120,000 examples of 'before and after' pairs, labelled with the exact geometric change, the model's attention heads learn to watch for boundaries (where shadow meets lit areas) and predict how they shift. The Effects-Sensitive Attention layer is a special set of attention heads trained to focus on these lighting edges. When the model sees the command token, it activates these heads more strongly, so they have more influence on the output."
-    ],
-    "visual": {
-      "kind": "pipeline",
-      "stages": [
-        {
-          "t": "input",
-          "s": "Image and command (translate, rotate, scale)"
-        },
-        {
-          "t": "step",
-          "s": "Convert image to small patches; convert command to number list",
-          "hl": false
-        },
-        {
-          "t": "step",
-          "s": "Neural network processes both patches and command numbers",
-          "hl": true
-        },
-        {
-          "t": "step",
-          "s": "Special pathways recalculate shadow and light positions",
-          "hl": true
-        },
-        {
-          "t": "output",
-          "s": "New image with object and lighting both transformed"
-        }
-      ]
-    }
-  },
-
-  "math": {
-    "h2": "The loss function that teaches consistency",
-    "words": "loss_total = image_loss + lambda_geo * geometric_loss + lambda_light * light_loss",
-    "equation": "L = L_recon(I_pred, I_target) + lambda_g * L_geo(T_obj_pred, T_obj_target) + lambda_l * L_light(L_pred, L_target)",
-    "symbols": [
-      ["I_pred", "the diffusion model's predicted output image"],
-      ["I_target", "the ground truth edited image from the dataset"],
-      ["L_recon", "pixel-by-pixel difference between predicted and target"],
-      ["T_obj_pred", "model's predicted new position/angle/scale of the object"],
-      ["T_obj_target", "the true transformation applied (from the command token)"],
-      ["L_geo", "how much the predicted geometry drifts from the true command"],
-      ["L_pred", "model's predicted lighting (shadow positions, highlight colors)"],
-      ["L_target", "ground truth lighting after the real transformation"],
-      ["L_light", "how much the predicted lighting drifts from realistic"],
-      ["lambda_g", "weight: how much to penalize geometry mismatch (set high)"],
-      ["lambda_l", "weight: how much to penalize unrealistic lighting (set high)"]
-    ],
-    "worked": {
-      "title": "A tiny worked example",
-      "lines": [
-        "Suppose the command is 'translate object 50 pixels right.'",
-        "Model predicts the object moved 48 pixels right: L_geo = (50 - 48)^2 = 4 pixels penalty.",
-        "Model predicts shadow at pixel 310, but true shadow at pixel 300: L_light = (310 - 300)^2 = 100 pixels penalty.",
-        "Pixel-by-pixel loss: 50 (just an example number, not real).",
-        "lambda_g = 10, lambda_l = 5 (these weights make object position and light both matter).",
-        "Total loss = 50 + 10*4 + 5*100 = 50 + 40 + 500 = 590.",
-        "If next try: object position 49.9 and shadow 300.1, loss = 50 + 10*(0.1)^2 + 5*(0.1)^2 = 50 + 0.1 + 0.05 = 50.15 (much better).",
-        "The large lambda_l keeps the model from ignoring shadow fidelity."
-      ]
-    },
-    "note": "The loss pulls the model toward predicting both correct object positions and realistic lighting by penalizing mismatches in both separately."
-  },
-
-  "bars": {
-    "h2": "Improvement over naive methods",
-    "charts": [
-      {
-        "title": "Naive cut-paste approach",
-        "rows": [
-          ["Object moved to correct spot?", 95, "good"],
-          ["Shadow looks real?", 22, "bad"],
-          ["Shadow in right place?", 15, "bad"]
-        ],
-        "note": "Moves the object correctly but keeps shadow frozen in place."
-      },
-      {
-        "title": "GeoEdit (this paper)",
-        "rows": [
-          ["Object moved to correct spot?", 92, "good"],
-          ["Shadow looks real?", 78, "good"],
-          ["Shadow in right place?", 81, "good"]
-        ],
-        "note": "Slight cost in object accuracy but huge gain in realistic, correctly-moved shadows."
-      }
-    ]
-  },
-
-  "failures": {
-    "h2": "What can go wrong",
-    "items": [
-      {
-        "warn": true,
-        "b": "Extreme transformations break the pattern.",
-        "html": "If you try to rotate an object 180 degrees, the training data may not have many examples of such extreme rotations. The model was only shown rotations up to, say, 45 degrees. Asking for 180 degrees is extrapolation, and the model will guess poorly."
-      },
-      {
-        "warn": true,
-        "b": "Multiple light sources confuse the model.",
-        "html": "The paper assumes one main light source (sun, or one studio light). Real scenes with two or three lights, or complex reflections off mirrors, overwhelm the learned pattern. The model was not trained on those."
-      },
-      {
-        "warn": true,
-        "b": "Occlusion changes are invisible.",
-        "html": "If you move an object and it uncovers a hidden wall, the wall has aged and changed texture. The model cannot invent what was hidden. It can only inpaint, not predict invisible surfaces."
-      },
-      {
-        "b": "Done right: objects transform within their training range.",
-        "html": "Move, rotate, or scale objects by amounts and into scenes similar to the 120,000 training pairs. Stay in the learned regime."
-      }
-    ]
-  },
-
-  "demo": {
-    "h2": "What a runnable demo should prove",
-    "paras": [
-      "Build a minimal editor: load a simple image (a person in a sunlit room, or a box on a table), define a geometric transformation (translate 100 pixels right, or rotate 20 degrees), run the model, and display the result side-by-side with the naive cut-paste baseline. Measure the shadow position: in the baseline, is it glued to the original spot? In GeoEdit, does it move with the object?"
-    ],
-    "metric_eq": "shadow_accuracy = 100 * (1 - mean_pixel_distance(predicted_shadow, true_shadow) / image_width)",
-    "closing": "The demo must show that GeoEdit's shadow moves with the object; the baseline's shadow freezes."
+ "slug": "iclr-or-0jfujv1uis",
+ "title": "GeoEdit: Geometric Image Editing via Effects-Sensitive Attention",
+ "family": "Computer Vision",
+ "one_liner": "GeoEdit edits objects in images by lifting them into 3D, applying precise geometric moves, then letting attention focus on shadows and lighting to make the result look real.",
+ "lead": "Moving an object in a photo should be simple: rotate it, scale it, slide it. But in real images, shadows and light also move with the object. Current methods either rotate the object correctly or add realistic shadows correctly, but not both. GeoEdit does both by lifting objects into 3D space first, then using a learned focusing system (which parts of the image to emphasize) to model how light and shadows shift when the object moves.",
+ "nav": [["theme-computer-vision.html","Computer Vision"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Why moving objects in images is hard",
+  "paras": [
+   "Imagine a photo of a mug on a table. You want to rotate it 45 degrees, or slide it to the left. The naive approach: cut the mug out, rotate it as pixels, paste it back. The problem: pixels are flat. When you rotate a mug, its shadow should rotate with it, and the light hitting its surface should change. Pixel rotation loses this. Real shadows and highlights need to move in plausible ways that depend on where the light comes from and where the object ends up.",
+   "Existing methods either solve the rotation and scaling problem (they move objects correctly as pixels) or solve the lighting problem (they add realistic shadows and highlights), but not both. If you only rotate pixels, the shadows stay in the wrong place. If you add shadows after rotating pixels, they often look pasted on and artificial, because the method does not understand that the object exists in 3D space and interacts with light differently at its new position."
+  ],
+  "callout": {
+   "b": "The method.",
+   "html": "GeoEdit lifts objects into 3D space, applies geometric transformations there, then uses a learned focusing system to guide generation of plausible lighting and shadows."
   }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The setup",
+    "viz": "brain",
+    "caption": "Photo with mug. We want to rotate and move it."
+   },
+   {
+    "title": "2. The old way fails",
+    "viz": "box",
+    "viz_args": "rotate pixels → shadows stay wrong",
+    "caption": "Pixel rotation loses the 3D structure and light interaction."
+   },
+   {
+    "title": "3. Lift to 3D",
+    "viz": "weights",
+    "viz_args": [["lifted",80],["lifted",75],["lifted",85],["lifted",90],["lifted",78],["lifted",82],["lifted",88],["lifted",76],["lifted",84],["lifted",79],["lifted",81],["lifted",86]],"caption": "GeoEdit reconstructs the mug in 3D space."
+   },
+   {
+    "title": "4. Precise moves",
+    "viz": "weights",
+    "viz_args": [["rotated",72],["rotated",68],["rotated",80],["rotated",82],["rotated",65],["rotated",75],["rotated",79],["rotated",70],["rotated",83],["rotated",74],["rotated",77],["rotated",81]],"caption": "Apply rotation, scaling, and translation in 3D coordinates."
+   },
+   {
+    "title": "5. Add light",
+    "viz": "box",
+    "viz_args": "attention learns shadows + highlights",
+    "caption": "ESA ensures shadows and highlights move realistically."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "User provides input",
+    "text": "A photo, a mask around the object, the desired geometric move (rotate 45 degrees, scale 0.8, translate 50 pixels)."
+   },
+   {
+    "b": "Geometric Transformation module lifts to 3D",
+    "text": "The object is reconstructed in 3D space using learned features. This gives it depth and structure, not just pixel colors."
+   },
+   {
+    "b": "Apply parametric moves",
+    "text": "Translation, rotation, and scaling happen in 3D coordinates, not on pixels. A 45-degree rotation means an exact 45-degree rotation around the 3D center."
+   },
+   {
+    "b": "Feed to a diffusion image generator",
+    "text": "The original image, the moved object mask, and the transformed object appearance (from 3D) go into a diffusion model (a neural network that generates images by removing noise, one step at a time)."
+   },
+   {
+    "b": "ESA focuses the model on lighting",
+    "text": "A learned focusing mechanism biases the model to place shadows and highlights where they belong, given the new object position."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "GeoEdit changes how the model generates the final image after a rotation, scaling, or sliding move. Instead of just rotating pixels and hoping shadows work out, it provides two concrete targets: the exact 3D-transformed object shape and appearance, and a learned focusing rule that knows how light behaves near objects. This gives the diffusion model two clear signals to follow, rather than leaving it to guess."
+  ],
+  "object": "geometric guidance + learned focus masks"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: attention focus",
+  "name": "Attention bias toward light-affected regions",
+  "paras": [
+   "Attention is a mechanism where the model's neurons look at different parts of the image to decide what to generate next. In standard attention, every part of the image can look at every other part equally. Effects-Sensitive Attention (ESA) does something different: it biases the model to look harder at regions where lighting and shadows matter, while still allowing the rest of the image to be considered.",
+   "The paper measures this as a probability distribution over which tokens (small image patches) the model attends to. ESA learns to concentrate attention on the object and its surroundings, then lets the model generate realistic shadows and highlights there without losing information about the rest of the scene."
+  ],
+  "heat": {
+   "cells": [
+    ["object",4,true],
+    ["shadow-zone",4,true],
+    ["light-zone",4,true],
+    ["background",1,false],
+    ["object",4,true],
+    ["edge",3,true],
+    ["surface",2,false],
+    ["light-facing",3,true],
+    ["background",1,false],
+    ["shadow",4,true],
+    ["unchanged",1,false],
+    ["context",2,false]
+   ],
+   "caption": "Darker means the attention system looks there harder. Marked cells are where shadow and light behavior matters most."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Imagine you are writing a story about a room, and you need to describe the shadows when a lamp moves. You would focus your attention on where the lamp is, its new direction, and how shadows fall. You would not waste effort redescribing walls across the room. That is what ESA does: it tells the model where to focus when generating lighting."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "ESA modifies the starting distribution of what the model looks at to match an ideal focus pattern. It preserves connections between distant regions while gently pushing the focus toward tokens in the affected lighting zones, using a learned set of weights on top of the attention scores."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: the causal chain",
+  "paras": [
+   "Here is the core insight: diffusion models (neural networks that generate images by removing noise iteratively) are very flexible—they can generate almost anything if you nudge them in the right direction. The nudges come from the input you provide (the original image, the object mask, hints about what should be there).",
+   "GeoEdit's mechanism has two parts. First, lifting to 3D gives the model exact knowledge of where the object should be and what it looks like after the move (rotation, scaling, or sliding). This removes guessing: the model knows the shape and location precisely. Second, Effects-Sensitive Attention steers the model to generate realistic lighting when generating the final image. ESA does this by modifying which parts of the image the neural network pays attention to—making it look harder at the moved object and its surroundings. The result: shadows and highlights follow the object to its new location, not staying in the original spot.",
+   "Why does this work better than just rotating pixels and adding shadows afterward? Because treating them as one unified task lets the model learn the link between object position and where shadows should fall. A 120,000-image training set gives the model countless examples of where shadows belong when an object is in different positions. The model internalizes that pattern—light hitting an object from the top-left will always cast a shadow toward the bottom-right, and that pattern holds regardless of whether the object is rotated or scaled. So when the 3D reconstruction and ESA work together, the generated shadows follow the new position naturally."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {"t": "input", "s": "Photo + mask + geometric move (rotate, scale, translate)"},
+    {"t": "step", "s": "Reconstruct object in 3D space", "hl": true},
+    {"t": "step", "s": "Apply rotation, scale, or slide to the 3D shape"},
+    {"t": "step", "s": "Feed transformed object and original image to diffusion model", "hl": true},
+    {"t": "step", "s": "Attention system focuses on shadow and light zones"},
+    {"t": "output", "s": "Edited image with correct object position and realistic shadows/highlights"}
+   ]
+  }
+ },
+ "math": {
+  "h2": "The equation: Effects-Sensitive Attention",
+  "words": "Attention bias = base attention scores plus a learned bias that up-weights tokens in lighting-sensitive regions, scaled by how much the model should trust the geometric cues.",
+  "equation": "attention(i,j) = softmax( q_i . k_j / sqrt(d) + lambda * bias_j )",
+  "symbols": [
+   ["q_i", "the query (what the model is looking for) at position i"],
+   ["k_j", "the key (candidate information) at position j"],
+   ["d", "the depth of the query vector (how many numbers are in it)"],
+   ["lambda", "a learned strength parameter that controls how much the bias matters"],
+   ["bias_j", "a learned bias term that is high for object and shadow regions, low elsewhere"],
+   ["softmax", "converts raw scores into percentages that add up to 100%"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose the model is deciding where shadows belong. It considers two spots: the original photo location and the new object location. Both look plausible to the base model.",
+    "Without ESA: both spots get equal focus. The model has no reason to pick one; it might fail.",
+    "With ESA: bias_j is higher for the new location (0.5) than the old (0.1). lambda=2.0. The added boost = 2.0*0.5=1.0 vs 2.0*0.1=0.2. After converting to percentages, the new location gets 75% focus, the old gets 25%. The model now places shadows at the new spot.",
+    "The information about both spots exists; the focus boost steers the model toward the correct answer."
+   ]
+  },
+  "note": "ESA does not forbid attention to the wrong place, but it makes the right place more attractive, guiding the diffusion process to generate lighting consistent with the moved object."
+ },
+ "bars": {
+  "h2": "Comparison on a benchmark task",
+  "charts": [
+   {
+    "title": "Methods without Effects-Sensitive Attention",
+    "rows": [
+     ["Rotates objects correctly",74,"bad"],
+     ["Shadows look natural",52,"bad"],
+     ["Overall quality",58,"bad"]
+    ],
+    "note": "Either the object rotates right but shadows look pasted on, or shadows look okay but the object position is off."
+   },
+   {
+    "title": "GeoEdit with ESA",
+    "rows": [
+     ["Rotates objects correctly",91,"good"],
+     ["Shadows look natural",88,"good"],
+     ["Overall quality",89,"good"]
+    ],
+    "note": "Rotation accuracy and shadow realism both improve, because they are guided by a model trained on examples of how shadows move with objects."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "3D reconstruction fails on complex occlusions.",
+    "html": "If the object in the original photo is partially hidden behind something else, the 3D lift may not recover the full shape. The model then generates a plausible completion, which may not match reality."
+   },
+   {
+    "warn": true,
+    "b": "Dataset bias limits realism.",
+    "html": "GeoEdit trains on 120,000 image pairs covering specific objects and scenes. A geometric edit involving an object type not in the training set may generate less realistic shadows, because the model has fewer examples to learn from."
+   },
+   {
+    "warn": true,
+    "b": "Lighting model assumes stable global light.",
+    "html": "ESA works best when light comes from one direction or a few steady sources. In complex multi-source lighting (reflections off mirrors, indirect bounces), the attention bias may place shadows incorrectly."
+   },
+   {
+    "b": "Large geometric moves with shadows work correctly.",
+    "html": "For typical use cases (translating objects a few hundred pixels, rotating ±60 degrees, scaling ±30%), GeoEdit generates shadows and highlights that look photorealistic."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "A demo starts with a photograph of an object on a surface (a mug, a toy, a book). The user specifies a geometric move: translate the object 100 pixels to the right and 50 pixels down, then rotate it 30 degrees counterclockwise. The demo shows the input image, draws the target mask at the new location, and displays the edited output. The key metric is whether the shadow and highlights have moved to the new location, not stayed in the original spot. A baseline (naive pixel rotation + post-hoc shadow blending) should show shadows in the wrong place. GeoEdit should show shadows that follow the object."
+  ],
+  "metric_eq": "Shadow-geometry alignment = (shadow pixels within 20 pixels of new object mask) / (total shadow pixels). Higher means shadows are in the right place.",
+  "closing": "The demo must make it impossible to mistake: when the object moves, its shadow moves with it, and the new lighting looks natural."
+ }
 }

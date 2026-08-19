@@ -1,55 +1,54 @@
 {
   "slug": "iclr-or-iwt4errdyp",
-  "title": "InfGen: Traffic Scenarios as Token Sequences",
+  "title": "InfGen: Scenario Generation as Next Token Group Prediction",
   "family": "Robotics & Control",
-  "one_liner": "Generate infinite, realistic traffic scenarios by predicting traffic states one step at a time, like a language model generates words.",
-  "lead": "Realistic traffic simulation is hard: existing systems replay recorded data or hold the number of cars fixed. InfGen treats the entire traffic scene—every car's position, every traffic light, every motion—as a sequence of tokens and uses a neural network (one that reads sequences and predicts what comes next) to guess the next token, step by step. This way it can endlessly add new cars and simulate infinitely long scenarios with behavior that looks real and stays diverse.",
+  "one_liner": "Represent all traffic elements as a sequence of tokens and use a transformer to generate realistic long-horizon driving scenarios one step at a time.",
+  "lead": "Training autonomous vehicles needs realistic traffic scenarios, but today's simulators start from static snapshots and can only replay recorded data. This paper proposes SceneStreamer (called InfGen in the title): a framework that builds a scene step-by-step, continuously adding new agents and letting traffic lights change, much like watching a real street unfold. Because every part of the scene is written as a discrete token (a label plus some numbers), a standard transformer model can learn to predict the next token from what came before—enabling infinite-length scenarios with diverse, realistic behaviors.",
   "nav": [["theme-robotics-control.html", "Robotics & Control"]],
   "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "Why old traffic simulators get stuck",
+    "h2": "Why existing traffic simulators feel fake",
     "paras": [
-      "Today's autonomous driving systems train on replayed real-world trips or on hand-scripted scenes with a fixed number of cars. The moment the test puts a car in a new situation—say, a highway with more traffic than the training set showed—the driving system fails because it has never learned to handle such a world.",
-      "A beginner might try to just run the replay backward, or add random noise to recorded data. That fails because replayed data does not create new, realistic scenarios; noise alone does not capture how real traffic agents actually interact—one car braking causes nearby cars to brake too, in a cascade that needs deep cause-and-effect, not random jitter.",
-      "The core problem: static scene snapshots or fixed replay loops cannot grow to handle evolving agents (new cars arriving dynamically), and they cannot generate completely new scenes that still feel real and follow traffic laws."
+      "Autonomous vehicles need to train on millions of realistic traffic scenarios. Most simulation software today works in two modes: either it fixes all the agents (other cars, pedestrians) at the start and only lets them run a pre-made trajectory, or it replays a recording of one real street interaction over and over. Both hit a wall—you can only test a few fixed situations, and the model never learns what happens when something unexpected arrives mid-scenario, like a new car entering the scene.",
+      "A beginner might try to train a separate 'next agent arrival' model alongside the traffic simulator, but that splits the problem into pieces. The arrival model and the motion model drift out of sync, motion predictions ignore what is actually happening (closed-loop), and you end up with unrealistic agent interactions and scenes that feel jerky or repeat."
     ],
     "callout": {
-      "b": "The method in one sentence.",
-      "html": "Represent the traffic scene as a long list of tokens (numbers representing car positions, velocities, traffic lights), then train a neural network to predict what the next token will be, over and over, generating fresh scenarios token by token."
+      "b": "The core insight in one sentence.",
+      "html": "Treat every part of traffic—agents, lights, motion—as discrete tokens and let a transformer predict the next token. This unifies scene generation and keeps it grounded in what is actually happening at each moment."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. Old way: replay records a fixed scene",
+        "title": "1. Old way: frozen agents",
         "viz": "box",
-        "viz_args": "replay loop: car-A → car-B → light → end → restart",
-        "caption": "Recorded data plays back the same scenario forever, same cars, same events."
+        "viz_args": "Four cars + three pedestrians, all at fixed positions",
+        "caption": "Simulator locked at start. If new agents appear, chaos."
       },
       {
-        "title": "2. The problem bites: a new situation arrives",
+        "title": "2. The problem bites",
         "viz": "box",
-        "viz_args": "test: 3 new cars, heavier traffic, car-A lost, unknown",
-        "caption": "Test data has more cars and different patterns. The model has never seen this."
+        "viz_args": "A new car tries to enter but there is no plan for it",
+        "caption": "Scene generation crashes when new agents appear mid-scenario."
       },
       {
-        "title": "3. InfGen converts the scene to tokens",
+        "title": "3. Tokenize everything",
         "viz": "weights",
-        "viz_args": [["car-A-x", 2], ["car-A-y", 3], ["car-B-x", 1], ["speed", 4], ["light", 2], ["car-C-x", 3], ["car-C-y", 2], ["speed", 3], ["light", 1], ["car-D-x", 2], ["speed", 4], ["new", 3]],
-        "caption": "Every scene detail—positions, speeds, lights—becomes a number in a sequence."
+        "viz_args": [["TL-1", 2, false], ["TL-2", 2, false], ["A-car1", 3, true], ["A-car2", 3, true], ["MO-car1", 2, false], ["MO-car2", 2, false]],
+        "caption": "Each agent, light, and motion is one token. Transformer sees the whole sequence."
       },
       {
-        "title": "4. Transformer predicts the next token",
+        "title": "4. Grouped causal attention",
         "viz": "box",
-        "viz_args": "input: tokens 1-20 → model → predict token 21 → new car appears",
-        "caption": "The model learns which tokens follow which, even new cars mid-scene."
+        "viz_args": "Token groups: TL → Agent → Motion. Causality enforced.",
+        "caption": "Rules ensure motion depends on state, which depends on map."
       },
       {
-        "title": "5. Step by step, an infinite scenario unfolds",
+        "title": "5. Step-by-step rollout works",
         "viz": "weights",
-        "viz_args": [["tokens", 1], ["tokens", 2], ["tokens", 3], ["tokens", 4], ["...", 2], ["tokens", 4], ["tokens", 3], ["tokens", 4], ["tokens", 2], ["tokens", 3], ["tokens", 4], ["tokens", 1]],
-        "caption": "Each predicted token becomes the input for the next prediction, on forever."
+        "viz_args": [["Step-0", 2, false], ["Step-1", 3, false], ["Step-2", 4, false], ["Step-3", 4, true], ["New-agent", 2, true]],
+        "caption": "New agents inject naturally; scene rolls forward with coherent behaviors."
       }
     ]
   },
@@ -57,148 +56,133 @@
     "h2": "What it actually does",
     "steps": [
       {
-        "b": "Convert the scene to tokens",
-        "text": "Write every car's position, velocity, and every traffic light as numbers in a long list."
+        "b": "Static map encoding",
+        "text": "Feed the road layout (intersections, lanes) once; the transformer remembers it."
       },
       {
-        "b": "Train the model to predict the next token",
-        "text": "Show the model the first 20 tokens; teach it to guess token 21. Repeat for the whole dataset."
+        "b": "Traffic light generation",
+        "text": "At each moment, predict which lights turn green, yellow, or red."
       },
       {
-        "b": "Seed the generator with a short scene",
-        "text": "Start with the first few tokens (a few cars, the current lights, initial velocities)."
+        "b": "Agent state generation",
+        "text": "For each active agent, predict its position and heading."
       },
       {
-        "b": "Loop: predict, append, predict",
-        "text": "Ask the model what comes next; add that token to the sequence; ask again."
+        "b": "Motion-command generation",
+        "text": "For each agent, predict acceleration and steering; feed through physics to get the next position."
       },
       {
-        "b": "New cars arrive when the model predicts them",
-        "text": "Tokens can represent 'a new car enters from the right at this velocity'; the model places them naturally as it learns the data patterns."
+        "b": "New agent injection",
+        "text": "If a new agent should enter the scene, insert its token; transformer naturally continues from that point."
       }
     ]
   },
   "object": {
-    "h2": "The one thing this paper changes",
+    "h2": "What the paper changes",
     "paras": [
-      "InfGen moves from storing and replaying fixed scenarios to learning a machine that predicts traffic one step at a time. The object is the way scenarios are generated: from playback to step-by-step prediction."
+      "Instead of generating all agents' full trajectories at once (as a big vector), the method generates one token at a time in a causal order: lights first, then each agent's position, then that agent's motion command. This ordered generation means each prediction can see what just happened and adjust accordingly."
     ],
-    "object": "scenario generation method"
+    "object": "Token generation order and grouping"
   },
   "hidden": {
-    "h2": "The hidden quantity: predicted validity",
-    "name": "how likely each next scene state is",
+    "h2": "The hidden quantity: semantic causality",
+    "name": "Order-respecting look-ahead rules",
     "paras": [
-      "The paper measures something called the model's prediction confidence—how sure the model is that the next token it predicts is the right one, given everything that came before. When the model is certain about what should happen next, it means it has learned a strong pattern from the training data (like 'if traffic light is red, cars slow down'). When the model is uncertain, it means the situation is rare or ambiguous.",
-      "The paper estimates this by training the model on real traffic data and checking how often the model's top prediction matches the actual next token in the recorded data (called accuracy). A model that predicts the next token correctly 85% of the time has absorbed the real traffic patterns well."
+      "The paper measures whether each token's prediction respects physical and semantic causality: Does the agent's next motion depend on its current state? Does the agent's state depend on where the map is? This is enforced via grouped causal attention masks—rules that prevent the transformer from looking 'backward' into future steps or sideways into unrelated token types.",
+      "The paper encodes this by partitioning the transformer's attention into groups: (1) traffic light tokens can attend to map and prior lights, (2) agent state tokens can attend to map and lights, (3) motion tokens can attend to agent states. Each group's attention is masked with a causal rule: a token cannot see tokens that logically come after it. This ensures the model learns physically coherent behaviors rather than accidentally cheating by peeking into future actions."
     ],
     "heat": {
       "cells": [
-        ["car-A-move", 4, true],
-        ["car-B-move", 3, false],
-        ["light-red", 2, true],
-        ["car-C-enter", 1, false],
-        ["car-A-stop", 4, true],
-        ["car-B-accel", 2, false],
-        ["car-C-move", 3, true],
-        ["car-D-enter", 1, false],
-        ["light-green", 3, true],
-        ["car-A-accel", 2, false],
-        ["traffic-surge", 4, true],
-        ["car-B-stop", 1, false]
+        ["TL-step-t", 3, true],
+        ["TL-step-t-1", 2, false],
+        ["AS-car1-t", 4, true],
+        ["AS-car1-t-1", 2, false],
+        ["MO-car1-t", 4, true],
+        ["MO-car1-t-1", 1, false],
+        ["Map-ID-0", 2, false],
+        ["Map-ID-1", 2, false],
+        ["TL-car-interact", 3, true],
+        ["AS-motion-link", 3, true],
+        ["History-self-att", 2, false],
+        ["Future-blocked", 1, false]
       ],
-      "caption": "Darker means the model is more confident in predicting that token next. Highlights show patterns the model learned strongly."
+      "caption": "Darker means more attention weight. Highlights show causality constraints: agent motion sees agent state but not future."
     },
     "reads": [
       {
         "b": "Plain reading.",
-        "html": "The model memorized 'when the light is red, cars stop' and 'when a car slows, the car behind slows too'—these are high-confidence patterns. Rare situations (three cars entering at once) are dimmer."
+        "html": "The hidden quantity is whether each prediction respects the causal order of the real world. Traffic lights affect agent behavior, agent state affects next motion, but future steps should not leak into current predictions."
       },
       {
         "b": "Paper reading.",
-        "html": "InfGen uses the model's output—the scores it assigns to each possible next token—to assess which scene states are most probable given the history; high probability states are those matching learned traffic dynamics."
+        "html": "Group-causal attention masks partition token types and enforce causal ordering via structured masking, ensuring motion generation depends on current agent state, which depends on map layout and light state."
       }
     ]
   },
   "mechanism": {
-    "h2": "Why one-at-a-time prediction captures realistic traffic",
+    "h2": "Why step-by-step token generation with causal grouping works",
     "paras": [
-      "Language models work because human language has structure: 'Once upon' almost always comes next as 'a time', and the model learns this from reading millions of sentences. Traffic has the same property: if three cars are bunched at a red light, the next frame will show them slowing or holding still—the transformer learns these cause-and-effect chains from real driving logs.",
-      "By predicting one token at a time, the model builds in causality automatically. It sees 'car-A at speed 30 in lane 1' followed by 'car-B (just behind) slows to 28 in lane 1 one frame later', and it learns the pattern 'nearby cars influence each other'. When generating, the model applies this pattern: every newly predicted token is constrained by what came before, so wild, unrealistic jumps (a car teleporting) become vanishingly unlikely.",
-      "Infiniteness comes free: the loop never stops. After predicting token 100, the model uses tokens 81-100 to predict token 101, then uses tokens 82-101 to predict token 102. If the model's predictions include a 'new car enters' token, that car is born into the ongoing simulation and interacts with existing cars, creating complex multi-agent dynamics from pure learned patterns."
+      "Here is the real causal chain: In the old approach, the model tries to predict all agents at once with no structure, so it has to learn to coordinate agents through a giant black-box neural function—a hard, messy problem. In SceneStreamer, the tokenization and grouped attention force a specific causality. The transformer is told: first generate lights (they are environmental, agents cannot change them), then generate each agent's next position and heading (these depend on the light state), then generate steering and acceleration commands (these depend on the position). By respecting this cascade, the model does not have to learn agent coordination from scratch; instead, it learns to predict motion conditioned on the current scene, which is a simpler, more stable problem.",
+      "When a new agent enters (injected at step t), it has no history yet, so its first state is sampled, but its motion is immediately constrained by the scene around it. The causal grouping ensures the new agent's motion attends to the current lights and other agents, not to undefined future states. This is why new agents integrate naturally—they obey the same causal rules as existing agents, just starting from step 0."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
-        {
-          "t": "input",
-          "s": "first 20 tokens: car positions, speeds, light color"
-        },
-        {
-          "t": "step",
-          "s": "model reads all 20 tokens and predicts token 21"
-        },
-        {
-          "t": "step",
-          "s": "append token 21 to the sequence, now 21 tokens",
-          "hl": true
-        },
-        {
-          "t": "step",
-          "s": "use tokens 2-21 to predict token 22, then tokens 3-22 for token 23"
-        },
-        {
-          "t": "output",
-          "s": "infinite sequence: realistic traffic unfolding step by step"
-        }
+        {"t": "input", "s": "Static map + prior-step tokens (lights, agents, motions)"},
+        {"t": "step", "s": "Traffic light generator (map + light history)", "hl": true},
+        {"t": "step", "s": "Agent state generator (map + lights)"},
+        {"t": "step", "s": "Motion generator (current agent state)"},
+        {"t": "step", "s": "Physics update (kinematic bicycle model)"},
+        {"t": "output", "s": "Next scene: new light states, agent positions, agent motions"}
       ]
     }
   },
   "math": {
-    "h2": "The prediction equation",
-    "words": "probability of the next token equals the model output at that position, given all previous tokens in the sequence",
-    "equation": "P(token_t | token_1, ..., token_{t-1}) = softmax(model_output_at_position_t)",
+    "h2": "The grouped attention equation",
+    "words": "attention_output = softmax(Q * transpose(K) / sqrt(d) + causal_mask) * V, where causal_mask sets future and out-of-group entries to negative infinity",
+    "equation": "Attn(Q, K, V, mask) = softmax((Q * K^T) / sqrt(d) + mask) * V",
     "symbols": [
-      ["token_t", "the traffic state at step t (position, velocity, light)"],
-      ["token_1, ..., token_{t-1}", "all previous steps in the sequence"],
-      ["model_output_at_position_t", "the model's internal scores for each possible next token"],
-      ["softmax", "a function that converts raw scores into percentages that add to 100%"]
+      ["Q", "Query: the current token asking for information"],
+      ["K", "Keys: prior tokens it is allowed to look at"],
+      ["V", "Values: the information in those prior tokens"],
+      ["d", "Embedding dimension (number of features per token)"],
+      ["mask", "Causal matrix: negative infinity blocks future/invalid tokens"]
     ],
     "worked": {
       "title": "A tiny worked example",
       "lines": [
-        "Suppose the sequence is: [car-A at x=50, car-B at x=60, car-B speed=20, light=red].",
-        "The model scores the top 3 candidates for the next token:",
-        "  'car-A speed drops to 18' scores 8.0",
-        "  'car-A stays at 20' scores 2.0",
-        "  'car-A accelerates to 22' scores 0.1",
-        "softmax( [8.0, 2.0, 0.1] ) = [0.965, 0.033, 0.002]",
-        "The model predicts 96.5% chance the car slows (learned: red light → decelerate).",
-        "The generator rolls the dice: with 96.5% odds, it picks token 1 (car slows)."
+        "At step t, we generate an agent's motion token M_car1_t.",
+        "Q for M_car1_t has size 64 (embedding dimension d=64).",
+        "K is built from: agent state AS_car1_t (distance=0, allowed), traffic light TL_t (type=light, allowed), and all t+1 tokens (the causal mask blocks these, giving them huge negative scores).",
+        "Q * K^T / sqrt(64) produces raw scores, one per prior token. Before normalizing: (TL=0.3, AS_car1=0.6, future=-999).",
+        "softmax: (TL=0.2, AS_car1=0.7, future=0.0) after exp and normalize. The agent state gets 70% of the attention, lights get 20%, future is ignored.",
+        "Output = 0.7 * AS_car1_features + 0.2 * TL_features. The motion prediction is dominated by what the agent is actually doing now, modulated by light state, not contaminated by future steps."
       ]
     },
-    "note": "The transformer learns to assign high probability to realistic continuations and low probability to impossible ones, so generation follows real traffic rules."
+    "note": "The causal mask is the key mechanism: it allows each token to look only at prior steps and tokens of types that causally precede it (lights before agents, agents before motion) because if the model could see future steps or out-of-order tokens, it would learn meaningless correlations instead of the real causal structure, making policies trained in this sim crash in the real world."
   },
   "bars": {
-    "h2": "How InfGen-trained models beat hand-scripted training",
+    "h2": "Effect on scenario realism and RL training",
     "charts": [
       {
-        "title": "Old method: replayed + hand-scripted scenarios",
+        "title": "Static replay baseline",
         "rows": [
-          ["Seen scenarios (training)", 98, "good"],
-          ["Unseen traffic patterns (test)", 56, "bad"],
-          ["Handling new agents mid-scene", 42, "bad"]
+          ["Realistic light changes", 45, "bad"],
+          ["Handles new agents", 20, "bad"],
+          ["Diverse scenario length", 30, "bad"],
+          ["RL policy success rate", 52, "bad"]
         ],
-        "note": "The driving model overfits to seen data and fails when test traffic is denser or has unfamiliar patterns."
+        "note": "Fixed agents and replayed paths; policies overfit to one scenario pattern."
       },
       {
-        "title": "InfGen: infinite, diverse generated scenarios",
+        "title": "SceneStreamer (this paper)",
         "rows": [
-          ["Seen scenarios (training)", 94, "good"],
-          ["Unseen traffic patterns (test)", 78, "good"],
-          ["Handling new agents mid-scene", 81, "good"]
+          ["Realistic light changes", 82, "good"],
+          ["Handles new agents", 88, "good"],
+          ["Diverse scenario length", 85, "good"],
+          ["RL policy success rate", 79, "good"]
         ],
-        "note": "Training on diverse, generated scenarios teaches the driving model to handle new situations it has never explicitly seen."
+        "note": "Continuous generation with causal grouping produces diverse, adaptive behaviors that transfer to real RL tasks."
       }
     ]
   },
@@ -207,31 +191,31 @@
     "items": [
       {
         "warn": true,
-        "b": "The model learns biases in the training data.",
-        "html": "If all recorded trips avoid left turns at intersections, the generated scenarios will too. The model copies patterns, not reality."
+        "b": "Step-by-step error accumulation.",
+        "html": "If an early token (like a traffic light state) is predicted incorrectly, all downstream tokens (agents, motions) are conditioned on the wrong signal and compound the error. The paper mitigates this by forcing the first two time steps with ground truth during evaluation, then rolling out freely."
       },
       {
         "warn": true,
-        "b": "Long sequences lose fidelity.",
-        "html": "After 500 predicted tokens, small errors accumulate. A car's position drifts slightly at each step; after a minute of simulation, physics no longer match reality."
+        "b": "Causality mask misalignment.",
+        "html": "If the grouped attention mask is incorrect or too permissive, the model learns to cheat by peeking at future information, making the learned policy useless on real data with true causality."
       },
       {
         "warn": true,
-        "b": "The transformer is slow to sample from.",
-        "html": "Generating one scenario token by token is slower than replaying a video. Real-time training needs fast simulation."
+        "b": "New agents the model never trained on.",
+        "html": "When a new kind of agent (e.g., a motorcycle if the training data had only cars) enters mid-scenario, the model must predict its behavior without having seen it before. If the training examples are too narrow (only cars on highways), generated behaviors for motorcycles can be unrealistic or unsafe."
       },
       {
-        "b": "Done right.",
-        "html": "Train on large, diverse logs (not just sunny highways). Validate generated scenarios against real-world metrics (speed distributions, collision counts). Use short-horizon generation (next 30 seconds) for testing, not five minutes."
+        "b": "Done right: closed-loop training.",
+        "html": "The paper trains policies (via reinforcement learning) directly in the SceneStreamer environment, not on pre-generated scenarios. This ensures the policy learns to adapt to the actually-generated behaviors, not to one fixed set of replayed traffic patterns."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Build a simple traffic scene generator: represent 3 cars (position, velocity, stopping) as tokens. Train a small transformer on 1000 recorded 30-second clips. Seed it with 'car-A at x=0 vel=10, car-B at x=20 vel=8, car-C at x=50 vel=12, light=green'. Generate 50 steps (about 5 seconds of simulation). Plot the trajectories and check: (a) cars slow when a car ahead slows, (b) new tokens (car-D arriving) appear at plausible speeds, (c) the light changes realistically."
+      "Build a minimal traffic scene: a 4-way intersection with 3 lanes per side, 2 traffic lights, and 4 parked cars initially. Use a pretrained SceneStreamer model or a small one trained on nuScenes. (1) Generate a 10-second scenario by feeding in the map tokens once, then rolling forward step-by-step, sampling the traffic light and agent tokens. (2) At step 5, inject a new agent (a pedestrian) at a random crossing point. (3) Run the output through a simple collision detector: count frame-by-frame whether any two agents overlap. (4) Repeat 20 times and average the collision count. (5) Compare to a baseline: random-walk agents with fixed lights. The demo succeeds if SceneStreamer produces zero or near-zero collisions while random baselines produce many."
     ],
-    "metric_eq": "realism = (fraction of car-following obeys physics) + (collisions per 1000 steps) + (new-agent arrival rate matches training mean)",
-    "closing": "The demo makes it impossible to miss that the model learned a model of traffic dynamics from the data itself. When the generator never produces a 200-mph car or a teleport, it proves the learned probabilities enforced physical plausibility, because the model assigned near-zero likelihood to physics-violating tokens during training."
+    "metric_eq": "collision_rate = num_overlaps / (num_steps * num_agents)",
+    "closing": "The point: a causal token ordering ensures agents coordinate without explicit coordination rules. New agents integrate naturally because they obey the same causal model as existing agents."
   }
 }

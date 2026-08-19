@@ -1,52 +1,54 @@
 {
   "slug": "icml-or-s0dgtvgat1",
-  "title": "Sonar-TS: Search-Then-Verify Querying for Time Series",
+  "title": "Sonar-TS: Search-Then-Verify for Time Series Databases",
   "family": "Time Series & Sequential",
-  "one_liner": "Sonar-TS finds events in massive time-series databases by first narrowing down candidate windows with SQL, then verifying them with custom Python code.",
-  "lead": "When you have years of stock prices, sensor readings, or heartbeat records and want to ask natural questions in plain English—like find all times when the price jumped suddenly or the pattern looked like a smooth climb—existing methods fail. They either drown in the huge amount of data or miss the actual shapes and patterns you are looking for. Sonar-TS is a hybrid method that uses database tricks to narrow the search space first, then validates with hand-built logic that understands the actual raw data.",
+  "one_liner": "When you ask a database a question about shapes in time series, split the search into two steps: fast SQL to find candidate windows, then Python code to verify which ones really match.",
+  "lead": "Imagine searching for a pattern in years of stock prices: you want to find all the times the price rose quickly, then fell. A regular database can find numbers, but it cannot understand shapes like \"rapid rise then fall.\" A machine-learning model could understand the shape, but it cannot read billions of data points without running out of memory. Sonar-TS splits the job: SQL finds candidate windows using pre-computed summaries, then Python code checks which ones truly match the shape you described.",
   "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
   "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "Asking questions about patterns buried in time",
+    "h2": "Two worlds that do not talk",
     "paras": [
-      "You have a database with millions of data points collected over weeks or years—stock prices ticking every second, factory sensors recording every minute, hospital monitors logging every heartbeat. You want to ask natural questions: when did the price spike? Find all times the curve looked smooth. Which periods had unusual jumps? The challenge is that the database is too big to read all at once, and the patterns you care about are shapes and anomalies, not simple numerical ranges.",
-      "Text-to-SQL methods exist, but they translate English into database queries designed for structured tables with clean columns—they are blind to shapes, curves, and anomalies. Time-series models can spot patterns but choke on ultra-long histories (years of data). Neither world talks to the other."
+      "Databases are fast at finding numbers: \"Which rows have temperature above 80?\" But they cannot understand continuous shapes. Ask a database to find \"periods when temperature spiked then plateaued\" and it fails, because shapes live in signals, not in individual rows.",
+      "Machine-learning models understand shapes perfectly. Feed them years of stock prices and they spot patterns instantly. But these models have a hidden memory limit (called context length): they can only ingest a few thousand data points at a time. Real databases store millions or billions of points. A model cannot swallow them all.",
+      "A beginner tries one of two things: (1) Pass the entire history to a model and watch it run out of memory, or (2) Use SQL alone and admit it cannot understand the shape you want. Sonar-TS refuses both."
     ],
     "callout": {
-      "b": "The core problem.",
-      "html": "How do you ask a natural-language question about patterns in massive, continuous time-series data when SQL sees only rows and columns, and machine learning models cannot handle the sheer length of history?"
+      "b": "The move.",
+      "html": "Use SQL to fast-scan pre-made summaries and find candidate windows, then use Python to verify each candidate against the raw signal."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. A haystack of time",
-        "viz": "plain",
-        "caption": "Years of data: every second recorded, every reading stored, impossible to read by hand."
-      },
-      {
-        "title": "2. What you ask in English",
+        "title": "1. The problem: two tools, zero overlap",
         "viz": "box",
-        "viz_args": "Find when the curve dipped then climbed",
-        "caption": "A human asks: when did this pattern happen? SQL does not understand curves."
+        "viz_args": "SQL finds numbers, ML understands shapes. Neither does both.",
+        "caption": "SQL is fast but dumb to shapes. ML is smart but chokes on billions of points."
       },
       {
-        "title": "3. Search: narrow via SQL",
+        "title": "2. Search step: SQL pings summaries via feature index",
         "viz": "weights",
-        "viz_args": [["hot", 2], ["free", 8], ["hot", 3], ["free", 10], ["hot", 2], ["free", 7], ["hot", 2], ["free", 9], ["hot", 1], ["free", 6], ["hot", 3], ["free", 8]],
-        "caption": "SQL index finds candidate windows that match simple properties: rows where price fell in this hour."
+        "viz_args": [["hot", 30], ["warm", 20], ["free", 15], ["hot", 25], ["warm", 18], ["free", 12], ["hot", 28], ["warm", 22], ["free", 10], ["hot", 26], ["warm", 19], ["free", 14]],
+        "caption": "Pre-computed features (SAX codes, trends, slopes) let SQL quickly sift millions of windows without loading raw data."
       },
       {
-        "title": "4. Verify: generated Python checks the shape",
+        "title": "3. Verify step: Python locks onto each candidate",
         "viz": "weights",
-        "viz_args": [["moved", 2], ["warm", 8], ["moved", 3], ["warm", 10]],
-        "caption": "Python code generated by the model tests each candidate: does this window show a dip-then-climb?"
+        "viz_args": [["moved", 28], ["free", 10], ["moved", 26], ["free", 14], ["moved", 25], ["free", 12]],
+        "caption": "Only the candidates SQL found get loaded and checked by Python code against the actual raw signal."
       },
       {
-        "title": "5. Answers delivered",
+        "title": "4. The payoff: fast + accurate",
+        "viz": "box",
+        "viz_args": "SQL found 200, Python verified 17 are right",
+        "caption": "No memory blown, no patterns missed, no false positives."
+      },
+      {
+        "title": "5. The result: complex queries work",
         "viz": "plain",
-        "caption": "Only true matches returned; the model understood both the database and the pattern."
+        "caption": "Users ask for patterns. The system returns the exact timestamps and values that match."
       }
     ]
   },
@@ -54,150 +56,171 @@
     "h2": "What it actually does",
     "steps": [
       {
-        "b": "Translate the question",
-        "text": "Parse the English query and decide what properties to search for in the database."
+        "b": "User asks a question",
+        "text": "In English: find times when temperature rose fast then stayed flat."
       },
       {
-        "b": "Search via SQL",
-        "text": "Query the time-series database using a feature index to find candidate time windows meeting basic criteria."
+        "b": "Plan the search",
+        "text": "The model breaks the question into steps: detect the rise, detect the plateau, verify both happened in order."
       },
       {
-        "b": "Generate Python verifier",
-        "text": "Write custom Python code that checks the actual raw values in each candidate window against the full pattern request."
+        "b": "Generate SQL to find candidates",
+        "text": "SQL queries the feature index (pre-made summaries) to fetch windows where the trend matches roughly."
       },
       {
-        "b": "Run verifier on candidates",
-        "text": "Execute the generated code on only the narrow set of candidates, not the entire dataset."
+        "b": "Generate Python to verify",
+        "text": "For each candidate window, Python computes the real slope and flatness of the raw signal."
       },
       {
-        "b": "Return results",
-        "text": "Report time intervals where both SQL and Python checks pass, eliminating false positives."
+        "b": "Return the matches",
+        "text": "Only windows where both the rough pattern (SQL) and the precise shape (Python) match are returned to the user."
       }
     ]
   },
   "object": {
-    "h2": "What the paper changes",
+    "h2": "The single change",
     "paras": [
-      "The paper builds a two-stage pipeline: SQL finds rough candidates by querying abstract properties (ranges, counts, simple statistics), then Python verifies by reading the actual raw time values and testing the full pattern. Instead of one model trying to do everything, the paper splits the load between database logic and verification code."
+      "Sonar-TS changes WHERE the query plan executes: instead of trying to do all the work in one place (either SQL or a model), it splits the work. SQL handles coarse-grained filtering on summaries; Python handles fine-grained verification on raw data. This split is the engine of the whole system."
     ],
-    "object": "the search-verify pipeline"
+    "object": "the query execution strategy"
   },
   "hidden": {
-    "h2": "The hidden quantity: search recall vs verification cost",
-    "name": "search recall and verification cost",
+    "h2": "The window candidate pool size",
+    "name": "candidate window pool",
     "paras": [
-      "The key trade-off the paper balances is this: the SQL search must be broad enough to include all true answers (high recall), but narrow enough that the Python verifier does not waste time checking millions of false candidates. If the SQL is too strict, true answers are discarded before verification. If the SQL is too loose, verification drowns in noise.",
-      "The paper measures this trade-off by tuning how broad the SQL search is—relaxing it to catch more candidates at the cost of more verification work, or tightening it to verify faster but risk missing answers. The feature index (a pre-computed summary of ranges, counts, and simple properties per time window) lets the SQL search work without scanning all raw data."
+      "The hidden quantity is how many windows pass the SQL filter before verification begins. If the feature index (SAX codes, trend slopes, etc.) finds 10,000 candidates out of a billion possible windows, the verification step only has to check 10,000, not a billion. The tighter the SQL filter, the fewer candidates Python has to verify. Fewer candidates means the system finishes faster because Python loads and checks less data, and the overall latency is dominated by that verification cost.",
+      "Sonar-TS estimates this by building a multi-scale feature index offline. Each window in the database gets a SAX code (a short letter sequence that captures the shape roughly) and other summaries. At query time, SQL uses fuzzy regex matching against these summaries to find candidates. The paper shows that a good feature index cuts the search space from billions to hundreds or thousands, making verification tractable."
     ],
     "heat": {
       "cells": [
-        ["SQL too strict", 4, true],
-        ["SQL too loose", 1, false],
-        ["Recall drops", 2, false],
-        ["Cost high", 1, false],
-        ["Balanced index", 3, true],
-        ["Misses answers", 2, false],
-        ["Cost low", 3, false],
-        ["Verification works", 4, true],
-        ["False positives", 1, false],
-        ["Real answers kept", 4, true],
-        ["Index tuning", 3, true],
-        ["Pipeline output", 4, true]
+        ["SQL-candidates", 4, true],
+        ["Python-verified", 2, false],
+        ["False-positives-from-SQL", 3, true],
+        ["False-negatives-missed", 1, false],
+        ["Index-recall", 4, false],
+        ["Verification-cost", 2, true],
+        ["SQL-runtime", 3, false],
+        ["Python-runtime", 2, false],
+        ["Feature-index-size", 3, true],
+        ["Memory-peak", 1, false],
+        ["Overall-latency", 3, true],
+        ["Accuracy-of-answers", 4, false]
       ],
-      "caption": "Darker means more balance between catching real answers and avoiding wasted verification."
+      "caption": "Darker: SQL filtering and Python verification together control how many windows pass, how fast, and how accurate the final result is."
     },
     "reads": [
       {
         "b": "Plain reading.",
-        "html": "The search part finds candidates fast but imprecisely. The verify part is precise but expensive. The paper tunes how strict the search is so the total cost stays low while the answer is not lost."
+        "html": "Imagine sifting through a billion grains of sand looking for red ones. You cannot check each grain by hand. Instead, you have a coarse sieve (SQL) that catches the ones that might be red, then human eyes (Python) that confirm each caught grain is truly red."
       },
       {
         "b": "Paper reading.",
-        "html": "The feature index supports efficient SQL queries over continuous-valued time series. The generated Python verifier narrows candidate sets by executing detailed checks on raw signal data, trading verification cost for recall preservation."
+        "html": "The feature index maps each time series window to a SAX representation and trend summary. SQL fuzzy matches against these summaries (searching for patterns like <em>ab*de*ab</em> in regex form). Candidates are then verified via generated Python code that computes exact metrics on raw signals."
       }
     ]
   },
   "mechanism": {
-    "h2": "Why it works: two minds, one question",
+    "h2": "Why splitting search and verify fixes the problem",
     "paras": [
-      "SQL databases are fast at filtering by simple rules: show me all times when a column was between 10 and 20, or where the average in a window fell. But SQL cannot describe a curve, an anomaly, or a smooth transition—it sees only numbers and ranges. Machine learning models understand curves and shapes but cannot efficiently scan billions of rows.",
-      "Sonar-TS solves this by having SQL do the heavy filtering (throwing away 99% of the data) using a fast feature index—a pre-built summary of simple properties per candidate window. Then, on only the narrow survivor set, it runs generated Python code that reads the actual raw values and tests the full pattern. This is like sonar: first, send a broad ping to narrow the search space (SQL search), then lock onto the target with precise verification (Python code). The pipeline works because filtering first is cheap (SQL is optimized for it) and verification second is affordable (only a few candidates remain)."
+      "The problem is a bottleneck: databases are small but dumb (cannot see shapes), models are smart but huge (cannot hold all data). Splitting work unblocks both.",
+      "SQL search runs on summaries, not raw data. Summaries are tiny (a few numbers per window), so SQL scans billions of windows in seconds without memory pressure. It finds rough candidates. Some candidates are false alarms because summaries are coarse.",
+      "Python verify loads only the candidates SQL found, not the whole database. Python computes the exact shape metrics (slope, plateau length, etc.) on raw data. It catches false alarms and confirms true matches. This two-step approach guarantees: (1) no patterns are missed (SQL recall is high because feature index is comprehensive), (2) false alarms are caught (Python precision is high because it checks real data), and (3) the system never loads more data than it can hold in memory (because verification only touches candidate windows, not the whole history)."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
         {
           "t": "input",
-          "s": "English question about a pattern"
+          "s": "Billions of time series points, natural language query, feature index"
         },
         {
           "t": "step",
-          "s": "Generate SQL query using the feature index",
+          "s": "LLM planner decomposes the query into sub-steps",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "SQL generates fuzzy regex against SAX summaries",
           "hl": true
         },
         {
           "t": "step",
-          "s": "SQL returns candidate time windows (thousands, not billions)"
+          "s": "SQL executes, returns rough candidate windows",
+          "hl": false
         },
         {
           "t": "step",
-          "s": "Generate Python verifier code from the full pattern",
+          "s": "Python generated code loads candidates and computes exact metrics",
           "hl": true
         },
         {
           "t": "step",
-          "s": "Run verifier on only the candidates"
+          "s": "Filters to windows where raw signal matches the query",
+          "hl": false
         },
         {
           "t": "output",
-          "s": "Time intervals matching both SQL and Python checks"
+          "s": "Precise timestamps and values of matching windows"
         }
       ]
     }
   },
   "math": {
-    "h2": "The scoring formula",
-    "words": "total_score = SQL_recall * verification_cost_ratio, where recall is the fraction of true answers the SQL finds, and cost_ratio is the number of candidates the Python must check divided by the total data points.",
-    "equation": "quality = recall_SQL * (1 - candidates / total_points)",
+    "h2": "The filtering formula",
+    "words": "Each window w receives a relevance score from SQL based on how well its SAX code and trend summary match the query pattern; only windows scoring above a threshold pass to Python for verification.",
+    "equation": "S_SQL(w) = count_matches(sax_code(w), query_pattern_regex) + trend_match_bonus(w) if S_SQL(w) >= threshold_SQL then verify(w) else discard(w)",
     "symbols": [
-      ["recall_SQL", "fraction of true answers caught by SQL search"],
-      ["candidates", "number of time windows returned by SQL"],
-      ["total_points", "all data points in the database"]
+      ["S_SQL(w)", "SQL relevance score for window w"],
+      ["sax_code(w)", "SAX letter sequence of window w (e.g. abcde)"],
+      ["query_pattern_regex", "pattern to match in SQL (e.g. a+.*b+)"],
+      ["count_matches", "number of regex matches found"],
+      ["trend_match_bonus(w)", "extra points if slope, plateau, or direction matches"],
+      ["threshold_SQL", "minimum score to pass to Python verification"]
     ],
     "worked": {
       "title": "A tiny worked example",
       "lines": [
-        "Suppose the database has 1,000,000 time points.",
-        "There are 100 true answers (windows matching the pattern).",
-        "SQL search returns 10,000 candidates (includes most true answers, plus false positives).",
-        "Recall from SQL: 95 out of 100 true answers found, so recall_SQL = 0.95.",
-        "Cost ratio: 10,000 / 1,000,000 = 0.01 (verifier touches 1% of the data).",
-        "Quality score: 0.95 * (1 - 0.01) = 0.95 * 0.99 = 0.9405.",
-        "If SQL were too strict and returned only 1,000 candidates, recall might drop to 0.70, giving quality = 0.70 * 0.999 = 0.699—lower overall because answers were lost."
+        "Suppose SQL searches for pattern 'rise then plateau' in SAX codes.",
+        "Window A: SAX code aabbc, matches regex a+b+c = 2 matches + trend bonus 1 = score 3.",
+        "Window B: SAX code cccaa, matches regex a+b+c = 1 match + trend bonus 0 = score 1.",
+        "Threshold is 2. Window A passes to Python verification (score 3 >= 2), Window B is discarded (score 1 < 2).",
+        "Python then confirms: Window A's raw signal truly rises then plateaus. Match found."
       ]
     },
-    "note": "The formula balances how many true answers the SQL finds against how much work the verifier must do."
+    "note": "SQL filters coarsely on summaries; Python verifies precisely on raw data. The threshold trades speed: lower threshold brings more candidates and slower verification, higher threshold risks missing matches."
   },
   "bars": {
-    "h2": "Naive vs Sonar-TS",
+    "h2": "Performance: before and after",
     "charts": [
       {
-        "title": "Naive full-scan approach",
+        "title": "Naive approach: use SQL alone",
         "rows": [
-          ["Time to search 1 year of data", 240, "bad"],
-          ["Answers found (recall)", 65, "bad"],
-          ["Computation cost per query", 100, "bad"]
+          ["Can find exact numbers?", 98, "good"],
+          ["Can find shapes like rise-then-plateau?", 5, "bad"],
+          ["Memory usage for billion-point query", 78, "bad"],
+          ["Query latency", 42, "bad"]
         ],
-        "note": "Without indexing or verification, the model reads all data and makes many mistakes."
+        "note": "SQL alone cannot express morphological patterns. Users get wrong or no results."
       },
       {
-        "title": "Sonar-TS pipeline",
+        "title": "Naive approach: use model alone",
         "rows": [
-          ["Time to search 1 year of data", 12, "good"],
-          ["Answers found (recall)", 92, "good"],
-          ["Computation cost per query", 15, "good"]
+          ["Can find shapes?", 89, "good"],
+          ["Can find exact timestamps?", 45, "bad"],
+          ["Memory usage for billion-point query", 95, "bad"],
+          ["Query latency", 88, "bad"]
         ],
-        "note": "SQL index filters first (12 seconds instead of 240), and Python verifier on small candidate set gives accurate answers while staying cheap."
+        "note": "Models understand shapes but run out of memory on real databases."
+      },
+      {
+        "title": "Sonar-TS: search-then-verify",
+        "rows": [
+          ["Can find shapes?", 85, "good"],
+          ["Can find exact timestamps?", 88, "good"],
+          ["Memory usage for billion-point query", 15, "good"],
+          ["Query latency", 22, "good"]
+        ],
+        "note": "Sonar-TS balances semantic precision with scalability. It handles complex queries that traditional methods fail on."
       }
     ]
   },
@@ -206,31 +229,32 @@
     "items": [
       {
         "warn": true,
-        "b": "Feature index does not match the query intent.",
-        "html": "If the SQL search looks for low values but the pattern actually needs to detect a sudden jump, the SQL index returns the wrong candidates and Python cannot fix it. The search stage must be tuned for each query type."
+        "b": "Feature index is too coarse.",
+        "html": "If the SAX codes or trend summaries do not capture the pattern you care about, SQL will miss candidates entirely. The query will return no results even though the pattern exists. Example: if your database only stores average slope per window but you need to detect sudden spikes, the index is too coarse."
       },
       {
         "warn": true,
-        "b": "Generated Python code has bugs.",
-        "html": "If the verifier code misunderstands the pattern (e.g., tests for the wrong threshold or reads the wrong column), it filters out true answers. Code generation must be careful."
+        "b": "Feature index is too expensive.",
+        "html": "Building and storing a feature index for billions of windows takes storage and offline compute time. If the database changes constantly, the index becomes stale. Trading off index freshness against query accuracy is a real tension."
       },
       {
         "warn": true,
-        "b": "Ultra-long patterns exceed Python capabilities.",
-        "html": "If the pattern spans longer than the model expects (e.g., a trend lasting 30 days when the verifier was written for 3 days), verification fails silently and returns incomplete results."
+        "b": "Python verification is too slow.",
+        "html": "If SQL returns 100,000 candidates and Python has to load and verify each one against raw data, the verify step becomes a bottleneck. The system is fast only when SQL filters aggressively. Poorly written query plans lead to huge candidate pools."
       },
       {
+        "warn": false,
         "b": "Done right.",
-        "html": "Tune the SQL search to be generous (accept candidates that look plausible), generate Python verifiers that carefully test the full pattern, and validate on known examples before running live queries."
+        "html": "Build the feature index carefully so it captures the shapes users actually ask about. Write good query plans so the LLM planner decomposes queries into verifiable sub-steps. Then Search-Then-Verify is fast and accurate, because SQL does the cheap sifting and Python does only the necessary precise checking."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Build a small time-series database (e.g., 100,000 data points from a sine wave with noise and occasional jumps). Write a natural-language query like find all times when the signal jumped up then down in under 5 minutes. Create a feature index by summarizing the data into candidate windows. Generate SQL that finds windows where the maximum and minimum are far apart. Generate Python that verifies the exact jump timing. Measure: of the true jumps inserted into the data, how many did the pipeline find (recall)? How much faster was the search than scanning all data (speedup)? The search is faster because SQL filters out most candidates using pre-computed summaries, and only the small survivor set requires Python verification—avoiding full data scans."
+      "Build a small time series database with 100,000 synthetic data points (e.g., randomly walking prices). Include a feature index (SAX codes and trend summaries pre-computed for all windows). Write a query: 'Find all times when price rose more than 5% then stayed flat for at least 10 steps.' Generate SQL to search the feature index and return candidates. Write Python code to verify each candidate (compute real slope and flatness on raw data). Count: how many SQL candidates? How many Python verifications passed? Time both steps separately."
     ],
-    "metric_eq": "overall_score = (true_answers_found / all_true_answers) * (baseline_time / sonar_time)",
-    "closing": "The demo must show that Sonar-TS finds real patterns fast, not by luck, but because SQL screening actually worked and Python verification actually checked."
+    "metric_eq": "false_positive_rate = (candidates_SQL_returned - candidates_Python_verified) / candidates_SQL_returned, verification_speedup = (time_to_check_all_raw_data) / (time_SQL_search + time_Python_verify)",
+    "closing": "The demo must show that SQL eliminates the need to scan all 100,000 windows, and Python eliminates false alarms that SQL caught. That is the whole system: fast coarse search, then precise fine-grained check."
   }
 }

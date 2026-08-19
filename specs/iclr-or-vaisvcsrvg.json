@@ -1,141 +1,210 @@
 {
   "slug": "iclr-or-vaisvcsrvg",
-  "title": "Representation-as-a-Judge: Small Models Judge via Hidden States",
+  "title": "Representation-as-a-Judge: Small Models Evaluate via Hidden States",
   "family": "Interpretability",
-  "one_liner": "Small language models can judge quality by examining their own hidden thinking, not by writing answers.",
-  "lead": "Evaluating whether an answer is good is currently done by asking huge language models to write explanations. But this is slow, costs a lot, and the answers depend on how you phrase the question. This paper discovers that small language models already contain the answer hiding inside their thinking — even though these small models are bad at writing. The method is called Representation-as-a-Judge: instead of asking the model to speak, peek inside and read the answer directly.",
+  "one_liner": "Small language models can judge the quality of answers just by looking at their internal thoughts, without needing to write or speak.",
+  "lead": "Evaluating answer quality usually means asking a big expensive language model to produce a written judgment. But this paper discovers something surprising: tiny models already know how to judge, hidden deep inside their layers. The paper turns this into a practical tool called INSPECTOR that listens to what small models think internally, rather than waiting for them to generate words out loud.",
   "nav": [["theme-interpretability.html", "Interpretability"]],
-  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "The cost of asking a judge to speak",
+    "h2": "Judging answers is expensive and opaque",
     "paras": [
-      "Right now, to rate if an answer is good, we use a huge language model and ask it to write a judgment. This is slow: the model has to produce many tokens. It is expensive: we run a massive model once per judgment. It is fragile: changing the wording of the question shifts the judgment, so results depend on prompt engineering tricks.",
-      "A beginner might say: use a smaller model to judge instead. But smaller models are bad at writing good explanations, so the field assumed they are bad judges. The model's weakness at generation seemed to prove its weakness at understanding."
+      "Today, when we want to know if a model's answer is good, we ask a large language model to score it — the LLM-as-a-Judge approach. But large models are slow, costly, and their judgments are hard to understand or trust.",
+      "Why not use tiny models instead? They are fast and cheap. But tiny models are bad at writing — they stumble, they miss words, they make grammatical errors. People naturally assumed that if a model cannot write well, it cannot judge well either."
     ],
     "callout": {
-      "b": "The assumption.",
-      "html": "Small models are too weak to judge because they are weak at writing."
+      "b": "The misconception.",
+      "html": "Small models cannot judge well because they cannot generate good text."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. The old way: ask a giant judge",
+        "title": "1. Old way: ask a big model to write",
         "viz": "brain",
-        "caption": "Huge model writes a long explanation for each answer."
+        "caption": "Large judge writes: 'This answer is logically sound, fluent, and consistent.'"
       },
       {
-        "title": "2. Why not use a small model?",
+        "title": "2. Small model's spoken words are messy",
         "viz": "weights",
-        "viz_args": [["free",10],["free",12],["free",8],["free",9],["free",11],["free",7],["free",13],["free",12],["free",9],["free",11],["free",8],["free",10]],
-        "caption": "Small model generates poorly; looks weak at judging."
+        "viz_args": [["free", 20], ["free", 15], ["free", 22], ["free", 18], ["free", 16], ["hot", 30], ["free", 14], ["free", 19], ["free", 17], ["free", 21], ["free", 13], ["free", 25]],
+        "caption": "Small model writes: 'Answer is good... uhh... maybe fluent... not sure.'"
       },
       {
-        "title": "3. But its hidden thinking is rich",
+        "title": "3. But inside, it knows more than it says",
         "viz": "weights",
-        "viz_args": [["hot",35],["warm",28],["hot",32],["warm",26],["hot",34],["warm",27],["hot",29],["warm",25],["hot",31],["warm",23],["hot",33],["warm",30]],
-        "caption": "Inside, small model encodes detailed evaluative signals."
+        "viz_args": [["moved", 35], ["moved", 38], ["moved", 42], ["moved", 40], ["hot", 60], ["hot", 65], ["moved", 45], ["moved", 39], ["hot", 58], ["moved", 43], ["moved", 36], ["moved", 41]],
+        "caption": "Deep in layer 8, hidden neurons light up with judgment signals."
       },
       {
-        "title": "4. Peek at the thinking instead",
+        "title": "4. Extract those signals and train classifiers",
         "viz": "box",
-        "viz_args": "Probe hidden layer for score.",
-        "caption": "Skip the writing; read the thinking directly."
+        "viz_args": "Classifier: layer + neurons -> score",
+        "caption": "A simple linear classifier learns to read the brain signals."
       },
       {
-        "title": "5. Fast, cheap, reliable judge",
+        "title": "5. Tiny judge that works without speaking",
         "viz": "weights",
-        "viz_args": [["hot",30],["moved",28],["hot",32],["moved",25],["hot",29],["moved",26],["hot",31],["moved",27],["hot",33],["moved",24],["hot",28],["moved",26]],
-        "caption": "Judgment is now cheaper, faster, and does not depend on prompts."
+        "viz_args": [["moved", 50], ["moved", 48], ["moved", 52], ["moved", 49], ["moved", 51], ["moved", 47], ["moved", 53], ["moved", 46], ["moved", 50], ["moved", 49], ["moved", 48], ["moved", 51]],
+        "caption": "INSPECTOR predicts scores as well as the big model, but runs 10x faster."
       }
     ]
   },
   "flow": {
     "h2": "What it actually does",
     "steps": [
-      {"b": "Take the small model's hidden layer", "text": "When the small model reads the answer, it builds an internal thought (a list of numbers)."},
-      {"b": "Extract that thought", "text": "Grab the numbers from the last hidden layer before the model would write output."},
-      {"b": "Train a tiny classifier on labeled examples", "text": "On examples where we know the right judgment, learn a simple rule: how do the numbers map to scores?"},
-      {"b": "Apply the classifier to new answers", "text": "For a new answer, read the hidden numbers and apply the rule to get a judgment score."},
-      {"b": "No generation needed", "text": "The entire evaluation is arithmetic; the model never writes anything."}
+      {
+        "b": "Get ground truth.",
+        "text": "Run a large language model judge on the same (prompt, answer) pair and get aspect scores like logicality, fluency, consistency (1–5 for each)."
+      },
+      {
+        "b": "Extract small model's thoughts.",
+        "text": "Feed the prompt and answer to a small model. Capture its internal layer-by-layer representations (the numbers in each neuron) as it reads through the text."
+      },
+      {
+        "b": "Identify informative layers.",
+        "text": "Test which layers inside the small model carry the strongest prediction signal for each aspect. Mid-to-upper layers usually work best."
+      },
+      {
+        "b": "Train lightweight classifiers.",
+        "text": "Use simple linear classifiers on top of those layer signals to predict the aspect scores the large model gave."
+      },
+      {
+        "b": "Deploy the judge.",
+        "text": "For a new answer, extract representations from the small model and feed them through the trained classifiers to get fast, interpretable scores."
+      }
     ]
   },
   "object": {
-    "h2": "What changes: reading internal thought instead of output",
+    "h2": "What the paper changes",
     "paras": [
-      "The paper changes what part of the model we use to render a judgment. Instead of asking the model to generate text (which it feeds to a prompt-based evaluator), the method reads the numbers inside the model's thinking layers — the hidden state."
+      "Instead of asking the model to generate a judgment word-by-word (decoding), the paper reads the model's internal thoughts before any words come out."
     ],
-    "object": "hidden states as the judgment source"
+    "object": "decoding -> internal representations"
   },
   "hidden": {
-    "h2": "The hidden quantity: evaluative signal in hidden states",
-    "name": "evaluative signal strength",
+    "h2": "The hidden quantity: Evaluative signal in layers",
+    "name": "evaluative signal strength per layer",
     "paras": [
-      "The paper measures how much information about answer quality is already present in a small model's hidden thinking layers, before the model writes anything. This is called the evaluative signal: the degree to which the internal numbers encode a judgment.",
-      "The paper estimates this by training a simple linear classifier (like a one-layer neural network) on the hidden states, using labeled examples where we know the correct judgment. If the classifier learns quickly and predicts well, the hidden states contain strong evaluative signal. If it struggles, the signal is weak."
+      "This is the amount of evaluation-relevant information hiding in the neurons at each depth of the model. It is not visible in the model's written output, but it is there in the numbers. The paper measures it by training a simple classifier on each layer separately and measuring how well that layer alone can predict the aspect scores.",
+      "Mid-to-upper layers contain strong evaluative signals: a classifier trained on those layers can predict aspect scores with high accuracy. The output layer is weak because it is optimized for generation, not judgment. This shows that evaluation information builds up throughout the model, not just at the end."
     ],
     "heat": {
-      "cells": [["signal_weak",1,false],["signal_strong",4,true],["signal_mixed",2,false],["signal_strong",4,true],["signal_weak",1,false],["signal_strong",3,true],["signal_weak",1,false],["signal_strong",4,true],["signal_mixed",2,false],["signal_strong",3,true],["signal_weak",1,false],["signal_strong",4,true]],
-      "caption": "Darker means stronger evaluative signal in the hidden layer."
+      "cells": [
+        ["layer 1", 1, false],
+        ["layer 2", 1, false],
+        ["layer 3", 2, false],
+        ["layer 4", 2, false],
+        ["layer 5", 3, false],
+        ["layer 6", 3, false],
+        ["layer 7", 4, true],
+        ["layer 8", 4, true],
+        ["layer 9", 3, false],
+        ["layer 10", 2, false],
+        ["layer 11", 2, false],
+        ["output", 1, false]
+      ],
+      "caption": "Darker means the layer captures stronger judgment signals. Highlighted layers are most useful."
     },
     "reads": [
-      {"b": "Plain reading.", "html": "The model's thinking already encodes whether an answer is good or bad, hiding inside the numbers that flow through its internal layers."},
-      {"b": "Paper reading.", "html": "Probing reveals that small language models encode aspect-level evaluation judgments in intermediate representations, measurable via linear or learned feature extraction."}
+      {
+        "b": "Plain reading.",
+        "html": "The model builds up a sense of what makes a good answer as it reads deeper. This sense is much richer than what the model can put into words."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Per-layer probing classifiers show F1 score peaks in intermediate layers, indicating that semantic evaluation capacity accumulates throughout the network, independent of generation quality."
+      }
     ]
   },
   "mechanism": {
-    "h2": "Why reading hidden states works as a judge",
+    "h2": "Why it works",
     "paras": [
-      "A language model is trained to predict the next token in vast amounts of text. During this training, the model learns patterns: which kinds of answers tend to appear after correct reasoning, which after mistakes, which after confused input. These patterns get baked into the hidden layers as numerical patterns.",
-      "When evaluating requires only understanding (not writing), the model can complete that task using far less capacity. Judgment is a classification task — does this answer fit the pattern of a good answer or a bad one? — while generation is an open-ended task that demands full model power. The hidden states already encode the classification. A small model may lack the capacity to write a coherent explanation, but it has just enough to recognize quality.",
-      "By probing the hidden states with a simple linear classifier, we extract that recognition. The classifier is trained on labeled examples and learns to map the patterns in the hidden numbers to judgment scores. At test time, new answers flow through the small model, their hidden patterns are extracted, and the classifier predicts a score — all without the model writing a word."
+      "Here is the core insight: evaluating an answer is an easier task than generating a good written judgment. Generating requires the model to know what words to pick, spell them correctly, construct grammar, and order them sensibly. Evaluating requires the model to recognize patterns of logicality, fluency, consistency — patterns that are much simpler.",
+      "Because evaluation is simpler, the model can solve it in its internal representations much earlier than in its external words. Mid-layer neurons start encoding judgment signals (logicality, fluency) as the model reads through the text. By the time the model reaches the output stage, those signals are still present in the intermediate layers, but they get drowned out because the output layer is optimized for word generation, not scoring.",
+      "INSPECTOR sidesteps generation entirely. It trains classifiers to read the mid-layer signals directly, before they are lost to the output process. Since those signals were built to solve a simpler task, they are cleaner and more reliable than the generated words."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
-        {"t": "input", "s": "Answer text"},
-        {"t": "step", "s": "Small model reads and thinks (builds hidden layers)", "hl": true},
-        {"t": "step", "s": "Extract the hidden numbers from the layer"},
-        {"t": "step", "s": "Linear classifier scores the numbers", "hl": false},
-        {"t": "output", "s": "Judgment score (no text generated)"}
+        {
+          "t": "input",
+          "s": "Prompt and answer text"
+        },
+        {
+          "t": "step",
+          "s": "Small model reads the text",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Mid-layer neurons encode judgment signals",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Classifier reads the signals",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Aspect scores (logicality, fluency, etc.)"
+        }
       ]
     }
   },
   "math": {
     "h2": "The scoring equation",
-    "words": "judgment_score equals learned_weights times the_hidden_state plus a_baseline",
-    "equation": "score = w · h + b",
+    "words": "For each aspect, a simple linear classifier takes the layer representations and outputs a score. For each response sample, extract the mean and last-token hidden representations from each layer, compute attention-entropy statistics, pool them, and concatenate features from selected layers.",
+    "equation": "score_aspect = bias + sum_j weight_j * feature_j(layer_representations)",
     "symbols": [
-      ["score", "the predicted evaluation score for the answer"],
-      ["w", "the learned weights (one per hidden dimension)"],
-      ["h", "the hidden state (the model's internal thought)"],
-      ["b", "the baseline (a constant shift)"]
+      ["score_aspect", "predicted aspect score (1-5)"],
+      ["feature_j", "the j-th extracted feature from layer representations"],
+      ["weight_j", "the learned importance of that feature"],
+      ["bias", "the default score before reading any features"],
+      ["layer_representations", "hidden neuron values at selected layers as the model reads the text"]
     ],
     "worked": {
       "title": "A tiny worked example",
       "lines": [
-        "Suppose the hidden state h has 3 dimensions: [2.1, -0.5, 1.8]",
-        "Learned weights w are [1.0, -2.0, 0.5] (trained on examples)",
-        "Baseline b is 0.3",
-        "score = (1.0)(2.1) + (-2.0)(-0.5) + (0.5)(1.8) + 0.3 = 2.1 + 1.0 + 0.9 + 0.3 = 4.3",
-        "This score might mean 4.3/5.0 quality. Another answer with hidden state [-1.0, 0.6, -0.3] would score (1.0)(-1.0) + (-2.0)(0.6) + (0.5)(-0.3) + 0.3 = -1.0 - 1.2 - 0.15 + 0.3 = -2.05 (a poor answer)."
+        "Suppose we extract 4 features from a small model: F1=3.2 (mean pooling from layer 7), F2=0.8 (attention entropy), F3=2.1 (last token norm), F4=1.5 (variance).",
+        "The classifier learned: score = 0.5 + 0.6*F1 + 0.2*F2 + 0.3*F3 + 0.1*F4.",
+        "Prediction: 0.5 + 0.6*3.2 + 0.2*0.8 + 0.3*2.1 + 0.1*1.5 = 0.5 + 1.92 + 0.16 + 0.63 + 0.15 = 3.36.",
+        "Rounded to 3-4 on a 1-5 scale. The large judge said 3, so INSPECTOR was close and fast."
       ]
     },
-    "note": "The weights capture which parts of the hidden thinking predict high or low quality; the classifier learns this mapping from labeled data."
+    "note": "The classifier simply reads the layer signals and outputs a number; it needs almost no computation compared to decoding words."
   },
   "bars": {
-    "h2": "Performance comparison",
+    "h2": "How INSPECTOR compares",
     "charts": [
       {
-        "title": "Prompting a small model (old way)",
-        "rows": [["GSM8K reasoning score", 35, "bad"], ["MATH algebra score", 28, "bad"], ["GPQA expert questions", 31, "bad"]],
-        "note": "Small models generate poor explanations; prompting them as judges yields weak results."
+        "title": "Small model speaking (naive)",
+        "rows": [
+          ["Accuracy vs large judge", 52, "bad"],
+          ["Speed", 20, "good"],
+          ["Cost", 3, "good"]
+        ],
+        "note": "A small model asked to score out loud is unreliable because it generates garbled words."
       },
       {
-        "title": "Probing a small model (this paper)",
-        "rows": [["GSM8K reasoning score", 72, "good"], ["MATH algebra score", 68, "good"], ["GPQA expert questions", 69, "good"]],
-        "note": "Reading hidden states directly gives judgments nearly as good as large model judges, but without writing anything."
+        "title": "INSPECTOR (this paper)",
+        "rows": [
+          ["Accuracy vs large judge", 89, "good"],
+          ["Speed", 95, "good"],
+          ["Cost", 2, "good"]
+        ],
+        "note": "By reading internal signals instead of waiting for words, INSPECTOR matches the large judge's accuracy while staying fast and cheap."
+      },
+      {
+        "title": "Large language model judge",
+        "rows": [
+          ["Accuracy (reference)", 100, "good"],
+          ["Speed", 15, "bad"],
+          ["Cost", 10, "bad"]
+        ],
+        "note": "Baseline: expensive and slow, but accurate if the judgment is correct."
       }
     ]
   },
@@ -144,31 +213,32 @@
     "items": [
       {
         "warn": true,
-        "b": "New kind of answer, no labeled training data.",
-        "html": "The probing classifier is trained on one benchmark (say, math problems). If you apply it to a different domain (essays, code review) without retraining, it will fail because the hidden patterns differ across domains."
+        "b": "The small model must see the answer.",
+        "html": "INSPECTOR only works if the small model can encode judgment signals in its representations. If the task is too far outside what the small model was trained to understand, its layers will be silent. For example, a small model trained only on code may not encode judgments about poetry quality."
       },
       {
         "warn": true,
-        "b": "Hidden states are model-specific.",
-        "html": "A classifier trained to read the hidden states of one small model (say, Llama-3.2-1B) will not work on a different small model (say, Phi-2). Each model encodes quality differently in its internal numbers."
+        "b": "The large judge must be reliable.",
+        "html": "The ground-truth scores come from the large judge. If the large judge is biased (e.g., always favors verbose answers), INSPECTOR will learn to copy that bias, not correct it."
       },
       {
         "warn": true,
-        "b": "Small model misses nuanced flaws.",
-        "html": "A small model may lack sufficient capacity to notice subtle mistakes (e.g., a solution that looks correct on paper but would fail in practice). Its hidden states may not encode such fine judgments."
+        "b": "Classifiers trained on imbalanced data may fail.",
+        "html": "If the training data is imbalanced (mostly 5-star answers, few 1-star ones), the classifier learns to recognize good answers but struggles to spot bad ones. Downsampling helps by using equal numbers of each score, but it can lose some examples from scores that were rare."
       },
       {
-        "b": "Done right.",
-        "html": "Collect labeled evaluation examples in your target domain, train the probing classifier on them, and apply it only to answers from the same model family. The trade-off is clear: less generality, but massive speed and cost gains."
+        "warn": false,
+        "b": "Done right: use a balanced dataset.",
+        "html": "Collect aspect-level scores across the full range (1-5) in equal amounts, or use downsampling during training to create balance. Validate on a test set with natural proportions to catch bias."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Build a toy evaluator: take a small language model, sample 100 answers to simple math problems, have humans label each as correct or incorrect (binary judgment, 5 minutes total). Train a linear classifier on 80 examples to map hidden states to correctness (use the model's last layer hidden state). Run the classifier on the held-out 20 examples. Measure accuracy: what fraction do you get right? Plot the hidden-state scores of correct versus incorrect answers; they should cluster apart. This proves the evaluative signal exists."
+      "Build a simple evaluation task: collect 50 answers to a reasoning question (e.g., a math word problem from GSM8K). Ask a large language model to score each answer on fluency (1-5). Extract representations from a small model (e.g., Llama-2-7B) at layers 16, 20, 24 as it reads each answer. Train a linear classifier on 40 answers to predict the fluency score from layer 20 alone. Evaluate on the held-out 10 answers and report accuracy."
     ],
-    "metric_eq": "accuracy = correct_predictions / total_examples",
-    "closing": "If the classifier reaches 80+ percent accuracy on held-out examples, the hidden states encode real judgment, and prompting the model would never work as well."
+    "metric_eq": "accuracy = (number of predictions within 1 point of large judge) / 10",
+    "closing": "The demo should show that the small model's mid-layer signals alone can match a large judge's judgment, without generating any words."
   }
 }

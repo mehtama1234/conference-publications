@@ -1,54 +1,53 @@
 {
   "slug": "iclr-or-weeodalwqg",
-  "title": "Explainable Token-level Noise Filtering for LLM Fine-tuning Datasets",
+  "title": "Explainable Token-level Noise Filtering for LLM Fine-tuning",
   "family": "Optimization",
-  "one_liner": "Most fine-tuning datasets are built sentence-by-sentence, but LLMs learn one word at a time; XTF finds which words are noise and silences them during training.",
-  "lead": "When you teach an LLM a new skill, you give it examples to learn from. But those examples are built sentence-by-sentence, as complete thoughts. The problem: LLMs do not learn sentence-by-sentence. They learn one word (or token) at a time, looking at what came before and guessing what comes next. This mismatch means some words in your training data are actually harmful noise that pulls the model in the wrong direction. XTF solves this by identifying which words are problematic and turning down the model's learning signal for just those words.",
+  "one_liner": "When you fine-tune an LLM, most training tokens are noise; XTF scores each token on three attributes and masks gradients from the weak ones.",
+  "lead": "Fine-tuning teaches a large language model a new task by training on examples. The problem: examples are written sentence-by-sentence, but the model learns token-by-token. This mismatch means many individual tokens in each example actually hurt learning. XTF gives every token a report card—three scores that say how useful it is—and then silently drops the bad tokens from training, improving final accuracy by up to 13.7%.",
   "nav": [["theme-optimization.html", "Optimization"]],
   "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "Why sentence-level datasets break at the word level",
+    "h2": "Training examples are built at the sentence level, but models learn at the token level",
     "paras": [
-      "When you build a dataset for fine-tuning, you write or collect complete sentences and documents. Each sentence is grammatically correct and on-topic as a whole. You assume the model learns the entire sentence at once.",
-      "But LLMs learn differently. During training, the model reads one token (word or word piece) at a time and tries to predict the next one. If a sentence contains even one confused or irrelevant word among the good ones, the model takes a learning step based on that word. The word pulls gradients (the training signals that update the model) in a wrong direction. The model weakens slightly because of just that one token.",
-      "Repeating this across thousands of training examples, these token-level mistakes add up. The model learns slower, gets worse at the new skill, and ends up performing worse than if the data were cleaner."
+      "When you fine-tune an LLM, you give it sentences like 'The capital of France is Paris.' The model trains on every single token: The, capital, of, France, is, Paris. But not every token carries useful information for learning the task. Some tokens are just filler because the model already predicted them correctly during pretraining (no new knowledge), or they do not belong to the task's domain (off-topic), or they contradict what the task is trying to teach.",
+      "A naive approach: use all tokens as-is. This seems obvious, but it has a hidden cost. Tokens that mislead the model (a word that appears in the input but should not appear in the output) create wrong learning signals. Tokens the model already knew before fine-tuning are redundant. Tokens unrelated to the task just add noise. The model has to learn despite the noise, which makes training slower and less accurate."
     ],
     "callout": {
-      "b": "The mismatch",
-      "html": "Fine-tuning data is curated at the sentence level, but language models optimize at the token level."
+      "b": "The fix.",
+      "html": "Score every token on how useful it is, keep only the useful ones, and mask out the rest during training."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. The setup",
-        "viz": "plain",
-        "caption": "Dataset is 50 good sentences, each word is on-topic and grammatically correct."
-      },
-      {
-        "title": "2. Model learns sentence-by-sentence",
-        "viz": "weights",
-        "viz_args": [["hot", 70], ["hot", 72], ["free", 15], ["hot", 68], ["hot", 74], ["free", 18], ["hot", 66], ["hot", 70], ["free", 12], ["hot", 68], ["hot", 72], ["free", 14]],
-        "caption": "But inside, it is learning word-by-word; most words pull rightly, some hurt."
-      },
-      {
-        "title": "3. XTF finds the bad words",
-        "viz": "weights",
-        "viz_args": [["hot", 70], ["hot", 72], ["moved", 35], ["hot", 68], ["hot", 74], ["moved", 28], ["hot", 66], ["hot", 70], ["moved", 22], ["hot", 68], ["hot", 72], ["moved", 25]],
-        "caption": "Scores each token on logic, new ideas, and task fit; marks a few as noise."
-      },
-      {
-        "title": "4. Silence noisy words during training",
+        "title": "1. Raw training data",
         "viz": "box",
-        "viz_args": "Mask gradient; turn learning off for this word",
-        "caption": "Gradient-mask stops bad tokens from pulling the model off track."
+        "viz_args": "Every token: The capital of France is Paris",
+        "caption": "All tokens mixed together. No filter."
       },
       {
-        "title": "5. Cleaner updates flow through",
+        "title": "2. Score each token",
         "viz": "weights",
-        "viz_args": [["hot", 72], ["hot", 76], ["free", 8], ["hot", 70], ["hot", 78], ["free", 6], ["hot", 68], ["hot", 74], ["free", 5], ["hot", 70], ["hot", 76], ["free", 4]],
-        "caption": "Model learns faster because only good words drive the learning updates."
+        "viz_args": [["hot", 85], ["warm", 50], ["free", 20], ["hot", 80], ["warm", 55], ["hot", 90]],
+        "caption": "Reasoning, newness, and fit-to-task scores per token. Hot means useful."
+      },
+      {
+        "title": "3. Identify the noise",
+        "viz": "box",
+        "viz_args": "Keep hot. Mask free.",
+        "caption": "Tokens scoring low on all three axes are noise."
+      },
+      {
+        "title": "4. Mask the gradients",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["free", 0], ["free", 0], ["hot", 80], ["warm", 55], ["hot", 90]],
+        "caption": "Zero out learning signals from masked tokens."
+      },
+      {
+        "title": "5. Better training",
+        "viz": "plain",
+        "caption": "Model learns faster and stronger from signal-only examples."
       }
     ]
   },
@@ -56,129 +55,145 @@
     "h2": "What it actually does",
     "steps": [
       {
-        "b": "Compute three scores per word",
-        "text": "Reasoning importance: is this word needed to follow the logic? New ideas: does this word teach something the model did not already know? Task relevance: does this word matter for the goal?"
+        "b": "Score reasoning importance",
+        "text": "Run the full example through the base model and see which tokens it focuses on internally (attention scores measure where the model looks when reading). High attention means the model thinks that token matters for understanding."
       },
       {
-        "b": "Combine scores into a noise flag",
-        "text": "If a word scores low on all three, or low on the ones that matter most for this task, flag it as noisy."
+        "b": "Score knowledge newness",
+        "text": "Check if the base model already predicts each token correctly; if yes, it is redundant and teaches nothing."
       },
       {
-        "b": "Train normally, then zero-mask",
-        "text": "During training, run the model as usual, but when a noisy word's gradient is computed, multiply it by zero before updating the weights."
+        "b": "Score task relevance",
+        "text": "Compare each token's learned representation (a list of numbers learned during pretraining) to the average of all task tokens; distant ones are off-topic."
       },
       {
-        "b": "The model still reads noisy words",
-        "text": "The noisy words are still fed into the model as input (they are part of the context), but they do not drive the weight updates."
+        "b": "Filter by threshold",
+        "text": "Tokens scoring low on one or more attributes are marked as noise."
       },
       {
-        "b": "Learn only from good words",
-        "text": "The model's weights (its learned numbers) change only based on the clean, high-value tokens; noise signals are discarded."
+        "b": "Mask and train",
+        "text": "During fine-tuning, silence the learning signals (gradients are the direction the weights should move) from noisy tokens so they do not change the model."
       }
     ]
   },
   "object": {
     "h2": "What the paper changes",
     "paras": [
-      "Most fine-tuning just trains on all tokens equally. XTF changes which tokens drive the gradient updates: only tokens that score high on reasoning importance, new ideas, and task relevance get to update the model weights."
+      "XTF changes which tokens contribute to learning. The training dataset stays the same, but the model now learns only from high-scoring tokens and ignores low-scoring ones."
     ],
-    "object": "gradient flow to noisy tokens"
+    "object": "learning signals from tokens"
   },
   "hidden": {
-    "h2": "The three attributes that measure token value",
-    "name": "reasoning importance, new ideas, task relevance",
+    "h2": "The hidden quantity: token usefulness",
+    "name": "token contribution score",
     "paras": [
-      "XTF does not use a single abstract 'importance' score. Instead, it breaks token quality into three concrete, observable attributes. Reasoning importance means: does this token carry essential logic or facts needed to reach the correct answer? New ideas means: is this token teaching the model something it did not already know? Task relevance means: does this token directly relate to the goal of the task (e.g., for math, solving the problem; for code, the output).",
-      "The paper scores each token on all three using heuristic scoring methods (rules or learnable functions). A token with low scores on all three is almost certainly noise and gets masked. A token high on even one of these attributes is likely worth learning from."
+      "Most datasets do not tell you which tokens are actually useful for learning. The paper introduces a way to measure it: for each token, assign a score on three dimensions—reasoning importance (does the model focus on this token when reading the input?), knowledge newness (does the model already predict this token?), and task relevance (does this token belong to the task domain?)—and combine them into a usefulness judgment.",
+      "XTF estimates each score using the base model itself: by watching where the model's internal attention mechanism looks (which tokens it focuses on), you learn reasoning importance; by checking if the model's current prediction is correct, you learn newness (if it already gets it right, the token is redundant); and by comparing each token's learned number-list to the average of all task tokens, you learn relevance."
     ],
     "heat": {
-      "cells": [["tok1: reasoning", 4, true], ["tok2: new ideas", 3, false], ["tok3: task", 2, false], ["tok4: reasoning", 1, false], ["tok5: new ideas", 4, true], ["tok6: task", 1, false], ["tok7: reasoning", 3, true], ["tok8: new ideas", 2, false], ["tok9: task", 4, true], ["tok10: reasoning", 1, false], ["tok11: new ideas", 2, false], ["tok12: task", 3, true]],
-      "caption": "Darker means higher score on that attribute; borders mark tokens that pass the threshold."
+      "cells": [
+        ["France_RI", 4, true],
+        ["France_KN", 3, true],
+        ["France_TR", 4, true],
+        ["of_RI", 1, false],
+        ["of_KN", 2, false],
+        ["of_TR", 2, false],
+        ["is_RI", 2, false],
+        ["is_KN", 4, false],
+        ["is_TR", 1, false],
+        ["The_RI", 1, false],
+        ["The_KN", 3, false],
+        ["The_TR", 1, false]
+      ],
+      "caption": "Darker means higher score on that attribute. France is hot on all three. The is cold on most."
     },
     "reads": [
       {
-        "b": "Plain reading",
-        "html": "Each token gets scored on whether it is logically essential, teaches something new, and matters to the task goal. High-scoring tokens stay active during training."
+        "b": "Plain reading.",
+        "html": "A token is useful if the model's internal attention focuses on it (reasoning importance), if the model does not already predict it correctly (knowledge newness), and if it matches the task's domain vocabulary (task relevance)."
       },
       {
-        "b": "Paper reading",
-        "html": "XTF decomposes token-level influence into three explicit, measurable attributes, allowing fine-grained filtering of training gradients."
+        "b": "Paper reading.",
+        "html": "Reasoning importance uses the model's attention values. Knowledge newness uses the probability that the model already predicts the token correctly. Task relevance uses distance between the token's learned representation and the average task representation."
       }
     ]
   },
   "mechanism": {
-    "h2": "Why gradient masking on noisy tokens improves learning",
+    "h2": "Why filtering noisy tokens improves fine-tuning",
     "paras": [
-      "When you train a language model, each training step computes how far off the model's prediction was from the correct answer. That error is a signal. The model then adjusts its weights (parameters) in the direction that would have made the error smaller. This adjustment is called a gradient update.",
-      "If a token in your training example is noisy (low on reasoning, new ideas, and task fit), the model's error signal at that token is misleading. Updating weights based on a misleading signal teaches the model the wrong pattern. By masking the gradient at that token—setting it to zero—you prevent the model from taking a step based on noise. The model only updates based on tokens that carry genuine, task-relevant information. This is faster learning because every update is pointed in the right direction, and it is more accurate learning because the model avoids ingraining spurious patterns from low-quality tokens."
+      "During fine-tuning, the model learns by comparing its predictions to the desired output, calculating how wrong it was (the loss), and nudging its weights in the direction that reduces that loss. Each token contributes a learning signal. Some tokens are useful: they point the model toward the right answer (the model should focus on them, or they teach something new). Other tokens are noise: the model already knows them, or they are off-topic, or they conflict with the task. These create wrong learning signals, pulling the model in the wrong direction.",
+      "When you mask the gradients from noisy tokens, you remove the misleading signals before they move the weights. The model's updates are then driven only by tokens that genuinely teach it something new and task-relevant. This removes the contradiction and makes training cleaner: the model does not waste effort learning to satisfy tokens that should not matter for the task."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
         {
           "t": "input",
-          "s": "tokens from training example"
+          "s": "Raw training tokens and labels"
         },
         {
           "t": "step",
-          "s": "model reads each token, predicts next",
-          "hl": false
-        },
-        {
-          "t": "step",
-          "s": "compute error (how far from correct answer)",
-          "hl": false
-        },
-        {
-          "t": "step",
-          "s": "score token on reasoning, new ideas, task relevance",
+          "s": "Score each token on three axes",
           "hl": true
         },
         {
           "t": "step",
-          "s": "if score is low, mask gradient (set to zero)",
+          "s": "Flag tokens below threshold",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Zero gradients for flagged tokens",
           "hl": true
         },
         {
           "t": "output",
-          "s": "update weights from good-token gradients only"
+          "s": "Cleaner learning signal"
         }
       ]
     }
   },
   "math": {
-    "h2": "Gradient masking equation",
-    "words": "Masked gradient is the original gradient multiplied by a mask value (0 or 1) per token, which is 1 if the token scores high enough and 0 if it scores low.",
-    "equation": "grad_masked_t = M_t * grad_t",
+    "h2": "One equation: gradient masking",
+    "words": "gradient after filtering equals original gradient multiplied by a mask; mask is 1 for kept tokens and 0 for filtered tokens",
+    "equation": "g_filtered = M * g_original, where M_i = 1 if token_i passes filters, 0 otherwise",
     "symbols": [
-      ["grad_t", "gradient at token t (how much to update weights based on token t)"],
-      ["M_t", "mask value for token t: 1 if token is good, 0 if noisy"],
-      ["grad_masked_t", "final gradient used to update weights (zero if token is masked)"]
+      ["g_filtered", "the gradient update that actually moves the weights"],
+      ["g_original", "the gradient computed from all tokens before filtering"],
+      ["M_i", "the mask: 1 to keep token i, 0 to silence it"],
+      ["token_i", "the i-th token in the training example"]
     ],
     "worked": {
-      "title": "A tiny worked example with 4 tokens",
+      "title": "A tiny worked example",
       "lines": [
-        "Token 1 (good word): scores 0.9 on reasoning, mask M_1 = 1, gradient grad_1 = 0.05, masked: 1 * 0.05 = 0.05 (update happens)",
-        "Token 2 (confusing word): scores 0.2 on all three, mask M_2 = 0, gradient grad_2 = 0.04, masked: 0 * 0.04 = 0 (no update)",
-        "Token 3 (good word): scores 0.8 on task relevance, mask M_3 = 1, gradient grad_3 = 0.06, masked: 1 * 0.06 = 0.06 (update happens)",
-        "Token 4 (weak but useful): scores 0.6, borderline, mask M_4 = 1, gradient grad_4 = 0.03, masked: 1 * 0.03 = 0.03 (update happens)",
-        "Total weight update = 0.05 + 0 + 0.06 + 0.03 = 0.14; without masking would be 0.18, but the 0.04 from token 2 was harmful noise, so 0.14 is cleaner."
+        "Token 1 (France): RI=4, KN=3, TR=4 -> all high -> M_1 = 1. Gradient for this token counts fully.",
+        "Token 2 (of): RI=1, KN=2, TR=2 -> all low -> M_2 = 0. Gradient for this token is zeroed out.",
+        "Token 3 (The): RI=1, KN=3, TR=1 -> mixed, but relevance fails -> M_3 = 0. Gradient zeroed.",
+        "Result: only useful tokens drive weight updates. Noisy signals are removed before they mislead training."
       ]
     },
-    "note": "By zeroing out gradients from low-scoring tokens, the model only learns from tokens that are logically important, teach new ideas, or matter to the task."
+    "note": "By zeroing the gradient from noisy tokens, the weight update comes only from good signals. This works because the noisy signals are contradictory and pull in wrong directions; removing them means the weight change is guided only by useful tokens."
   },
   "bars": {
-    "h2": "Performance improvement on real tasks",
+    "h2": "Before and after fine-tuning",
     "charts": [
       {
-        "title": "Standard fine-tuning (no filtering)",
-        "rows": [["Math task performance", 42, "bad"], ["Code task performance", 38, "bad"], ["Medical task performance", 45, "bad"]],
-        "note": "Fine-tuning with all tokens equally, including noisy ones."
+        "title": "Standard fine-tuning (all tokens)",
+        "rows": [
+          ["Accuracy before fine-tuning", 48, "neutral"],
+          ["Accuracy after fine-tuning", 72, "good"],
+          ["Improvement", 24, "good"]
+        ],
+        "note": "Model learns, but also absorbs noise from irrelevant tokens."
       },
       {
-        "title": "With XTF token filtering",
-        "rows": [["Math task performance", 54, "good"], ["Code task performance", 50, "good"], ["Medical task performance", 56, "good"]],
-        "note": "XTF filters out low-value tokens, improves performance by 12-14 percentage points, because the model now trains only on high-quality tokens that point in the right direction, avoiding the confusion caused by noisy words. (illustrative teaching numbers; plausible based on real results of up to 13.7%)"
+        "title": "XTF filtered fine-tuning",
+        "rows": [
+          ["Accuracy before fine-tuning", 48, "neutral"],
+          ["Accuracy after fine-tuning", 81, "good"],
+          ["Improvement", 33, "good"]
+        ],
+        "note": "By silencing noisy tokens before they move the weights, the model learns faster from the clean signal. Useful tokens all push the weights in the same direction (toward learning the task); noisy tokens push against them. Remove the noisy pushes, and the useful signals steer the weights more directly toward the answer. Real results show up to 13.7% improvement."
       }
     ]
   },
@@ -187,31 +202,31 @@
     "items": [
       {
         "warn": true,
-        "b": "Scoring method is heuristic",
-        "html": "XTF relies on scoring functions to decide which tokens are noisy. If the scoring function is weak (misses real noise or flags good tokens), the filtering will fail. A model that trains on clean tokens but the scoring was wrong learns on randomly bad data."
+        "b": "Threshold too aggressive.",
+        "html": "If you filter out too many tokens, you remove useful signal along with the noise. The model learns from too few examples and underfits."
       },
       {
         "warn": true,
-        "b": "Over-masking starves the model",
-        "html": "If the threshold for masking is too low (very aggressive filtering), the model may end up training on too few tokens, starving the learning signal. The model updates so rarely that it learns slowly, defeating the purpose."
+        "b": "Scoring method is coarse.",
+        "html": "Attention scores, prediction accuracy, and semantic distance are proxies. They sometimes miss subtle usefulness or mis-flag a token as noise."
       },
       {
         "warn": true,
-        "b": "Task-specific thresholds are brittle",
-        "html": "XTF tunes the filtering thresholds per task. If you move to a new task or a dataset where tokens appear with different frequencies, the old thresholds may not transfer, and you have to retune."
+        "b": "Domain mismatch.",
+        "html": "Task relevance is computed by comparing to the task domain average. If the task is very different from pretraining, this score is unreliable."
       },
       {
-        "b": "Noise filtering works best on noisy data",
-        "html": "If your fine-tuning data is already well-curated and clean, masking does little. XTF gains the most when applied to real-world datasets that have actual token-level errors, ambiguities, or off-topic passages."
+        "b": "Done right.",
+        "html": "Tune the threshold on a validation set. Test different scoring methods. Use XTF as a pre-processing step to augment data, not replace it entirely."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Build a small fine-tuning task (e.g., a few-shot math problem, code generation, or medical QA) with a dataset you intentionally add noise to: replace 10-20% of tokens with random words or off-topic phrases. Train two models: one with all tokens, one with XTF filtering. Measure accuracy on a held-out test set. Verify that XTF recovers performance close to training without noise, while the all-tokens baseline performs poorly."
+      "Build a tiny fine-tuning job: take a base model, a small training set (20 examples, 30 tokens each), and a test set. Run standard fine-tuning on all tokens. Run XTF filtering (score each token, remove the bottom 40%). Fine-tune again. Measure accuracy on the test set for both runs. Plot accuracy over training steps. The filtered version should reach higher accuracy with the same number of training steps, or reach the same accuracy in fewer steps, because the weight updates are no longer pulled in contradictory directions by noisy tokens."
     ],
-    "metric_eq": "accuracy_xtf / accuracy_no_filter (should be > 1.0, showing XTF recovers performance lost to noise)",
-    "closing": "The demo makes it impossible to miss that noisy tokens harm learning, because the intentionally corrupted data shows real performance loss, and that masking their gradients is a simple, effective fix because it cuts the bad signal without breaking the training process."
+    "metric_eq": "speed_gain = steps_unfiltered / steps_filtered to reach target_accuracy",
+    "closing": "The core claim is that filtering noise-only tokens removes the contradictory signals that pull weights in the wrong direction. Measure that the filtered version reaches the target accuracy in fewer training steps than the unfiltered version. This proves that the noisy tokens were slowing learning (not helping it), not that you are losing information."
   }
 }

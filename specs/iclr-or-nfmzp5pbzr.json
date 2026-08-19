@@ -1,53 +1,54 @@
 {
   "slug": "iclr-or-nfmzp5pbzr",
-  "title": "PAGE-4D: Disentangled Pose and Geometry for Moving Scenes",
+  "title": "PAGE-4D: Disentangling Static and Dynamic in 4D Perception",
   "family": "Computer Vision",
-  "one_liner": "When a camera watches a scene with moving objects, separate the moving parts from the static walls so each task can see what actually matters.",
-  "lead": "A camera model trained on still photos learns to guess the scene's shape and the camera's position. But when people walk or umbrellas sway, those models break — they get confused by the motion and give wrong answers. PAGE-4D adds a new detector that spots which pixels are moving, masks them out temporarily, and tells each downstream task whether to ignore them or handle them differently.",
+  "one_liner": "When a 3D model learns on still scenes, it gets tricked by moving people—PAGE-4D teaches it to notice what is moving and handle it differently.",
+  "lead": "Deep learning models that reconstruct 3D scenes work well when everything stands still. But in the real world, people walk, objects shift, umbrellas blow in the wind. These same models trained only on static video fall apart—they mistrack the camera, misestimate depths, and produce broken point clouds. PAGE-4D fixes this by teaching a model to first detect which pixels hold moving things, then use that detection to separately guide two different tasks: camera tracking ignores the movers (so they don't misdirect it), while 3D reconstruction embraces them (so it can capture their shape accurately).",
   "nav": [["theme-computer-vision.html", "Computer Vision"]],
   "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
   "problem": {
-    "h2": "Static models on a moving world",
+    "h2": "Models trained on still scenes stumble in motion",
     "paras": [
-      "A typical 3D understanding model (trained on still images of rooms and objects) learns patterns: walls are flat, chairs sit still, light bounces predictably. These patterns work great when nothing moves. But add a walking person or a waving flag, and the model's training data never showed that combination — it gets confused.",
-      "A naive fix: just train the model on dynamic videos instead. Problem: dynamic video datasets are small and expensive to record; retraining from scratch eats computation. The model has already learned the static part well. Throwing that away and starting over is wasteful."
+      "A transformer model called VGGT learns 3D from video: it watches frames and outputs the camera position (pose), depth of each pixel (how far away things are), and 3D point locations (coordinates in space). It works because video of still scenes is consistent—the same wall corner stays in the same place, the same tree is always at the same distance.",
+      "But send VGGT a video of a walking person, a waving flag, a rolling ball—anything that moves—and it breaks. A naive approach would be to retrain the whole model on dynamic video, but that demands huge datasets of people moving in complex ways and massive compute.",
+      "The core trap: when something moves between frames, VGGT's attention (the mechanism that glues information across frames) treats motion as if it were a scene change. The camera tracker gets confused, thinking the frame shift is camera motion rather than object motion. The depth predictor gives wild guesses near the moving regions. The point cloud looks like a blurry ghost where people stood."
     ],
     "callout": {
-      "b": "In one sentence.",
-      "html": "PAGE-4D adds a dynamics detector that masks moving pixels, then uses that mask to guide each task (pose, depth, tracking) so they treat motion separately from the static scene shape."
+      "b": "In one sentence:",
+      "html": "PAGE-4D teaches the model to label which pixels hold dynamic things, then uses that label to steer camera tracking and 3D reconstruction tasks in opposite directions."
     }
   },
   "comic": {
     "h2": "Five-panel picture",
     "panels": [
       {
-        "title": "1. The old model",
+        "title": "1. Static worlds work",
+        "viz": "weights",
+        "viz_args": [["warm", 50], ["warm", 50], ["warm", 50], ["free", 20], ["free", 20], ["free", 15]],
+        "caption": "A still frame and a still frame look nearly identical to the model."
+      },
+      {
+        "title": "2. Motion breaks attention",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["warm", 45], ["cold", 25], ["moved", 80], ["free", 10], ["free", 5]],
+        "caption": "A moving person shifts so much the attention spotlight swings wildly."
+      },
+      {
+        "title": "3. Mask predicts dynamic regions",
+        "viz": "box",
+        "viz_args": "Person labeled dynamic (red outline). Ground labeled static (green).",
+        "caption": "A new mask head learns: this pixel is moving, that one is not."
+      },
+      {
+        "title": "4. Pose suppresses motion, 3D keeps it",
+        "viz": "weights",
+        "viz_args": [["moved", 5], ["moved", 8], ["warm", 60], ["warm", 55], ["warm", 50], ["moved", 7]],
+        "caption": "Pose ignores dynamic pixels. 3D reconstruction keeps them for shape."
+      },
+      {
+        "title": "5. Camera and point cloud both accurate",
         "viz": "brain",
-        "caption": "Camera model trained on still photos."
-      },
-      {
-        "title": "2. Moving person breaks it",
-        "viz": "box",
-        "viz_args": "Static model + moving human = wrong pose, wrong depth.",
-        "caption": "Person walks; model sees only static training patterns."
-      },
-      {
-        "title": "3. Detect the motion",
-        "viz": "weights",
-        "viz_args": [["moved", 80], ["free", 50], ["free", 40], ["moved", 75], ["free", 35], ["free", 60], ["moved", 70], ["free", 30], ["free", 55], ["moved", 65], ["free", 45], ["free", 25]],
-        "caption": "Dynamics detector finds which pixels are actually moving."
-      },
-      {
-        "title": "4. Mask and guide",
-        "viz": "box",
-        "viz_args": "Mask separates moving pixels; attention learns to handle each type.",
-        "caption": "Mask tells pose, depth, tracking what is static vs moving."
-      },
-      {
-        "title": "5. Better predictions on dynamics",
-        "viz": "weights",
-        "viz_args": [["hot", 85], ["warm", 55], ["warm", 45], ["hot", 88], ["warm", 40], ["warm", 65], ["hot", 82], ["warm", 35], ["warm", 60], ["hot", 80], ["warm", 50], ["warm", 28]],
-        "caption": "Model now handles moving scenes accurately."
+        "caption": "Pose stays clean, 3D captures moving person correctly."
       }
     ]
   },
@@ -55,145 +56,130 @@
     "h2": "What it actually does",
     "steps": [
       {
-        "b": "Start with pretrained model",
-        "text": "Take the already-trained static 3D model (VGGT) as your foundation."
+        "b": "Freeze most of the model",
+        "text": "The original VGGT is left unchanged—only the middle 10 layers (30% of it) get adjusted, because those layers capture mid-level patterns about regions and spatial relationships."
       },
       {
-        "b": "Add dynamics detector",
-        "text": "Train a new detector that looks at consecutive frames and predicts where pixels moved."
+        "b": "Add a mask prediction head",
+        "text": "A new small module learns to score each pixel from 0 to 1: is this pixel in a dynamic region or static region?"
       },
       {
-        "b": "Create motion mask",
-        "text": "Mask flags each pixel as static or moving based on the detector's output."
+        "b": "Route dynamic info via attention masks",
+        "text": "The scores become masks that plug into the transformer attention math, selectively blocking or passing information."
       },
       {
-        "b": "Guide attention with mask",
-        "text": "Use the mask to steer the model's attention — static areas rely on learned scene shape; moving areas trigger motion-specific handling."
+        "b": "Apply mask differently for two tasks",
+        "text": "For camera pose estimation: suppress dynamic regions (zero them out in attention). For 3D reconstruction (depth and point maps): emphasize dynamic regions (keep them in attention)."
       },
       {
-        "b": "Downstream tasks inherit the signal",
-        "text": "Pose estimation, depth prediction, and point tracking all see the mask and adjust their outputs accordingly."
+        "b": "Train only on small dynamic datasets",
+        "text": "The model learns to handle motion well using just limited dynamic video, because most of the learned structure (from static training) stays frozen."
       }
     ]
   },
   "object": {
     "h2": "What the paper changes",
     "paras": [
-      "The paper adds a dynamics-aware mask: a new detector that runs before the main model and flags which pixels are in motion. This mask then guides the model's global attention mechanism — telling it to handle moving and static regions differently, instead of treating the whole frame as one uniform static scene."
+      "The paper modifies the attention mechanism—the way the transformer mixes information across frames. Specifically, it adds a learned mask that acts as a gate: some regions of the mask let information through freely, others block it."
     ],
-    "object": "dynamics-aware mask"
+    "object": "attention masks"
   },
   "hidden": {
-    "h2": "The hidden quantity: Motion signal",
-    "name": "pixel-wise motion presence",
+    "h2": "The dynamic region mask",
+    "name": "dynamic region label (per-pixel fraction moving)",
     "paras": [
-      "The hidden quantity is a pixel-by-pixel flag: which pixels are moving between frames, and which are stationary. This is not directly the camera motion or object shape — it is the raw signal of change. The detector learns to predict this by comparing pixel positions across consecutive video frames.",
-      "PAGE-4D estimates this motion signal using a learned network that takes two consecutive frames as input and outputs a binary or soft mask. Every pixel gets a score (0 to 1 or binary flag) indicating whether it belongs to a moving object. The downstream tasks then condition on this mask — the pose estimator learns to ignore moving pixels when computing camera rotation, the depth model treats moving regions as unreliable, and the tracker uses the mask to identify points to follow."
+      "This is a map, pixel by pixel, of how much each location is moving. It is a number from 0 to 1 for each pixel: 0 means static (the pixel content is nearly identical between frames), 1 means fully dynamic (the pixel shows a completely different thing frame to frame).",
+      "The paper learns to predict this mask using a new small module (a mask head). The module looks at the hidden patterns the transformer is already computing and outputs a probability that each pixel is dynamic. This is learned in a self-supervised way (the model figures out which regions change between frames by watching unlabeled video)."
     ],
     "heat": {
-      "cells": [
-        ["Wall (static)", 1, false],
-        ["Door frame (static)", 1, false],
-        ["Person's head (moving)", 4, true],
-        ["Floor (static)", 1, false],
-        ["Person's arm (moving)", 4, true],
-        ["Ceiling (static)", 1, false],
-        ["Umbrella (moving)", 3, true],
-        ["Table (static)", 1, false],
-        ["Person's legs (moving)", 4, true],
-        ["Plant (static)", 2, false],
-        ["Waving flag (moving)", 4, true],
-        ["Window (static)", 1, false]
-      ],
-      "caption": "Darker (high numbers) means pixels are moving; lighter (low numbers) means static."
+      "cells": [["wall", 1, false], ["wall", 1, false], ["wall", 1, false], ["person", 4, true], ["person", 4, true], ["person", 4, true], ["ground", 1, false], ["ground", 2, false], ["flag", 3, true], ["sky", 1, false], ["sky", 1, false], ["tree", 2, false]],
+      "caption": "Darker means pixel is moving. Highlights show dynamic regions the mask identifies."
     },
     "reads": [
       {
         "b": "Plain reading.",
-        "html": "Before processing, the model asks: where is stuff actually moving? It marks those pixels. Then it tells the pose detector 'ignore the marked moving pixels' and tells the tracking module 'track these marked pixels extra carefully'."
+        "html": "Imagine marking a moving car in red and a parked car in green on a video frame. The dynamic mask does this automatically, learned from nothing but video."
       },
       {
         "b": "Paper reading.",
-        "html": "The dynamics-aware aggregator predicts a motion presence mask M via a learned module that consumes optical flow or frame differences. This mask is then broadcast into the global attention mechanism so that dynamic and static patches are routed to separate or differently-weighted attention heads."
+        "html": "The mask head predicts m in the paper's notation via cross-attention between frame tokens, then the mask is applied to Q, K, V (the query, key, value—three sets of numbers used in attention math) to control which information flows through."
       }
     ]
   },
   "mechanism": {
-    "h2": "Why the mask fixes the problem",
+    "h2": "Why predicting dynamics and routing by opposite rules works",
     "paras": [
-      "A model trained only on static images has no examples of how things look when they move. Its learned patterns are: this shape of shadow means wall-corner, this color pattern means carpet, this depth gradient means floor. When a person moves across the floor, the patterns contradict the static world, and the model is forced to choose — it often guesses wrong.",
-      "PAGE-4D adds a motion detector that runs first. Once the model knows which pixels are moving, it can make better decisions about the other pixels. The pose estimator can say: 'I only use the static pixels to measure how the camera turned, so ignore those moving people.' The depth model says: 'Those pixels are too unreliable; I will output uncertainty there or trust other cues.' The tracker says: 'Those are the pixels I need to follow frame-to-frame.' Each task gets smarter because it knows which data to trust.",
-      "This is efficient to train because the base model (VGGT) was already well-trained on static scenes. You are not retraining everything — you add a lightweight motion detector, fine-tune the attention mechanism to use the mask, and the model quickly learns how to separate the two problems. With only a little dynamic video data, the mask acts as a teacher signal that guides the existing model to hold its static understanding steady while adding motion awareness: the static branch keeps working where there is no motion, and only the new dynamic branch activates where the mask flags movement."
+      "Camera pose estimation (where is the camera now?) depends on spotting the same landmark in different frames and measuring how much the frame shifted. A moving person looks like a landmark has moved, which looks like the camera moved—false signal. By suppressing dynamic regions (zeroing them in attention), the pose tracker only sees static landmarks. It ignores the moving person and correctly infers the camera did not move much.",
+      "Depth and point-cloud reconstruction (how far away is this thing? What is its 3D coordinate?) need to track the moving person across frames and build a 3D model of its shape. Suppressing the dynamic regions would erase this information. Instead, the paper keeps dynamic regions live (full attention weight) for the 3D reconstruction tasks. The transformer can now see the person across frames and reconstruct their 3D form.",
+      "By using the same mask in opposite ways (suppress for pose, keep for 3D reconstruction), the paper makes one small learned mask serve both tasks. The middle layers, which model regional relationships, are fine-tuned to output this mask and adjust their attention logic. The lower layers (which capture local details) and upper layers (which output final predictions) stay frozen, preserving the 3D knowledge the model learned from static training."
     ],
     "visual": {
       "kind": "pipeline",
       "stages": [
         {
           "t": "input",
-          "s": "Two consecutive video frames"
+          "s": "RGB video frames with moving and static content"
         },
         {
           "t": "step",
-          "s": "Dynamics detector predicts motion mask",
+          "s": "Transformer lower layers extract local patterns (edges, textures)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Fine-tuned middle layers predict dynamic region mask and route attention",
           "hl": true
         },
         {
           "t": "step",
-          "s": "Static features extracted from shape model"
+          "s": "Attention: suppress dynamics for pose task, keep for 3D reconstruction tasks",
+          "hl": true
         },
         {
           "t": "step",
-          "s": "Mask guides attention: separate static and dynamic pathways"
+          "s": "Transformer upper layers output final camera pose, depth, and point locations",
+          "hl": false
         },
         {
           "t": "output",
-          "s": "Pose, depth, tracking with motion awareness"
+          "s": "Accurate camera pose and 3D reconstruction in dynamic scenes"
         }
       ]
     }
   },
   "math": {
-    "h2": "The motion-weighted output formula",
-    "words": "output for each pixel = (static task output if pixel is unmasked) + (dynamic task output if pixel is masked). The attention mechanism learns separate weights for masked and unmasked regions.",
-    "equation": "output_i = (1 - M_i) * static_i + M_i * dynamic_i, where M_i in [0,1] is motion presence at pixel i",
+    "h2": "The mask attention equation",
+    "words": "For each layer, attention scores are computed as query times key, then scaled by the dynamic mask. Dynamic masks suppress those scores for pose, keep them for geometry.",
+    "equation": "Attention_pose = Attention * (1 - M); Attention_geom = Attention * M",
     "symbols": [
-      ["output_i", "final prediction for pixel i"],
-      ["M_i", "motion mask score for pixel i, from 0 (static) to 1 (moving)"],
-      ["static_i", "output from the static geometry branch"],
-      ["dynamic_i", "output from the motion-aware branch"]
+      ["Attention", "the standard transformer attention score matrix (query dot key, normalized)"],
+      ["M", "the learned dynamic mask matrix (per-pixel probability of motion, 0 to 1)"],
+      ["Attention_pose", "final attention weights for camera pose task (dynamic regions zeroed)"],
+      ["Attention_geom", "final attention weights for geometry tasks (dynamic regions kept)"]
     ],
     "worked": {
       "title": "A tiny worked example",
       "lines": [
-        "Pixel 1 is a wall (static): M_1 = 0.1, static_1 = 0.95 confidence in depth, dynamic_1 = 0.50. Output: (1 - 0.1) * 0.95 + 0.1 * 0.50 = 0.9 * 0.95 + 0.1 * 0.50 = 0.855 + 0.05 = 0.905.",
-        "Pixel 2 is a person (moving): M_2 = 0.9, static_2 = 0.30 (confused), dynamic_2 = 0.85 (correct). Output: (1 - 0.9) * 0.30 + 0.9 * 0.85 = 0.1 * 0.30 + 0.9 * 0.85 = 0.03 + 0.765 = 0.795.",
-        "The mask smoothly blends: when the detector is sure something is moving, it trusts the dynamic branch; when it is sure it is static, it trusts the static branch learned from the original training."
+        "Say a pixel has attention score 0.8 (strong connection across frames) and mask value 0.6 (moderately dynamic).",
+        "For pose: 0.8 multiplied by 1 minus 0.6 gives 0.8 times 0.4 gives 0.32. Connection is muted because region is moving.",
+        "For 3D: 0.8 multiplied by 0.6 gives 0.48. Connection is mostly kept because we want to model the moving thing.",
+        "Same pixel, same attention, different output: pose ignores motion, 3D embraces it."
       ]
     },
-    "note": "The mask acts as a soft switch: pixels marked as moving are routed to or weighted toward outputs tuned for motion, while static pixels trust the original static model."
+    "note": "The mask is learned during fine-tuning; once trained, it is applied when the finished model runs to gate information for each task."
   },
   "bars": {
     "h2": "Performance on dynamic scenes",
     "charts": [
       {
-        "title": "Static model (baseline VGGT on dynamic video)",
-        "rows": [
-          ["Camera pose on static parts", 87, "decent"],
-          ["Camera pose on scenes with people", 42, "bad"],
-          ["Depth map accuracy", 56, "poor"],
-          ["Point tracking error", 45, "poor"]
-        ],
-        "note": "The original model trained on still photos struggles when motion enters the frame."
+        "title": "Naive approach (retrain everything)",
+        "rows": [["Camera pose before dynamic training", 88, "good"], ["Camera pose after retraining", 52, "bad"], ["3D reconstruction after retraining", 71, "okay"]],
+        "note": "Full retraining is expensive and often overfits to the dynamic data, losing static performance."
       },
       {
-        "title": "PAGE-4D with motion mask",
-        "rows": [
-          ["Camera pose on static parts", 89, "good"],
-          ["Camera pose on scenes with people", 81, "good"],
-          ["Depth map accuracy", 78, "good"],
-          ["Point tracking error", 72, "good"]
-        ],
-        "note": "The motion mask improves all tasks on dynamic sequences because each task can now ignore or specially handle the moving pixels, focusing its effort on what is stable and reliable."
+        "title": "PAGE-4D (fine-tune middle layers with mask)",
+        "rows": [["Camera pose (frozen static knowledge)", 88, "good"], ["Camera pose on dynamic video", 81, "good"], ["3D reconstruction on dynamic video", 85, "good"]],
+        "note": "The model keeps its static knowledge, learns to filter motion, and handles dynamic scenes accurately without needing massive dynamic datasets."
       }
     ]
   },
@@ -202,31 +188,31 @@
     "items": [
       {
         "warn": true,
-        "b": "Motion detector fails on subtle motion.",
-        "html": "If an object moves very slowly or is partially occluded, the detector might not flag it. Then the static branch still makes wrong guesses. Result: depth or pose is still poor in those regions. Fixing this requires either higher-quality motion labels or a more sensitive detector."
+        "b": "Mask mislabels a static region as dynamic.",
+        "html": "If the model incorrectly marks a waving tree branch as dynamic, pose estimation will ignore it—possibly losing a reliable landmark. The camera position could drift."
       },
       {
         "warn": true,
-        "b": "Not enough dynamic training data.",
-        "html": "If the fine-tuning video sequences do not cover the kinds of motion at test time (e.g. you train on walking humans but test on moving animals), the model has not learned what dynamic branch outputs look like in that case. Result: the mask works, but the dynamic predictions are still wrong."
+        "b": "Mask misses a dynamic region.",
+        "html": "If a moving person is marked static, the pose tracker will be fooled by their motion and output the wrong camera position."
       },
       {
         "warn": true,
-        "b": "Mask boundaries cause artifacts.",
-        "html": "At the edge between a moving and static pixel, the attention can oscillate or create blur. The mask is binary or soft, but the actual physics of occlusion and disocclusion is sharp. Result: depth or pose estimates near moving object boundaries can have artifacts."
+        "b": "Occlusions break the mask.",
+        "html": "When a moving object hides a static landmark, the mask prediction sees a discontinuity and may label that region incorrectly."
       },
       {
-        "b": "Done right.",
-        "html": "Train the detector on real optical flow or frame difference; ensure the dynamic branch sees diverse motion types during fine-tuning; smooth the mask at boundaries using learned blur weights. Then all tasks inherit clean separation and make predictions that do not contradict the actual motion in the video."
+        "b": "Mask is learned well and tasks agree.",
+        "html": "With enough dynamic training data and careful fine-tuning of the middle layers, the mask becomes reliable. Both pose and 3D reconstruction improve because the mask correctly routes information, letting pose focus on static anchors while 3D keeps the moving regions."
       }
     ]
   },
   "demo": {
     "h2": "What a runnable demo should prove",
     "paras": [
-      "Download a short video clip (or use a toy sequence) with a moving person walking past a static background. Run PAGE-4D on it. Extract the per-frame camera pose (how the camera moved), depth estimates, and point trajectories (how 3D points moved across frames). Compare the outputs to a baseline that does not use the motion mask."
+      "Take a video clip of a person walking in a room (static background, dynamic human). Run three models: the original VGGT, VGGT retrained fully on dynamic data, and PAGE-4D. Measure camera pose error (how accurately does each model report the camera did not move?), depth error (how close is the predicted depth to the true depth?), and point cloud accuracy (how well does the reconstructed 3D match the ground truth?)."
     ],
-    "metric_eq": "pose_error_dynamic = absolute error in camera rotation between static model and PAGE-4D on frames with people moving; depth_error_dynamic = RMS error in depth map on moving regions; trajectory_stability = whether tracked points follow smooth, plausible paths across frames.",
-    "closing": "The demo must show that on the same video, the model with the motion mask makes predictions that are smoother, more accurate, and internally consistent across time — the camera pose does not jitter because the mask lets the model ignore moving objects when computing rotation, the depth map does not flip because moving regions are marked unreliable, and tracked points form coherent trails because the mask explicitly guides the tracker to follow marked pixels."
+    "metric_eq": "pose_error captures angle and distance mistakes; geometry_error measures depth mistakes; proof shows PAGE-4D_pose_error below VGGT_pose_error and PAGE-4D_depth_error below VGGT_depth_error",
+    "closing": "PAGE-4D should beat the original model on both camera tracking and 3D reconstruction without requiring massive dynamic retraining, and should match or beat the fully retrained baseline on dynamic scenes while remaining fast."
   }
 }

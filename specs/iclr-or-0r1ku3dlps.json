@@ -1,234 +1,236 @@
 {
- "slug": "iclr-or-0r1ku3dlps",
- "title": "Distributionally Robust Linear Regression with Block Lewis Weights",
- "family": "Optimization",
- "one_liner": "A faster algorithm for fitting a single regression line that works well for all subgroups of data at once, not just the average.",
- "lead": "When you have data split into groups (say, patient ages, weather regions, factory lines), building one model that works well for <em>every</em> group is harder than fitting just the average. This paper speeds up that process using a new weighting scheme called block Lewis weights, which focuses computation on groups where the data is genuinely ambiguous, because those groups are the actual bottleneck — easy groups are already solved, so spending more computation there wastes effort.",
- "nav": [["theme-optimization.html","Optimization"]],
- "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
- "problem": {
-  "h2": "The setup: one model for every group",
-  "paras": [
-   "Imagine you run a hospital and want a single prediction model for patient outcomes. But your patient data splits into age groups. A model trained on the average outcome works great for 50-year-olds but fails for 20-year-olds. The naive fix: train a separate model for each group. But that is expensive and wasteful — you have dozens or hundreds of groups.",
-   "A smarter idea: train one model and check that it works <em>reasonably well</em> on all groups at once. The problem: checking every group and fixing them all requires solving expensive linear-system equations many, many times. Existing solvers use interior point methods (older optimization algorithms that are mathematically sound but slow), which need thousands of these system-solves, making the whole approach slow for real data."
-  ],
-  "callout": {
-   "b": "The challenge in one sentence.",
-   "html": "A model that works well for all groups solves faster if you can identify which groups are hard to predict and focus computation on those, rather than treating all groups equally, because the solver's time is dominated by working on redundant easy cases that are already nearly solved."
-  }
- },
- "comic": {
-  "h2": "Five-panel picture",
-  "panels": [
-   {
-    "title": "1. The setup",
-    "viz": "box",
-    "viz_args": "Age groups: 20s|40s|60s",
-    "caption": "Hospital data split into age groups; one model must fit all."
-   },
-   {
-    "title": "2. The problem",
-    "viz": "weights",
-    "viz_args": [["free",30],["hot",85],["free",25],["hot",80],["free",35],["hot",90]],
-    "caption": "Some groups are far from the average; standard methods treat them all equally."
-   },
-   {
-    "title": "3. The paper's move",
-    "viz": "box",
-    "viz_args": "Measure group ambiguity",
-    "caption": "Identify which groups contribute most to the problem; down-weight the easy ones."
-   },
-   {
-    "title": "4. Focus computation",
-    "viz": "weights",
-    "viz_args": [["moved",15],["hot",85],["moved",12],["hot",80],["moved",18],["hot",90]],
-    "caption": "Spend expensive solver steps only on groups that matter; skip the clear ones."
-   },
-   {
-    "title": "5. The payoff",
-    "viz": "plain",
-    "caption": "Fewer system-solves needed; same answer in less wall-clock time."
-   }
-  ]
- },
- "flow": {
-  "h2": "What it actually does",
-  "steps": [
-   {
-    "b": "1. Measure each group",
-    "text": "Compute a score for how far each group's data points sit from the best-fit line."
-   },
-   {
-    "b": "2. Assign group importance",
-    "text": "Groups with harder, more uncertain predictions get higher weight; easy groups get lower weight."
-   },
-   {
-    "b": "3. Reframe as a single regression",
-    "text": "Instead of solving a separate problem per group, solve one weighted regression that automatically balances all groups."
-   },
-   {
-    "b": "4. Use fast optimization",
-    "text": "Apply a faster solver (accelerated proximal method), which needs far fewer system-solves than older interior point methods because the weighted problem has lower effective rank, so each iteration makes bigger progress toward convergence."
-   },
-   {
-    "b": "5. Return the model",
-    "text": "The result is one set of numbers that defines the line, works well on all groups, found much faster because the solver skipped redundant work on easy groups and focused only on the groups that truly matter."
-   }
-  ]
- },
- "object": {
-  "h2": "What the paper changes",
-  "paras": [
-   "The paper changes the <em>weights assigned to each group</em> in the optimization process. Instead of treating all groups equally, it computes a weight for each group based on how hard that group is to predict. This one change cascades: the optimization algorithm now focuses expensive computation where it matters."
-  ],
-  "object": "group weights"
- },
- "hidden": {
-  "h2": "Group importance: which groups drive the hard part of the problem",
-  "name": "group importance weight",
-  "paras": [
-   "This paper measures a hidden quantity called <em>group importance</em>: a number (between 0 and 1) for each group that says how much that group contributes to making the overall regression problem hard. A group with many data points far from the best-fit line is important — it drives the overall error. A group clustered tightly around the line is unimportant — it is solved easily.",
-   "The paper computes group importance using a mathematical object called Lewis weights, which comes from a shape-based construction (imagine how points scatter in space). The weight is higher for groups where the data points are spread out and fewer in number (hard to pin down) and lower for groups that are tightly clustered or numerous (easy to fit)."
-  ],
-  "heat": {
-   "cells": [
-    ["Group A",4,true],
-    ["Group B",1,false],
-    ["Group C",3,true],
-    ["Group D",2,false],
-    ["Group E",4,true],
-    ["Group F",1,false],
-    ["Group G",2,false],
-    ["Group H",3,true],
-    ["Group I",1,false],
-    ["Group J",2,false],
-    ["Group K",4,true],
-    ["Group L",1,false]
-   ],
-   "caption": "Darker cells mean higher importance weight for that group. Highlighted groups drive most of the optimization work."
-  },
-  "reads": [
-   {
-    "b": "Plain reading.",
-    "html": "Some groups in your data are harder to predict — their points scatter widely. The paper identifies those groups and weights them higher in the optimization, so the solver spends more effort getting those right."
-   },
-   {
-    "b": "Paper reading.",
-    "html": "Block Lewis weights are a construction that assigns each group a weight proportional to the effective number of degrees of freedom in that group's regression problem. Groups where data is spread wide or few in count receive higher weight, directly translating to more solver iterations devoted to them."
-   }
-  ]
- },
- "mechanism": {
-  "h2": "Why focusing on hard groups makes the whole problem faster",
-  "paras": [
-   "Here is the core mechanism: a regression solver works by iteratively nudging the numbers that define the line, aiming to lower the overall error. Each nudge requires solving a large linear system (a matrix equation). If you have 100 groups, a naive approach solves 100 separate systems or one huge combined system — expensive either way.",
-   "Lewis weights reframe the problem mathematically. Instead of solving 100 independent group problems, you solve one <em>weighted</em> regression where each group is weighted by how hard it is. Groups that are easy and redundant drop to low weight; groups that are ambiguous or underrepresented rise to high weight. This is not just a cosmetic reframe — it directly reduces the rank of the problem the solver has to handle (the effective size shrinks). A faster iterative solver then exploits this lower rank to converge in far fewer steps. Fewer steps means fewer matrix systems to solve, which means less total computation.",
-   "The insight: <em>groups do not all matter equally</em>. Easy groups are already well-fit; solving them more precisely wastes CPU. Hard groups are the bottleneck. By redirecting computation to where it really matters, the total cost drops while the final accuracy stays the same."
-  ],
-  "visual": {
-   "kind": "pipeline",
-   "stages": [
-    {
-     "t": "input",
-     "s": "Groups with different scatter and size"
-    },
-    {
-     "t": "step",
-     "s": "Compute Lewis weight for each group",
-     "hl": true
-    },
-    {
-     "t": "step",
-     "s": "Reframe as single weighted regression"
-    },
-    {
-     "t": "step",
-     "s": "Solve with accelerated proximal method"
-    },
-    {
-     "t": "output",
-     "s": "One model, all groups, fewer system-solves"
+  "slug": "iclr-or-0r1ku3dlps",
+  "title": "Distributionally Robust Linear Regression with Block Lewis Weights",
+  "family": "Optimization",
+  "one_liner": "Find a prediction rule that works fairly well on every subgroup simultaneously, not just on average, by reweighting groups before solving.",
+  "lead": "When you train a predictor on mixed data (say, hospital records from different regions), a method that minimizes error on average might fail badly on small or unusual groups. This paper solves a harder problem: find one predictor that keeps the worst-group error as low as possible. The trick is a clever reweighting called block Lewis weights that turns this fairness problem into a standard least-squares setup, solvable with accelerated methods that converge fast.",
+  "nav": [["theme-optimization.html", "Optimization"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The unfairness trap in regression",
+    "paras": [
+      "Suppose you have medical records from five hospitals. You train a linear model (a simple weighted-sum predictor) to predict patient recovery time. Standard training minimizes the average prediction error across all hospitals. But what if Hospital C is smaller? Its errors might be much larger, and no one notices, because averaging hides the worst performers.",
+      "A naive fix: just add a penalty that hits big errors harder (e.g., an ell-infinity rule: minimize the single worst error). This works mathematically, but solving it is slow—a standard method called interior point methods must invert a large rectangular table of numbers (a matrix) many times, and the cost grows with the number of groups. For 100 hospitals, solving becomes expensive."
+    ],
+    "callout": {
+      "b": "The problem:",
+      "html": "Standard training hides unfair performance on small groups; solving fairness the obvious way is computationally expensive."
     }
-   ]
-  }
- },
- "math": {
-  "h2": "The optimization objective",
-  "words": "Minimize the weighted sum of group losses: group-one's loss weighted by w1 plus group-two's loss weighted by w2, and so on, where each weight w_g is the Lewis weight for group g.",
-  "equation": "min_theta sum_g w_g * loss_g(theta)",
-  "symbols": [
-   ["theta", "the model parameters (numbers that define the regression line)"],
-   ["w_g", "the Lewis weight for group g (how much that group matters)"],
-   ["loss_g(theta)", "the squared-error loss on group g given current parameters"],
-   ["sum_g", "add up over all groups"]
-  ],
-  "worked": {
-   "title": "A tiny worked example",
-   "lines": [
-    "Suppose you have 3 groups: Group A (10 points, tight cluster), Group B (5 points, scattered), Group C (20 points, medium spread).",
-    "Lewis weight for A = 0.2 (many points, tight, easy).",
-    "Lewis weight for B = 0.6 (few points, scattered, hard).",
-    "Lewis weight for C = 0.4 (many points, medium).",
-    "If A's loss is 10.0, B's loss is 5.0, C's loss is 8.0 (hypothetical values):",
-    "Weighted objective = 0.2 * 10.0 + 0.6 * 5.0 + 0.4 * 8.0 = 2.0 + 3.0 + 3.2 = 8.2.",
-    "The optimizer will work hard on B (high weight, contributes 3.0 to the objective) and lightly on A (low weight, only 2.0 contribution), even though A has the most points."
-   ]
   },
-  "note": "The weights tell the optimizer which groups to focus on; faster solvers then converge more quickly because the effective problem size shrinks."
- },
- "bars": {
-  "h2": "Complexity comparison",
-  "charts": [
-   {
-    "title": "Interior point method (standard approach)",
-    "rows": [
-     ["Number of system-solves required", 240, "bad"],
-     ["Time per system-solve", 1200, "bad"],
-     ["Total wall-clock time", 4800, "bad"]
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Mixed data, hidden disaster",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["warm", 50], ["free", 15], ["hot", 95], ["free", 25], ["warm", 55], ["free", 10], ["free", 5], ["warm", 48], ["free", 18], ["free", 8], ["warm", 52]],
+        "caption": "Five hospitals' prediction errors. One is huge. Average hides it."
+      },
+      {
+        "title": "2. Average training picks the easy path",
+        "viz": "box",
+        "viz_args": "minimize mean error across all hospitals",
+        "caption": "Fast to solve but ignores the worst performer."
+      },
+      {
+        "title": "3. Lewis weights rebalance the game",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["warm", 30], ["hot", 75], ["free", 15], ["hot", 85], ["warm", 25], ["hot", 70], ["hot", 78], ["warm", 28], ["hot", 72], ["hot", 82], ["warm", 32]],
+        "caption": "Groups with large errors get high weight. Hot hospitals influence training most."
+      },
+      {
+        "title": "4. Reweighted problem becomes standard least-squares",
+        "viz": "box",
+        "viz_args": "solve a weighted sum-of-squares (standard convex problem)",
+        "caption": "Now solvable with fast accelerated methods."
+      },
+      {
+        "title": "5. Result: fair predictor",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 45], ["moved", 40], ["moved", 42], ["moved", 46], ["moved", 44], ["moved", 41], ["moved", 43], ["moved", 45], ["moved", 40], ["moved", 44], ["moved", 42]],
+        "caption": "All hospitals now have similar, balanced errors."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Identify the worst group",
+        "text": "Check which hospital (or group) currently has the largest error."
+      },
+      {
+        "b": "Step 2: Compute block Lewis weights",
+        "text": "Assign a reweight to each group based on its error size and how its data points are spread out, favoring groups that are hard to fit."
+      },
+      {
+        "b": "Step 3: Reweight the least-squares problem",
+        "text": "Form a new weighted least-squares objective using the Lewis weights, now a standard convex problem."
+      },
+      {
+        "b": "Step 4: Apply accelerated optimization",
+        "text": "Use mirror descent, a fast iterative method, to solve the reweighted problem efficiently."
+      },
+      {
+        "b": "Step 5: Iterate",
+        "text": "Repeat until all groups have similar errors and the solution is within epsilon of optimal fairness."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the optimization method, not the predictor itself. Instead of solving the worst-group problem directly (which is slow), it reformulates it as a reweighted least-squares problem solvable in fewer steps."
     ],
-    "note": "Interior point methods are slow because they need many iterations and each iteration solves a large system. Treating all groups equally means no opportunity to save computation."
-   },
-   {
-    "title": "This paper: accelerated proximal with Lewis weights",
-    "rows": [
-     ["Number of system-solves required", 48, "good"],
-     ["Time per system-solve", 1200, "good"],
-     ["Total wall-clock time", 960, "good"]
+    "object": "optimization algorithm (the path to the solution)"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Group importance",
+    "name": "Block Lewis weight for each group",
+    "paras": [
+      "The paper measures and uses a quantity called a Lewis weight: a number for each group that says how much it should influence the training. A large Lewis weight means that group is hard to fit well, so training should pay close attention to it. The paper computes these weights by examining the data shape—specifically, how spread out each group's data points are and how badly a naive solution fits them.",
+      "Lewis weights are not new, but applying them to grouped regression is. The weights emerge from a mathematical construction called John's ellipsoid: imagine shrink-wrapping the tightest oval around your data cloud in each direction; the ellipsoid's shape tells you which directions matter most for balancing all groups simultaneously."
     ],
-    "note": "Lewis weights reduce the effective problem rank because they downweight easy groups and focus on hard ones. Accelerated methods then converge much faster, because a smaller rank means each iteration makes bigger progress. The same accuracy is reached in about 5 times fewer system-solves, translating to much lower total time."
-   }
-  ]
- },
- "failures": {
-  "h2": "What can go wrong",
-  "items": [
-   {
-    "warn": true,
-    "b": "Outlier groups dominate.",
-    "html": "If one group is so scattered or unusual that its Lewis weight becomes very high, the optimizer will over-focus on it and potentially neglect the majority of the data. Mitigation: use techniques that cap or smooth group weights to prevent this imbalance."
-   },
-   {
-    "warn": true,
-    "b": "Empty or near-empty groups.",
-    "html": "If a group has very few data points (or is artificially thinned), its Lewis weight can become unreliable or very large, destabilizing the optimization. Mitigation: filter out or merge tiny groups before running the algorithm."
-   },
-   {
-    "warn": true,
-    "b": "Non-linear relationships.",
-    "html": "This paper assumes linear regression (a straight-line fit). If a group's true relationship is curved or non-linear, no amount of weighting can fix it; the model will still perform poorly on that group."
-   },
-   {
-    "b": "Done right.",
-    "html": "When groups are well-separated, their relationships are roughly linear, and no single group is pathological, Lewis weights work reliably to speed up the solver without sacrificing accuracy, because the weights are based on genuine data properties and align well with the groups' actual difficulty."
-   }
-  ]
- },
- "demo": {
-  "h2": "What a runnable demo should prove",
-  "paras": [
-   "Build a synthetic dataset with 5 groups: one with 100 tight points, one with 50 scattered points, one with 200 tight points, one with 10 scattered points, and one with 30 medium points. Fit a linear regression model using three methods: (1) interior point method on all groups equally, (2) this paper's Lewis-weight-based accelerated proximal method, and (3) separate linear regressions per group. Measure wall-clock time and final error on each group."
-  ],
-  "metric_eq": "time_interior_point / time_lewis_accelerated = speedup ratio; error_lewis_group_i = per-group final squared-error for group i",
-  "closing": "The demo must show that Lewis weights achieve the same per-group accuracy as interior point methods (within 5 percent) but in 3-10 times less wall-clock time, because the weighting lets the faster solver skip redundant work on easy groups, and match or beat the per-group accuracy of separate regressions while being massively faster."
- }
+    "heat": {
+      "cells": [
+        ["Group A", 2, false],
+        ["Group B", 4, true],
+        ["Group C", 1, false],
+        ["Group D", 3, true],
+        ["Group E", 4, true],
+        ["Group F", 2, false],
+        ["Group G", 1, false],
+        ["Group H", 3, false],
+        ["Group I", 4, true],
+        ["Group J", 2, false],
+        ["Group K", 1, false],
+        ["Group L", 2, false]
+      ],
+      "caption": "Darker means higher Lewis weight. Hot groups (marked) get more say in training."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Lewis weights tell you which groups are hard to satisfy. Groups with high weight are on the edge—nudge the predictor slightly and their error explodes. Training must protect them."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Block Lewis weights emerge from solving a geometric problem: find the minimum-volume ellipsoid that contains a certain polytope defined by the groups' data. The ellipsoid's axes tell you which groups are most constrained."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: The reweighting trick",
+    "paras": [
+      "The core insight is a conversion: the worst-group problem (minimize the single largest group error) is mathematically equivalent to a reweighted least-squares problem, where groups with high Lewis weights contribute more to the total penalty. This conversion is the magic. Once you have the reweighted problem, you can use any fast convex optimizer; the paper uses mirror descent (a close cousin of gradient descent) accelerated by Nesterov's trick, which converges very quickly when you choose the right step sizes for the data shape.",
+      "Why does reweighting solve the fairness problem? Because in the reweighted problem, any group with a large error automatically contributes more to the total loss. Training thus naturally adjusts the predictor to shrink the biggest errors first. Groups that are easy to fit get low weight, so training can ignore them safely. Groups on the edge (high Lewis weight) are protected by becoming the dominant term in the objective. The result: all groups end up with similar, balanced errors."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "raw data grouped by hospital"
+        },
+        {
+          "t": "step",
+          "s": "analyze data shape and compute Lewis weights per group",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "form reweighted least-squares objective"
+        },
+        {
+          "t": "step",
+          "s": "run accelerated mirror descent (many fast iterations)",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "fair predictor (worst-group error minimized)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The reweighting equation",
+    "words": "minimize sum over all groups i of (Lewis weight for group i) times (squared prediction error for group i), where prediction error for group i is computed as the norm of residuals for that group scaled by group size",
+    "equation": "minimize_x sum_{i=1}^{m} w_i * (1/sqrt(n_i)) * ||A_i * x - b_i||_2^2",
+    "symbols": [
+      ["x", "the predictor weights we are learning"],
+      ["w_i", "the Lewis weight for group i (computed from data geometry)"],
+      ["n_i", "the size (number of samples) in group i"],
+      ["A_i", "the data matrix for group i"],
+      ["b_i", "the true values (targets) for group i"],
+      ["||...||_2", "the Euclidean length (norm) of the residual vector"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say we have 2 hospitals. Hospital 1: 10 patients, Lewis weight 1.0, residual norm 5. Hospital 2: 20 patients, Lewis weight 4.0, residual norm 3.",
+        "Hospital 1 penalty: 1.0 * (1/sqrt(10)) * 5^2 = 1.0 * 0.316 * 25 = 7.9",
+        "Hospital 2 penalty: 4.0 * (1/sqrt(20)) * 3^2 = 4.0 * 0.224 * 9 = 8.0",
+        "Penalties are nearly equal, even though Hospital 2 has lower raw error. Lewis weights enforced balance by giving Hotel 1 a lower weight (since it is harder to fit well) and Hospital 2 a higher weight (since it is easier). Training adjusts the predictor to keep both penalties in line."
+      ]
+    },
+    "note": "The Lewis weights emerge from analyzing the data shape; they are computed once as a preprocessing step using existing efficient algorithms. Then the reweighted problem is solved with standard accelerated convex optimization."
+  },
+  "bars": {
+    "h2": "Unfair training versus fair",
+    "charts": [
+      {
+        "title": "Average training (ignores small groups)",
+        "rows": [
+          ["Hospital A error", 8, "good"],
+          ["Hospital B error", 7, "good"],
+          ["Hospital C error", 42, "bad"],
+          ["Overall (average)", 19, "good"]
+        ],
+        "note": "Average error is low, but Hospital C fails catastrophically."
+      },
+      {
+        "title": "This paper (fair across all groups)",
+        "rows": [
+          ["Hospital A error", 12, "good"],
+          ["Hospital B error", 11, "good"],
+          ["Hospital C error", 14, "good"],
+          ["Overall (worst-group)", 14, "good"]
+        ],
+        "note": "Worst-group error is much lower. All hospitals are protected equally."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Underspecified Lewis weights.",
+        "html": "If the data-shape computation is done incorrectly or on approximate data, Lewis weights can be inaccurate, and the reweighting does not balance fairly. The paper requires a correct data-shape analysis; mistakes there propagate."
+      },
+      {
+        "warn": true,
+        "b": "Very imbalanced groups.",
+        "html": "If one group has 10 samples and another has 100,000, scaling by group size helps, but extreme imbalance can still cause numerical instability during optimization, because the matrix being inverted in each solver step becomes very ill-conditioned: some directions are much more sensitive than others, and rounding errors accumulate."
+      },
+      {
+        "warn": true,
+        "b": "Nonlinear data.",
+        "html": "The method solves linear regression. If the true relationship is highly nonlinear, fair linear predictions may simply be impossible; the method can only balance error among bad fits."
+      },
+      {
+        "b": "Done right.",
+        "html": "Compute Lewis weights carefully, use double-precision arithmetic, and let the accelerated solver run until convergence. The result is a provably fair and near-optimal predictor."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a synthetic regression problem with multiple groups (say, 5 groups, 50 samples each, with different noise levels per group). Train using average least squares, then train using the block Lewis weight reweighting with accelerated mirror descent. Compare the largest error across groups before and after."
+    ],
+    "metric_eq": "fairness_gain = (worst_group_error_average) - (worst_group_error_fair)",
+    "closing": "The demo must make it impossible to miss that Lewis-weighted training brings all groups to similar error levels, while average training leaves one group in the dust."
+  }
 }
