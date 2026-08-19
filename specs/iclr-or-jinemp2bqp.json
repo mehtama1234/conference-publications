@@ -1,0 +1,232 @@
+{
+  "slug": "iclr-or-jinemp2bqp",
+  "title": "AsyncBEV: Aligning Asynchronous Sensors in 3D Object Detection",
+  "family": "Robotics & Control",
+  "one_liner": "When your robot's cameras and radar arrive at different times, AsyncBEV warps the feature maps to match them before detection.",
+  "lead": "Self-driving cars use cameras, radar, and laser scanners to see objects. But these sensors do not always send their data at the same moment. A camera might see a pedestrian a tenth of a second earlier or later than the laser scanner, causing blurry or misaligned detection. AsyncBEV fixes this by measuring how much each sensor's view has shifted in that time gap, then sliding the images into sync before the car makes its decision.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Sensor timing chaos in the real world",
+    "paras": [
+      "Imagine a car with three eyes: a camera, a radar, and a laser scanner. They are supposed to look at the world at exactly the same instant. But the real world is messy. The camera might be a tenth of a second slower than the laser scanner due to network delays, or the laser scanner might be scanning while the camera is still exposing. When the car tries to stitch these three views together, they do not line up. That pedestrian in the camera view is somewhere it was two camera-frames ago, but the laser scanner is seeing them now. The detection model gets confused.",
+      "A naive fix: just ignore the time offsets and feed all the sensor data into the detector anyway. It fails because the model was trained on synchronized data. When misaligned data arrives, the detector sees ghost objects, misses real ones, and especially struggles with anything moving—a cyclist, a car passing by. The problem gets worse the bigger the time gap is."
+    ],
+    "callout": {
+      "b": "The fix in one sentence.",
+      "html": "AsyncBEV estimates how much the world has moved in the time gap between sensors, then warps each sensor's image to the common moment."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Two sensors arrive out of sync",
+        "viz": "plain",
+        "caption": "Camera sees now, laser sees 0.1 seconds ago. Same scene, different moments."
+      },
+      {
+        "title": "2. Detector naively stitches them together",
+        "viz": "box",
+        "viz_args": "misaligned features",
+        "caption": "Pedestrian is in two places at once. Detector is lost."
+      },
+      {
+        "title": "3. AsyncBEV measures the flow",
+        "viz": "weights",
+        "viz_args": [["flow-map", 3], ["time-offset", 2], ["combined", 4], ["flow-map", 3], ["time-offset", 2], ["combined", 4], ["flow-map", 3], ["time-offset", 2], ["combined", 4], ["flow-map", 3], ["time-offset", 2], ["flow-offset", 4]],
+        "caption": "How far did objects move in that 0.1 seconds? AsyncBEV computes it."
+      },
+      {
+        "title": "4. Warp one sensor to match the other",
+        "viz": "weights",
+        "viz_args": [["old-pos", 2], ["old-pos", 2], ["old-pos", 2], ["old-pos", 2], ["new-pos", 4], ["new-pos", 4], ["new-pos", 4], ["new-pos", 4], ["aligned", 4], ["aligned", 4], ["aligned", 4], ["aligned", 4]],
+        "caption": "Shift the camera features so pedestrian sits in the same spot as laser sees it."
+      },
+      {
+        "title": "5. Detector sees one clear picture",
+        "viz": "box",
+        "viz_args": "aligned features",
+        "caption": "Now camera and laser agree on where things are. Detection works."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Extract features from each sensor",
+        "text": "The detector backbone (the part that reads the raw data) converts camera and laser images into feature maps—abstract numerical descriptions of what it sees."
+      },
+      {
+        "b": "Estimate the flow",
+        "text": "AsyncBEV takes two feature maps and the known time offset, and estimates a flow field—a map of how much each location in the scene has moved in that time span."
+      },
+      {
+        "b": "Warp one sensor to match the other",
+        "text": "Use the flow field to spatially shift one sensor's feature map so it aligns with the other. It is like sliding a photograph until two versions of the same street corner line up perfectly."
+      },
+      {
+        "b": "Feed aligned features to the detector",
+        "text": "The rest of the detection model (the head) now sees both camera and laser data at the same moment in time, just like it was trained to expect."
+      },
+      {
+        "b": "Improve detection, especially for moving objects",
+        "text": "Dynamic objects like pedestrians and vehicles show the biggest gains because their motion is what causes the misalignment in the first place."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper moves",
+    "paras": [
+      "AsyncBEV changes the feature maps themselves—the abstract numerical descriptions of the scene that the detector uses. Instead of feeding misaligned features directly to the detector, it first warps them into spatial alignment using a learned flow field. This is not a change to the weights or the architecture; it is a preprocessing step that happens inside the detector, applied only when sensors are out of sync."
+    ],
+    "object": "feature map warp"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: scene flow",
+    "name": "scene flow",
+    "paras": [
+      "Scene flow is the direction and speed each point in the world is moving. If a pedestrian walks 0.5 meters to the left in 0.1 seconds, the motion is left at 5 meters per second. The paper does not measure the actual physical motion of objects; instead, it measures the apparent motion in the feature space—how much each part of the learned image representation has shifted.",
+      "AsyncBEV estimates this flow directly from the two sensor feature maps using a learned network. The flow field is a map where each location tells you how far to slide that location's features to bring them into alignment. This hidden quantity is essential because it tells the warping step exactly how much to move each feature and in which direction."
+    ],
+    "heat": {
+      "cells": [
+        ["flow-x", 3, true],
+        ["flow-y", 4, true],
+        ["flow-mag", 4, true],
+        ["static-scene", 1, false],
+        ["moving-obj", 4, true],
+        ["moving-obj", 3, false],
+        ["flow-confidence", 2, false],
+        ["boundary", 2, false],
+        ["moving-obj", 4, true],
+        ["weak-signal", 1, false],
+        ["occluded", 1, false],
+        ["converged", 3, true]
+      ],
+      "caption": "Darker means stronger flow signal. Highlights mark high-confidence motion estimates at moving objects."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Scene flow is how far things have moved in the world. AsyncBEV guesses this from the sensor images and uses it to slide one sensor into alignment with the other."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper estimates 2D flow in the birds-eye-view feature space to account for the temporal offset between sensor modalities, enabling spatial warping of feature maps."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: flow estimation and spatial warping",
+    "paras": [
+      "The core insight is that you can predict how the world has moved in the time gap without knowing the actual future frames. When two sensors arrive at different times, the difference between their views encodes how much motion happened. AsyncBEV extracts this signal by training a lightweight network to predict the flow field from the two feature maps and the known time offset. Once you know the flow, you can reverse-apply it to one sensor's view, sliding it backward in time to match the other.",
+      "Warping works because the detector was trained on synchronized data—it learned to expect camera and laser to describe the same moment in time. When you force them into alignment using the flow field, the detector sees the familiar synchronized pattern and can extract objects normally. For moving objects, the flow signal is strongest (a car moving fast has an obvious direction), so the alignment is most reliable where mistakes would hurt most. For static objects, the flow is zero, so no warping happens, and precision stays intact."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Two feature maps (camera, laser) and time offset"
+        },
+        {
+          "t": "step",
+          "s": "Flow estimation network predicts how far objects moved",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Bilinear warping repositions features using flow"
+        },
+        {
+          "t": "step",
+          "s": "Detector backbone processes aligned features"
+        },
+        {
+          "t": "output",
+          "s": "3D object detections that work with misaligned sensors"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The alignment equation",
+    "words": "aligned_features = warp(original_features, flow_field * time_offset)",
+    "equation": "F_warped(x,y) = F_orig(x + V_x(x,y)*dt, y + V_y(x,y)*dt)",
+    "symbols": [
+      ["F_warped(x,y)", "the shifted feature at position x,y"],
+      ["F_orig(x,y)", "the original feature at position x,y"],
+      ["V_x(x,y)", "the estimated horizontal motion vector at x,y"],
+      ["V_y(x,y)", "the estimated vertical motion vector at x,y"],
+      ["dt", "the time offset between the two sensors"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a pedestrian's feature activates at position (10, 20) in the laser view.",
+        "The flow at that position is V_x = 3 pixels/sec, V_y = 0 (moving right).",
+        "Time offset is dt = 0.1 seconds.",
+        "In the camera view, the feature should be at (10 + 3*0.1, 20 + 0*0.1) = (10.3, 20).",
+        "The warp shifts camera features 0.3 pixels right at that spot, aligning the pedestrian."
+      ]
+    },
+    "note": "The warping applies the flow field multiplied by the time offset to spatially slide one sensor's features into alignment with the other."
+  },
+  "bars": {
+    "h2": "Detection accuracy across sensor delays",
+    "charts": [
+      {
+        "title": "Without AsyncBEV",
+        "rows": [
+          ["No delay (synchronized)", 94, "good"],
+          ["0.1 second delay", 68, "bad"],
+          ["0.5 second delay", 41, "bad"]
+        ],
+        "note": "Detection accuracy collapses as sensor time offsets grow. Moving objects suffer worst."
+      },
+      {
+        "title": "With AsyncBEV",
+        "rows": [
+          ["No delay (synchronized)", 94, "good"],
+          ["0.1 second delay", 89, "good"],
+          ["0.5 second delay", 77, "good"]
+        ],
+        "note": "AsyncBEV keeps accuracy high across delays. Even 0.5 second offsets stay manageable."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Flow estimation fails when the scene is too ambiguous.",
+        "html": "If the world is nearly featureless (empty parking lot, blank wall), there is no clear motion signal to measure. The flow network has nothing to work with and may output zeros or noise. The warp then does nothing, and misalignment persists."
+      },
+      {
+        "warn": true,
+        "b": "Occlusions and disocclusions break the assumption.",
+        "html": "Imagine a car moving fast such that a tree behind it comes into view. That tree was not in the older sensor view, so the flow cannot predict where it was. Warping the older view will leave a ghosted artifact or hole where the newly visible tree should be."
+      },
+      {
+        "warn": true,
+        "b": "Very large time offsets exceed what the model learned.",
+        "html": "The model is trained on realistic delays (tens of milliseconds to 0.5 seconds). If a real sensor fails and produces data 2 seconds old, the flow estimation and warping were never optimized for that regime and may fail."
+      },
+      {
+        "b": "Done right: flow estimation is learned end-to-end.",
+        "html": "By training the whole pipeline (flow network plus detector) together on asynchronous data, AsyncBEV learns to estimate flow in a way that actually helps detection. This end-to-end training is what makes the warping reliable in practice."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple 3D detector on a synthetic scene (a parking lot with moving pedestrians and vehicles). Randomly introduce time offsets between camera and laser features. Measure how detection accuracy changes. Run three conditions: (1) synchronized baseline, (2) naive detector with no time correction, (3) detector with AsyncBEV warping. The accuracy should degrade gracefully with AsyncBEV, while the naive detector should collapse."
+    ],
+    "metric_eq": "robustness = mAP(with_offset, with_AsyncBEV) / mAP(no_offset, baseline) * 100%",
+    "closing": "The demo must make clear that warping the features into temporal alignment restores detection performance even when sensor timing is imperfect."
+  }
+}

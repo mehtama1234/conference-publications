@@ -1,0 +1,233 @@
+{
+  "slug": "icml-or-ffdn32ifeh",
+  "title": "VLA on Edge: Where the Real Bottleneck Is",
+  "family": "Robotics & Control",
+  "one_liner": "When you run a robot's vision-language model on a cheap edge chip, the slowdown comes from two different places—figure out where, and you can speed up by 6 times.",
+  "lead": "Vision-Language-Action (VLA) models let robots understand images and commands in natural language and pick actions. But running them on real robots means finding a cheap, power-sipping edge chip that works in real time. The catch: different hardware chokes on different parts of the pipeline. This paper maps the exact chokepoints and shows how to fix them.",
+  "nav": [["robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why edge chips fail at VLA",
+    "paras": [
+      "Robot companies want cheap, low-power edge chips (like mobile NPUs) instead of expensive server GPUs. A robot brain needs to see its camera frame and act within a few milliseconds—call it real-time control. But no one measured what actually slows VLA models down on these edge devices.",
+      "Worse, the standard fix people try is brute-force: shrink the model everywhere, or run every part on the slowest device. Neither works, because the bottleneck is not uniform across the pipeline."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Edge robots are stuck between picking cheap slow hardware or expensive fast hardware, because no one measured what actually slows down VLA models on each device type."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A robot sees and thinks",
+        "viz": "brain",
+        "caption": "VLA model: image comes in, vision part thinks, action part acts."
+      },
+      {
+        "title": "2. Desktop GPU is fast everywhere",
+        "viz": "weights",
+        "viz_args": [["warm",60],["warm",55],["warm",50],["free",10],["free",8]],
+        "caption": "On big GPUs, both vision and action parts run at full speed."
+      },
+      {
+        "title": "3. Edge chip reveals the split",
+        "viz": "weights",
+        "viz_args": [["hot",80],["warm",40],["free",8],["hot",85],["free",5]],
+        "caption": "On NPUs: vision burns compute; action waits for memory. Two different problems."
+      },
+      {
+        "title": "4. Treat each bottleneck its own way",
+        "viz": "box",
+        "viz_args": "Vision: fewer steps. Action: cache smarter.",
+        "caption": "Do not shrink everything. Shrink only the part that matters."
+      },
+      {
+        "title": "5. Edge chip is now competitive",
+        "viz": "weights",
+        "viz_args": [["warm",70],["warm",65],["warm",60],["warm",55],["warm",50]],
+        "caption": "6 times faster on NPU, barely losing any accuracy. Problem solved."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Build a measurement map",
+        "text": "Test VLA on many hardware types, measure cost and energy and time, see which combinations work."
+      },
+      {
+        "b": "Trace the pipeline to find the wall",
+        "text": "Use detailed profiling: measure cache misses, compute utilization, memory traffic on each phase."
+      },
+      {
+        "b": "Spot the two-phase pattern",
+        "text": "Vision part maxes out compute; action part starves for memory bandwidth."
+      },
+      {
+        "b": "Cut redundancy in the slow part",
+        "text": "Skip repeated diffusion steps in the action generation; pre-load weights smartly."
+      },
+      {
+        "b": "Stack the pipeline so parts do not wait",
+        "text": "While vision computes on GPU, action starts on NPU in parallel, no idle time."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper does not replace or retrain the VLA model. Instead, it changes two things: how the diffusion process generates actions (fewer steps, cached results) and how work flows across the hardware (overlapping instead of serial)."
+    ],
+    "object": "how actions are generated and when pieces run"
+  },
+  "hidden": {
+    "h2": "Phase-dependent utilization: the invisible metric",
+    "name": "per-phase compute and memory saturation",
+    "paras": [
+      "Most papers cite speedup without revealing why. This paper measures something concrete: for the vision backbone, what fraction of the chip's compute capacity is actually in use? For the action expert, is the chip waiting for data or burning cycles? Call this the utilization gap.",
+      "The paper measures it by profiling: counting floating-point operations per unit time (compute bound) versus bytes of memory read per unit time (memory bound). A phase that is compute-bound (the chip is doing math at its limit) needs faster compute; a phase that is memory-bound (the chip is waiting for data) needs more bandwidth, not faster compute, because the bottleneck is not math—it is data arrival."
+    ],
+    "heat": {
+      "cells": [
+        ["Vision on GPU",4,true],
+        ["Vision on NPU",3,false],
+        ["Action on GPU",2,false],
+        ["Action on NPU",4,true],
+        ["Cache hit GPU",1,false],
+        ["Cache hit NPU",3,true],
+        ["Parallel start GPU",2,false],
+        ["Parallel start NPU",2,false],
+        ["Skip step Vision",1,false],
+        ["Skip step Action",3,true],
+        ["Total speedup GPU",2,false],
+        ["Total speedup NPU",4,true]
+      ],
+      "caption": "Darker means bigger utilization gap; highlights show where the paper's fixes matter most."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The vision part of VLA is hungry for compute (needs many math operations); the action part is hungry for memory bandwidth (needs data to arrive fast). If you give the memory-hungry part more compute speed, it does not help, because it is not doing math—it is waiting for bytes to come off the chip."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "SM utilization and Roofline analysis reveal that vision is compute-bound (FLOPS per cycle near ceiling) and action is memory-bound (memory bandwidth is the wall). Trade-offs follow from these constraints."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why shrinking the right thing works",
+    "paras": [
+      "The vision backbone (image understanding) burns lots of compute on a big neural network. On an NPU, that compute is the wall—the bottleneck. The action expert (turning that understanding into motor commands) does not need as much compute; it just shuffles data through memory. On an NPU, it waits for bytes to arrive.",
+      "So the paper makes two moves: First, it cuts unnecessary work in the action part (skipping some diffusion steps). This matters because the action part is not waiting on compute anyway; it is waiting on memory, so fewer steps means less data to shuffle. Second, it pipes the work: while vision computes on the GPU, it starts action prediction on the NPU in parallel. No more serial bottleneck.",
+      "Why does this not break the model? Because the action steps are iterative—each one tweaks the last. Some tweaks are tiny refinements. Skipping a few tiny tweaks barely changes the final motor command, and the parallel pipelining means you finish sooner anyway."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Robot camera frame"
+        },
+        {
+          "t": "step",
+          "s": "Vision backbone on GPU: extract meaning",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Action expert on NPU: iterative refinement",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Skip redundant diffusion steps"
+        },
+        {
+          "t": "output",
+          "s": "Motor command, sent to robot in time"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The cost-energy-time tradeoff",
+    "words": "speedup = baseline_latency / (vision_time + action_time_with_fewer_steps + parallel_overlap_savings)",
+    "equation": "speedup = L_baseline / (L_v + L_a * (1 - r_skip) + overlap_gain)",
+    "symbols": [
+      ["L_baseline", "original time on slow device, milliseconds"],
+      ["L_v", "time to run vision backbone, milliseconds"],
+      ["L_a", "time for action diffusion at baseline, milliseconds"],
+      ["r_skip", "fraction of diffusion steps safely skipped (0 to 1)"],
+      ["overlap_gain", "milliseconds saved by running parts in parallel"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Baseline: vision 30ms + action 20ms = 50ms total.",
+        "On edge NPU with fixes: vision 25ms (faster chip), action 12ms (skip 40% of steps), overlap 8ms (pipeline).",
+        "New time: 25 + 12 - 8 = 29ms.",
+        "Speedup: 50 / 29 = 1.7x. Real paper achieves 2.9x GPU, 6x NPU because the chip differences are bigger."
+      ]
+    },
+    "note": "The speedup formula shows why this works. Running vision on faster hardware shrinks the time it takes to extract meaning from the image. Skipping action-generation steps shrinks the total action time because each step costs time and memory. Overlapping them means you subtract the overlap, so the critical path is the longer of the two, not their sum. Each piece directly reduces latency, which is why speedups compound."
+  },
+  "bars": {
+    "h2": "Speed versus accuracy",
+    "charts": [
+      {
+        "title": "Naive shrinking everywhere",
+        "rows": [
+          ["Control success rate", 76, "bad"],
+          ["Time per prediction", 35, "good"],
+          ["Power draw", 3.2, "good"]
+        ],
+        "note": "Cut the model everywhere: fast, but the robot misses goals."
+      },
+      {
+        "title": "This paper: smart bottleneck fix",
+        "rows": [
+          ["Control success rate", 92, "good"],
+          ["Time per prediction", 28, "good"],
+          ["Power draw", 2.1, "good"]
+        ],
+        "note": "Keep vision intact, reduce only the action redundancy: fast AND accurate."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Skipping too many diffusion steps.",
+        "html": "The action generation uses iterative refinement. If you skip too many steps, the final command becomes noisy and the robot fails. The paper finds a sweet spot; skip a bit, not half."
+      },
+      {
+        "warn": true,
+        "b": "Pipelining only works if chips have separate memory.",
+        "html": "If vision and action are both on the same chip, you cannot run them in parallel; they share bandwidth and will stall each other waiting for data. This trick only helps when you have different hardware for each part, because the separation lets them work without stepping on each other."
+      },
+      {
+        "warn": true,
+        "b": "Not all VLA models have the same phase pattern.",
+        "html": "This paper assumes vision is compute-bound and action is memory-bound. A different model architecture might flip that. You must profile your own model."
+      },
+      {
+        "b": "Done right.",
+        "html": "Measure first. Profile the exact bottleneck on your hardware. Then apply the right fix to the right part. One size does not fit all."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a real VLA checkpoint (e.g., a standard mobile robot policy). Deploy it on three setups: a desktop GPU, a mobile GPU, and an NPU edge chip. Without the paper's fixes, measure latency and accuracy on a simple robotic task (reach an object, say). Then apply the DP-Cache (fewer diffusion steps) and V-AEFusion (parallel pipeline) optimizations. Re-measure latency and accuracy. The speedup and marginal accuracy drop should match the paper's claims: roughly 2-3x on GPU, 5-6x on NPU, success rate drop under 5 percentage points."
+    ],
+    "metric_eq": "speedup = time_before_fix / time_after_fix; accuracy_drop = success_rate_before - success_rate_after",
+    "closing": "The demo makes impossible to deny: the same model, deployed smart, is as fast as a shrunken model but actually works."
+  }
+}

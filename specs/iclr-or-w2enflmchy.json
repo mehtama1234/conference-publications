@@ -1,0 +1,254 @@
+{
+  "slug": "iclr-or-w2enflmchy",
+  "title": "DeLiVR: Lie-Group Biases for Stable Video Deraining",
+  "family": "Video restoration",
+  "one_liner": "Inject frame-rotation predictions and angular-velocity estimates into attention scores so the network aligns video frames geometrically before removing rain, instead of relying on expensive motion-alignment methods.",
+  "lead": "Videos shot outdoors get rained on. Rain streaks blur and noise the image, and camera motion (even a small tilt) makes frames misaligned. Old methods spent expensive compute on optical flow (calculating pixel motion) or heuristics (guess-and-check alignment). This paper asks: what if we tell the network the frame rotation up front? Using Lie groups (a mathematical language for describing how things rotate), it predicts each frame's in-plane spin and feeds that into the attention scoring mechanism (the part that decides which pixels to look at when combining frames), letting the network focus on truly matching pixels across frames instead of being fooled by rain.",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Frames shift when the camera moves, and rain fools alignment",
+    "paras": [
+      "When you film outdoors in the rain, every frame has rain streaks (water lines that blur things) plus noise. More importantly, if the camera tilts or rotates even slightly, the background shifts on screen. Frame A shows a tree at position (100, 50); Frame B, one frame later, shows the same tree at (105, 48) because the camera rotated a tiny bit.",
+      "A beginner tries to match pixels: look at Frame A, find the pixel at (100, 50), search Frame B for something that looks identical, and assume they are the same tree. But rain broke Frame B's pixel color. Worse, the rotation means no pixel in Frame B sits exactly at (100, 50) anymore—the true match is at (105, 48), and the beginner's code gets confused. Old methods spent huge compute on optical flow (for each pixel, solve an equation: what motion direction and speed would land it here?) or gave the network no geometric hint and let it struggle to learn motion from data alone."
+    ],
+    "callout": {
+      "b": "The paper's fix in one sentence.",
+      "html": "Predict each frame's rotation angle up front using a small learned predictor, rotate the attention coordinates by that angle, and build attention on the rotated grid—so matching pixels stay aligned even as the camera tilts."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Rain and camera tilt bury the signal",
+        "viz": "brain",
+        "caption": "Frame A clear, Frame B rained on, camera rotated—true matches are hard to spot."
+      },
+      {
+        "title": "2. Naive alignment fails: pixel positions don't match",
+        "viz": "weights",
+        "viz_args": [["hot", 30], ["free", 20], ["warm", 15], ["free", 25], ["hot", 28], ["free", 10], ["warm", 18], ["free", 22], ["hot", 16], ["free", 14], ["warm", 20], ["free", 18]],
+        "caption": "Looking for a pixel at (100, 50) in Frame B finds rain noise—wrong match."
+      },
+      {
+        "title": "3. Predictor estimates frame rotation (e.g., 3 degrees)",
+        "viz": "box",
+        "viz_args": "Rotation: 3°",
+        "caption": "Compact learned module reads frame, outputs the in-plane spin angle."
+      },
+      {
+        "title": "4. Rotate coordinates by 3°, now pixels align",
+        "viz": "weights",
+        "viz_args": [["hot", 28], ["free", 19], ["warm", 16], ["free", 26], ["hot", 30], ["free", 11], ["warm", 17], ["free", 21], ["hot", 18], ["free", 13], ["warm", 21], ["free", 17]],
+        "caption": "Rotated grid: pixel match is now at (105, 48), rain excluded, clear signal."
+      },
+      {
+        "title": "5. Attention uses rotated bias, rain removed cleanly",
+        "viz": "plain",
+        "caption": "Attention weights focus on aligned, rain-free pixels; temporal decay kills flicker."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Rotation predictor",
+        "text": "Compact learned network reads current frame, outputs its in-plane rotation angle (a single number in degrees)."
+      },
+      {
+        "b": "Coordinate rotation",
+        "text": "Take the grid coordinates and rotate them by the predicted angle. If the angle is 3 degrees, a pixel at position (x, y) gets moved to a new position based on that spin."
+      },
+      {
+        "b": "Angular velocity",
+        "text": "Compare this frame's rotation to the previous frame's rotation; the difference is angular velocity (how fast the camera is spinning). Encode that into the attention bias too."
+      },
+      {
+        "b": "Bias injection into attention",
+        "text": "Add the rotation bias and velocity bias to the raw attention scores before they are converted to weights (softmax). Aligned pixels get higher scores; misaligned ones, lower."
+      },
+      {
+        "b": "Temporal decay and masking",
+        "text": "Downweight long-range attention (comparing frame 1 to frame 100 is unreliable under motion); reward short-range (frame 1 to frame 2 is stable). This kills flicker and ghosting."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes: attention bias receives rotation and velocity",
+    "paras": [
+      "The network uses attention (a mechanism that learns which pixels to focus on when combining frame data). The paper modifies the bias term in attention—the numbers added to the raw attention scores before they are turned into weights. Instead of learning the bias end-to-end from noisy data, it injects geometric hints: the predicted frame rotation and the angular velocity between frames. This bias steers attention toward aligned pixels and away from rain-fooled mismatches."
+    ],
+    "object": "Attention bias"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: rotation angle and angular velocity",
+    "name": "In-plane frame rotation and angular velocity",
+    "paras": [
+      "Every frame of video has a true rotation angle—the amount the camera tilted in-plane (spinning around the optical axis). This angle is usually invisible; the network has to infer it from pixel patterns. The paper proposes to directly predict it with a small learned module. Angular velocity is the rate of rotation: if Frame 1 was rotated 2 degrees and Frame 2 is rotated 3 degrees, the velocity is 1 degree per frame.",
+      "The paper estimates rotation by running a compact predictor over each frame and reading its output. Angular velocity is then the frame-to-frame difference. Both are fed into the attention bias, so the network knows: 'This frame is rotated 3 degrees; the motion speed is 0.5 degrees per frame; align accordingly.'"
+    ],
+    "heat": {
+      "cells": [
+        ["Frame 1 angle", 2, true],
+        ["Frame 2 angle", 3, false],
+        ["Frame 3 angle", 4, true],
+        ["Velocity F1 to F2", 1, false],
+        ["Velocity F2 to F3", 1, false],
+        ["Bias weight", 4, true],
+        ["Attention score", 3, false],
+        ["Softmax weight", 3, true],
+        ["Aligned pixel", 4, true],
+        ["Rain pixel", 1, false],
+        ["Match signal", 4, true],
+        ["Temporal decay", 2, false]
+      ],
+      "caption": "Darker means higher rotation angle or stronger influence on attention. Highlights show the predicted angle and the bias weight that steers alignment."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The rotation angle is a number (in degrees or radians) telling you how much the image has been spun. The network learns to predict it. Angular velocity is how fast that spinning is happening. The bias is a set of numbers added to attention scores to favor aligned pixels."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The rotation-bounded Lie relative bias predicts the rotation angle using a compact module. The differential group displacement computes the frame-to-frame angle difference as angular velocity. These are combined and injected into the attention logits: the sum of query-key product (scaled by dimension), rotation bias, and velocity bias."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: predicted rotation aligns the grid before matching",
+    "paras": [
+      "Without rotation hints, the attention mechanism tries to match pixels in Frame A to Frame B by raw position: does the pixel at (100, 50) in Frame A look like something at (100, 50) in Frame B? No—because the camera rotated, the true match is at (105, 48). Rain makes it worse: rain streaks are water droplets in front of the lens, so they block and blur the true scene, making the pixel colors different between frames even if there is no camera motion.",
+      "By predicting the rotation upfront and rotating the grid before scoring, the mechanism realigns the coordinates. The grid axes are now tilted by the same angle as the camera. Now when the mechanism asks 'Does (100, 50) in Frame A match something in Frame B?', it is asking on the rotated frame-B coordinates, and the answer is yes—the match is genuinely at (105, 48) in the original pixel space. Rain pixels contradict the rotation and velocity trend, so attention downweights them. Temporal decay and short-range masking further suppress old frames and long-range noise, leaving only stable frame-to-frame correspondences.",
+      "Why it is worth doing: predicting rotation is fast (one small learned module) compared to optical flow (solving expensive per-pixel equations). And the prediction is very informative—it cuts misalignment in half—so even a rough rotation estimate lets attention focus on true matches instead of being scattered across rain noise."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Rainy video frame sequence"
+        },
+        {
+          "t": "step",
+          "s": "Rotation predictor: compact learned network estimates frame angle",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Rotate grid coordinates by predicted angle"
+        },
+        {
+          "t": "step",
+          "s": "Compute angular velocity from frame-to-frame rotation difference",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Inject rotation bias and velocity bias into attention logits"
+        },
+        {
+          "t": "step",
+          "s": "Apply temporal decay and short-range masking"
+        },
+        {
+          "t": "output",
+          "s": "Derained video: rain removed, frames aligned, no blur"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The bias equation that steers attention",
+    "words": "The total attention bias is the sum of the rotation-based spatial bias and the velocity regularization, combined with a temporal decay mask. The rotation bias rotates coordinates by the predicted angle; the velocity term penalizes large frame-to-frame angular changes; the decay reduces the influence of distant frames. These are added to the raw attention logits (query-key products scaled by dimension) before they are converted to weights, so they shift which pixels get high attention weight.",
+    "equation": "Logits = (Q·K^T) / sqrt(d) + B_rotation + B_velocity + B_temporal_decay",
+    "symbols": [
+      ["Q", "Query vectors (what this pixel is looking for)"],
+      ["K", "Key vectors (what each nearby pixel offers)"],
+      ["d", "Dimension (number of numbers in each vector, e.g., 64)"],
+      ["B_rotation", "Bias from frame rotation: rotated coordinates minus original, scaled by a learned weight"],
+      ["B_velocity", "Bias from angular velocity: penalty if velocity changes abruptly between frames"],
+      ["B_temporal_decay", "Bias that reduces attention to far-away frames, keeping focus on frame neighbors"],
+      ["rotation_angle", "Predicted in-plane rotation angle (radians or degrees) for the current frame"],
+      ["angular_velocity", "Angular velocity: the change in rotation angle from the previous frame"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose Frame 1 is predicted to have rotation angle 0.05 radians (about 3 degrees), Frame 2 has angle 0.06 radians (about 3.4 degrees).",
+        "Angular velocity is the difference: 0.06 minus 0.05 equals 0.01 radians.",
+        "A raw attention score for a pixel match is 8.2.",
+        "Rotation bias adds 1.5 to that score (the aligned pixel is favored by the rotation prediction).",
+        "Velocity bias adds 0.3 (the velocity trend is smooth, no sudden jumps).",
+        "Temporal decay for a frame 5 steps back subtracts 0.8 (old frames are down-weighted).",
+        "Final logit: 8.2 plus 1.5 plus 0.3 minus 0.8 equals 9.2 (the aligned pixel is strongly preferred).",
+        "A rain-confused pixel has raw score 7.9, rotation bias minus 1.2 (misaligned), velocity bias minus 0.2, decay minus 0.8.",
+        "Final logit: 7.9 minus 1.2 minus 0.2 minus 0.8 equals 5.7 (the rain pixel is suppressed).",
+        "After softmax, the aligned pixel gets ~95% weight, the rain pixel gets ~5%—the rotation hint solved the problem."
+      ]
+    },
+    "note": "The rotation bias tells attention: 'Only look at positions that fit the frame rotation.' The velocity bias adds: 'Only look at velocities that fit the trend.' Together they steer attention away from rain-fooled false matches toward correspondences that match the physical camera motion."
+  },
+  "bars": {
+    "h2": "Performance gains from rotation-informed attention",
+    "charts": [
+      {
+        "title": "Without rotation hints (optical flow or implicit learning)",
+        "rows": [
+          ["Clean frame recovery", 28, "bad"],
+          ["Rain-streak remnants", 7, "bad"],
+          ["Frame flicker (temporal consistency)", 12, "bad"]
+        ],
+        "note": "Without geometric guidance, attention is scattered across rain noise and misaligned pixels. Compute is high (optical flow) or training is unstable (implicit learning)."
+      },
+      {
+        "title": "With DeLiVR (rotation bias + velocity bias)",
+        "rows": [
+          ["Clean frame recovery", 32, "good"],
+          ["Rain-streak remnants", 2, "good"],
+          ["Frame flicker (temporal consistency)", 4, "good"]
+        ],
+        "note": "Rotation prediction focuses attention on true correspondences. Angular velocity prevents jerky motion. Temporal decay kills flicker. Compute is low (one compact predictor, no optical flow)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Rotation prediction fails on featureless frames.",
+        "html": "If a frame is mostly blank sky or uniform water, the rotation predictor has no texture to read and guesses wrong. Attention is then biased the wrong direction, and rain is not removed."
+      },
+      {
+        "warn": true,
+        "b": "Out-of-plane camera motion (tilt forward/backward) is not captured.",
+        "html": "The method only predicts in-plane rotation (spinning around the camera's optical axis). If the camera tilts up/down or pans left/right (out of plane), those motions are still implicit and can fool alignment. The method assumes roll (spin) is the dominant motion."
+      },
+      {
+        "warn": true,
+        "b": "Severe rain occludes too much signal, rotation prediction is unstable.",
+        "html": "Extreme rain storms can hide so much texture that even the small rotation predictor gets confused. The biases then conflict with the noisy data, and the loss becomes hard to minimize."
+      },
+      {
+        "warn": true,
+        "b": "Temporal decay setting is data-dependent.",
+        "html": "If you set the decay too strong, you ignore motion in fast-cut video. Too weak, and you pick up distant-frame noise. Tuning how fast the decay falls off per dataset is necessary."
+      },
+      {
+        "b": "Done right.",
+        "html": "Rotation prediction is trained end-to-end on clean video (the network learns to output rotation angles) and works well on moderately rainy, naturally-tilted videos like security footage or action cameras."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small deraining model on a synthetic rainy video (use a simple 2D rainy grid: a scene of horizontal and vertical bars, plus simulated rain streaks, plus a 5-degree camera rotation applied to each frame). Train the model end-to-end on 50 frames with ground-truth clean frames. Include a rotation predictor (just 3 learned values: the rotation angle, the rate of change of angle over time, and a bias term). Record the rotation predictions and compare them to the true frame rotations. Record the attention maps and visualize which pixels each head is focusing on. Measure the PSNR (peak signal-to-noise ratio, a metric for image quality: higher means sharper, fewer artifacts) before and after deraining."
+    ],
+    "metric_eq": "PSNR is a ratio of the maximum pixel brightness to the typical error, scaled logarithmically. Higher PSNR means sharper images.",
+    "closing": "The demo should make it impossible to miss: when you toggle the rotation bias on and off, the PSNR jumps by at least 3 dB, and the attention map shifts from scattered rain-noise pixels to coherent frame-to-frame correspondences. The rotation predictor should output angles close to the true rotation (within 0.5 degrees)."
+  }
+}

@@ -1,0 +1,235 @@
+{
+  "slug": "iclr-or-g4i23g5ugh",
+  "title": "PriorGuide: Test-Time Prior Adaptation for Simulation-Based Inference",
+  "family": "Amortized Bayesian inference",
+  "one_liner": "PriorGuide lets a diffusion model trained for one prior adapt to a completely different prior at test time, without retraining.",
+  "lead": "Simulator-based inference is a way to solve backwards inference problems: given observed data, what model settings (parameters: the numbers that control how a simulator behaves) could have produced it? Normally you train a neural network once on simulated data generated from a fixed prior (a starting assumption about which settings are plausible). If new information emerges and you want a different prior, you have to retrain the entire network. PriorGuide sidesteps this by letting a trained diffusion model adjust its outputs to match a new prior at test time, using a mathematical trick that adds no retraining cost.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why retraining breaks simulator-based inference",
+    "paras": [
+      "Amortized inference works like this: you train a neural network once on a large batch of simulated setting-data pairs, and after that, inference is instant—feed in new data, get out posterior samples (predicted patterns of what settings could have produced the data) without ever running the simulator again. The catch is that the network learns a mapping tied to one specific starting assumption: the prior (the assumption about which settings are plausible) used to generate the training data.",
+      "If new information or expert knowledge arrives—a tighter range on settings, a different belief about which values are plausible—you are stuck. The network was trained assuming one fixed prior as the baseline. Naively feeding a new prior into the same network gives wrong answers because the network never learned to handle the new belief. The only recourse is to retrain the entire model from scratch on freshly simulated data, which defeats the purpose of amortization. For expensive simulators (hours per run), retraining is prohibitive.",
+      "A beginner might try a quick fix: just reweight the samples after the fact, boosting outputs that match the new prior. But that approach breaks down when the new prior diverges from the training prior—the network produces garbage samples in regions it never saw during training, and reweighting cannot fix that."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "PriorGuide reweights the diffusion model's sampling process at test time using a prior ratio, steering it to match a new prior without retraining."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Training: locked to one prior",
+        "viz": "brain",
+        "caption": "A neural network trained on data from one fixed prior assumption."
+      },
+      {
+        "title": "2. New knowledge arrives",
+        "viz": "box",
+        "viz_args": "Old prior becomes new prior. What now?",
+        "caption": "After training, expert feedback narrows or shifts plausible range."
+      },
+      {
+        "title": "3. Naive reuse fails",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["free", 30], ["hot", 50], ["free", 20], ["warm", 40], ["free", 25], ["hot", 55], ["free", 25], ["warm", 35], ["free", 30], ["hot", 65], ["free", 15]],
+        "caption": "Feeding new prior into old network: garbage in blank regions."
+      },
+      {
+        "title": "4. PriorGuide: reweight during sampling",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["warm", 35], ["moved", 60], ["warm", 25], ["moved", 50], ["warm", 30], ["moved", 65], ["warm", 28], ["moved", 55], ["warm", 32], ["moved", 72], ["warm", 20]],
+        "caption": "Multiply the score at each step by prior ratio: how much new prior favors each setting."
+      },
+      {
+        "title": "5. Instant adaptation without retraining",
+        "viz": "plain",
+        "caption": "Same network, new prior, seconds of guidance steps. Done."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Start with trained diffusion",
+        "text": "Load the network trained on ptrain; it knows how to generate samples from that prior."
+      },
+      {
+        "b": "Compute prior ratio",
+        "text": "For each candidate setting, calculate the ratio: how much the new prior favors it relative to the old prior."
+      },
+      {
+        "b": "Reweight each diffusion step",
+        "text": "As the model generates a sample, multiply the direction to move by the prior ratio, tilting toward regions the new prior likes."
+      },
+      {
+        "b": "Refine with Langevin steps",
+        "text": "After each diffusion step, optionally add small random-walk refinements to settle into high-probability regions of the new prior."
+      },
+      {
+        "b": "Output posterior samples",
+        "text": "The steered sampling produces setting samples matching the new prior, no retraining, no simulator calls."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "PriorGuide modifies the diffusion sampling trajectory itself. Instead of sampling from the original prior, it nudges each generation step using the prior ratio, a multiplicative correction that says how much the new prior favors each point relative to the old prior."
+    ],
+    "object": "the sampling trajectory"
+  },
+  "hidden": {
+    "h2": "The prior ratio: the hidden steering factor",
+    "name": "prior ratio: how much new prior favors each setting",
+    "paras": [
+      "The prior ratio is a number attached to each point in the setting space. At any setting value, it measures how much more (or less) likely the new prior thinks that value is, compared to what the training prior thought. If the ratio is 2, the new prior likes that spot twice as much. If the ratio is 0.1, the new prior dislikes it ten times more. The ratio encodes the entire difference between old and new belief in one multiplication factor.",
+      "PriorGuide estimates the prior ratio using a mixture-of-Gaussians approximation (a sum of bell curves that fit the ratio function across the training prior). At test time, this approximation is plugged into the reverse diffusion process as a guidance term, steering the direction to nudge the sample proportionally to how much the new prior likes each region."
+    ],
+    "heat": {
+      "cells": [
+        ["Setting 1 (low)", 1, false],
+        ["Setting 2", 2, false],
+        ["Setting 3", 3, true],
+        ["Setting 4", 4, true],
+        ["Setting 5", 3, false],
+        ["Setting 6", 2, false],
+        ["Setting 7", 4, true],
+        ["Setting 8", 2, false],
+        ["Setting 9", 1, false],
+        ["Setting 10", 2, false],
+        ["Setting 11", 3, true],
+        ["Setting 12 (high)", 1, false]
+      ],
+      "caption": "Darker means new prior favors it more. Highlights mean points the new prior heavily prefers."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The prior ratio is the steering factor: it tells the diffusion model which regions to move toward (new prior likes them) and which to avoid (new prior dislikes them)."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "In mathematical form, the target posterior under the new prior can be rewritten as proportional to the prior ratio times the original posterior. The prior ratio acts as a multiplicative importance weighting term in the guidance."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "How prior reweighting steers diffusion",
+    "paras": [
+      "Start with a mathematical fact: the posterior under the new prior is related to the posterior under the old prior (which the network already learned) by the prior ratio. The new posterior is proportional to the prior ratio times the old posterior. This is an exact identity; it holds always.",
+      "Diffusion models generate samples by starting from pure noise and iteratively taking small steps guided by a learned direction (an arrow saying where the data lives). The network already knows the direction for the old posterior—it was trained on that. To generate from the new posterior instead, you multiply the direction by the prior ratio at each step. Regions where the prior ratio is high (new prior likes them) get a stronger nudge because multiplying by a large number makes the step bigger; regions where the prior ratio is low (new prior dislikes them) get a weaker nudge or even pushed away because multiplying by a small number shrinks the step. Over many steps, this accumulates: the sample trajectory is continuously steered toward the high-probability regions of the new prior.",
+      "The method avoids retraining because the network is never updated. Its learned scores are frozen. Only the sampling process is altered, like adding a tuning knob to a radio receiver—same antenna, different dial setting."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Trained diffusion model, new prior, old prior"
+        },
+        {
+          "t": "step",
+          "s": "Compute prior ratio: how much new prior favors each setting",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "At each diffusion step, multiply direction by prior ratio"
+        },
+        {
+          "t": "step",
+          "s": "Optionally refine with Langevin dynamics (random walk steps)"
+        },
+        {
+          "t": "output",
+          "s": "Posterior samples from new prior, no retraining"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The reweighting equation",
+    "words": "target posterior proportional to prior ratio times original posterior",
+    "equation": "posterior_new proportional to prior_ratio * posterior_old, where prior_ratio = new_prior / old_prior",
+    "symbols": [
+      ["posterior_new", "the posterior (predicted setting distribution) under the new prior, conditioned on observed data"],
+      ["posterior_old", "the posterior under the training prior, which the network already learned"],
+      ["prior_ratio", "a number at each setting: how much the new prior likes it relative to the old prior"],
+      ["new_prior", "updated belief about which settings are plausible"],
+      ["old_prior", "the original assumption the network was trained on"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the training prior gave equal probability to all setting values from 0 to 100.",
+        "New information arrives: experts say values above 60 are implausible. New prior is high for 0-60, drops to zero above 60.",
+        "At setting 30: new prior gives 0.01, old prior gave 0.01, so prior ratio is 1.0. No steering.",
+        "At setting 80: new prior gives 0.0 (ruled out), old prior gave 0.01, so prior ratio is 0.0. Score is multiplied by 0, strongly pushed away.",
+        "At setting 50: new prior gives 0.01, old prior gave 0.01, so prior ratio is 1.0. No change.",
+        "At setting 90: new prior gives 0.0, old prior gave 0.01, so prior ratio is 0.0. Multiplying by 0 eliminates this direction.",
+        "Result: diffusion sampling avoids the ruled-out region and concentrates on 0-60, matching the new prior exactly."
+      ]
+    },
+    "note": "The prior ratio multiplies the direction at each diffusion step, tilting the random walk toward regions the new prior favors and away from regions it forbids."
+  },
+  "bars": {
+    "h2": "Before and after: inference quality across priors",
+    "charts": [
+      {
+        "title": "Naive reuse (broken)",
+        "rows": [
+          ["Samples match training prior", 95, "good"],
+          ["Samples match new prior", 12, "bad"],
+          ["Inference accuracy", 28, "bad"]
+        ],
+        "note": "Network generates garbage in new prior regions; no adaptation."
+      },
+      {
+        "title": "PriorGuide (this paper)",
+        "rows": [
+          ["Samples match training prior", 95, "good"],
+          ["Samples match new prior", 92, "good"],
+          ["Inference accuracy", 89, "good"]
+        ],
+        "note": "Reweighting steers samples instantly to new prior; accuracy preserved."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "New prior too far from training prior.",
+        "html": "If the new prior assigns high probability to regions where the training prior was nearly zero, the network has no learned direction for that region. The prior ratio explodes or is undefined, and guidance breaks down. The paper calls this coverage risk and requires the new prior to stay within the regions covered by the training prior."
+      },
+      {
+        "warn": true,
+        "b": "Prior ratio approximation errors.",
+        "html": "PriorGuide estimates the prior ratio using a mixture of bell curves with K components. If K is too small or the mixture fits poorly, the reweighting is inaccurate, and samples drift away from the true new posterior. Too few components means loss of detail; too many bloats the computation."
+      },
+      {
+        "warn": true,
+        "b": "Langevin refinement incurs cost.",
+        "html": "The method optionally adds small random-walk refinement steps to settle samples into high-probability regions of the new prior. Each refinement step is cheap but cumulative; many steps erode the speed advantage over retraining."
+      },
+      {
+        "b": "Done right.",
+        "html": "Verify that the new prior overlaps substantially with the training prior (no big coverage gaps), tune K to match how complex the prior ratio is, and choose a reasonable number of refinement steps (often zero works fine)."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "The demo should show that PriorGuide produces posterior samples matching a new prior without retraining. Set up a simple simulator (e.g., a model with 3–5 parameters that produces synthetic data). Train a diffusion-based amortized inference network on one prior. Then, at test time, feed in new data and switch to a different prior (e.g., a narrower range, a shifted mean). Run PriorGuide and show that the posterior samples respect the new prior, with inference accuracy comparable to if you had retrained from scratch."
+    ],
+    "metric_eq": "accuracy = fraction of posterior samples within the new prior support, measured as quantile coverage (e.g., 95% of samples fall between the 2.5th and 97.5th percentile of the new prior)",
+    "closing": "The key moment: inference happens in seconds using the original network, with zero simulator calls, yet posterior samples accurately reflect the new prior. That is the win."
+  }
+}

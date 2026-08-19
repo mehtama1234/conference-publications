@@ -1,0 +1,234 @@
+{
+  "slug": "iclr-or-blfw2t3uhq",
+  "title": "Visual Grounding Diagnosis for Sign Language Translation",
+  "family": "Interpretability",
+  "one_liner": "Hallucinations in sign language models come from guessing words instead of reading the video, and you can detect this by watching how much the model actually uses visual information.",
+  "lead": "Sign language translation models sometimes write sentences that sound fluent but have nothing to do with what the person in the video is actually signing. The problem gets worse when the model learns directly from continuous hand and body movements (no intermediate text steps). This paper teaches you to measure a hidden signal: how much of each word actually came from watching the video versus from guessing based on language patterns.",
+  "nav": [["theme-interpretability.html", "Interpretability"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The hallucination trap in sign language",
+    "paras": [
+      "Sign language translation is like watching a silent video and writing what the person is saying. The model sees movements of hands, arms, face, and body, then outputs English words. If the model is trained well, it watches the movement carefully and writes what each movement means. But here's the trap: when the model has seen a lot of English text, it learns English sentence patterns — the fact that a greeting usually comes first, that certain actions go together. If the model feels uncertain about what a movement means, it can guess a word that fits the pattern, even if that word was not in the video.",
+      "The problem gets worse when the model works directly from video (called <b>gloss-free</b>). A gloss is an intermediate step: first label each hand shape with a word, then assemble those words into a sentence. Gloss-free models skip that middle step and go straight from movement to English. That means there is no built-in checkpoint to catch hallucinations — the model can hallucinate anywhere."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "The model outputs fluent sentences that contradict the video, because it relies on learned English patterns instead of reading what the hands actually do."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Video input",
+        "viz": "brain",
+        "caption": "Signer moves hands to mean 'hungry'. Model sees the video."
+      },
+      {
+        "title": "2. The hallucination",
+        "viz": "box",
+        "viz_args": "Model writes 'I want apple pie' (sounds right, but not in video)",
+        "caption": "Model guesses words from English patterns, ignoring the video clues."
+      },
+      {
+        "title": "3. Masking the video",
+        "viz": "weights",
+        "viz_args": [["grounded", 65], ["guessed", 15], ["grounded", 70], ["guessed", 20], ["grounded", 60]],
+        "caption": "Hide the video. Watch which words change their predictions most."
+      },
+      {
+        "title": "4. Reliability score",
+        "viz": "box",
+        "viz_args": "High for 'hungry', low for 'apple' and 'pie'",
+        "caption": "Words that change a lot when video is hidden were relying on it."
+      },
+      {
+        "title": "5. Risk diagnosis",
+        "viz": "plain",
+        "caption": "Sentences with low-reliability words are likely hallucinating. Flag them before output."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Compute two visual signals",
+        "text": "Measure how much the model's internal math changes when you hide the video."
+      },
+      {
+        "b": "Add a counterfactual signal",
+        "text": "Compare model confidence on clean video versus degraded video (blur, noise, or partial)."
+      },
+      {
+        "b": "Combine into a token score",
+        "text": "Each word gets a reliability value: high means the word depends on video; low means it came from guessing."
+      },
+      {
+        "b": "Roll up to sentence level",
+        "text": "Average the token scores to rank whole sentences by hallucination risk."
+      },
+      {
+        "b": "Catch hallucinations",
+        "text": "Low-reliability sentences are flagged as risky; combine with text signals for best results."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper adds a measurement at the token level (each individual word) that quantifies whether the model used the video or just guessed. This is not something the standard model computes; the paper infers it after training by running the model twice — once on real video, once on altered video — and comparing the internal activations (the numbers flowing through the layers) and output probabilities (how confident the model was in each word choice)."
+    ],
+    "object": "Token reliability signal"
+  },
+  "hidden": {
+    "h2": "The reliability of each word",
+    "name": "How much each token depends on the video",
+    "paras": [
+      "This is a single number per word (between 0 and 1, or 0 and 100 percent) that says: if you removed the video, how much would this word's prediction change? High reliability means the model based the word choice on movement it saw in the video. Low reliability means the model would have written the same word even if the video were blank, which signals hallucination.",
+      "The paper measures this in two ways. First, <b>feature sensitivity</b>: mask (hide) the video frame-by-frame and watch how much the internal layers change. If the layers change a lot, the video was important; if they barely change, the model was not paying attention. Second, <b>counterfactual signals</b>: compare the model's prediction on clean video versus videos you deliberately degraded (blur, add noise, or cut out parts of the signer). If the predictions flip or drop in confidence, the video was doing real work. The paper adds these two signals together."
+    ],
+    "heat": {
+      "cells": [
+        ["hungry", 4, true],
+        ["I", 1, false],
+        ["want", 3, false],
+        ["apple", 1, false],
+        ["pie", 1, false],
+        ["is", 2, false],
+        ["today", 2, false],
+        ["good", 3, true],
+        ["weather", 4, true],
+        ["outside", 3, false],
+        ["now", 1, false],
+        ["please", 2, false]
+      ],
+      "caption": "Darker means more visual grounding (video-dependent). Bright means likely hallucinated (pattern-guessed)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Reliability is the <b>degree to which each word came from reading the video</b>. A word with high reliability stood out in the video; the model copied what it saw. A word with low reliability blended in with learned English patterns; the model probably guessed it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper formalizes reliability as a combination of two sensitivities: (1) how much the hidden layer activations (the numbers flowing through the network) change when the video frame is masked (a measurement of whether internal features use the video), and (2) the divergence in output probability distributions (the fractions the model assigns to each possible word) between the clean input and the degraded input."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why masking and degradation reveal grounding",
+    "paras": [
+      "A hallucinating model makes its guess partly from the video (if anything is there) and partly from learned language patterns. When you remove or blur the video, the model has to choose: either switch to a different word (because the video clue is gone) or stick with the same guess (because it was never relying on video anyway). If the model was truly reading the hands, hiding the video will force a change. If it was guessing from context, the prediction stays the same or stays confident. By measuring how much the prediction <b>changes</b> (both the internal layers and the final word scores), you can reverse-engineer how much work the video was doing.",
+      "The counterfactual signals add another angle: instead of asking <b>what happens if video disappears entirely</b>, ask <b>what happens if the video gets fuzzier or glitchier</b>. A word that depends on sharp hand details will become uncertain (lower probability) if the video is blurred. A word that depends on broad silhouette (body motion) will stay confident. A word that does not depend on the video at all (pure pattern guessing) will stay equally confident no matter what you do to the video. The combination of these two signals — sensitivity to masking and sensitivity to degradation — reliably reveals whether the video was actually used."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Video of signing (continuous movement)"
+        },
+        {
+          "t": "step",
+          "s": "Model processes video normally to predict word 1, word 2, etc.",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Mask frames or degrade video (blur, noise, occlusion)"
+        },
+        {
+          "t": "step",
+          "s": "Run model again, measure change in layer activations and output probabilities"
+        },
+        {
+          "t": "output",
+          "s": "Reliability score per token (high means relied on video, low means hallucinated)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Token reliability as sensitivity",
+    "words": "reliability_i = w1 * feature_sensitivity_i + w2 * counterfactual_divergence_i",
+    "equation": "R_i = alpha * E[|h_clean - h_masked|] + beta * KL(p_clean || p_degraded)",
+    "symbols": [
+      ["R_i", "reliability score for token i (0 to 1)"],
+      ["h_clean", "internal layer activation when video is clean"],
+      ["h_masked", "internal layer activation when video is masked (hidden)"],
+      ["p_clean", "output probability distribution (predicted word fractions) on clean video"],
+      ["p_degraded", "output probability distribution on degraded video"],
+      ["E[·]", "average across all layers"],
+      ["KL(·||·)", "divergence (distance between two probability distributions)"],
+      ["alpha, beta", "weights that balance the two signals (learned or set by hand)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose token 'hungry': feature-sensitivity part = 0.35 (layers change a lot when video hides), counterfactual part = 0.40 (confidences drop a lot on blurred video).",
+        "If alpha = 0.5 and beta = 0.5, then R_hungry = 0.5 * 0.35 + 0.5 * 0.40 = 0.175 + 0.20 = 0.375 (low-medium reliability, video was important but not overwhelming).",
+        "For token 'apple' that was hallucinated: feature-sensitivity = 0.05 (layers barely change), counterfactual = 0.08 (confidence stays high even on blurred video).",
+        "R_apple = 0.5 * 0.05 + 0.5 * 0.08 = 0.025 + 0.04 = 0.065 (very low, signal of hallucination).",
+        "Sentence reliability = average of all token reliabilities. If most tokens are low, the sentence is flagged as risky."
+      ]
+    },
+    "note": "Reliability quantifies whether the model was reading the video or pattern-guessing by measuring how much the internal predictions changed when the video was hidden or degraded."
+  },
+  "bars": {
+    "h2": "Impact on hallucination detection",
+    "charts": [
+      {
+        "title": "Without reliability (baseline)",
+        "rows": [
+          ["Grounded sentences detected", 52, "bad"],
+          ["Hallucinated sentences caught", 31, "bad"],
+          ["False alarms (real output flagged wrong)", 18, "bad"]
+        ],
+        "note": "Only using text signals like word confidence or perplexity misses many hallucinations and flags good output."
+      },
+      {
+        "title": "With visual reliability signal",
+        "rows": [
+          ["Grounded sentences detected", 88, "good"],
+          ["Hallucinated sentences caught", 74, "good"],
+          ["False alarms (real output flagged wrong)", 8, "good"]
+        ],
+        "note": "Adding the visual-grounding signal catches hallucinations while avoiding false alarms, because hallucinated words have low reliability while grounded words have high reliability."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Rare but grounded tokens.",
+        "html": "Some signs appear only once or twice in the training data (rare hand shapes or movements). The model may have learned them with low confidence, so even when the video is clear, the internal sensitivity is weak. A rare-but-correct sign can score low reliability."
+      },
+      {
+        "warn": true,
+        "b": "Ambiguous video.",
+        "html": "Some movements could mean two different things. When you mask or degrade the video, the model might flip between two valid interpretations, creating large sensitivity scores. High reliability does not guarantee the word was correct, just that the video was necessary to choose it."
+      },
+      {
+        "warn": true,
+        "b": "Language patterns that match video.",
+        "html": "If a common word phrase (like <b>good morning</b>) is almost always signed the same way, then guessing from language patterns gives the right answer. The video might be necessary for nothing. High reliability can falsely result from coincidence."
+      },
+      {
+        "b": "Done right.",
+        "html": "Combined with other signals (word confidence, sentence fluency, multiple input degradations), reliability catches hallucinations reliably across different signer styles and datasets."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a script that takes a gloss-free sign language model trained on a standard dataset (PHOENIX-2014T or CSL-Daily), feeds it a short signing video, and produces one English sentence. Then, for each word in that sentence, run the model twice more: once with the video masked frame-by-frame, and once with the video degraded (blurred or noisy). Compute the feature sensitivity (how much the layer activations changed) and the counterfactual divergence (how different the output probabilities were). Combine these into a reliability score per token. At the end, sort the tokens by reliability and rank the sentence. The demo succeeds if: sentences you know are hallucinated (checked against the actual signed meaning) have low average reliability, and sentences that accurately reflect the video have high average reliability. A second, richer demo would show that adding reliability to a text-only baseline (which only looks at word confidence or perplexity) makes hallucination detection much more accurate, because text-only signals cannot tell the difference between a confident guess and a confident truth, whereas reliability can by measuring whether the video was actually used."
+    ],
+    "metric_eq": "hallucination_precision = count(low_reliability_sentences_that_are_hallucinated) / count(all_sentences_flagged_as_low_reliability)",
+    "closing": "The demo must make it impossible to miss that words visually grounded in the video have high reliability while pattern-guessed words have low reliability, and that averaging token reliability ranks sentences by hallucination risk."
+  }
+}
