@@ -1,0 +1,171 @@
+{
+ "slug": "iclr-or-ianilfspew",
+ "title": "T1: Channel-Head Binding for Time Series with Missing Data",
+ "family": "Time Series & Sequential",
+ "one_liner": "A hybrid of CNNs and attention that pairs each attention head with a single CNN channel, so corrupted data streams can be downweighted while good ones flow through.",
+ "lead": "Filling in missing values in time series is hard because holes corrupt patterns. When you try to send information across variables using learned attention (a scoring system that picks which other variables to copy from), you cannot tell which pathways got broken by missing data and which are still reliable. T1 solves this by tying each attention head to a single CNN channel, so each head can learn which data streams to trust.",
+ "nav": [["theme-time-series-sequential.html","Time Series & Sequential"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Why filling gaps is stuck",
+  "paras": ["Imagine a chart with rows (time steps) and columns (different measurement types—temperature, humidity, pressure). Missing values poke holes in the grid. A naive approach fills each column separately, ignoring that temperature and humidity usually go together. A better approach uses learned scoring (a system that ranks which other columns to copy from) to borrow patterns from complete columns and fill the broken ones. This works because when one column is mostly intact it has a real, measurable signal—actual time steps showing actual values—and copying real signal is more accurate than guessing per-column without help.", "But learned scoring has a fatal flaw: when it looks at a broken column to borrow information, it reads corrupted patterns baked into the broken column itself—patterns that were never there before the holes opened up. For example, if 70% of column 2 is missing, the learned filter trains on only 30% of the real pattern plus whatever phantom pattern it built to fill the gaps. That distorted signal poisons the entire transfer process because other columns borrow from this phantom pattern, copying artifacts instead of real correlations."],
+  "callout": {
+   "b": "The core problem.",
+   "html": "Attention cannot tell the difference between a reliable pattern and a phantom pattern born from missing data."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The healthy chart",
+    "viz": "weights",
+    "viz_args": [["hot",55],["hot",60],["hot",58],["warm",40],["warm",42],["warm",38],["free",15],["free",12],["free",18],["free",20],["free",16],["free",14]],
+    "caption": "Three columns, all full; learned scoring can safely borrow between them."
+   },
+   {
+    "title": "2. Missing data arrives",
+    "viz": "weights",
+    "viz_args": [["hot",55],["hot",60],["hot",58],["warm",10],["warm",8],["warm",12],["free",15],["free",12],["free",18],["free",20],["free",16],["free",14]],
+    "caption": "Column 2 gets holes; phantom patterns fill those gaps during training."
+   },
+   {
+    "title": "3. CNN filters one channel",
+    "viz": "weights",
+    "viz_args": [["hot",55],["hot",60],["hot",58],["moved",40],["moved",42],["moved",38],["free",15],["free",12],["free",18],["free",20],["free",16],["free",14]],
+    "caption": "CNN extracts reliable temporal features from each variable; one channel per mapping."
+   },
+   {
+    "title": "4. Each head picks one channel",
+    "viz": "box",
+    "viz_args": "Head 1: channel 1. Head 2: channel 2. Head 3: channel 3. Each head sees only one channel.",
+    "caption": "Channel-head binding ensures each scoring head draws from one CNN pathway only."
+   },
+   {
+    "title": "5. Corrupted pathways mute",
+    "viz": "weights",
+    "viz_args": [["hot",55],["hot",60],["hot",58],["free",8],["free",6],["free",9],["free",15],["free",12],["free",18],["moved",45],["moved",42],["moved",48]],
+    "caption": "Head 2 learns column 2 is corrupted and down-weights it; head 3 shines."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {"b": "Embed the input","text": "Encode time steps and observation mask into dense lists of numbers using small learned filters."},
+   {"b": "Extract temporal features per variable","text": "Deep learned filters build consistent patterns within each variable from sparse observations only."},
+   {"b": "Bind channels to heads","text": "Create exactly as many scoring heads as learned-filter channels; head K always reads channel K only."},
+   {"b": "Down-weight corrupted pathways","text": "Each head learns from observation patterns which variables are reliable; corrupted ones get low scoring weight."},
+   {"b": "Reconstruct missing values","text": "Combine selective cross-variable borrowing (from heads with high scores) to fill gaps with only trustworthy patterns."}
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": ["Traditional attention in time series imputation connects any attention head to any CNN channel. This gives the model flexibility but also lets corrupted patterns leak through.",
+    "T1 enforces a fixed one-to-one mapping: the c-th attention head always pulls from the c-th CNN channel, and no other. This constraint sounds restrictive but it buys something: each head becomes a specialist in one data pathway, so it can learn whether that pathway is poisoned or clean."],
+  "object": "Channel-head binding (the fixed one-to-one pairing)"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: Attention strength by pathway",
+  "name": "Attention weight (how much each variable borrows from each other)",
+  "paras": ["When attention looks at variable X to borrow information for variable Y, it assigns a weight—a number from 0 to 1. High weight means 'Y trusts X; copy its patterns.' Low weight means 'X is corrupted or irrelevant; ignore it.'", "T1 measures this by tracking attention weights as missing ratio increases. When variable X has 70% missing data, its attention weight drops sharply in shallow layers (46% decline) but stays stable in deep layers (6% decline) because earlier layers partially reconstruct X, giving later layers cleaner patterns to work with."],
+  "heat": {
+   "cells": [
+    ["var_1_trusted",4,true],
+    ["var_1_corrupted",1,false],
+    ["var_2_trusted",4,true],
+    ["var_2_corrupted",1,false],
+    ["var_3_trusted",3,true],
+    ["var_3_partial",2,false],
+    ["var_4_reliable",4,true],
+    ["var_4_noisy",2,false],
+    ["var_5_clean",4,true],
+    ["var_5_sparse",1,false],
+    ["var_6_stable",3,true],
+    ["var_6_missing",1,false]
+   ],
+   "caption": "Darker means higher scoring weight (more trust). Each head learns which variables to trust based on observed patterns."
+  },
+  "reads": [
+   {"b": "Plain reading.","html": "Attention weight is 'how much to copy'—a confidence score that one variable's patterns are reliable enough to borrow for filling another."},
+   {"b": "Paper reading.","html": "Attention degradation rate measures the drop in attention weight as missing ratio climbs. Layer-wise stabilization shows early CNN reconstruction raises later-layer confidence."}
+  ]
+ },
+ "mechanism": {
+  "h2": "Why channel-head binding works",
+  "paras": ["The mechanism has two parts. First, learned filters (small mathematical operations that operate on time windows) extract temporal features within each variable from incomplete observations only. A depthwise filter operates on one variable at a time, building consistent patterns even when some time steps are missing, because the filter trains on what it can see without guessing.", "Second, channel-head binding ensures that each scoring head draws from a single learned-filter channel. This creates feature-specific pathways: if channel 3 (variable 3's filter output) is corrupted by 70% missingness, then scoring head 3 learns from the data what it sees and lowers its weight on that channel, because the partial signal it reads teaches it that channel is unreliable. Meanwhile, heads 1 and 2 (feeding on cleaner channels) remain high-weight. By isolating pathways, each head learns independently whether its input stream is trustworthy. If you let any head read any channel (vanilla architecture), a poisoned channel corrupts multiple heads at once because all heads trust all channels equally."],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {"t": "input","s": "Time series with missing values and observation mask"},
+    {"t": "step","s": "Learned filters extract temporal patterns per variable from observed time steps only","hl": true},
+    {"t": "step","s": "Channel-head binding: head c reads channel c only"},
+    {"t": "step","s": "Each head learns scoring weight (trust score) for each variable","hl": true},
+    {"t": "output","s": "Selective cross-variable borrowing: only trusted channels fill gaps"}
+   ]
+  }
+ },
+ "math": {
+  "h2": "The binding and attention formula",
+  "words": "For each channel c from 1 to C, the c-th scoring head computes scores using only the c-th learned-filter channel. The output for channel c is the input plus the rescaled scoring output and cross-channel mixing.",
+  "equation": "Z_attn = Z + LayerNorm(PWConv(O)) where O is the scoring output from head c reading channel c only",
+  "symbols": [
+   ["Z","current state (list of numbers per time step)"],
+   ["Z_attn","output after scoring and residual connection"],
+   ["LayerNorm","rescale each number to mean 0, standard deviation 1"],
+   ["PWConv","pointwise filter: mix information across variables without changing channel count"],
+   ["O","scores: how much to borrow from each variable"],
+   ["c","channel index from 1 to C (one per scoring head)"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Setup: 3 variables, 2 are clean (90% observed), 1 is broken (30% observed).",
+    "CNN extracts 3 channels. Head 1 reads channel 1 (clean). Head 2 reads channel 2 (clean). Head 3 reads channel 3 (broken).",
+    "Head 1 learns: variable 1 is reliable, variable 2 is reliable -> high attention weight to both (0.8, 0.7).",
+    "Head 2 learns: variable 2 is reliable, variable 1 is reliable -> high weights (0.75, 0.8).",
+    "Head 3 learns: variable 3 is sparse, phantom patterns unreliable -> low weight to itself (0.2), borrows sparingly from 1,2 (0.3, 0.25).",
+    "Result: heads 1 and 2 dominate the reconstruction; head 3's corrupted pathway is muted. Without binding, head 1 could read channel 3 and get poisoned too."
+   ]
+  },
+  "note": "Each head's attention weight is learned independently from its assigned channel, so corrupted channels automatically down-weight themselves."
+ },
+ "bars": {
+  "h2": "Performance gap: selective vs. all-to-all",
+  "charts": [
+   {
+    "title": "Vanilla Transformer (any head reads any channel)",
+    "rows": [
+     ["Clean variables before",96,"good"],
+     ["Clean variables after",52,"bad"],
+     ["Imputed missing values",48,"bad"]
+    ],
+    "note": "Corrupted channels poison heads even when heads tried to attend to clean channels. Information bottleneck."
+   },
+   {
+    "title": "T1 with Channel-Head Binding",
+    "rows": [
+     ["Clean variables before",96,"good"],
+     ["Clean variables after",88,"good"],
+     ["Imputed missing values",79,"good"]
+    ],
+    "note": "Each head specializes in one channel; corrupted channels mute themselves, preserving clean pathways. Selection works."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {"warn": true,"b": "If all variables are equally corrupted.","html": "Channel-head binding assumes some variables are cleaner than others. If every variable has 90% missing data, each head has no clean reference and all pathways are equally unreliable because there is no signal to learn from. The model cannot separate real patterns from phantom ones."},
+   {"warn": true,"b": "If temporal patterns are truly independent per variable.","html": "The model assumes variables are correlated and benefit from cross-variable borrowing. If temperature, humidity, and pressure have no relationship—that is, changes in one do not predict changes in the other—then learned scoring cannot help fill gaps in one from another, because copying unrelated variables introduces error instead of fixing it. Domain knowledge about correlation matters."},
+   {"warn": true,"b": "If missing values are not random.","html": "If missingness is systematic—for example, a sensor always fails at dawn—then the learned-filter temporal patterns are biased. A gap coinciding with a real pattern (dawn means temperature drops) becomes hard to distinguish from a gap caused by sensor failure (dawn means sensor is offline). The model reads both and learns a phantom 'dawn pattern' that it copies incorrectly to other variables."},
+   {"b": "Done right.","html": "T1 works best when some variables are mostly complete, missing patterns are somewhat random, and variables have real correlations. The model then learns to route information through clean pathways and ignore corrupted ones."}
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": ["Build a synthetic time series with 5 variables that are correlated (temperature drives humidity; humidity drives pressure). Introduce missing data at random. Run T1 and compare reconstruction error (how far imputed values sit from the ground truth) at different missing ratios: 10%, 30%, 70%. Also measure attention weight drop per variable: does attention to a 70%-missing variable actually shrink compared to a complete one? Plot both."],
+  "metric_eq": "Reconstruction Error = mean squared error between imputed values and held-out ground truth. Attention Drop = (attention weight at 0% missing) minus (attention weight at 70% missing), per variable.",
+  "closing": "If channel-head binding works, attention weight should drop proportionally to missingness (high drop for broken variables, low drop for complete ones) and reconstruction error should stay low even at 70% missing."
+ }
+}

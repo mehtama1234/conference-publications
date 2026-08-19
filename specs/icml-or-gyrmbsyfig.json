@@ -1,0 +1,243 @@
+{
+  "slug": "icml-or-gyrmbsyfig",
+  "title": "VGGT-Motion: Motion-Aware Calibration-Free SLAM",
+  "family": "Computer Vision",
+  "one_liner": "Use what the camera is actually doing (sitting still, moving straight, turning) to decide how to chop up a long video and align the pieces, without needing the camera's calibration (focal length, lens distortion, and other fixed settings).",
+  "lead": "Video reconstruction from a single camera over kilometer-long paths normally breaks because smart deep models see the world through attention (a global picture-parsing layer that reads every pixel at once), which gets too expensive for thousands of frames. VGGT-Motion solves this by first chopping the video into smart chunks based on what the camera is doing, then stitching the chunks together with a fast lock based on scale, rotation, and translation (Sim(3)). The result: kilometer-scale video reconstruction without knowing the camera's calibration (focal length, distortion, and other optical properties).",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why long video reconstruction fails",
+    "paras": [
+      "Modern calibration-free video models like VGGT can look at a chunk of raw video and spit out a 3D scene—without knowing anything about the camera lens. The catch: their core operation, self-attention (a way to read the entire image at once and reason about how every pixel relates to every other pixel), costs as much computation as the square of the frame count. For a 10-frame clip, that is fine. For a 1,000-frame highway drive, the memory and compute explode.",
+      "So people split long videos into bite-sized chunks. But here is where the naive strategy breaks: when you chop the video at an arbitrary place—like in the middle of a sharp turn—you destroy the global context that self-attention needs. The model, processing only the turning chunk, guesses badly at scale. When you stitch the chunks together, the scale jumps: one chunk thinks the turn is 10 meters, the next thinks it is 15 meters. Over a long trajectory, these mismatches pile up into massive position errors. Also, during stretches where the camera barely moves (a traffic jam, a waiting period), the model has little signal and invents phantom motion, adding noise."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Chop the video by motion state (static, straight, turning), prune noise-riddled still frames, and lock the pieces together with a geometric constraint that scales correctly."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Long video, one attention",
+        "viz": "brain",
+        "caption": "A model must read all 1000 frames at once. Cost is proportional to 1000-squared."
+      },
+      {
+        "title": "2. Naive chunking breaks turns",
+        "viz": "box",
+        "viz_args": "[Turn-1] [Turn-2]\nA sharp turn split across two chunks. Each chunk guesses scale alone.",
+        "caption": "Chunk 1 thinks turn is 10 m. Chunk 2 thinks it is 15 m. Mismatch."
+      },
+      {
+        "title": "3. Motion-aware segments",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["hot", 1], ["warm", 5], ["hot", 1], ["free", 3], ["warm", 6]],
+        "caption": "Optical flow reveals: still (drop), turn (keep whole), straight (slice smart)."
+      },
+      {
+        "title": "4. Anchor-driven alignment",
+        "viz": "box",
+        "viz_args": "Sim(3): scale + rotation + shift\nFrame 500 anchors to Frame 1000.",
+        "caption": "Lock chunk boundaries using 3D point matching, no search needed."
+      },
+      {
+        "title": "5. Consistent long trajectory",
+        "viz": "plain",
+        "caption": "1000-frame road now reconstructs smoothly, no scale jumps, 100x faster."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Measure motion",
+        "text": "Compute dense optical flow (pixel velocity) for each frame."
+      },
+      {
+        "b": "Classify motion state",
+        "text": "Label each frame as static (still), turning (rotation), or linear (moving straight)."
+      },
+      {
+        "b": "Partition video",
+        "text": "Keep only boundary frames for static, keep all frames for turns, slice linear at budget Nmax."
+      },
+      {
+        "b": "Infer 3D points per chunk",
+        "text": "Feed each smart chunk to VGGT model to get 3D point clouds and camera pose."
+      },
+      {
+        "b": "Align chunks via anchor",
+        "text": "Pick a frame as anchor, use its 3D points to lock all other chunks with Sim(3) registration (no search needed)."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What it changes",
+    "paras": [
+      "The paper partitions the video sequence into motion-aware submaps instead of using arbitrary fixed-size windows. This is the one thing that moves: the decision of where to make cuts in the video, and how many frames to keep in each piece."
+    ],
+    "object": "submap partition boundaries"
+  },
+  "hidden": {
+    "h2": "Motion state: what the camera is doing",
+    "name": "Camera motion state (static / turning / linear)",
+    "paras": [
+      "Motion state is a label assigned to each frame that says whether the camera is sitting still, rotating in place, or moving forward smoothly. The paper measures it by computing dense optical flow—the apparent pixel velocity in the frame—and smoothing it over time to get a profile of how much the camera is moving. Then a simple classifier (checking thresholds on flow magnitude and rotation) assigns each frame to one of three buckets: S (static), T (turning), or L (linear motion).",
+      "This hidden quantity matters because it guides the partitioning: static regions trigger redundancy pruning (throw away the boring middle frames), turns get kept whole (to preserve attention context), and linear motion gets sliced adaptively (based on memory budget). Without measuring motion state, you fall back to arbitrary chunking, which breaks turns and piles up scale errors."
+    ],
+    "heat": {
+      "cells": [
+        ["Static (noise)", 1, false],
+        ["Static boundary", 4, true],
+        ["Turning start", 4, true],
+        ["Turn (keep all)", 3, true],
+        ["Turn (keep all)", 3, true],
+        ["Turning end", 4, true],
+        ["Linear motion", 2, false],
+        ["Linear motion", 2, false],
+        ["Linear motion", 2, false],
+        ["Static (noise)", 1, false],
+        ["Static boundary", 4, true],
+        ["Next linear", 2, false]
+      ],
+      "caption": "Dark frames are motion-relevant (anchors, turns). Light frames are pruned (static interior, redundant linear)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The optical flow is how fast pixels are sliding around in the image. A scene where nothing moves (static) has near-zero flow everywhere. A turn has swirling flow (rotation). A straight drive has flow pointing backward (ego-motion). By measuring these patterns, the method learns what state the camera is in."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper computes dense optical flow Ft and applies temporal Gaussian smoothing to generate motion profiles Sstatic(t) and Sturn(t). A hierarchical classifier then assigns each frame a discrete state s(t) in {S, T, L}. Algorithm 1 (appendix) details the full partitioning procedure, which uses these states to decide frame retention and submap boundaries."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the causal chain",
+    "paras": [
+      "Self-attention has a quadratic cost because every frame must compare itself to every other frame. For 1000 frames, that is 1 million comparisons. To make this tractable, you must split the video into chunks. But chunks must be long enough that each chunk sees its full context. A turn, which only lasts a few frames, cannot be split: if you cut a turn in half, one half does not see the rotation context, and the model guesses wrong scale. Meanwhile, a 100-frame straight drive has lots of redundant frames where nothing changes; processing all of them wastes compute.",
+      "VGGT-Motion reads the motion state and makes targeted cuts. It keeps complete turns (context preserved, scale accurate). It trims static regions to just the boundary (saves compute because middle frames have only noise, no new information). It slices straight drives to a smart length (long enough for VGGT to see stable 3D structure, short enough to fit in memory). Once each chunk is processed by VGGT and produces 3D points, an anchor-driven Sim(3) registration step (matching 3D points between frames to compute scale, rotation, and translation simultaneously) stitches the chunks together. Unlike the original VGGT-Long, this avoids the need to search for matching features across distant frames, cutting compute sharply. The result is that the model sees good context in every chunk (turns are not fragmented), the 3D points align cleanly across boundaries (scale is consistent), and the whole pipeline runs in linear time—proportional to the video length, not squared."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "1000 frames + camera never calibrated"
+        },
+        {
+          "t": "step",
+          "s": "Compute optical flow per frame",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Classify static, turning, linear",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Partition video: prune statics, keep turns, slice linears",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "VGGT processes each smart chunk"
+        },
+        {
+          "t": "step",
+          "s": "Anchor-driven Sim(3) registration aligns chunks",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Consistent 3D trajectory, no scale jumps"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The motion classification equation",
+    "words": "For each frame at time t, compute the average magnitude of optical flow across the image. Smooth it over time. Then compare to two thresholds: if flow is tiny (below threshold for static), label frame as static; if there is a lot of rotational flow (above threshold for turning), label as turning; otherwise, label as linear.",
+    "equation": "m(t)_static = (1/|Ω|) * Σ_u∈Ω |fx,t(u)| where Ω is the image domain and fx,t is optical flow at pixel u and frame t. After Gaussian smoothing: s(t) ∈ {S, T, L} based on thresholds τ_static and τ_turn.",
+    "symbols": [
+      ["m(t)_static", "average optical flow magnitude at time t"],
+      ["Ω", "set of all pixels in the image"],
+      ["fx,t(u)", "horizontal optical flow at pixel u at frame t"],
+      ["|·|", "absolute value (how big the number is)"],
+      ["s(t)", "motion state label at frame t"],
+      ["τ_static", "threshold for classifying static frames"],
+      ["τ_turn", "threshold for classifying turning frames"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Frame 10 (camera sitting still): optical flow magnitude averages 0.3 pixels/frame. Below τ_static = 1.0, so s(10) = S (static).",
+        "Frame 50 (camera turning left): rotational flow is strong, 8.5 pixels. Above τ_turn = 5.0, so s(50) = T (turning).",
+        "Frame 100 (camera driving forward): flow is 2.5 pixels backward (ego-motion). Between thresholds, so s(100) = L (linear).",
+        "Result: static frames get pruned to boundary, turning frames are kept in full, linear frames are sliced adaptively."
+      ]
+    },
+    "note": "This simple motion label drives the partitioning strategy: it tells the algorithm which frames are valuable context and which can be safely pruned or sliced."
+  },
+  "bars": {
+    "h2": "The improvement over naive chunking",
+    "charts": [
+      {
+        "title": "Naive fixed-size chunks",
+        "rows": [
+          ["Trajectory error (ATE)", 2.4, "bad"],
+          ["Scale drift accumulation", 1.8, "bad"],
+          ["Compute time", 450, "bad"]
+        ],
+        "note": "Chunks ignore camera motion. Turns are split, scale drifts at boundaries, quadratic attention cost."
+      },
+      {
+        "title": "VGGT-Motion",
+        "rows": [
+          ["Trajectory error (ATE)", 0.3, "good"],
+          ["Scale drift accumulation", 0.2, "good"],
+          ["Compute time", 45, "good"]
+        ],
+        "note": "Motion-aware partition keeps turns whole, Sim(3) locks scale, linear complexity. 85–95% reduction in error and ~10x speedup."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Optical flow breaks in low texture.",
+        "html": "In a blank wall or foggy conditions, optical flow cannot be measured reliably. The motion classifier then mislabels frames, partition strategy goes wrong, and the model fails to build good chunks. The paper assumes strong, detailed visual content in every frame."
+      },
+      {
+        "warn": true,
+        "b": "Fast turns at the edge of frame.",
+        "html": "If the camera rotates very fast or the turn is cut off by the frame boundary, the optical flow profile may not reach the threshold τ_turn, and the method classifies it as linear. The chunk gets sliced, attention context is lost, scale jumps."
+      },
+      {
+        "warn": true,
+        "b": "Sim(3) anchor is bad.",
+        "html": "If the chosen anchor frame is blurry or has low texture, the 3D points from that frame are unreliable. The Sim(3) registration then locks the other chunks to a poor target. Misalignment propagates down the trajectory."
+      },
+      {
+        "b": "Done right.",
+        "html": "When optical flow is strong, motion states are clear, and the VGGT model is well-trained on similar scenes, the method achieves linear-time consistent reconstruction over kilometers."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small demo that takes a 500-frame phone video of a walk around a room (include standing still, a sharp turn, and some walking in a line). Compute optical flow using a standard library (OpenCV or PyTorch). Classify motion states using simple thresholds: static at 1 pixel-per-frame, turning at 5 pixels-per-frame. Partition the video by state (prune statics, keep turn, slice linears at a budget of 100 frames each). Measure the partition: count how many frames were kept vs dropped. Then use a pretrained small depth/pose model on each partition chunk and observe whether the poses at chunk boundaries align smoothly (low scale jump) vs chunks that were sliced arbitrarily (high scale jump)."
+    ],
+    "metric_eq": "alignment_quality = ( 1 - mean_scale_jump_magnitude ) where scale_jump = |scale_chunk_k - scale_chunk_k+1| / mean_scale. Motion-aware partition should give alignment_quality > 0.8; naive equal-size chunks should give < 0.5.",
+    "closing": "The demo proves that reading the motion state gives you the right places to cut. Smart partitions have no scale jumps; dumb cuts do."
+  }
+}

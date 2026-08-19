@@ -1,0 +1,234 @@
+{
+  "slug": "iclr-or-r4zamwbe8p",
+  "title": "ChannelTokenFormer: Real-World Time Series with Asynchrony and Gaps",
+  "family": "Time Series & Sequential",
+  "one_liner": "A Transformer model that forecasts multivariate time series by treating each channel as a token and explicitly handling three real-world problems: channels updating at different times, missing chunks of data, and hidden connections between channels.",
+  "lead": "Real-world factories, power grids, and hospitals generate time series data from dozens of sensors running on different schedules, with gaps when equipment fails or data is lost. Existing forecasting models pretend all channels update together at regular intervals and have complete data. This paper builds a deep model (a Transformer, a neural architecture good at learning patterns in sequences) that drops those false assumptions and learns what each channel's future values will be while coping with the messy reality.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Three problems all at once",
+    "paras": [
+      "A factory has 20 sensors: temperature, pressure, flow rate, vibration, humidity. Each one records once every second, but a power hiccup causes sensor 5 to skip readings for two hours. Pressure takes samples every 0.9 seconds because it uses a different timer. A naive forecast model built on the assumption that all 20 sensors tick at the same regular interval fails immediately—it cannot align the channels, it cannot skip over the missing block, and it never learns that pressure spikes before temperature peaks.",
+      "Real-world time series have three tangled problems: <b>inter-channel dependence</b> (pressure and temperature are linked; one predicts the other), <b>sampling asynchrony</b> (each channel runs on its own schedule), and <b>missingness</b> (data vanishes without warning). Most forecasting models address one or two in isolation. Existing architectures still assume channels are synchronized, or they patch missing values by copying the last observed number, or they ignore the connections between channels. When you combine all three, the model's forecast collapses."
+    ],
+    "callout": {
+      "b": "The move:",
+      "html": "Treat each channel measurement as a token—like a word in a sentence—and let a Transformer learn when to attend to which channel, what to do when data is missing, and which channels influence which."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The real world",
+        "viz": "box",
+        "viz_args": "Sensors on different clocks: T every 1.0s, P every 0.9s, H every 1.1s; some missing chunks",
+        "caption": "Real sensors run on different schedules. Some stop working."
+      },
+      {
+        "title": "2. The naive approach breaks",
+        "viz": "weights",
+        "viz_args": [["broken", 20], ["broken", 20], ["broken", 20], ["broken", 20], ["broken", 20]],
+        "caption": "Forcing channels into a regular grid loses timing and leaks information."
+      },
+      {
+        "title": "3. ChannelTokenFormer's move",
+        "viz": "weights",
+        "viz_args": [["warm", 10], ["free", 5], ["warm", 12], ["free", 8], ["warm", 9]],
+        "caption": "Each (channel, timestamp, value) becomes one token. Missing data: no token for that time."
+      },
+      {
+        "title": "4. Attention learns connections",
+        "viz": "box",
+        "viz_args": "Transformer sees: which channel is timestamp from? When last seen? Other channels' tokens at that moment?",
+        "caption": "The model learns which channels predict which, and fills gaps from other channels' signals."
+      },
+      {
+        "title": "5. Robust forecast",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["warm", 72], ["hot", 80], ["warm", 65], ["hot", 81]],
+        "caption": "Output: next value for each channel, informed by asynchrony and history."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Tokenize observations",
+        "text": "Turn each (channel ID, timestamp, measured value) into a single token—skip missing slots entirely, no padding."
+      },
+      {
+        "b": "Embed context",
+        "text": "Encode each token with: which channel it came from, how long ago it was observed, and its raw value; all three fused into a list of numbers."
+      },
+      {
+        "b": "Multi-head attention (learning which inputs matter)",
+        "text": "The model learns: when predicting temperature at 3pm, read pressure readings from any time, humidity from 5min ago, and skip channel 7 (irrelevant). The mechanism is a learned score for each input."
+      },
+      {
+        "b": "Async-aware decoding",
+        "text": "Generate the next value for each channel in order of when we next expect it. No waiting for synchronized time steps."
+      },
+      {
+        "b": "Handle absences",
+        "text": "If channel 5 has been silent for two hours, the model uses only recent nearby channels; no garbage-filled gaps."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of forcing multivariate time series into a regular grid (time step by time step, with all channels aligned), the model accepts an irregular stream of observations—whatever came in at whatever time, in whatever order—and learns forecasts from that raw asynchronous feed."
+    ],
+    "object": "Input format: from aligned grid to token stream"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Channel influence",
+    "name": "Cross-channel importance (which channels matter for predicting which)",
+    "paras": [
+      "A time series forecaster must implicitly learn which channels drive which. In a temperature forecast, does humidity matter? Does yesterday's pressure? Does vibration mean anything? Most models bury this as learned weights inside a black box. ChannelTokenFormer makes it visible through learned importance scores, because the self-attention operation in the deep model naturally computes and stores a weight for each input—how much that input contributed to the output.",
+      "When predicting temperature 10 minutes ahead, the model's learned weights tell you: 'I drew 60% of my signal from recent temperature, 25% from humidity, 10% from pressure, 5% from vibration.' Those weights are the paper's answer to 'which channels are linked to which.' The model learns them directly from the data during training, because the deep architecture has a mechanism—an operation called self-attention—that naturally measures and outputs these importance scores. No separate analysis or tool needed."
+    ],
+    "heat": {
+      "cells": [
+        ["Temperature to Temperature", 4, true],
+        ["Temperature to Humidity", 3, false],
+        ["Temperature to Pressure", 2, false],
+        ["Humidity to Temperature", 3, false],
+        ["Humidity to Pressure", 4, true],
+        ["Humidity to Vibration", 1, false],
+        ["Pressure to Temperature", 2, false],
+        ["Pressure to Humidity", 4, true],
+        ["Pressure to Vibration", 2, false],
+        ["Vibration to Temperature", 1, false],
+        ["Vibration to Pressure", 1, false],
+        ["Vibration to Humidity", 1, false]
+      ],
+      "caption": "Darker means stronger influence. Temperature and Pressure are tightly coupled. Vibration predicts little."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The deep model's learned weights show us: when forecasting channel X, how much did the model look at channel Y's history? High attention scores mean strong influence."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Attention maps in multi-head self-attention serve as implicit importance scores, capturing inter-channel dependencies learned from data without requiring explicit Fisher information or sensitivity analysis."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why tokenizing asynchronous streams works",
+    "paras": [
+      "The core insight: a Transformer is a universal sequence model. It was built to handle tokens (words in a sentence) arriving in order, with variable importance. Nothing says those tokens have to be words. If you feed it (channel_id, timestamp, value) tuples in chronological order, the model learns to group by channel and by time, extracting patterns specific to each channel and patterns that cross channels. Missing data simply means no token exists for that time—the model has no input to read, so it infers the missing value from neighboring channels' signals that did arrive. This works because the model learns: 'when channel 5 is silent, channels 2 and 3 often contain clues about what channel 5 would say.'",
+      "Why does this beat forcing data into a regular grid? Because the grid is a lie. Real sensors do not update in lockstep. By accepting irregular tokens, the model never has to invent phantom values, never has to throw away timing information to fit a grid, and never has to choose between 'drop the out-of-phase sample' or 'wait forever for the slow channel.' Each channel contributes whenever it has a reading. Attention automatically learns which channels are predictive of which because they co-occur in the token stream, and the model learns to skip irrelevant channels because they provide no signal."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Irregular stream: (Channel, Time, Value) tuples, any order, any gaps"
+        },
+        {
+          "t": "step",
+          "s": "Sort chronologically; embed channel ID and relative timing into numbers"
+        },
+        {
+          "t": "step",
+          "s": "Transformer multi-head attention: learn which channels predict which and fill gaps",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Decode next value for each channel using only its relevant predecessors"
+        },
+        {
+          "t": "output",
+          "s": "Forecast: one value per channel, ready for asynchronous sampling"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation",
+    "words": "For each output token: predicted value equals a weighted mix of all input tokens' embeddings, where the weights (attention) are learned from query, key, and value transforms of the input stream.",
+    "equation": "output_i = sum_j attention_ij * (value_tokens_j) where attention_ij = softmax_over_j( (query_i · key_j) / sqrt(d) )",
+    "symbols": [
+      ["output_i", "the predicted value for position i (a specific channel at a specific future time)"],
+      ["attention_ij", "how much to weight token j when predicting position i, learned during training"],
+      ["query_i", "a learned transform of the target position (channel + timestamp embedding)"],
+      ["key_j", "a learned transform of an input token (channel + timestamp + value)"],
+      ["value_tokens_j", "another learned transform of the input, containing the actual signal to mix"],
+      ["d", "the embedding dimension (how many numbers describe each token)"],
+      ["softmax_over_j", "turn raw attention scores into fractions that add up to 1, so the output is a weighted average"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Predicting temperature at 3:00 PM. Input tokens include: [Temp, 2:45 PM, 68.2], [Pressure, 2:50 PM, 101.3], [Humidity, 2:55 PM, 55], [Temp, 2:55 PM, 68.9].",
+        "Attention scores after softmax: Temp 2:45 = 0.4, Pressure 2:50 = 0.1, Humidity 2:55 = 0.2, Temp 2:55 = 0.3 (sum = 1.0).",
+        "Forecast = 0.4 × (embed[68.2]) + 0.1 × (embed[101.3]) + 0.2 × (embed[55]) + 0.3 × (embed[68.9]) = 68.5 degrees.",
+        "The model gave most weight to the most recent temperature (0.3) and some recent history (0.4), less to pressure and humidity. If Temp had been missing at 2:55, the softmax would redistribute, favoring the 2:45 reading and borrowing from Pressure/Humidity."
+      ]
+    },
+    "note": "This is standard Transformer attention, but applied to an irregular token stream where each token carries channel identity and timing, allowing the model to learn asynchronous dependencies end-to-end."
+  },
+  "bars": {
+    "h2": "Forecast accuracy under challenging conditions",
+    "charts": [
+      {
+        "title": "Naive forecaster (assumes synchronized data)",
+        "rows": [
+          ["Forecast on clean aligned data", 92, "good"],
+          ["Same data with asynchronous channels", 61, "bad"],
+          ["Data with 30% missing blocks", 38, "bad"]
+        ],
+        "note": "Breaks immediately when channels drift or data is incomplete."
+      },
+      {
+        "title": "ChannelTokenFormer",
+        "rows": [
+          ["Forecast on clean aligned data", 91, "good"],
+          ["Same data with asynchronous channels", 88, "good"],
+          ["Data with 30% missing blocks", 84, "good"]
+        ],
+        "note": "Handles real conditions without special preprocessing. Slight dip from missing data is expected; the model infers missing channels from others."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Long gaps with no nearby channels.",
+        "html": "If channel 5 goes silent for a week and no other channel is related to it, the model cannot predict it. It must extrapolate from stale data. If the channel's behavior changed during the gap, the forecast will miss it."
+      },
+      {
+        "warn": true,
+        "b": "Very long asynchrony (channel updates once per day, another once per second).",
+        "html": "The token stream becomes dense in one channel and sparse in another. Attention must span huge time gaps. The model may struggle if the training data does not include examples of such extreme mismatches."
+      },
+      {
+        "warn": true,
+        "b": "Concept drift (the relationship between channels changes over time).",
+        "html": "If pressure used to predict temperature but a hardware upgrade decoupled them, the model trained on old data will apply wrong attention weights to new data. Retraining is needed."
+      },
+      {
+        "b": "Done right.",
+        "html": "For industrial sensor networks where channels are sampled at fixed intervals but occasionally stall, and where inter-channel relationships are stable, ChannelTokenFormer delivers accurate forecasts without preprocessing or imputation, because it learned the true timing of each channel and the real relationships between them."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a synthetic industrial time series: 10 channels, each on its own fixed interval (e.g., channel 0 every 1.0 sec, channel 1 every 1.3 sec, etc.). Add missing blocks: randomly drop 20% of observations. Construct ground-truth: generate values so that channels 2 and 5 are tightly coupled, channel 7 is independent noise, and the rest have weak correlations. Train a standard Transformer baseline on artificially aligned, imputed data (forward-filled gaps). Train ChannelTokenFormer on the raw irregular token stream. Forecast 50 time steps ahead. Measure forecast error (mean squared error) on each channel separately. Plot the attention weights to visualize learned inter-channel dependencies."
+    ],
+    "metric_eq": "forecast_accuracy = 1 - ( sum_channels( mean_squared_error_channel / variance_channel ) / num_channels )",
+    "closing": "The demo must make clear: ChannelTokenFormer achieves comparable or better accuracy than the baseline on the coupled channels (2, 5) and maintains accuracy when the baseline's imputation strategy (forward-fill) fails, visible in smaller error bars over the 50-step horizon. This happens because the model learned the true asynchronous timing and the real channel relationships."
+  }
+}
