@@ -41,7 +41,7 @@ def theme_block(theme, rows):
         nsub = 0
     openattr = " open" if total_deep else ""
     dtag = f'<span class="deep">{total_deep} deep</span>' if total_deep else ""
-    return (f'<details{openattr}><summary><a class="thname" href="theme-{s}.html">{e(theme)}</a>'
+    return (f'<details{openattr}><summary><a class="thname" href="theme-{s}-explained.html">{e(theme)}</a>'
             f'<span class="n">{len(rows)} papers · {nsub} subthemes</span>{dtag}</summary>'
             + "".join(parts) + '</details>')
 

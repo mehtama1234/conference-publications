@@ -102,15 +102,21 @@ def build_theme(theme, rows):
     # header + subtheme jump-nav
     o.append(f'<div class="kick">theme · {len(rows)} papers · {len(allsubs)} subthemes</div><h1>{bs.esc(theme)}</h1>')
     o.append(f'<p class="lead">{bs.esc(bs.FRAME.get(theme,""))}</p>')
-    o.append('<p style="margin:12px 0"><a href="index.html">&larr; all themes</a></p>')
+    o.append(f'<p style="margin:12px 0"><a href="index.html">&larr; all themes</a> &nbsp;·&nbsp; '
+             f'<a href="theme-{s}-explained.html"><b>Read this theme explained from scratch &rarr;</b></a></p>')
     nav = "".join(f'<a class="chip" href="#{bs.slug(x["name"])}">{bs.esc(x["name"])} · {len(x["_papers"])}</a>' for x in allsubs)
     o.append(f'<div style="display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 6px">{nav}</div>')
     # sections
     for x in allsubs:
         o.append(f'<section id="{bs.slug(x["name"])}" style="margin-top:26px">')
-        o.append(f'<h2 style="border-top:1px solid var(--line);padding-top:16px">{bs.esc(x["name"])} '
+        is_catch = x["name"].startswith("Other work in")
+        nm = bs.esc(x["name"]) if is_catch else f'<a href="subtheme-{s}__{bs.slug(x["name"])}.html" style="color:inherit">{bs.esc(x["name"])}</a>'
+        o.append(f'<h2 style="border-top:1px solid var(--line);padding-top:16px">{nm} '
                  f'<span style="font-family:var(--mono);font-size:13px;color:var(--accent)">{len(x["_papers"])}</span></h2>')
-        o.append(f'<p class="lead" style="font-size:16px">{bs.esc(x["gist"])}</p>')
+        gist = bs.esc(x["gist"])
+        if not is_catch:
+            gist += f' &nbsp;<a href="subtheme-{s}__{bs.slug(x["name"])}.html">open the full subtheme page &rarr;</a>'
+        o.append(f'<p class="lead" style="font-size:16px">{gist}</p>')
         o.append(render_papers(x, s))
         o.append('</section>')
     o.append(bs.FOOT)

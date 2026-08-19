@@ -115,7 +115,7 @@ def build_index():
     o.append(f'<p class="lead">Every accepted paper read from its abstract and sorted into one of eighteen themes, with its problem, central move, and contribution. So far {len(MERGED):,} analyzed ({conf.get("ICLR",0):,} ICLR + {conf.get("ICML",0):,} ICML). Open a theme to read the papers; see <a href="hub.html">the one machine</a> for how the themes connect.</p>')
     o.append('<div class="grid">')
     for theme, rows in sorted(BY_THEME.items(), key=lambda kv:-len(kv[1])):
-        o.append(f'<a class="card" href="theme-{slug(theme)}.html"><span class="n">{len(rows)}</span>'
+        o.append(f'<a class="card" href="theme-{slug(theme)}-explained.html"><span class="n">{len(rows)}</span>'
                  f'<h3>{esc(theme)}</h3><p>{esc(FRAME.get(theme,""))}</p></a>')
     o.append('</div>'); o.append(FOOT)
     open(f"{SITE}/index.html","w").write("\n".join(o))
@@ -126,7 +126,7 @@ def build_hub():
     o.append('<p class="lead">ICML and ICLR look like a thousand unrelated papers. Read as one system, they are the pipeline every ML result moves through: represent the data, train a model on it, generate or decide with it, make it trustworthy, and measure it against the world. Each theme is one stage; the tile shows its paper count.</p>')
     for i,(name,sub,themes) in enumerate(STAGES):
         c = COLORS[i]
-        chips = "".join(f'<a class="chip" href="theme-{slug(t)}.html">{esc(t)} · {len(BY_THEME.get(t,[]))}</a>' for t in themes)
+        chips = "".join(f'<a class="chip" href="theme-{slug(t)}-explained.html">{esc(t)} · {len(BY_THEME.get(t,[]))}</a>' for t in themes)
         o.append(f'<div class="stage"><h3><span class="b" style="background:{c}">{i+1:02d}</span>{esc(name)}</h3>'
                  f'<div style="color:var(--dim);font-size:14px">{esc(sub)}</div><div class="chips">{chips}</div></div>')
     o.append(FOOT); open(f"{SITE}/hub.html","w").write("\n".join(o))
@@ -164,7 +164,7 @@ function loop(){tick();draw();requestAnimationFrame(loop);}loop();
 function at(x,y){for(const n of NODES)if(Math.hypot(n.x-x,n.y-y)<n.r+4)return n;return null;}
 cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(drag){drag.x=x;drag.y=y;}else{hov=at(x,y);cv.style.cursor=hov?'pointer':'default';}});
 cv.addEventListener('mousedown',e=>{const r=cv.getBoundingClientRect();drag=at(e.clientX-r.left,e.clientY-r.top);});addEventListener('mouseup',()=>drag=null);
-cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect();const n=at(e.clientX-r.left,e.clientY-r.top);if(n)location.href='theme-'+SLUG[n.id]+'.html';});
+cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect();const n=at(e.clientX-r.left,e.clientY-r.top);if(n)location.href='theme-'+SLUG[n.id]+'-explained.html';});
 </script>"""
 
 if __name__=="__main__":
