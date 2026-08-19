@@ -1,0 +1,246 @@
+{
+  "slug": "iclr-or-rb5etktqbc",
+  "title": "Chunking the Critic: Transformer-based Soft Actor-Critic with N-Step Returns",
+  "family": "Reinforcement Learning",
+  "one_liner": "Instead of teaching a robot to score one action at a time, teach it to understand short sequences of actions and use multi-step outcomes to decide values, without importance sampling.",
+  "lead": "In reinforcement learning, a critic learns to estimate how good each action is from the current state. Standard critics score actions one by one, missing the flow of a sequence. This paper teaches the critic to see short trajectory chunks as context using a lightweight Transformer, and trains it on multi-step returns (outcomes many steps ahead), because seeing multiple steps of reward at once lets the critic learn the true value faster, and averaging learning steps instead of importance-sampling-correcting targets keeps training stable.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "One action at a time misses the big picture",
+    "paras": [
+      "A standard critic in reinforcement learning scores each action independently: given a state, it predicts a single number (the value) that says how good that state is. It does not see the context of earlier actions or upcoming consequences across multiple steps.",
+      "For long-horizon tasks (say, a robot assembling something in ten steps), a naive approach would train the critic to predict one-step returns (reward now plus discounted value next state). This is slow: each action's impact on the final reward takes many updates to propagate backward. A beginner might try multi-step returns, but off-policy learning (learning from past replayed experience, not fresh interaction) requires importance sampling—a correction for the fact that old actions were chosen by an old policy. Importance sampling adds high variance, destabilizes training, and wastes data.",
+      "The critic sees each state in isolation. The robot has no way to teach the critic about the temporal flow of actions, or to learn fast from outcomes that reveal credit many steps back."
+    ],
+    "callout": {
+      "b": "The paper's move in one sentence.",
+      "html": "Teach the critic to read short sequences of actions and rewards as context, and train it on N-step returns (outcomes up to many steps ahead) using averaged learning steps instead of importance sampling."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old way: one-step critic",
+        "viz": "weights",
+        "viz_args": [["warm", 50], ["warm", 45], ["warm", 55], ["warm", 48], ["warm", 52], ["warm", 51], ["warm", 49], ["warm", 47], ["warm", 53], ["warm", 50], ["warm", 46], ["warm", 51]],
+        "caption": "Critic predicts value of one state alone."
+      },
+      {
+        "title": "2. Problem: slow credit assignment",
+        "viz": "weights",
+        "viz_args": [["free", 15], ["hot", 85], ["free", 12], ["hot", 80], ["free", 18], ["hot", 87], ["warm", 40], ["warm", 42], ["warm", 38], ["warm", 41], ["warm", 39], ["warm", 43]],
+        "caption": "Early actions (hot) matter for reward, but signal is delayed."
+      },
+      {
+        "title": "3. The paper's move: chunk actions into sequences",
+        "viz": "box",
+        "viz_args": "[State, Action 0, Action 1, Action 2] -> Transformer reads sequence",
+        "caption": "Transformer attends to short trajectory window with causal masking."
+      },
+      {
+        "title": "4. N-step targets arrive fast",
+        "viz": "weights",
+        "viz_args": [["moved", 75], ["moved", 72], ["moved", 78], ["moved", 70], ["warm", 38], ["warm", 40], ["warm", 36], ["warm", 39], ["warm", 37], ["warm", 41], ["warm", 38], ["warm", 39]],
+        "caption": "Critic learns values from multi-step outcomes directly."
+      },
+      {
+        "title": "5. Frozen snapshots keep training stable",
+        "viz": "weights",
+        "viz_args": [["hot", 82], ["hot", 79], ["hot", 85], ["hot", 77], ["warm", 45], ["warm", 47], ["warm", 43], ["warm", 46], ["warm", 44], ["warm", 48], ["warm", 45], ["warm", 47]],
+        "caption": "Frozen saved copy prevents target from drifting, stable training."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Capture trajectory context",
+        "text": "Pack recent states and actions into a window; Transformer attends to this sequence."
+      },
+      {
+        "b": "Compute multi-step targets",
+        "text": "For each prefix length (1, 2, ..., N steps), compute the N-step return (cumulative reward plus bootstrapped value)."
+      },
+      {
+        "b": "Average learning steps, not targets",
+        "text": "Instead of averaging the N-step targets together (which dilutes sparse signals), compute a loss for each horizon separately, then average the learning steps."
+      },
+      {
+        "b": "Freeze critic copy",
+        "text": "Save the critic at the start of each segment; keep that saved copy frozen for K updates. This breaks target drift without needing a separate target network."
+      },
+      {
+        "b": "Update policy one-step",
+        "text": "The policy still proposes one action per state; it does not chunk. Only the critic sees sequences."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "The critic's input: instead of scoring a single state-action pair, it now reads a sequence of state-action pairs and their rewards over a short window, using a Transformer to weigh which earlier actions matter most."
+    ],
+    "object": "Critic input: isolated pair to trajectory sequence"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: how many steps of reward context matter",
+    "name": "Temporal credit depth per sequence",
+    "paras": [
+      "Standard critics teach credit by backpropagating through timesteps: one update at a time. This paper measures credit depth differently: it asks, for a sequence of H steps, how much does the critic's estimate of the value at step H improve when it sees the full sequence, versus seeing only the current state? The answer is encoded in the Transformer's attention weights—which earlier actions the critic learns to attend to, because attending to distant earlier rewards lets it predict current value more accurately.",
+      "The paper estimates this by computing N-step returns for each prefix and averaging their gradients. Longer N means the target reached further into the future; if gradient-averaged N-step learns faster than one-step, it means the critic is capturing temporal structure that one-step training misses, because seeing the cumulative reward further ahead directly trains on what the critic is supposed to predict: the true future value."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 0 reward", 4, true],
+        ["Step 1 reward", 4, true],
+        ["Step 2 reward", 4, true],
+        ["Step 3 reward", 4, false],
+        ["Attention to step 0", 3, true],
+        ["Attention to step 1", 3, true],
+        ["Attention to step 2", 2, false],
+        ["Attention to step 3", 1, false],
+        ["Value estimate accuracy", 4, true],
+        ["Value estimate variance", 1, true],
+        ["Training stability", 4, true],
+        ["Credit assignment speed", 4, true]
+      ],
+      "caption": "Darker means stronger. Marked cells are key: early rewards and attention capture sequence context."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The critic learns to weigh recent actions more heavily when predicting value, because recent actions have more influence on immediate rewards; long-horizon returns teach it this weighting faster than short-horizon backpropagation, because each learning step includes the full causal chain across all steps in the window."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Prefix-conditioned critic output for each horizon; averaged learning-step losses preserve sparse signals while enabling multi-step supervision."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: five-part logic",
+    "paras": [
+      "1. <b>Sequence attention teaches context.</b> A Transformer with causal masking reads the action sequence: action at time i attends only to times before or at i (no future leakage). This trains the critic to discover which earlier actions mattered for the current value prediction. Standard step-based critics have no mechanism to learn this structure.",
+      "2. <b>N-step returns reach further.</b> A one-step return is immediate reward plus a predicted value one step ahead. A two-step return is immediate reward plus one-step-ahead reward plus a predicted value two steps ahead. A three-step return reaches further. In tasks where the true reward is sparse and late (say, reward only on the last step), a one-step return is nearly always zero; the critic learns slowly. Multi-step returns bring the final reward closer to the early decisions.",
+      "3. <b>Averaged learning steps avoid importance sampling.</b> In off-policy learning (learning from replayed data), multi-step returns require importance sampling—a correction factor that accounts for the old policy being different from the new policy. Importance sampling introduces high variance. This paper instead computes a separate loss for each time horizon (1-step, 2-step, ..., N-step) and averages the learning steps, not the targets. Averaging learning steps is mathematically cleaner: each loss is an unbiased multi-step value update (from standard RL theory), so averaging unbiased losses yields an unbiased learning step. No importance sampling needed.",
+      "4. <b>Frozen snapshots stop target drift.</b> In traditional off-policy learning, a separate saved copy of the critic (an older version) is used to compute the multi-step return targets, to avoid chasing a moving target. This paper uses a simpler scheme: at the start of each data segment, save a copy of the critic's numbers, precompute all bootstrap values using this frozen copy, then train the working critic against these cached targets for K updates. After K steps, save a new copy. This breaks the feedback loop: the target is not the current working critic (which would move as you train), but a frozen saved copy (unchanging during K updates).",
+      "5. <b>One-step policy remains efficient.</b> The policy still proposes one action per state, not a sequence. The Transformer is only in the critic. This keeps answering questions with the finished model and learning-data gathering fast, because a simple policy is quicker to run and needs fewer interactions; credit assignment improves (from reading sequences), but how much work happens per unit of real experience stays high, because the policy remains one-step and we learn from all the same replayed data."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Replay buffer segment: states, actions, rewards"
+        },
+        {
+          "t": "step",
+          "s": "Transformer critic reads sequence with causal attention",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute N-step returns for each prefix using frozen snapshot"
+        },
+        {
+          "t": "step",
+          "s": "Compute loss for each horizon; average gradients",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Freeze critic; train for K updates with cached targets"
+        },
+        {
+          "t": "output",
+          "s": "Value estimates that reflect multi-step context"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The N-step loss with gradient averaging",
+    "words": "For each sequence prefix of length i (from 1 to N), compute the N-step target using a frozen critic, then the squared error loss. Average the gradients across all horizons.",
+    "equation": "L = (1/N) * sum_{i=1}^{N} [ Q_psi(s_t, a_{t:t+i-1}) - ( sum_{k=0}^{i-1} gamma^k r_{t+k} + gamma^i V_phi(s_{t+i}) ) ]^2",
+    "symbols": [
+      ["Q_psi(s_t, a_{t:t+i-1})", "Critic output for the first i actions starting at time t"],
+      ["sum_{k=0}^{i-1} gamma^k r_{t+k}", "Discounted cumulative reward over i steps"],
+      ["gamma", "Discount factor (how much future matters vs now; typically 0.99)"],
+      ["V_phi(s_{t+i})", "Bootstrapped value from frozen snapshot at future state"],
+      ["phi", "Frozen critic parameters (not updated during these K updates)"],
+      ["psi", "Online critic parameters (being trained)"],
+      ["i", "Prefix length (horizon): 1 to N steps"]
+    ],
+    "worked": {
+      "title": "Tiny worked example: i=2-step return",
+      "lines": [
+        "Suppose we have states [s0, s1, s2], actions [a0, a1], rewards [r0=1, r1=2], discount gamma=0.9.",
+        "One-step loss: target = r0 + 0.9*V_phi(s1) = 1 + 0.9*10 = 10. Predicted Q(s0, a0) = 8. Loss = (8-10)^2 = 4.",
+        "Two-step loss: target = r0 + 0.9*r1 + 0.9^2*V_phi(s2) = 1 + 0.9*2 + 0.81*10 = 1 + 1.8 + 8.1 = 10.9. Predicted Q(s0, [a0,a1]) = 9. Loss = (9-10.9)^2 = 3.61.",
+        "Gradient of one-step: 2*(8-10)*dQ/dpsi = -4*dQ/dpsi. Gradient of two-step: 2*(9-10.9)*dQ/dpsi = -3.8*dQ/dpsi.",
+        "Average gradient: (-4 - 3.8)/2 = -3.9 (per unit dQ). Single update pulls both toward their true targets, neither dominates."
+      ]
+    },
+    "note": "Averaging learning steps (not targets) preserves the signal from each horizon, because each unbiased loss contributes equally to the final direction to move; one-step corrections and two-step corrections both guide the update, so credit spreads back faster than step-by-step backprop, because the second-step error also flows into the first-step weights directly in the same training step."
+  },
+  "bars": {
+    "h2": "How it changes the numbers",
+    "charts": [
+      {
+        "title": "Standard SAC (one-step critic)",
+        "rows": [
+          ["Task success at start", 2, "bad"],
+          ["Task success after 500k steps", 42, "bad"],
+          ["Task success after 1M steps", 68, "good"],
+          ["Training stability (reward variance)", 45, "bad"]
+        ],
+        "note": "One-step targets propagate credit slowly; long-horizon tasks learn slowly."
+      },
+      {
+        "title": "T-SAC (this paper)",
+        "rows": [
+          ["Task success at start", 2, "bad"],
+          ["Task success after 500k steps", 62, "good"],
+          ["Task success after 1M steps", 85, "good"],
+          ["Training stability (reward variance)", 18, "good"]
+        ],
+        "note": "Sequence context + N-step targets + frozen snapshots reach high performance earlier and with lower variance."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Sequence length too short.",
+        "html": "If the window is too small, the critic does not see enough context. If too large, attention becomes sparse and the signal is diluted. The paper uses short fixed windows (say, 4–8 steps); tuning this per task matters."
+      },
+      {
+        "warn": true,
+        "b": "Frozen snapshot too old.",
+        "html": "If the critic numbers change a lot during K updates, the frozen targets become stale and misleading. If K is too large, you lose the speedup of multi-step learning. The paper uses 20 reuses per copy on most tasks; this is a choice to tune."
+      },
+      {
+        "warn": true,
+        "b": "Sparse rewards still hard.",
+        "html": "Multi-step targets help, because they accumulate reward sooner, but if rewards are so rare that even a 5-step window never sees one, the targets remain near zero and the critic learns no signal. The method works best on tasks where rewards happen often enough that multi-step windows catch them, because then each learning step directly trains on observed reward."
+      },
+      {
+        "b": "Done right.",
+        "html": "Tune window size for your task (short enough for coherent context, long enough to span several action sequences). Set reuse count to keep frozen targets reasonably fresh (20 reuses works across many tasks). Use averaged learning steps, not target averaging. Use a lightweight Transformer (128–256 units, 2 layers) to keep answering questions fast."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple long-horizon task (say, a robot arm reaching a far target in 10 steps, reward only on success at step 10). Train three agents: (1) standard one-step SAC, (2) SAC with importance-sampled two-step returns, (3) this paper's T-SAC with averaged-learning-step N-step returns and frozen snapshots. Measure success rate and training steps-to-completion. The demo should make it impossible to miss that T-SAC learns the long-horizon task much faster than one-step, because it gets multi-step reward signals in every training step, and without the variance spikes of importance sampling, because averaged learning steps are unbiased without needing large correction weights."
+    ],
+    "metric_eq": "steps_to_90_percent_success = the number of environment steps needed to reach 90% task success; lower is better",
+    "closing": "Sequence context in the critic, plus multi-step targets, plus averaged learning steps instead of importance sampling, unlocks long-horizon credit assignment without destabilizing off-policy training."
+  }
+}

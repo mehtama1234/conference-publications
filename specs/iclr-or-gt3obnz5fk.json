@@ -1,0 +1,235 @@
+{
+ "slug": "iclr-or-gt3obnz5fk",
+ "title": "AliTok: Aligned Tokenizer for Autoregressive Image Generation",
+ "family": "Generative Models & Diffusion",
+ "one_liner": "Make image tokens predictable by training them one-at-a-time instead of all-at-once.",
+ "lead": "When a model generates images one piece at a time, each new piece should depend only on the pieces that came before it. A piece (called a token in ML: a small encoded unit of the image) gets created this way. But standard image encoders create pieces by looking at the whole image at once, which means later pieces contain information from future patches, breaking this prediction chain. AliTok fixes this by adding a causal decoder (a decoder that only reads previous pieces) during encoder training, forcing the encoder to organize all the context it needs inside each piece's history.",
+ "nav": [["theme-generative-models-diffusion.html","Generative Models & Diffusion"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "The Tokenizer-and-Sequential-Predictor Mismatch",
+  "paras": [
+   "Image generation happens in two stages. First, a tokenizer shrinks an image down to a sequence of small encoded units called tokens (like turning a photo into a short code). Second, a sequential predictor learns to guess each token using only the tokens that came before (this is called autoregressive: building the sequence one step at a time, using only history). A beginner might assume: if the tokenizer does its job well, the predictor will be easy to train. But this breaks because standard tokenizers use bidirectional encoders, which look at the entire image to decide what each token should be. Later tokens peek at future patches, creating information that leaks forward. When a sequential predictor then tries to guess token 5 using only tokens 1-4, it is missing important context that the tokenizer had when it created token 5, because token 5 was built with a sneak peek at patches 6, 7, 8. The model keeps guessing wrong because the tokenizer is not playing fair.",
+   "You could try retraining the tokenizer from scratch with new rules, but that is slow. Or you could fiddle with the sequential predictor to guess better, but the fundamental problem stays: the token sequence was designed by a bidirectional process (looking at all patches), not a forward-only process (looking at only earlier patches). The sequential predictor is built to guess one token at a time from earlier tokens, but the encoder put information about future patches into current tokens because it could see the future. This is a permanent mismatch that no post-hoc tuning can fix."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "AliTok retrains the existing tokenizer encoder under the constraint that it must reconstruct patches using only its own token plus earlier tokens, forcing it to hide all future information inside each token."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Standard tokenizer",
+    "viz": "weights",
+    "viz_args": [["hot",60],["hot",62],["hot",58],["hot",65],["hot",61]],
+    "caption": "All patches viewed at once; later tokens hold future secrets."
+   },
+   {
+    "title": "2. Autoregressive model guesses",
+    "viz": "box",
+    "viz_args": "Token5 = ? | Tokens1-4",
+    "caption": "Predict token 5 from earlier tokens only. Information is missing."
+   },
+   {
+    "title": "3. Causal decoder constraint",
+    "viz": "weights",
+    "viz_args": [["free",35],["warm",48],["warm",52],["warm",50],["free",38]],
+    "caption": "Decoder sees token i plus earlier ones only. Encoder forced to reorganize."
+   },
+   {
+    "title": "4. New token patterns",
+    "viz": "weights",
+    "viz_args": [["moved",65],["moved",62],["moved",58],["moved",63],["moved",61]],
+    "caption": "Later tokens now carry context they previously hid. Predictable."
+   },
+   {
+    "title": "5. Autoregressive wins",
+    "viz": "box",
+    "viz_args": "Tokens1-4 -> Token5 OK!",
+    "caption": "Autoregressive model finds what it needs; generation runs clean."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Start with bidirectional encoder and decoder",
+    "text": "Standard tokenizer built by training on whole images, both directions allowed."
+   },
+   {
+    "b": "Plug in a causal decoder",
+    "text": "Replace the decoder with one that sees only the current token plus earlier ones."
+   },
+   {
+    "b": "Freeze encoder and decoder, train only the encoder",
+    "text": "The encoder must learn to compress the image into tokens that work under this new asymmetric loss."
+   },
+   {
+    "b": "Add prefix tokens and auxiliary loss",
+    "text": "First row of patches has no history; extra prefix tokens prime it with context."
+   },
+   {
+    "b": "Retrain a new decoder on the frozen tokens",
+    "text": "Second stage decoder (bidirectional again) reads the causal tokens to improve reconstruction detail without breaking generation, because the encoder is locked."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "AliTok changes the token dependency structure: instead of all tokens built from the whole image at once, tokens are retrained so they can be reconstructed one-at-a-time using only their causal history plus the decoder's access to earlier tokens."
+  ],
+  "object": "token dependency structure"
+ },
+ "hidden": {
+  "h2": "Causal predictability: how much can you guess from the past",
+  "name": "causal predictability",
+  "paras": [
+   "Causal predictability measures whether a token's content can be rebuilt using only information available up to and including that token. A token has high causal predictability if the decoder can reconstruct its patch using (1) the token itself and (2) only earlier tokens. A token has low causal predictability if you need to peek at later tokens to fill in the details. Standard tokenizers score low because they were built with full-image context. AliTok's tokens score high because the training loss explicitly penalized the encoder if later tokens held information not in the causal chain.",
+   "The paper estimates causal predictability by measuring reconstruction loss under the causal decoder constraint. When the loss is low, the token sequence is highly predictable. The autoregressive model benefits directly: each token it predicts carries the right kind of information, because the tokens were built that way."
+  ],
+  "heat": {
+   "cells": [
+    ["Token1",4,true],
+    ["Token2",3,false],
+    ["Token3",2,false],
+    ["Token4",3,false],
+    ["Token5",4,true],
+    ["Token6",2,false],
+    ["Token7",1,false],
+    ["Token8",3,false],
+    ["Token9",2,false],
+    ["Token10",1,false],
+    ["Token11",3,false],
+    ["Token12",4,false]
+   ],
+   "caption": "Darker means more predictable under causal constraint; lighter means info leaks from future patches."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Imagine writing a story one sentence at a time. Your reader knows only what you have already written. Causal predictability asks: can you write each sentence using only plot points you revealed earlier? If yes, readers always follow. If no, they get confused because you hint at future events but have not set them up."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The encoder's learned representation becomes more predictable (i.e., tokens compress fewer future-oriented features) when trained under a decoder that forbids forward peeking. This is measured by reconstruction loss on the causal path."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why forcing a causal decoder remakes the encoder",
+  "paras": [
+   "Here is the core insight: an encoder is trained by adjusting its weights to shrink the loss (the error between what it produced and what we wanted). The loss measures how well the decoder can reconstruct patches from tokens. When the decoder is bidirectional, the encoder learns to pack information anywhere in the tokens because the decoder will read the whole sequence. But when you swap in a causal decoder that forbids reading future tokens, the same encoder produces terrible reconstructions because its tokens do not carry the right information at the right place. The loss then forces the encoder to reorganize: it learns to move context earlier so each token is usable. Information that was hidden in token 7 gets pushed into tokens 1-6, because token 7 can only read tokens 1-7. After enough weight adjustments, the encoder settles into a new pattern where each token is self-contained within its causal history. This is not a new encoder; it is the old encoder relearned under asymmetric loss.",
+   "The prefix tokens solve a boundary problem. The first row of image patches has no earlier tokens to learn from. Without help, the causal decoder would fail on the first row because there is no history to draw from. The prefix tokens (extra learned number-lists) provide fake history, guided by an auxiliary loss that ensures they help reconstruction. The two-stage strategy then keeps this predictable token structure but reintroduces a bidirectional decoder in stage 2 to polish details without breaking generation (because the encoder is frozen, and the sequential predictor only reads the frozen tokens)."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Image patches (all 256)"
+    },
+    {
+     "t": "step",
+     "s": "Bidirectional encoder (retrained)",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Tokens plus prefix (272 total)"
+    },
+    {
+     "t": "step",
+     "s": "Causal decoder reads token i plus earlier",
+     "hl": false
+    },
+    {
+     "t": "output",
+     "s": "Patch reconstruction (causal loss drives reorganization)"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The causal reconstruction loss",
+  "words": "Total loss equals reconstruction loss plus perceptual loss plus quantization loss plus adversarial loss plus auxiliary loss on prefix tokens.",
+  "equation": "L_total = L_mse + L_perc + L_quant + L_adv + L_aux",
+  "symbols": [
+   ["L_mse","mean squared error between original patch and reconstructed patch"],
+   ["L_perc","perceptual loss measuring visual detail agreement"],
+   ["L_quant","loss from rounding tokens to discrete codes"],
+   ["L_adv","adversarial loss encouraging realistic reconstructions"],
+   ["L_aux","auxiliary loss on prefix tokens, guiding them to provide context for first row"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose an image has 256 patches arranged in 16×16 grid. Stage 1 trains with causal constraint.",
+    "Token 50 is in row 4. It can use tokens 1-50 for reconstruction but cannot peek at tokens 51-256.",
+    "Old bidirectional encoder would pack patch-51 info into token 50. Reconstruction loss is low.",
+    "Causal decoder cannot read token 50 into patch 51 (wrong direction). Loss spikes on reconstruction of patches 51+.",
+    "Backprop nudges encoder: push patch-51 info into tokens 51+ instead. Token 50 focuses on patches 1-50.",
+    "After retraining, token 50 is predictable: autoregressive model can guess it from tokens 1-49."
+   ]
+  },
+  "note": "The total loss forces the encoder to hide each patch's information inside (or before) its own token position, breaking bidirectional dependencies."
+ },
+ "bars": {
+  "h2": "Autoregressive model performance",
+  "charts": [
+   {
+    "title": "Standard tokenizer (bidirectional)",
+    "rows": [
+     ["Token prediction loss",32,"bad"],
+     ["Image reconstruction quality",88,"good"],
+     ["Generation speed",120,"good"]
+    ],
+    "note": "Tokens are high-quality but unpredictable; autoregressive model struggles to guess token sequences."
+   },
+   {
+    "title": "AliTok (causal-trained encoder)",
+    "rows": [
+     ["Token prediction loss",14,"good"],
+     ["Image reconstruction quality",86,"good"],
+     ["Generation speed",120,"good"]
+    ],
+    "note": "Tokens are predictable (low loss) and detailed (stage-2 decoder helps because it can look at all tokens at once to find detail), so the autoregressive model learns quickly without wasting updates on prediction errors."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "First-row artifacts without prefix tokens.",
+    "html": "The causal decoder sees only the current patch and history. For the first row, there is no history. Without prefix tokens, the decoder reconstructs the first row poorly because it is flying blind. This creates visible stripes or blur in generated images. AliTok fixes this by adding extra learned prefix number-lists that stand in for missing history."
+   },
+   {
+    "warn": true,
+    "b": "Reconstruction quality drops if only stage 1 is used.",
+    "html": "Retraining the encoder under causal constraint helps generation but can degrade fine details because the token space is reshaped. AliTok's stage 2 (retraining a bidirectional decoder on frozen encoder and codebook) restores detail without breaking generation, because the encoder is locked, and the autoregressive model never reads the stage-2 decoder."
+   },
+   {
+    "warn": true,
+    "b": "Autoregressive model still requires careful training.",
+    "html": "AliTok makes tokens predictable but not automatic. The sequential predictor must be trained on the token sequences. If learning rate or architecture is wrong, generation still fails. The alignment is necessary but not sufficient."
+   },
+   {
+    "b": "Done right.",
+    "html": "Train stage 1 with causal decoder and prefix tokens, then stage 2 with frozen encoder. Sequential predictor then learns a clear, predictable token sequence. Generation is 10 times faster than diffusion because the sequential predictor only needs to run prediction (when the finished model answers a question) once per image position, whereas diffusion requires 50-100 iterative denoising steps, and it reaches the best-known fidelity scores because tokens carry both predictability and detail."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a small image tokenizer on a toy dataset (e.g., a 32x32 crop set). Train the encoder under two conditions: (1) with a bidirectional decoder (standard), and (2) with a causal decoder (AliTok). For each, measure how well an autoregressive model can predict token sequences over a fixed number of training steps. Optionally: sample from both autoregressive models and measure visual fidelity via a lightweight metric (e.g., L2 distance between reconstructed crops and originals)."
+  ],
+  "metric_eq": "Token prediction accuracy = (number of correct next-token predictions) / (total predictions)",
+  "closing": "A causal-trained tokenizer will show faster accuracy growth in the autoregressive model compared to a bidirectional tokenizer, because tokens are predictable from the start."
+ }
+}

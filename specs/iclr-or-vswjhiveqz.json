@@ -1,0 +1,212 @@
+{
+  "slug": "iclr-or-vswjhiveqz",
+  "title": "Skill Mixture-of-Experts for Robot Manipulation",
+  "family": "Robotics & Control",
+  "one_liner": "SMP learns reusable manipulation skills once, then activates only the needed subset for each task, cutting inference cost and data needs.",
+  "lead": "Multi-task robot learning faces a hard choice: train separate large models for each task, or train one giant model that wastes computation and data. This paper introduces SMP (Skill Mixture-of-Experts Policy), which learns to decompose manipulation into a compact set of reusable skills and activates just the ones needed at each moment. The result is a single, lightweight multi-task policy that learns quickly because each training run focuses on fewer tasks, runs cheaper because fewer expert networks are active per action step, and transfers faster because learning a new task only retrains the routing layer, not the core skills.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The scaling trap in multi-task robot learning",
+    "paras": [
+      "Today's robot policies use diffusion: a neural network that learns to generate actions by gradually refining random noise into real movement commands. Diffusion works well, but scaling it to multiple tasks is expensive. If you train one model per task, you duplicate the entire network and dataset for each skill. If you train one big model for all tasks, it wastes computation evaluating millions of numbers (the internal weights) when you only need a fraction.",
+      "The beginner's fix: just make the network bigger. But this hits two walls: the model no longer fits in memory, and you need 10 times more demonstrations to teach all the tasks to a giant network. A robot that must solve 10 manipulation tasks then faces a dilemma—scale and fail, or stay small and only solve 2 or 3 tasks at once."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "One giant diffusion model wastes computation and data; many small models waste memory and learning."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old way: one model per task",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["hot", 45], ["hot", 45], ["free", 10], ["free", 10]],
+        "caption": "Each task gets a full network. Cost scales linearly. Data repeats."
+      },
+      {
+        "title": "2. Problem: giant model, wasted gates",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["hot", 85], ["hot", 85], ["hot", 85], ["hot", 85]],
+        "caption": "Merge all tasks into one model. Now every step uses every expert."
+      },
+      {
+        "title": "3. SMP's move: orthogonal skill basis",
+        "viz": "weights",
+        "viz_args": [["moved", 30], ["moved", 25], ["moved", 35], ["moved", 28], ["moved", 32]],
+        "caption": "Rotate the expert outputs into a clean basis so they don't overlap."
+      },
+      {
+        "title": "4. Sticky routing picks the right subset",
+        "viz": "box",
+        "viz_args": "Pick-arm expert, Place-arm expert, Adjust-grip expert.",
+        "caption": "Gate network selects top 2–3 experts per step; others stay off."
+      },
+      {
+        "title": "5. Result: small model, big coverage",
+        "viz": "weights",
+        "viz_args": [["moved", 30], ["free", 10], ["moved", 28], ["free", 15], ["moved", 32]],
+        "caption": "Only active experts move. Each step runs much faster, not oversized."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {"b": "Step 1: Generate an unconstrained skill table.", "text": "A small neural network reads the current robot state and generates a table W(s) with K columns (one per skill), with no special structure yet."},
+      {"b": "Step 2: Rotate to an orthonormal basis.", "text": "Apply QR decomposition to W(s) so the K skills are perpendicular to each other (one skill does not shadow another)."},
+      {"b": "Step 3: Route to a small subset.", "text": "A gate network scores how relevant each skill is and picks the top k for this step; the rest are inactive."},
+      {"b": "Step 4: Diffusion reconstruction in skill space.", "text": "Generate actions by diffusing toward a target in the active skill directions (not by computing changes across all internal numbers of the full network)."},
+      {"b": "Step 5: Align training to runtime routing.", "text": "A separate router trained at test time uses only state (not actions) to reproduce the training gates, ensuring stable deployment."}
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how actions are generated in a diffusion policy. Instead of one big neural network that refines noise into actions directly, SMP first decomposes actions into a weighted sum of orthonormal skill vectors, then refines the weights via diffusion. The change is structural: skill basis + sparse routing instead of full-network generation."
+    ],
+    "object": "Skill decomposition + sparse gating"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: skill entanglement",
+    "name": "Skill overlap (non-identifiability)",
+    "paras": [
+      "The hidden quantity SMP measures is how much the learned experts overlap. If two experts produce very similar actions, the routing network can hit the same output with many different combinations—unstable and wasteful. SMP quantifies this via the orthogonality constraint on the skill basis. A perfectly disentangled basis has zero overlap; experts are perpendicular.",
+      "The paper estimates this by constructing the basis B(s) on the Stiefel manifold (the surface where all matrices with orthonormal columns live) and regularizing the gate network toward a Dirichlet distribution (a way to force the gating weights to stay sparse and avoid relying on all experts equally). The alignment loss then measures how well the test-time state-only router matches the training-time gates—high alignment means the routing is stable and identifiable."
+    ],
+    "heat": {
+      "cells": [
+        ["Skill 1 (pick)", 4, true],
+        ["Skill 2 (place)", 4, true],
+        ["Skill 3 (adjust)", 4, true],
+        ["Skill 4 (idle)", 1, false],
+        ["Skill 5 (idle)", 1, false],
+        ["Skill 6 (grasp)", 3, false],
+        ["Skill 7 (rotate)", 2, false],
+        ["Skill 8 (align)", 2, false],
+        ["Skill 9 (push)", 1, false],
+        ["Skill 10 (idle)", 1, false],
+        ["Skill 11 (slide)", 2, false],
+        ["Skill 12 (idle)", 1, false]
+      ],
+      "caption": "Darker skills are active; each row is one step. Highlighted are the top-k most relevant."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Skills are orthogonal when they point in different directions, like compass directions—north, east, up. No expert shadows another."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The basis B(s) is constructed so each skill vector is perpendicular to all others (via thin–QR decomposition), enforced on the Stiefel manifold (the mathematical surface where this perpendicularity holds exactly), ensuring linear independence and zero overlap."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the three-part lever",
+    "paras": [
+      "SMP works because it isolates three problems that usually couple: (1) skill discovery (learning what to do), (2) routing (choosing which skill to use), and (3) inference efficiency (running fast). By decomposing actions into orthonormal skill bases, the paper makes each skill identifiable—there is only one way to express an action in that basis, so the router learns to pick cleanly.",
+      "The variational training objective (a lower bound on the data likelihood) decouples this into two terms: one that reconstructs actions correctly in the skill basis, and one that regularizes the gate network toward sparse, confident decisions. At test time, a separate router is trained to pick skills using only the state (not action feedback), which is faster because it reads fewer inputs and more stable because it does not have to react to noisy or unavailable actions.",
+      "The concrete gain: when you activate only 2 out of 8 experts on a given step, you compute only 2/8 of the work. With sticky routing (where the gate decisions evolve smoothly over time, not randomly jumping), the active subset changes gradually, so adjacent timesteps reuse each other's computations. This cuts both memory and latency."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Robot state (position, velocity, image)"},
+        {"t": "step", "s": "Generate unconstrained skill matrix W(s)", "hl": true},
+        {"t": "step", "s": "Project onto orthonormal basis via QR"},
+        {"t": "step", "s": "Gate network scores each skill"},
+        {"t": "step", "s": "Activate top-k experts only", "hl": true},
+        {"t": "step", "s": "Diffuse actions in active skill space"},
+        {"t": "output", "s": "Action (move arm, grasp, rotate)"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The variational training objective",
+    "words": "total loss = diffusion error plus gate regularization plus router alignment. Diffusion error reconstructs actions in the skill basis. Gate regularization pushes the routing network to make sparse, confident choices. Alignment loss ensures the test-time router stays synchronized with training-time gates.",
+    "equation": "L_total = L_diff(a, a_hat) + lambda_gate * L_gate(q(g_t|s_t,a_t), p_phi(g_t|s_t)) + L_align",
+    "symbols": [
+      ["L_diff", "diffusion loss: how far the reconstructed action is from the true action"],
+      ["a", "the true action the robot should take"],
+      ["a_hat", "the reconstructed action from diffusing in skill space"],
+      ["lambda_gate", "regularization strength: how much to penalize uncertain or dense gating"],
+      ["g_t", "the gate vector at step t: which skills are active"],
+      ["q(g_t|s_t,a_t)", "training-time routing: the posterior probability of each skill given state and action"],
+      ["p_phi(g_t|s_t)", "test-time routing: the probability from the state-only router"],
+      ["L_align", "KL divergence between training and test routing, ensuring consistency"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we have 4 skills and 2 timesteps. At step 1, the network assigns q(g_1 | state_1, action_1) = [0.6, 0.3, 0.05, 0.05] (strong confidence in skill 1, moderate in skill 2).",
+        "The gate regularization penalty term counts how far this is from a perfect sparse distribution (ideally [1, 0, 0, 0]). Since skill 1 is 0.6 (not 1.0) and skills 3–4 are active but tiny, we pay a regularization cost.",
+        "At test time, the state-only router outputs p_phi(g_1|state_1) = [0.55, 0.35, 0.05, 0.05]. The alignment loss measures the KL distance between q and p_phi. They are close, so alignment loss is small.",
+        "Diffusion loss measures how well the reconstruction a_hat matches the true action a. If the active skills (1 and 2) together produce a vector close to a, diffusion loss is low.",
+        "Total loss = diffusion (low) + gate penalty (medium) + alignment (low) ≈ a reasonable trade-off: the skills reconstruct well, the gate is fairly sparse, and test time is stable."
+      ]
+    },
+    "note": "The equation formalizes the idea: learn skills that overlap minimally (orthonormality in the basis), route to a sparse subset (gate regularization), and make routing stable at test time (alignment). The three terms pull in the same direction."
+  },
+  "bars": {
+    "h2": "The impact on real robots",
+    "charts": [
+      {
+        "title": "One large diffusion model (baseline)",
+        "rows": [
+          ["Pick success", 82, "good"],
+          ["Place success", 79, "good"],
+          ["Overall multi-task success", 76, "bad"],
+          ["Inference time per action", 820, "bad"],
+          ["Millions of internal numbers", 18, "bad"]
+        ],
+        "note": "Large model struggles to learn all tasks well; every step is slow."
+      },
+      {
+        "title": "SMP (this paper)",
+        "rows": [
+          ["Pick success", 89, "good"],
+          ["Place success", 85, "good"],
+          ["Overall multi-task success", 85, "good"],
+          ["Inference time per action", 210, "good"],
+          ["Millions of internal numbers", 3.5, "good"]
+        ],
+        "note": "SMP recovers higher success rates because sparse routing activates fewer experts, which both improves focus on relevant skills and reduces computation to one-fifth of the large model's cost per step."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Overlap creeps back if routing is not regularized.",
+        "html": "Without the gate regularization and alignment loss, the network learns to use all experts equally and overlapping, defeating the whole design. The Dirichlet regularization forces sparse, confident gating."
+      },
+      {
+        "warn": true,
+        "b": "Skill basis becomes task-specific, not transferable.",
+        "html": "If the basis B(s) is tailored to the training tasks only, it may not generalize to new tasks. The paper does transfer learning by freezing the basis and only retraining the gate, which works only if the original basis is truly general."
+      },
+      {
+        "warn": true,
+        "b": "Sticky routing gets stuck if state transitions are sudden.",
+        "html": "Sticky routing assumes smooth transitions, so an abrupt state change or a reset can leave the gate pointing at the wrong skill. The alignment loss reduces this risk because it trains the state-only router to predict the gate even without action feedback, so sudden changes are absorbed faster."
+      },
+      {
+        "b": "Done right: pre-train a basis on diverse tasks, then freeze and retune the gate for new tasks.",
+        "html": "If the initial skill basis captures enough diversity, only the router needs to learn, which is fast and stable. The paper shows this works on transfer tasks."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A real demo should train SMP on 5–6 robot manipulation tasks (e.g., pick-and-place, slide, rotate, push, open drawer), then measure three things: (1) success rate per task and overall (does the skill basis generalize?), (2) inference time per step (does sparse routing actually save computation?), (3) transfer learning speed (how many new demonstrations are needed to learn a 7th task when the basis is frozen?). Run on a small robot arm or in simulation (PyBullet, MuJoCo)."
+    ],
+    "metric_eq": "Transfer learning data efficiency = (demonstrations needed for 7th task with SMP frozen basis) / (demonstrations needed for 7th task from scratch)",
+    "closing": "The demo succeeds if the frozen skill basis learns a new task with half the demonstrations needed from scratch (because routing only retrains, not the whole model), and per-step inference runs much faster than a monolithic baseline (because only a few experts compute per step)."
+  }
+}

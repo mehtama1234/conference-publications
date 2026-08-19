@@ -1,0 +1,234 @@
+{
+  "slug": "iclr-or-ruvt3pex1m",
+  "title": "Task Affinity: Predicting Which Tasks Learn Better Together",
+  "family": "Multi-task learning",
+  "one_liner": "Before training a group of tasks together, measure how their learning steps affect each other to predict if they will help or hurt.",
+  "lead": "Multi-task learning trains several tasks with one shared model to save time and improve learning, because the shared layers learn general patterns that work for all tasks, and each task's specific layers adapt those patterns to its own goal. But which tasks should be grouped together? Testing all possible combinations is too expensive. This paper predicts in advance whether a group of tasks will work well together by measuring how strongly each task's learning nudges the others.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Picking task groups is expensive",
+    "paras": [
+      "In multi-task learning, many tasks share one model to learn faster because shared weights absorb recurring patterns (like detecting edges in images for both face and car recognition), so each task learns its specifics more quickly. But which tasks should share? Testing every possible group requires training hundreds of models—prohibitively slow for even ten tasks. A beginner might try training a random group and seeing if it works, then trying another, then another. This wastes enormous compute because most groups fail to help each other, sending conflicting nudges to shared weights.",
+      "What is actually needed: a prediction before training. Can you look at tasks and say in advance whether they will benefit from learning together? If so, you train only promising groups, saving time."
+    ],
+    "callout": {
+      "b": "The challenge.",
+      "html": "Predict which task groups will improve performance together (rather than degrade each other), without training each group first, because looking at how their learning signals align can tell you if they will cooperate on shared weights."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The choice problem",
+        "viz": "box",
+        "viz_args": "Task A, Task B, Task C\nShould we train A+B?\nA+C? B+C? All three?",
+        "caption": "Many task groups to choose from. Which ones work?"
+      },
+      {
+        "title": "2. How tasks learn",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["free", 25], ["warm", 35], ["free", 30], ["warm", 42]],
+        "caption": "Each task sends learning signals (gradients) that nudge shared weights."
+      },
+      {
+        "title": "3. Measuring affinity",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["free", 25], ["moved", 38], ["warm", 32], ["hot", 50]],
+        "caption": "Task A's nudge moves weights. How much does that help Task B's loss?"
+      },
+      {
+        "title": "4. Training a predictor",
+        "viz": "box",
+        "viz_args": "Affinity scores → Predictor\n(learns to forecast gains)",
+        "caption": "A machine learns to predict gains from affinity scores."
+      },
+      {
+        "title": "5. Forward prediction",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["warm", 28], ["hot", 48], ["warm", 35], ["warm", 42]],
+        "caption": "Now predict A+B gains without training them together first."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Run one model on all tasks",
+        "text": "Train a shared-encoder multi-task model once to get gradients."
+      },
+      {
+        "b": "Measure pairwise affinity",
+        "text": "For each pair of tasks, compute how Task A's weight nudge affects Task B's loss, averaged over training."
+      },
+      {
+        "b": "Collect ground truth on a few groups",
+        "text": "Train only a handful of task groups to know their real performance gains."
+      },
+      {
+        "b": "Train a residual corrector",
+        "text": "A non-linear model learns to predict gain errors from affinity scores, filling gaps the linear version misses."
+      },
+      {
+        "b": "Predict new groups",
+        "text": "Use the combined linear affinity and learned corrector to forecast gains for all other task groups."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper introduces a method to compute task-affinity scores directly from training dynamics, not from training many models. It measures how one task's weight-update nudge affects another task's loss during a single training run, without extra cost."
+    ],
+    "object": "task-affinity scores"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Gradient affinity",
+    "name": "gradient-based affinity score",
+    "paras": [
+      "During training, each task sends a gradient (which way to nudge the weights to reduce its loss). The affinity score measures how much Task A's nudge reduces Task B's loss. High affinity means the tasks naturally help each other because their gradients point in similar directions, so a nudge that improves one tends to improve the other. Low affinity means they push weights in conflicting directions.",
+      "The paper computes this by recording gradients from each task at each training step, then measuring how much applying one task's gradient would reduce the other's loss. It averages this over all training steps to get a stable score that does not bounce around due to randomness in early steps."
+    ],
+    "heat": {
+      "cells": [
+        ["pair_AB", 4, true],
+        ["pair_AC", 2, false],
+        ["pair_BC", 3, true],
+        ["pair_AD", 1, false],
+        ["pair_BD", 3, true],
+        ["pair_CD", 2, false],
+        ["pair_AE", 4, true],
+        ["pair_BE", 1, false],
+        ["pair_CE", 3, true],
+        ["pair_DE", 2, false],
+        ["pair_EF", 2, false],
+        ["pair_AF", 4, true]
+      ],
+      "caption": "Darker means stronger affinity (one task's learning nudge helps the other more)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Affinity is the direction that Task A's learning pushes weights, versus the direction Task B needs them to go. When those directions align, training together helps both because neither task wastes steps undoing the other's weight changes."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The affinity score is computed as the dot product of Task A's gradient with the change in Task B's loss when Task A's weights shift by its gradient."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Two-layer prediction",
+    "paras": [
+      "The core insight is that task relationships are partly linear and partly non-linear. The linear part—gradient affinity—captures how tasks' learning directions align. But real gain is more complex: affinity alone misses interactions, saturation, and task-specific quirks.",
+      "The paper's solution: use gradient affinity as a foundation, then train a lightweight non-linear model (using B-splines, a smooth curve-fitting technique) to learn what affinity scores are missing. Because this corrector only trains on a handful of task groups (not hundreds), it is cheap. The two layers together predict gains more accurately than affinity alone because the corrector catches non-linear patterns (like when two tasks' gradients are nearly orthogonal but their datasets overlap, creating hidden alignment), and far faster than testing all combinations because you label only 3-4 groups instead of 50+."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Affinity scores for task pair"
+        },
+        {
+          "t": "step",
+          "s": "Linear layer estimates base gain",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Corrector predicts error from learned patterns"
+        },
+        {
+          "t": "output",
+          "s": "Final gain forecast"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The affinity formula and corrector loss",
+    "words": "The per-step affinity score from task i to task j is: how much does task i's weight update reduce task j's loss. We average this over all K training steps. Then we train a corrector model to predict the residual (the difference between affinity's prediction and ground truth).",
+    "equation": "affinity_i_to_j = (1/K) * sum_{k=1}^{K} (-learning_rate * gradient_i * gradient_j) ; corrector_loss = (predicted_residual - actual_residual)^2",
+    "symbols": [
+      ["gradient_i", "how much task i wants to change each weight, pointing down i's loss slope"],
+      ["gradient_j", "how much task j wants to change each weight"],
+      ["learning_rate", "step size (how far we move in the gradient direction)"],
+      ["K", "total number of training steps"],
+      ["predicted_residual", "what the corrector model forecasts will be missed by affinity alone"],
+      ["actual_residual", "ground truth: what affinity actually got wrong on a training group"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose Task A's gradient is [0.2, -0.1, 0.3] and Task B's gradient is [0.15, 0.2, 0.1].",
+        "Affinity = learning_rate * (0.2*0.15 + (-0.1)*0.2 + 0.3*0.1) = 0.01 * (0.03 - 0.02 + 0.03) = 0.01 * 0.04 = 0.0004.",
+        "This is positive, so Task A's nudge roughly helps Task B (tasks are weakly aligned).",
+        "But ground truth gain is 5 percentage points. Affinity alone predicts 1 point.",
+        "Residual = 5 - 1 = 4. The corrector learns: this task pair helps each other in ways affinity missed; add 4 points to affinity's prediction."
+      ]
+    },
+    "note": "Affinity measures linear alignment of learning directions; the corrector learns the non-linear corrections that pure gradient similarity misses."
+  },
+  "bars": {
+    "h2": "What the improvement looks like",
+    "charts": [
+      {
+        "title": "Naive (train every group)",
+        "rows": [
+          ["Task group A+B predicted", 45, "good"],
+          ["Task group A+B actual", 48, "good"],
+          ["Task group A+C predicted", 12, "bad"],
+          ["Task group A+C actual", 8, "bad"],
+          ["Task group B+C predicted", 38, "good"]
+        ],
+        "note": "Testing all groups is correct but prohibitively expensive."
+      },
+      {
+        "title": "This paper (ETAP)",
+        "rows": [
+          ["Task group A+B predicted (no training)", 46, "good"],
+          ["Task group A+B actual", 48, "good"],
+          ["Task group A+C predicted (no training)", 10, "bad"],
+          ["Task group A+C actual", 8, "bad"],
+          ["Task group B+C predicted (no training)", 39, "good"]
+        ],
+        "note": "ETAP predicts nearly as accurately without training each group, saving compute by 10x or more."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Affinity varies wildly early in training.",
+        "html": "In the first few steps, gradients bounce around due to randomness, so affinity scores are noisy. The paper fixes this by averaging over the entire training run, smoothing out noise."
+      },
+      {
+        "warn": true,
+        "b": "Non-linear patterns need enough labeled examples.",
+        "html": "If you train the corrector on only one or two task groups, it cannot learn the patterns. The method needs at least 5-10 ground-truth groups to fit the non-linear model reliably."
+      },
+      {
+        "warn": true,
+        "b": "Affinity can miss deep interactions.",
+        "html": "Two tasks may have zero-affinity (orthogonal gradients) but still help each other through data because seeing Task B's examples helps Task A generalize to cases it rarely saw alone, even though their weight nudges point in different directions. The corrector is trained to catch such patterns from the ground-truth training groups."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train one MTL model, compute affinity from its training dynamics, label a handful of promising groups via real multi-task learning, then use both to forecast the rest."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small multi-task learning setup with 5-8 tasks (e.g., predicting different attributes of images, or different time-series forecasting targets). Compute ETAP's gradient affinity scores. Train 3-4 random task groups and measure their real MTL gains. Train ETAP's corrector on those 3-4 groups. Then predict gains for all remaining groups (at least 10 new combinations) and compare predictions to ground truth. Measure prediction accuracy (R squared or mean absolute error)."
+    ],
+    "metric_eq": "prediction_accuracy = 1 - (sum((predicted_gain - actual_gain)^2) / sum((actual_gain - mean(actual_gain))^2))",
+    "closing": "The demo must show that ETAP predicts gains with at least 80 percent accuracy while testing only 4 out of 50+ possible groups, making the compute savings obvious."
+  }
+}

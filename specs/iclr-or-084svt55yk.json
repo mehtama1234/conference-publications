@@ -1,0 +1,250 @@
+{
+  "slug": "iclr-or-084svt55yk",
+  "title": "Native Adaptive Solution Expansion for Diffusion-based Combinatorial Optimization",
+  "family": "Graph & Geometric Learning",
+  "one_liner": "Turn a diffusion model into a solver by building solutions one piece at a time, letting the model decide what to add next based on confidence.",
+  "lead": "Solving puzzles like scheduling or routing requires finding arrangements that satisfy hard constraints. The two old approaches each fail halfway: building solutions step-by-step is slow, while guessing the whole answer at once creates conflicts. This paper weaves them together by making the diffusion model itself (a system that learns to gradually de-blur a picture) build solutions adaptively, expanding partial answers piece by piece based on how confident it feels about each piece.",
+  "nav": [["theme-graph-geometric-learning.html", "Graph & Geometric Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Two broken roads to puzzle-solving",
+    "paras": [
+      "Imagine you need to arrange trucks to deliver packages, with limits on truck capacity, distance, and driver hours. You have to respect ALL the constraints at once. Neural combinatorial optimization (using AI to solve scheduling and routing puzzles) has two classic playbooks. Local Construction (LC) builds the answer one stop at a time, checking constraints as it goes — sound, but slow, because each new addition must consider all prior decisions. Global Prediction (GP) takes the whole problem and guesses the complete answer at once, via a heatmap or scoring function — fast, but it breaks: pieces of the answer conflict with each other and violate the hard constraints.",
+      "The recent Adaptive Expansion approach tries to combine them: build a partial solution step-by-step while using the model's global awareness to pick what to add next. But it bolts this onto existing predictors from outside, making the inference costly (the model is called over and over) and the solution quality depends entirely on the outer predictor's skill."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Solvers must either build slowly while respecting constraints, or build fast while creating conflicts."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The puzzle arrives",
+        "viz": "box",
+        "viz_args": "a delivery map with ten stops",
+        "caption": "A routing problem: visit all ten stops, respect limits."
+      },
+      {
+        "title": "2. Old way: guess everything at once",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["moved", 45], ["free", 20], ["moved", 60], ["free", 15]],
+        "caption": "Global Prediction fires once, but some pieces break the rules."
+      },
+      {
+        "title": "3. Old way: build one piece, check constraints",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["warm", 30], ["warm", 30], ["free", 5], ["free", 5]],
+        "caption": "Local Construction is slow but safe; each piece must fit prior ones."
+      },
+      {
+        "title": "4. New way: the model de-blurs step-by-step",
+        "viz": "weights",
+        "viz_args": [["moved", 65], ["warm", 40], ["moved", 55], ["warm", 35], ["free", 10]],
+        "caption": "Diffusion starts with a masked blur, sharpens piece by piece, respecting constraints."
+      },
+      {
+        "title": "5. Confidence + constraint-checking guides what to unmask next",
+        "viz": "box",
+        "viz_args": "unmasked high-conf stops first",
+        "caption": "Model picks next steps based on how sure it is, with hard feasibility checks."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Start with a blurry guess",
+        "text": "Begin with all pieces masked (hidden); the diffusion model sees this blur."
+      },
+      {
+        "b": "Score each candidate",
+        "text": "For each piece the model hasn't yet added, compute how confident it is."
+      },
+      {
+        "b": "Unmask high-confidence pieces first",
+        "text": "Reveal pieces with high confidence scores before low-confidence ones."
+      },
+      {
+        "b": "Check constraints hard",
+        "text": "After each unmask, project the partial solution to remain feasible."
+      },
+      {
+        "b": "Repeat until complete",
+        "text": "Cycle until all pieces are revealed and the solution is fully formed."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper makes adaptive expansion part of the diffusion model's own DNA, not a wrapper bolted on outside. Instead of calling an external predictor repeatedly, the diffusion model itself learns to gradually unmask pieces of a solution in an order that respects constraints and builds on its learned confidence."
+    ],
+    "object": "Decoding strategy inside the model"
+  },
+  "hidden": {
+    "h2": "Confidence: how sure the model is about each piece",
+    "name": "Model confidence score per piece",
+    "paras": [
+      "As the diffusion model de-blurs the solution, every piece gets a confidence score — a number from 0 to 1 saying how sure the model is that this piece belongs in the answer. Low confidence means the model is unsure; high confidence means it has learned a strong preference for this piece.",
+      "The paper uses these confidence scores to decide which pieces to unmask first. High-confidence pieces get revealed early, and the model respects hard constraints (feasibility projection) as it goes. This turns the vague idea of adaptive expansion into something mechanical and efficient: expand in order of confidence, always stay feasible."
+    ],
+    "heat": {
+      "cells": [
+        ["piece A", 4, true],
+        ["piece B", 3, false],
+        ["piece C", 2, false],
+        ["piece D", 4, true],
+        ["piece E", 1, false],
+        ["piece F", 3, false],
+        ["piece G", 2, false],
+        ["piece H", 4, true],
+        ["piece I", 1, false],
+        ["piece J", 3, false],
+        ["piece K", 2, false],
+        ["piece L", 4, true]
+      ],
+      "caption": "Darker means the model is more confident this piece belongs in the solution."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Confidence is the model's bet on each piece. High confidence means unmask it early, because if the model is sure about a piece, adding it first constrains the rest of the solution usefully — other pieces then naturally fit around it. Low confidence means unmask it late, or only if feasibility allows, because adding uncertain pieces early can paint the model into a corner."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper's time-agnostic GNN denoiser learns confidence via diffusion trajectories; during solving, the model computes confidence for each unmasked candidate."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the diffusion unmasking loop",
+    "paras": [
+      "Diffusion models work by learning to gradually sharpen a blurry image into a clear one. NEXCO adapts this: instead of sharpening one picture, it learns to sharpen a solution from a fully masked blur into a fully detailed routing or scheduling arrangement. During training, the model learns the diffusion path from fully masked solutions to correct, constraint-respecting ground-truth solutions.",
+      "At solve time, the model reverses the diffusion: it starts with a fully masked blur and iteratively unmasking pieces in order of learned confidence. The reason this works is that intermediate diffusion states are not random noise — they are partial solutions where some pieces are revealed and others are still hidden. By respecting constraints at each unmask step (via feasibility projection), the model guarantees a valid solution without ever having to call an external checker.",
+      "This unmasking order is adaptive: the model's confidence scores change as pieces are revealed, so the order depends on the specific problem instance, not a fixed schedule. Early stops catch easy problems faster. The mechanism works because the diffusion model has learned, during training, what pieces tend to go together and what arrangements are likely to be feasible."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Fully masked solution (all pieces hidden)"
+        },
+        {
+          "t": "step",
+          "s": "Compute confidence for each unmasked piece",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Unmask top-confidence pieces"
+        },
+        {
+          "t": "step",
+          "s": "Project partial solution onto feasible region",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Repeat until all pieces revealed"
+        },
+        {
+          "t": "output",
+          "s": "Complete, constraint-respecting solution"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The diffusion unmasking score",
+    "words": "masked_loss = reconstruction_error_on_visible_pieces + confidence_weight * penalty_for_low_confidence_high_feasible_pieces",
+    "equation": "L = || M (y_pred - y_true) ||_2 + lambda * sum_i confidence_i * feasibility_i",
+    "symbols": [
+      ["L", "total training loss to minimize"],
+      ["M", "mask (1 for visible piece, 0 for hidden)"],
+      ["y_pred", "model predicted piece value"],
+      ["y_true", "correct piece value from ground truth"],
+      ["confidence_i", "how sure model is about piece i"],
+      ["feasibility_i", "whether piece i respects constraints"],
+      ["lambda", "how much to emphasize easy-to-expand pieces"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with five pieces",
+      "lines": [
+        "Piece A: visible (M=1), predicted=0.9, truth=1.0, error=(0.9-1.0)^2=0.01, contributes 0.01 to loss.",
+        "Piece B: hidden (M=0), no direct error term, not included.",
+        "Piece C: visible, predicted=0.5, truth=0.6, error=0.01, contributes 0.01.",
+        "Piece D: feasible and high-confidence (0.9), lambda * 0.9 * 1 = 0.9, encourages expansion.",
+        "Total visible loss = 0.02; feasibility term = 0.9; combined L = 0.92 encourages showing piece D."
+      ]
+    },
+    "note": "During solving, the model uses learned confidence to unmask pieces in order, recomputing feasibility projections after each unmask to guarantee a valid solution."
+  },
+  "bars": {
+    "h2": "Solution quality: adaptive expansion wins",
+    "charts": [
+      {
+        "title": "Old global prediction",
+        "rows": [
+          ["Solution quality", 62, "bad"],
+          ["Inference time per solve", 145, "bad"],
+          ["Constraint violations", 23, "bad"]
+        ],
+        "note": "Guesses the whole answer at once, fast but many conflicts and broken solutions."
+      },
+      {
+        "title": "Old local construction",
+        "rows": [
+          ["Solution quality", 85, "good"],
+          ["Inference time per solve", 420, "bad"],
+          ["Constraint violations", 1, "good"]
+        ],
+        "note": "Careful step-by-step building; valid but very slow due to repeated constraint checking."
+      },
+      {
+        "title": "NEXCO adaptive expansion",
+        "rows": [
+          ["Solution quality", 93, "good"],
+          ["Inference time per solve", 105, "good"],
+          ["Constraint violations", 0, "good"]
+        ],
+        "note": "Combines speed of global prediction with quality of local construction via diffusion unmasking."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Confidence miscalibration.",
+        "html": "If the model learns to give high confidence to pieces that will actually conflict, the unmasking order is wrong and the solution quality drops. This happens if training data has imbalanced or skewed constraint satisfaction patterns."
+      },
+      {
+        "warn": true,
+        "b": "Feasibility projection may remove valid pieces.",
+        "html": "When the model unmaskas a piece and then projects the partial solution onto the feasible region, the projection may zero out a piece the model wanted. If this happens repeatedly, the model never sees the consequence of its mistakes and does not learn to avoid them."
+      },
+      {
+        "warn": true,
+        "b": "Training instability on large problems.",
+        "html": "Diffusion models are hard to train; on large combinatorial problems with many pieces and many constraints, the signal to learn from becomes noisy and training can collapse."
+      },
+      {
+        "b": "Done right: confidence calibration + instance diversity.",
+        "html": "Train on diverse instances with varied constraint patterns so the model learns general confidence, because seeing a wide range of problems teaches the model which features of a problem tend to lead to valid decisions. Use confidence thresholds or early-stopping during solving so the model stops expanding if it becomes unsure, rather than forcing a complete solution, because a half-built valid tour is better than a full tour with constraint violations, and it saves computation."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small instance of the Travelling Salesman Problem (visit each city once, return to start, minimize total distance). Start with five cities on a 10x10 grid. Encode each city's position and the distance between each pair, and encode the partial solution as a list of visited cities (some masked as unknown). Train NEXCO to map from a masked tour to the ground-truth tour for 100 random instances. At solve time, start with a fully masked tour, have the model compute confidence for each unmasked city, unmask high-confidence cities first, and recompute feasibility (the partial tour must not repeat cities). Measure solution quality (total distance) and wall-clock solve time."
+    ],
+    "metric_eq": "solution_quality = total_distance_travelled; inference_time = seconds_to_build_full_tour; constraint_violations = count_of_repeated_cities",
+    "closing": "A working demo should show that the model unmaskas cities in an order that respects the constraint (no repeats) and finds a tour shorter than a random greedy baseline, while finishing in far less time than exhaustive local construction."
+  }
+}

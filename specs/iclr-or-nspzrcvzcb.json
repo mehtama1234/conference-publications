@@ -1,0 +1,243 @@
+{
+  "slug": "iclr-or-nspzrcvzcb",
+  "title": "Entropy-Monitored Kernelized Token Distillation for Audio-Visual Compression",
+  "family": "Multimodal",
+  "one_liner": "Instead of copying weights or predictions, distill the pattern of how tokens relate to each other, then tune which modality matters most for each task.",
+  "lead": "Training a single model to handle both audio and video at once is hard: you want it to understand both languages equally, but audio carries timing and pitch information while video carries colors and motion. This paper shows how to compress a large teacher model into a small student model by teaching it not to memorize the teacher's exact values, but to mimic how the teacher groups and relates its internal signals — and to know when sound matters more than sight (or vice versa).",
+  "nav": [["theme-multimodal.html","Multimodal"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "The distillation trap: flexibility or accuracy",
+    "paras": [
+      "When you compress a large model into a small one, you need to teach the small model to mimic the large one. But audio and video are very different. If you try to match the teacher's internal signals directly (its embeddings, which are just lists of numbers encoding what it learned), you run into a wall: the teacher model might have 512 numbers per signal, while your tiny student has only 128. They don't fit. You could rewire both to use the same number of signals, but that defeats the purpose of having a tiny student—you lose flexibility.",
+      "The old trick is to ignore internal signals altogether and just copy the teacher's final answer (its prediction). That works for any student size, but the student learns less—it only sees what the teacher decided, not the reasoning behind it. It's like learning to cook by only tasting the final dish, never watching how the chef combined ingredients."
+    ],
+    "callout": {
+      "b": "The core move.",
+      "html": "Distill how tokens relate to each other (their pairwise similarities), not the tokens themselves. This works between any two model sizes."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Big model, small model",
+        "viz": "brain",
+        "caption": "Teacher has 512 signals per token; student has only 128."
+      },
+      {
+        "title": "2. Old way: copy final predictions",
+        "viz": "weights",
+        "viz_args": [["free",20],["free",18],["warm",60],["warm",65],["warm",62]],
+        "caption": "Student learns only the final answer, missing all reasoning."
+      },
+      {
+        "title": "3. New way: copy token relationships",
+        "viz": "box",
+        "viz_args": "Token A relates to B: strong. B to C: weak. Copy this pattern.",
+        "caption": "Map of who influences whom; works for any model size."
+      },
+      {
+        "title": "4. Entropy gate: sound vs. sight",
+        "viz": "weights",
+        "viz_args": [["hot",75],["free",15],["hot",80],["free",20],["warm",50]],
+        "caption": "When audio is informative, sound matters more; dial down video."
+      },
+      {
+        "title": "5. Tiny model with big understanding",
+        "viz": "weights",
+        "viz_args": [["moved",35],["moved",40],["moved",38],["warm",50],["warm",48]],
+        "caption": "94% smaller; preserves reasoning structure from teacher."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Tokenize and embed input",
+        "text": "Split audio and video into small pieces (tokens), convert each to a list of numbers."
+      },
+      {
+        "b": "Compute token similarity map (Gram matrix)",
+        "text": "For each modality, ask: how does token A relate to token B? Create a table of all pairwise similarities."
+      },
+      {
+        "b": "Measure information content per modality",
+        "text": "Check how uncertain and spread-out the audio pattern is, separately from the video pattern."
+      },
+      {
+        "b": "Weight distillation by modality importance",
+        "text": "If audio entropy is high (audio is informative), teach student to copy audio relationships harder; dial down video."
+      },
+      {
+        "b": "Train student to match the weighted relationships",
+        "text": "Penalize student when its token map diverges from teacher's, scaled by modality confidence."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes",
+    "paras": [
+      "The paper changes what the student is taught to copy. Instead of copying the teacher's internal values or final predictions, it copies the <em>pairwise relationships between tokens</em>—a Gram matrix, which is just a table showing how similar token A is to token B, how similar B is to C, and so on."
+    ],
+    "object": "Token relationship map (Gram matrix)"
+  },
+  "hidden": {
+    "h2": "The entropy score",
+    "name": "Modality entropy",
+    "paras": [
+      "The paper measures one quantity that did not exist in older methods: the entropy of each modality. Entropy is a number measuring how spread-out and uncertain a pattern is. If audio entropy is high, the audio signal is complex and informative; if it is low, audio is almost the same everywhere (redundant). Similarly for video.",
+      "The method estimates modality entropy by looking at the distribution of the Gram matrix values for each modality—if the relationships are tightly clustered (all strong or all weak), entropy is low; if they vary widely, entropy is high. The paper uses this entropy to decide how hard to push the student on that modality: high entropy modalities contribute more to the distillation loss."
+    ],
+    "heat": {
+      "cells": [
+        ["Audio strong", 4, true],
+        ["Audio weak", 1, false],
+        ["Audio strong", 4, true],
+        ["Audio weak", 2, false],
+        ["Audio mixed", 3, false],
+        ["Audio weak", 1, false],
+        ["Video strong", 2, false],
+        ["Video weak", 1, false],
+        ["Video strong", 2, false],
+        ["Video mixed", 3, true],
+        ["Video weak", 1, false],
+        ["Video strong", 2, false]
+      ],
+      "caption": "Darker means higher information content (more spread-out values); true marks show what values counted."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Some parts of the model's work are chaotic and informative; others are boring and predictable. The paper measures how chaotic each modality is, then trusts chaotic parts more."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Entropy of the Gram matrix is computed as the Shannon entropy of the normalized singular values or distribution of pairwise similarities, and is used as a weighting coefficient in the distillation loss for that modality."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the method works",
+    "paras": [
+      "Relationships between tokens survive scaling. Two models can have different numbers of internal signals (512 vs. 128), but they can still agree on which signals relate to each other. A Gram matrix is a table of how similar token A is to token B; as long as both models can compute similarity (they can—it's just a dot product), both can build the same kind of map. The small student model can mimic the big teacher's map even if they run at different scales.",
+      "Entropy weighting makes this smarter. Audio and video contribute differently to different tasks. Sometimes audio is the main signal (e.g., speech recognition); sometimes video dominates (e.g., identifying an object). If you equally weight both modalities in distillation, you force the student to memorize boring, redundant modality (low entropy), wasting its limited capacity. By measuring entropy and upweighting high-entropy modalities, the student focuses its learning on the parts that actually carry information. Low-entropy modalities get less weight because they are already repetitive and easier to learn.",
+      "Together, this creates a compression strategy that keeps the reasoning structure (relationships between tokens) while filtering out noise (low-entropy modalities). The student learns to think like the teacher, not memorize its values."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Audio and video signals"
+        },
+        {
+          "t": "step",
+          "s": "Tokenize and embed each modality",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Compute Gram matrix (token similarities)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Measure entropy for each modality",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Weight Gram-matrix loss by entropy",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Student matches weighted token maps"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation",
+    "words": "Loss = (sum over modalities) entropy_weight_for_modality * sum_over_token_pairs (teacher_gram_ij - student_gram_ij) squared",
+    "equation": "L = sum_m H_m * ||G_teacher_m - G_student_m||_F^2",
+    "symbols": [
+      ["L", "total loss (error to minimize)"],
+      ["m", "modality index (audio or video)"],
+      ["H_m", "entropy weight for modality m (ranges 0 to 1)"],
+      ["G_teacher_m", "Gram matrix from teacher for modality m"],
+      ["G_student_m", "Gram matrix from student for modality m"],
+      ["||...||_F^2", "Frobenius norm squared (sum all matrix entries squared)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Teacher has 4 tokens in audio. Gram matrix (simplified, just 3 pairs): (T0,T1)=0.9, (T0,T2)=0.2, (T1,T2)=0.8. Entropy = 0.7 (information-rich).",
+        "Teacher has 4 tokens in video. Gram matrix: (V0,V1)=0.5, (V0,V2)=0.5, (V1,V2)=0.5. Entropy = 0.2 (repetitive).",
+        "Student audio Gram: (T0,T1)=0.8, (T0,T2)=0.3, (T1,T2)=0.75. Diffs: 0.1, 0.1, 0.05.",
+        "Student video Gram: (V0,V1)=0.5, (V0,V2)=0.5, (V1,V2)=0.5. Diffs: 0, 0, 0.",
+        "Audio loss: 0.7 * (0.1^2 + 0.1^2 + 0.05^2) = 0.7 * 0.025 = 0.0175.",
+        "Video loss: 0.2 * (0^2 + 0^2 + 0^2) = 0.",
+        "Total loss: 0.0175. Student prioritizes matching audio (high entropy); video is already trivial."
+      ]
+    },
+    "note": "The entropy weight acts as a gate: high entropy modalities pull harder on the student, low entropy modalities release pressure, so the student's small capacity goes where it matters most."
+  },
+  "bars": {
+    "h2": "Performance comparison",
+    "charts": [
+      {
+        "title": "Matching teacher quality",
+        "rows": [
+          ["Large teacher model", 100, "good"],
+          ["Small student (naive copy)", 89, "bad"],
+          ["Small student (EM-KTD)", 97, "good"]
+        ],
+        "note": "Student retains 97% of teacher accuracy (preserves reasoning structure)."
+      },
+      {
+        "title": "Model size reduction",
+        "rows": [
+          ["Teacher weights and signals", 100, "good"],
+          ["Student weights (copy method)", 25, "bad"],
+          ["Student weights (EM-KTD)", 6, "good"]
+        ],
+        "note": "EM-KTD uses 94% fewer weights because it distills relationships, not values."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Gram matrix can be large.",
+        "html": "If there are many tokens (e.g., 1000), the Gram matrix has 1,000,000 entries. This is expensive to compute and store. The method needs to limit token count or subsample for large inputs."
+      },
+      {
+        "warn": true,
+        "b": "Entropy estimation can be noisy.",
+        "html": "If the Gram matrix is small (few tokens), entropy is hard to estimate reliably. With only 10 tokens, 100 entries in the matrix, the entropy estimate can be unstable, leading to bad weighting."
+      },
+      {
+        "warn": true,
+        "b": "Misaligned modalities confuse entropy weighting.",
+        "html": "If the task actually needs both modalities equally (not one dominant), but entropy weighting biases toward whichever modality appears noisier in the data, the student will learn a wrong emphasis."
+      },
+      {
+        "b": "Entropy calibration matters.",
+        "html": "Entropy must be computed consistently across batches (not re-estimated per batch), because if you recompute it every training step, the weighting bounces wildly—one batch the audio weight is 0.8, the next it is 0.2, confusing the student about what to learn. Temperature tuning (scaling entropy by a fixed constant) can help smooth oscillations, because wild swings in the weight teach contradictory lessons."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small demo: take an audio-visual classification task (e.g., identify an event: a dog barking, a car horn). Train a large pretrained teacher model (you can use any multimodal model or your own). Create a tiny student model (1/10 or 1/20 the size). Then run three trainings: (1) the student copies the teacher's final predictions (baseline), (2) the student copies the teacher's internal signals directly (if you can match dimensions), and (3) the student uses EM-KTD to copy token relationships with entropy weighting. Measure how much accuracy the student loses in each case. The demo should show that EM-KTD preserves the most accuracy while being the most flexible (it does not require matching dimensions between teacher and student)."
+    ],
+    "metric_eq": "Accuracy loss = (teacher_accuracy - student_accuracy) / teacher_accuracy * 100 percent. Goal: < 3.5 percent loss (preserving 96.5% of teacher accuracy).",
+    "closing": "The point is that copying relationships works: it lets a tiny student think like a big teacher without memorizing any of its numbers or requiring any architectural alignment."
+  }
+}

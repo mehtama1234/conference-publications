@@ -1,0 +1,247 @@
+{
+  "slug": "iclr-or-dwpdyfqvwo",
+  "title": "Group Tree Optimization for Speculative Decoding",
+  "family": "Efficiency & Systems",
+  "one_liner": "Train the draft model on the same tree-based drafting strategy that decoding actually uses, not on single greedy predictions, to unlock faster LLM inference.",
+  "lead": "Speculative decoding speeds up language models by having a fast draft model propose several tokens at once, which a large target model then verifies in parallel. But here is the misalignment: during training, the draft model learns to predict a single greedy path (always picking the highest-confidence token next), while during actual decoding it must generate branching trees that get verified multiple ways. This mismatch leaves speedup on the table. GTO fixes it by training the draft model directly on the tree reward that matters: how many tokens it proposes that the target model actually accepts.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The draft-decoding mismatch",
+    "paras": [
+      "Speculative decoding works like this: a small fast model (the draft model) proposes multiple tokens; a large model (the target model) checks if each token is plausible and accepts it or rejects it. If tokens are accepted, you get several tokens per step at nearly the cost of one, speeding up the big model's inference. A beginner would try training the draft model to simply match the target model's output one token at a time, like a compression or distillation task.",
+      "But here is the real decoding process: the draft model does not pick one path and go straight ahead. It branches. It proposes token A, then token B, then token C, and simultaneously proposes alternatives like token B-prime and token C-prime, forming a tree. The target model then walks this tree and accepts sequences that feel natural. So at training time, the model sees single greedy paths; at decoding time, it must produce trees with many branches. The optimizer never sees a signal for branching.",
+      "The result: the draft model converges to a policy that is good at picking the single best next token, but poor at filling out a branching tree where some tokens will be rejected. The speedup caps out, leaving 7-8% of possible gains unrealized."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Train the draft model on the branching-tree strategy that decoding actually does, not on single-token prediction."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Why speculative decoding exists",
+        "viz": "box",
+        "viz_args": "small model says A, then B / big model verifies both in parallel",
+        "caption": "Fast model proposes, large model checks: two tokens per step."
+      },
+      {
+        "title": "2. Naive training (greedy path only)",
+        "viz": "plain",
+        "caption": "Trainer shows path It -> is -> a. Model learns to pick best next token always."
+      },
+      {
+        "title": "3. Real decoding (branching tree)",
+        "viz": "box",
+        "viz_args": "root branches to A, A-alt, B / B branches to C, C-alt",
+        "caption": "Decoding creates many branches, not one straight line."
+      },
+      {
+        "title": "4. Acceptance length hidden quantity",
+        "viz": "weights",
+        "viz_args": [["branch1", 4, true], ["branch2", 2, false], ["branch3", 3, false], ["branch4", 1, false], ["branch5", 4, true], ["branch6", 2, false]],
+        "caption": "Some branches get 4 tokens accepted, others only 1. Average matters."
+      },
+      {
+        "title": "5. GTO training aligns to tree reward",
+        "viz": "plain",
+        "caption": "Train directly on how many tokens actually get accepted in the tree."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Build a draft tree.",
+        "text": "Given a starting phrase, the draft model generates not one path but many branches, proposing alternatives at each step."
+      },
+      {
+        "b": "Compute acceptance length per branch.",
+        "text": "Simulate the target model verifying each branch, counting how many draft tokens it accepts before stopping."
+      },
+      {
+        "b": "Define the tree reward.",
+        "text": "Average the acceptance lengths across all branches. This single number measures the tree's quality."
+      },
+      {
+        "b": "Compare to a reference draft model.",
+        "text": "Subtract the reference tree's reward from the current model's reward (debiasing), reducing noise."
+      },
+      {
+        "b": "Update the draft model.",
+        "text": "Nudge the draft model's weights to increase the tree reward, using the same PPO-style update as in reinforcement learning."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes: the training signal",
+    "paras": [
+      "The paper changes what the draft model is trained to optimize. Instead of a cross-entropy loss on single greedy predictions, it now optimizes the Draft Tree Reward: the expected number of tokens that the target model will accept from the draft tree. This one change makes the training objective match the decoding objective."
+    ],
+    "object": "training reward signal"
+  },
+  "hidden": {
+    "h2": "Acceptance length: how many draft tokens survive",
+    "name": "Acceptance length",
+    "paras": [
+      "Acceptance length is the count of consecutive tokens that the target model verifies as correct and accepts from a draft sequence. If the draft proposes 'I saw a cat', and the target accepts the first 3 tokens 'I saw a' but rejects 'cat' as too unusual, the acceptance length is 3. During decoding, acceptance length directly sets the speedup: more accepted tokens per target-model step means less total compute.",
+      "GTO estimates the expected acceptance length by building a tree of draft tokens, simulating the target model's verification on each path, and averaging. Unlike traditional training where you see a single greedy path, the tree shows how well your proposals work across different branches, giving a more honest signal for what decoding will actually achieve."
+    ],
+    "heat": {
+      "cells": [
+        ["path-1", 4, true],
+        ["path-2", 2, false],
+        ["path-3", 3, true],
+        ["path-4", 1, false],
+        ["path-5", 4, true],
+        ["path-6", 2, false],
+        ["path-7", 3, false],
+        ["path-8", 1, false],
+        ["path-9", 2, false],
+        ["path-10", 4, true],
+        ["path-11", 3, true],
+        ["path-12", 1, false]
+      ],
+      "caption": "Darker paths accept more tokens. Training boosts the dark ones."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Some draft proposals branch into trees where later tokens get accepted, others do not. Acceptance length is how far each branch goes before the target model stops accepting it. Train on the average acceptance length across all branches."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Expected acceptance length under the target model, computed as the average number of tokens accepted per draft sequence in a depth-d tree, with top-k pruning of branches by global acceptance score."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: aligning training with decoding reality",
+    "paras": [
+      "The mechanism is simple. Greedy training optimizes for single-token accuracy because the trainer shows only one path. But the true bottleneck is not single-token prediction; it is tree coverage. When you deploy speculative decoding, the draft model must fill out a branching tree where some paths will be rejected. Greedy training never pushes the model to do that well. Acceptance length is what actually matters for speedup, so training directly on it tells the model what to optimize.",
+      "The debiasing step (subtracting a reference model's tree reward) cuts down noise. A random tree gets some acceptance length by luck. By comparing your improved tree to a stable baseline, you isolate the signal: did this model actually learn to draft better, or is the variation just noise? This is the same trick used in reinforcement learning to reduce variance in reward signals.",
+      "The PPO-style update (a clipped weight-nudge step) ensures the training is stable. The model is being nudged to improve tree reward without overshooting, because the clipped update prevents the weights from changing so much that the new tree reward becomes unreliable or collapses. The constraint is applied along the longest accepted sequence, so the model learns from the most credible paths it generates, because these paths are the ones the target model actually accepted in practice and thus provide the clearest signal about what works."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Context (starting phrase)"
+        },
+        {
+          "t": "step",
+          "s": "Draft model generates branching tree",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Simulate target model accepting each branch"
+        },
+        {
+          "t": "step",
+          "s": "Compute acceptance length per branch",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Average to get tree reward"
+        },
+        {
+          "t": "step",
+          "s": "Compare to reference model (debiasing)"
+        },
+        {
+          "t": "step",
+          "s": "PPO-style weight-nudge update"
+        },
+        {
+          "t": "output",
+          "s": "Improved draft tree strategy"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The tree reward equation",
+    "words": "tree reward equals the average number of tokens accepted across all branches of the draft tree, compared to the reference model's tree reward for the same context.",
+    "equation": "R(T_t) = E[length of accepted sequence in T_t under target model]; Advantage = R(T_t) - R(T_t_ref)",
+    "symbols": [
+      ["T_t", "the draft tree at context t"],
+      ["E[...]", "average over all branches in the tree"],
+      ["length of accepted sequence", "how many tokens the target accepts before rejecting"],
+      ["target model", "the powerful model doing verification"],
+      ["R(T_t_ref)", "tree reward of the reference (frozen) draft model on the same context"],
+      ["Advantage", "the difference, showing improvement over baseline"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a draft tree has 4 branches: branch-1 gets 4 tokens accepted, branch-2 gets 2 tokens, branch-3 gets 3 tokens, branch-4 gets 1 token.",
+        "R(T_t) = (4 + 2 + 3 + 1) / 4 = 10 / 4 = 2.5 tokens on average.",
+        "The reference model's tree gets: branch-1 gets 2 tokens, branch-2 gets 1 token, branch-3 gets 2 tokens, branch-4 gets 1 token.",
+        "R(T_t_ref) = (2 + 1 + 2 + 1) / 4 = 6 / 4 = 1.5 tokens.",
+        "Advantage = 2.5 - 1.5 = 1.0. The improved draft model is 1 token better on average. This advantage signal tells training how much to boost these weights."
+      ]
+    },
+    "note": "The tree reward directly measures how many tokens the draft model successfully proposes that the target accepts, turning decoding performance into a single honest number."
+  },
+  "bars": {
+    "h2": "Real-world speedup gains",
+    "charts": [
+      {
+        "title": "Prior state-of-the-art (EAGLE-3)",
+        "rows": [
+          ["Acceptance length (tokens)", 3.2, "good"],
+          ["Speedup multiplier", 1.24, "good"],
+          ["Dialogue accuracy", 87, "good"]
+        ],
+        "note": "Greedy training gets tokens per step and overall speedup, but limited by single-path optimization."
+      },
+      {
+        "title": "GTO (this paper)",
+        "rows": [
+          ["Acceptance length (tokens)", 3.4, "good"],
+          ["Speedup multiplier", 1.34, "good"],
+          ["Dialogue accuracy", 88, "good"]
+        ],
+        "note": "Tree-based training increases acceptance length by 7.4%, yielding 7.7% more speedup on top of EAGLE-3."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Tree is too small or shallow.",
+        "html": "If the draft tree does not branch enough (depth is shallow or only a few branches per token), the training signal is weak because it does not reflect real decoding trees. The remedy: use deeper trees and more branches during training, matching deployment settings."
+      },
+      {
+        "warn": true,
+        "b": "Reference model is stale or weak.",
+        "html": "Debiasing by comparing to a reference model only works if the reference captures the baseline well. A weak or outdated reference model gives noisy advantage estimates. The remedy: refresh the reference model periodically and ensure it is a reasonable baseline."
+      },
+      {
+        "warn": true,
+        "b": "Target model changes between training and deployment.",
+        "html": "GTO trains the draft model to pair with a specific target model. If you swap the target model at inference time, acceptance lengths will be different. The remedy: retrain the draft model for each new target, or use draft models that are less specific to one target."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train the draft tree on the exact target model you will use at inference, refresh the reference model regularly, and use deployment-matched tree depth and branching."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy example: take a small language model as the target and a smaller one as the draft. Initialize the draft model with greedy training (standard token-matching loss). Then train it with GTO on a small dataset (e.g., 100 prompts). Measure acceptance length before and after. The demo should show that tree-trained draft models consistently accept more tokens than greedy-trained ones on the same prompts, proving the mechanism: optimizing the tree reward directly improves what decoding actually cares about, because the tree reward measures exactly what you deploy (expected accepted tokens), while greedy training measures something different (single-token accuracy)."
+    ],
+    "metric_eq": "acceptance_length_GTO - acceptance_length_greedy",
+    "closing": "If the demo is built right, the acceptance-length gap will be 5-10%, matching the paper's claimed 7.4% improvement, making the mechanism concrete and visible."
+  }
+}

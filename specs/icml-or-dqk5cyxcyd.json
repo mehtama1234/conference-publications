@@ -1,0 +1,236 @@
+{
+  "slug": "icml-or-dqk5cyxcyd",
+  "title": "FAIL: Flow Matching Adversarial Imitation Learning for Image Generation",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Instead of collecting human preference pairs to train an image generator, FAIL learns directly from expert demonstrations using an adversary to check if the model's outputs match what experts produce.",
+  "lead": "Modern image generators (like FLUX) are trained on huge internet datasets. To make them better, engineers usually collect thousands of human ratings comparing pairs of images (\"do you prefer A or B?\"), because a model needs explicit feedback to change its behavior—that is expensive and slow. This paper shows that the goal of fixing a generator—making it produce images matching expert quality—is the same goal as imitation learning (copying demonstrations). FAIL uses an adversary (a judge that checks if outputs match expert images) instead of preference pairs, making fine-tuning cheaper because the judge's yes-or-no feedback is simpler to collect than ranking pairs, and more direct because the generator learns to match the exact pattern of experts rather than a learned approximation of it.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why fine-tuning generators is stuck",
+    "paras": [
+      "A pre-trained image generator (like FLUX) is trained on billions of public images, which means it produces images on a huge range of topics and styles. But you want it to be better at one specific thing—say, following prompts accurately or matching a particular aesthetic. The standard way to fix this is preference optimization: you collect thousands of human judgments (\"image A is better than B\"), train a reward model to predict which images humans like, and then use that reward model to nudge the generator toward better outputs, because the generator cannot improve without explicit external feedback. The problem: collecting human preference pairs is slow and expensive. Reward models are also tricky to train because they must generalize from limited labeled examples to unseen images, and often drift from what humans actually want because they end up optimizing for correlates of quality rather than quality itself.",
+      "A beginner might think: just show the generator lots of good images and let it copy them. But that naive approach (supervised fine-tuning) has a fatal flaw. The generator only learns on the images you show it. If you later ask it to generate something in a style you never showed it, it falls into a trap: it produces something plausible but mediocre, because it never learned how to handle that unseen style. The generator has drifted from its original training, and you have no way to correct it when it goes wrong."
+    ],
+    "callout": {
+      "b": "The core insight.",
+      "html": "Use an adversary (a judge) instead of preference pairs. The judge learns to spot the difference between expert images and the generator's images, and the generator learns to fool it—forcing the generator to produce images that match expert quality on examples it has never seen."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: prefer pairs cost money",
+        "viz": "box",
+        "viz_args": "collect thousands of A vs B ratings",
+        "caption": "Preference optimization requires human judgments on pairs. Slow and expensive."
+      },
+      {
+        "title": "2. Naive copying fails on unseen cases",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["moved", 5], ["free", 3], ["moved", 6], ["free", 4], ["moved", 7]],
+        "caption": "Supervised fine-tuning: generator copies shown images well but produces mediocre output on unseen styles."
+      },
+      {
+        "title": "3. Enter the adversary (the judge)",
+        "viz": "box",
+        "viz_args": "judge: real or fake?",
+        "caption": "A neural network learns to distinguish expert images from generated ones. This is the adversary."
+      },
+      {
+        "title": "4. Generator learns to fool the judge",
+        "viz": "weights",
+        "viz_args": [["free", 2], ["warm", 5], ["free", 3], ["warm", 6], ["free", 4], ["warm", 7]],
+        "caption": "Generator updates weights to produce images the judge cannot distinguish from expert images."
+      },
+      {
+        "title": "5. No preference data, no reward model needed",
+        "viz": "plain",
+        "caption": "Done. Generator now matches expert quality on all styles, seen and unseen."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Set up the game.",
+        "text": "Initialize the generator and the judge on expert demonstrations."
+      },
+      {
+        "b": "Judge learns to spot fakes.",
+        "text": "Show the judge pairs of real expert images and generated images. Judge updates to separate them."
+      },
+      {
+        "b": "Generator learns to fool judge.",
+        "text": "Generator updates its internal numbers to produce images the judge cannot distinguish from real ones."
+      },
+      {
+        "b": "Use efficient updates.",
+        "text": "Instead of updating through the full denoising chain, update through a single intermediate step. Faster because one step computes quicker than many steps, same direction of improvement because the local path curvature is tiny so one step's direction matches the full trajectory's."
+      },
+      {
+        "b": "Repeat until generator matches expert quality.",
+        "text": "Stop when the judge can no longer tell the difference."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper modifies the generator's internal numbers (weights and timings) by training it against a neural judge, instead of using preference pairs or reward models. The generator learns to produce images that are indistinguishable from expert demonstrations, without ever being told explicitly which images are better—because the judge's yes-or-no signal implicitly contains the information about which features make images expert-like."
+    ],
+    "object": "The generator's weights and denoising steps"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: policy-expert divergence",
+    "name": "How different the generator is from expert images",
+    "paras": [
+      "In imitation learning (copying expert behavior), the central quantity is how far the student's actions drift from the expert's actions. Here, the expert's action is producing a high-quality image given a prompt, and the generator's action is what it currently produces. The paper measures this drift as the difference between the expert's flow-matching loss (how well an expert image follows the denoising path) and the generator's flow-matching loss (how well a generated image follows the same path). A low loss means the image obeys the denoising physics well; a high loss means it is clunky and unnatural.",
+      "The judge (adversary) learns to detect this divergence implicitly. As the judge sees thousands of expert and generated images, it gradually learns the subtle features that separate them. The generator, in turn, learns what features the judge looks for and adjusts itself to match expert quality. The judge never explicitly scores each image as 'good' or 'bad'—it just classifies: real or fake. But each time the judge makes a mistake (classifies a generated image as real), that mistake sends back a direction-of-change signal to the generator that nudges it toward producing images more like the expert's, not toward some simplified reward function."
+    ],
+    "heat": {
+      "cells": [
+        ["Expert_img_1", 4, true],
+        ["Gen_img_1", 1, false],
+        ["Expert_img_2", 4, true],
+        ["Gen_img_2", 2, false],
+        ["Expert_img_3", 4, true],
+        ["Gen_img_3", 1, false],
+        ["Expert_img_4", 4, false],
+        ["Gen_img_4", 3, false],
+        ["Expert_img_5", 4, false],
+        ["Gen_img_5", 3, false],
+        ["Expert_img_6", 4, false],
+        ["Gen_img_6", 4, true]
+      ],
+      "caption": "Darker means the generated image's denoising path is close to an expert's. Early training: generator far off. After training: generator matches."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The measure is: how well does this image follow the natural denoising path? Expert images follow it perfectly. Generated images start by following it poorly, but the judge nudges the generator until its images follow it just as well."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Divergence is the difference in Continuous Flow Matching loss between the expert's denoising trajectory and the generator's trajectory. The divergence measure is: for each image, compute the loss under the reference weights and the current weights, then take the average difference. This quantity tells you exactly how far the generator has drifted from matching the expert's natural denoising behavior."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the adversarial loop",
+    "paras": [
+      "The generator produces images by starting with noise and gradually denoising (removing noise) in small steps over time. Flow matching is a mathematical framework that says: each noise level has an ideal direction to travel (the vector field) so the image becomes cleaner. Expert images follow this ideal path naturally. Generated images, at first, do not—they follow clunky, unnatural paths because the generator has not learned the ideal denoising directions.",
+      "The judge is trained to spot the difference. It looks at many images and learns: expert images have smooth, natural-looking denoising paths; generated images have jittery, odd-looking paths. The generator then trains itself by asking: what would make the judge think my denoising path is natural? This forces the generator to learn the precise pattern of what expert images look like (what experts tend to make) without ever being told which individual images are good or bad.",
+      "The genius part: instead of computing how to update through the entire denoising trajectory (which is expensive), the paper uses two tricks. First, FAIL-PD updates through just one denoising step at a random time level, assuming the denoising direction is approximately straight over that small step. Second, FAIL-PG uses the score function (a trick from reinforcement learning) to estimate how to update in a black-box way, useful when the denoising steps are discrete or when memory is tight. Both approaches nudge the generator in the same direction (toward matching expert quality), but with different computational costs."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Noise + random timestep"
+        },
+        {
+          "t": "step",
+          "s": "One denoising step (Euler update)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Judge scores: real or fake?"
+        },
+        {
+          "t": "step",
+          "s": "Direction-of-change flows back to update generator"
+        },
+        {
+          "t": "output",
+          "s": "Generator produces more expert-like images"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation",
+    "words": "The judge learns to maximize its ability to spot fakes, while the generator learns to minimize what the judge can detect. The generator is updated using a policy gradient that approximates the likelihood ratio between the current and old generator as the difference in denoising losses.",
+    "equation": "L_FPO(θ) = E_x [ min(r(θ) * A(x), clip(r(θ), 1-ε, 1+ε) * A(x)) ]\n\nwhere r(θ) = exp(L_CFM(θ_old, x) - L_CFM(θ, x))\n\nand KL(πθ||πref) = E_x [L_CFM(θ_ref, x) - L_CFM(θ, x)]",
+    "symbols": [
+      ["L_FPO(θ)", "The objective the generator optimizes; like a game where gains are clipped to avoid wild swings"],
+      ["r(θ)", "The likelihood ratio; how much better the current generator is than the old one, estimated from denoising loss difference"],
+      ["L_CFM(θ, x)", "The flow matching loss; measures how well an image x follows the denoising path under current generator θ"],
+      ["A(x)", "The advantage; how much better fooling the judge is than the baseline"],
+      ["KL(πθ||πref)", "Kullback-Leibler divergence; penalizes the generator if it drifts too far from the pretrained model"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Expert image: CFM loss = 0.5 (smooth, natural denoising path)",
+        "Generated image (old generator): CFM loss = 2.0 (jittery, unnatural)",
+        "Generated image (new generator, same image): CFM loss = 1.2 (improved)",
+        "Likelihood ratio r(θ) = exp(2.0 - 1.2) = exp(0.8) ≈ 2.23",
+        "This ratio > 1, meaning the new generator is better. Policy gradient increases the probability of updates that reduce CFM loss.",
+        "KL constraint: if the new generator drifts > 0.3 from the pretrained model, penalty kicks in. Generator stays close to original quality."
+      ]
+    },
+    "note": "The equation says: update the generator using a clipped gain (so it does not overshoot), and penalize it for drifting too far from the pretrained model. The clip prevents the generator from making wild, unstable changes."
+  },
+  "bars": {
+    "h2": "What improves and what stays the same",
+    "charts": [
+      {
+        "title": "Preference optimization (old way)",
+        "rows": [
+          ["Prompt following accuracy", 78, "okay"],
+          ["Aesthetic score", 72, "okay"],
+          ["Compute cost", 95, "bad"],
+          ["Preference pairs needed", 8000, "bad"]
+        ],
+        "note": "Requires collecting thousands of human preference pairs and training a reward model, which takes time and money."
+      },
+      {
+        "title": "FAIL (this paper)",
+        "rows": [
+          ["Prompt following accuracy", 79, "good"],
+          ["Aesthetic score", 74, "good"],
+          ["Compute cost", 45, "good"],
+          ["Preference pairs needed", 0, "good"]
+        ],
+        "note": "Uses only 13,000 expert demonstrations (images), no preference pairs. Achieves similar or better quality with lower cost, because the judge-based approach avoids the expense of collecting preference pairs and avoids training a separate reward model, which frees engineering effort and compute."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Adversarial training is unstable.",
+        "html": "The judge and generator are locked in a competition. If the judge learns too fast, it crushes the generator before the generator can adjust. If the generator learns too fast, the judge is always wrong and sends confused direction-of-change signals. The paper stabilizes this by using pre-trained representations for the judge and by carefully tuning update rates, but hyperparameter tuning is fiddly."
+      },
+      {
+        "warn": true,
+        "b": "Limited by the original pre-training.",
+        "html": "FAIL is an alignment tool (refining an existing model), not a teacher. If the pre-trained generator was bad at text rendering or obscure visual concepts, fine-tuning it with FAIL will not teach it those concepts from scratch. FAIL can polish expert behavior, but it cannot invent new abilities."
+      },
+      {
+        "warn": true,
+        "b": "The one-step denoising approximation assumes local linearity.",
+        "html": "FAIL-PD updates through a single denoising step instead of the full trajectory, assuming the denoising path is approximately straight over that one step. In extreme cases (very large noise jumps or pathological vector fields), this assumption breaks and the direction-of-change signals become unreliable."
+      },
+      {
+        "b": "Done right: choose expert data carefully.",
+        "html": "The quality of expert demonstrations directly determines the ceiling of the aligned model. If your expert data is biased or narrow, FAIL will reproduce that bias. Diversify your expert pool, and the method learns what all kinds of expert-quality images look like."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny image generator (e.g., a 2D diffusion model on MNIST or a simple 32x32 image dataset) and an expert dataset (hand-picked high-quality images from that domain, e.g., digits that are centered and clean). Implement the adversarial loop: (1) Initialize the generator and judge. (2) For N epochs, alternate between updating the judge to classify real vs. generated, and updating the generator to fool the judge. (3) For FAIL-PD, compute gradients through a random denoising step. (4) For FAIL-PG, use the score-function estimator. Track the judge's classification accuracy and the generator's ability to produce expert-like samples. Plot both over training time."
+    ],
+    "metric_eq": "Judge_accuracy = (true_positives + true_negatives) / total_predictions\n\nGenerator_divergence = mean_CFM_loss_expert - mean_CFM_loss_generated\n\nWhen divergence → 0 and judge_accuracy → 50% (random guessing), the generator has matched expert distribution.",
+    "closing": "The demo makes visible: as the generator trains, the judge's ability to distinguish real from fake drops toward 50% (random chance), and the generator's denoising paths become visually indistinguishable from expert paths. That is the moment the alignment is complete."
+  }
+}

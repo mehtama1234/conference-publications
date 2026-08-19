@@ -1,0 +1,216 @@
+{
+  "slug": "iclr-or-bfj8sdr224",
+  "title": "Learning to Parallel: Accelerating Diffusion Language Models via Adaptive Decoding",
+  "family": "Efficiency & Systems",
+  "one_liner": "Instead of waiting for every word to converge, train a tiny filter to predict which words are already correct and stop refining only those, cutting text-generation time by over 20 times.",
+  "lead": "Diffusion language models generate entire sequences of words in parallel, refining them over multiple denoising steps rather than one word at a time. But current methods wait the same number of steps for every word, even though many words finish converging early. This work trains a small learned filter that watches each word's confidence and predicts when it is done, so the decoder can stop updating it and move on — a speedup with no loss in quality.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "All words refine at the same speed, wasting time on the ones that are already done",
+    "paras": [
+      "Diffusion language models work like this: you start with a random garble of words. Then you run a denoising step over all of them at once, updating every position. You repeat for many steps until every word settles. This is parallel (fast), but it wastes motion: a word like 'the' might be fully correct after 3 steps, yet you keep nudging it for 10 more steps until the tricky word at the end finally converges.",
+      "If you naively stop early, you risk stopping one word before it is right. A beginner might try: stop each word when its confidence (how sure the model is) goes above 80%. But confidence is not a promise — a word can be confident and wrong, or uncertain and right. The real stopping point depends on what task you are doing, what the context is, what the previous words were. Fixed thresholds break across different problems."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Train a lightweight filter model to predict when each word has genuinely settled to its final answer, not just when it looks confident."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Naive parallel decoding",
+        "viz": "weights",
+        "viz_args": [["warm", 45], ["warm", 45], ["warm", 45], ["warm", 45], ["warm", 45]],
+        "caption": "All words get refined for the same number of steps, even though some converge early."
+      },
+      {
+        "title": "2. Tokens finishing at different times",
+        "viz": "weights",
+        "viz_args": [["free", 25], ["hot", 70], ["warm", 50], ["hot", 65], ["warm", 48]],
+        "caption": "Words 2 and 4 are correct early; words 3 and 5 still need work. Waste time refining the done ones."
+      },
+      {
+        "title": "3. Filter model watches confidence",
+        "viz": "box",
+        "viz_args": "conf 0.78, conf 0.92, conf 0.55, conf 0.88, conf 0.61",
+        "caption": "A tiny trained model learns to predict match-to-final by watching confidence patterns and context."
+      },
+      {
+        "title": "4. Filter unmasks only the ready tokens",
+        "viz": "weights",
+        "viz_args": [["free", 25], ["moved", 70], ["warm", 50], ["moved", 65], ["warm", 48]],
+        "caption": "Decoder stops updating words the filter says are done. Other words keep refining."
+      },
+      {
+        "title": "5. Same quality in a fraction of the steps",
+        "viz": "plain",
+        "caption": "Results are identical, but you finish in fewer than half the denoising steps."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Collect confidence signatures",
+        "text": "Run the diffusion model on a small diverse training set (2,640 examples). At each step and each word position, record the confidence score the model outputs."
+      },
+      {
+        "b": "Compare predictions to final output",
+        "text": "For each token, check: did it match the final correct token? Record whether yes or no, paired with that confidence history."
+      },
+      {
+        "b": "Train the filter on the signal",
+        "text": "Feed the confidence patterns and context into a two-layer neural network (tiny, a few thousand parameters). Teach it to predict: will this token match the final output?"
+      },
+      {
+        "b": "Use the filter when generating text",
+        "text": "During text generation, after each denoising step, run the filter on every word position. If it predicts match, mark that word as done and stop refining it."
+      },
+      {
+        "b": "Stop redundant padding steps",
+        "text": "Add a separate mechanism to detect when the entire sequence is finished (including the end-of-text token), so you do not waste steps on padding."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of using a fixed, one-size-fits-all heuristic (e.g., stop when confidence exceeds a threshold), the paper trains a learned model to make word-by-word stopping decisions. The filter observes the confidence evolution and other context cues and predicts whether the current prediction will match the final, refined output."
+    ],
+    "object": "word stopping decisions"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: token convergence match",
+    "name": "convergence match (does this token match the final output?)",
+    "paras": [
+      "The paper measures one binary quantity per token at each denoising step: will this token end up matching the final correct answer? This is not the same as confidence. A token can be high-confidence and wrong (early in the denoising, the model guesses boldly but incorrectly). Or it can be low-confidence and correct (it is uncertain, but it happens to match). The 'convergence match' is the ground truth: does the token, right now, equal the token in the final refined sequence?",
+      "The filter model learns to estimate this quantity by observing the confidence scores (how certain the model is) and the block-level context (neighboring tokens, what was chosen in previous steps). The paper shows that a simple two-layer neural network can learn this from a small training set, without needing task-specific engineering."
+    ],
+    "heat": {
+      "cells": [
+        ["token 1, step 3", 4, true],
+        ["token 1, step 5", 4, true],
+        ["token 1, step 9", 4, true],
+        ["token 2, step 4", 1, false],
+        ["token 2, step 7", 2, false],
+        ["token 3, step 5", 3, false],
+        ["token 3, step 8", 4, false],
+        ["token 4, step 3", 4, true],
+        ["token 4, step 6", 4, true],
+        ["token 5, step 9", 2, false],
+        ["token 5, step 12", 3, false],
+        ["token 6, step 10", 1, false]
+      ],
+      "caption": "Darker means token has converged to its final value (higher match likelihood). Highlights show tokens predicted correctly early."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The filter learns the pattern 'this word will stay the same from here on' by watching how confident the model is and what context surrounds it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The filter minimizes a classification loss (a penalty function that counts wrong guesses) to predict whether the predicted word at position i at step k matches the final word in the sequence."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: picking the ready tokens",
+    "paras": [
+      "In a diffusion-based language model, all tokens are decoded together. At each step, every position gets slightly refined. Early tokens (like 'the') converge quickly because there is less uncertainty. Later tokens (like complex nouns) take longer. If you wait for the slowest token, you waste time refining the ones that are already perfect.",
+      "The filter model learns to spot when a token is 'done converging.' It does this by reading the confidence history: if a token has been high-confidence for several steps and the model has not changed it, it is probably not going to change. If the context around it is settled and the block-level patterns are stable, it is probably correct. The filter is tiny (two layers), so it runs in microseconds — far faster than another denoising step.",
+      "Once the filter says a token is done, you stop refining it. You unmask (finalize) it and move on. This cuts the total steps from, say, 64 down to 20 or 30, because most tokens converge early. The final output is the same quality because you are not changing tokens that were already right."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "confidence scores and context from each denoising step"},
+        {"t": "step", "s": "feed into learned filter model", "hl": true},
+        {"t": "step", "s": "filter predicts: token matches final output?"},
+        {"t": "step", "s": "unmask early-converged tokens; continue refining uncertain ones"},
+        {"t": "output", "s": "same final sequence in fewer denoising steps"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The learning rule",
+    "words": "minimize binary cross-entropy loss to predict token convergence, training only the filter model parameters",
+    "equation": "L = sum_i [ -y_i log(f_theta(c_i, context_i)) - (1 - y_i) log(1 - f_theta(c_i, context_i)) ]",
+    "symbols": [
+      ["y_i", "ground truth: does token i match the final output (1 = yes, 0 = no)"],
+      ["f_theta(c_i, context_i)", "filter model prediction: probability token i will converge"],
+      ["c_i", "confidence score the diffusion model gave at this step"],
+      ["context_i", "neighboring tokens and their confidence values"],
+      ["theta", "parameters of the filter (a two-layer MLP, frozen during inference)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Word 1: confidence 0.91, neighbors also high-confidence, ground truth is converged. Filter predicts 0.88. Loss is -log(0.88) which equals 0.128.",
+        "Word 2: confidence 0.42, neighbors mixed, ground truth is not converged. Filter predicts 0.35. Loss is -log(0.65) which equals 0.431.",
+        "Word 3: confidence 0.85, neighbors stable, ground truth is converged. Filter predicts 0.91. Loss is -log(0.91) which equals 0.094.",
+        "Total loss is 0.128 plus 0.431 plus 0.094, which equals 0.653. Training nudges the filter to be more confident on high-confidence, settled words."
+      ]
+    },
+    "note": "The loss penalizes wrong guesses: if you predict converged but the token changes, or predict not-converged but it stays put. Correct predictions cost nearly zero."
+  },
+  "bars": {
+    "h2": "Quality and speed trade-off",
+    "charts": [
+      {
+        "title": "Naive fixed threshold (stop at confidence 0.8)",
+        "rows": [
+          ["Accuracy before", 94, "good"],
+          ["Accuracy after", 68, "bad"],
+          ["Speed", 12, "good"]
+        ],
+        "note": "Stops too early, many tokens are wrong."
+      },
+      {
+        "title": "This paper (Learn2PD filter)",
+        "rows": [
+          ["Accuracy before", 94, "good"],
+          ["Accuracy after", 94, "good"],
+          ["Speed multiplier", 22.58, "good"]
+        ],
+        "note": "Keeps quality intact and gets even faster by learning which tokens are truly done."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Filter trained on narrow task range.",
+        "html": "If the filter is trained only on math problems, it may fail on poetry or code. The paper trains on a variety of tasks to mitigate this, but the filter can still overfit if the training set is too small or skewed toward one type of task."
+      },
+      {
+        "warn": true,
+        "b": "Confidence is not a reliable proxy for convergence.",
+        "html": "A token can be very confident and still be wrong, especially early in the diffusion steps. The filter must learn to ignore superficial confidence and track deeper patterns. If the filter relies too heavily on raw confidence, it will make wrong early-stopping decisions."
+      },
+      {
+        "warn": true,
+        "b": "Context matters, but not always consistently.",
+        "html": "Neighboring word convergence can help predict the current word, because the words are interdependent — but some words depend mostly on the language model's internal reasoning, not context. If the filter relies too much on neighboring words, it may stop refining a word prematurely if its neighbors converge early."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train on a diverse, large-enough set (40 samples per task, 66 different task types for 2,640 total examples). Test the filter on held-out tasks to verify it generalizes. Pair the filter with the end-of-text mechanism to catch redundant padding steps."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a script that: (1) loads a diffusion language model and the trained filter; (2) generates text on a new prompt; (3) at each denoising step, runs the filter on each word position; (4) counts how many denoising steps actually happen. Compare this to the same model without the filter, which requires more steps because it refines every word fully. The output text should be identical in quality and content, but finish in fewer steps (20–60 percent reduction in denoising iterations)."
+    ],
+    "metric_eq": "speedup = (steps_without_filter / steps_with_filter); quality_loss = (accuracy_without_filter - accuracy_with_filter) / accuracy_without_filter",
+    "closing": "The demo must show that speedup and quality are decoupled: the filter can give you huge speedup with zero loss of accuracy, because it is learning exactly when to unmask, not guessing."
+  }
+}

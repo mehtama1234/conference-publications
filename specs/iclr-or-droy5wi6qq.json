@@ -1,0 +1,239 @@
+{
+  "slug": "iclr-or-droy5wi6qq",
+  "title": "Less Is More: Clustered Cross-Covariance Control for Offline RL",
+  "family": "Reinforcement Learning",
+  "one_liner": "When training an offline robot from saved data, the standard learning rule lets gradients from different data regions fight each other; partitioning the data into clusters and training on one cluster at a time stops this sabotage.",
+  "lead": "Imagine teaching a robot from a folder of old videos where some sequences are excellent and some are junk. The standard way to learn combines all videos in each batch, but the nudges (weight adjustments) from good data and bad data point in opposite directions. This paper shows that instead of mixing all videos, you should partition them into groups and train on one group per update. This simple change stops the nudges from canceling each other out, especially when data is scarce.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Offline learning: weight-nudge directions conflict",
+    "paras": [
+      "When a robot learns from saved data (instead of live trial-and-error), it faces a deadly problem: the data includes both good trajectories and bad ones. Some parts of the data come from wise policies, some from random flailing.",
+      "The naive approach is to throw all data together in one batch and compute how the data says to nudge the weights. But here is what breaks: the nudge direction (which way to move the weights based on good examples) points opposite to the nudge direction from bad examples. The two nudges cancel each other out, as if they were balanced weights on a seesaw. The more scarce the data or the more skewed toward bad trajectories, the worse this sabotage becomes. The robot learns almost nothing, or learns something backwards."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Split the data into clusters by the direction of its nudges (weight-adjustment directions), then train using only one cluster per update, so all nudges point the same way."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Mixed data",
+        "viz": "plain",
+        "caption": "Good trajectories and bad mixed in one batch."
+      },
+      {
+        "title": "2. Gradients collide",
+        "viz": "weights",
+        "viz_args": [["hot", 60], ["free", 40], ["hot", 50], ["free", 45], ["hot", 55], ["free", 35]],
+        "caption": "Good data (hot bars up), bad data (down). They cancel out."
+      },
+      {
+        "title": "3. Separate into clusters",
+        "viz": "box",
+        "viz_args": "Cluster A: good, Cluster B: bad",
+        "caption": "Partition the data by nudge direction."
+      },
+      {
+        "title": "4. One cluster per update",
+        "viz": "weights",
+        "viz_args": [["moved", 68], ["moved", 72], ["moved", 65]],
+        "caption": "Sample one cluster; all nudges now point the same way."
+      },
+      {
+        "title": "5. Clean learning",
+        "viz": "plain",
+        "caption": "No cancellation. The policy learns from aligned signals."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Examine the data",
+        "text": "For each saved transition, compute the gradient direction (which way to nudge the weights)."
+      },
+      {
+        "b": "Group by similarity",
+        "text": "Cluster trajectories that have gradients pointing the same way."
+      },
+      {
+        "b": "Draw from one cluster",
+        "text": "Each training update uses only transitions from a single cluster, never mixed."
+      },
+      {
+        "b": "Apply gradient penalty",
+        "text": "Add a small bonus that cancels any remaining covariance (the tendency for numbers to move together) within the cluster."
+      },
+      {
+        "b": "Plug into any offline RL algorithm",
+        "text": "This works as a lightweight add-on to standard methods like CQL or TD3."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing the paper changes",
+    "paras": [
+      "The paper changes how data is sampled during training. Instead of drawing uniformly from all saved trajectories, it draws from clusters grouped by whether their nudges (weight-adjustment directions) point the same way."
+    ],
+    "object": "Sampling strategy"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Cross-covariance",
+    "name": "TD cross-covariance",
+    "paras": [
+      "Cross-covariance is the tendency for two things to move together when they should not. In this setting, it measures how much the gradient from one data region is aligned with the gradient from another region. When data regions have conflicting lessons (good vs bad trajectories), their gradients have negative covariance: they pull in opposite directions.",
+      "The paper measures this by expanding the temporal-difference (the gap between predicted and actual return) as a function of the saved features, then computing the statistical correlation between the two parts. It shows that standard squared-error training makes this covariance large in areas where the data is sparse or where the saved examples come from regions the robot has never seen before, areas where lessons conflict."
+    ],
+    "heat": {
+      "cells": [
+        ["Cluster A gradient", 4, true],
+        ["Cluster B gradient", 1, false],
+        ["Mixed batch", 2, false],
+        ["Region update 1", 4, true],
+        ["Region update 2", 1, false],
+        ["Conflicting updates", 3, true],
+        ["Separated clusters", 4, true],
+        ["Aligned gradients", 4, true],
+        ["OOD zone covariance", 1, false],
+        ["Seen-data zone", 4, true],
+        ["Cross-region interference", 2, false],
+        ["Single-cluster isolation", 4, true]
+      ],
+      "caption": "Darker means stronger gradient alignment within the region. Highlights mark the partitions that keep covariance low."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When you train on mixed data, good lessons and bad lessons pull the weights in opposite directions, causing cancellation. Cross-covariance measures how much this pulling happens. The paper shows this cancellation is especially bad in sparse data areas."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper derives that the standard squared-error TD objective creates an implicit penalty (a push against certain weight changes) that is proportional to the cross-region covariance between the bootstrap target and the current value estimate. Partitioning the buffer breaks this covariance by ensuring that the target and current estimates come from aligned data, reducing the false penalty and enabling better learning in limited data regimes, because now the data is not contradicting itself."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Aligned forces learn faster",
+    "paras": [
+      "When you train on a mixed batch where half the samples say move right and half say move left, the average gradient is near zero. The weights barely move. But when you train on a single cluster where all samples say move right, the gradient is strong and unambiguous. The weights shift decisively.",
+      "Mathematically, training on one cluster maximizes a lower bound to the true objective. The paper proves this using mixture-theory: if you imagine the data as coming from a mixture of clusters (good data, bad data, mediocre data), then sampling from one cluster per update is equivalent to importance-weighting the mixture, except you avoid the noise of mixing batches. The gradient stays clean.",
+      "Additionally, the paper adds a small penalty term that directly cancels any remaining covariance within a single cluster, mopping up fine-grained conflicts that clustering alone does not catch. This is a plug-in: works with any offline RL algorithm (CQL, TD3+BC, IQL) without changing their core logic."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Batch of mixed data (good and bad regions)"
+        },
+        {
+          "t": "step",
+          "s": "Partition by gradient direction",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sample one cluster"
+        },
+        {
+          "t": "step",
+          "s": "Compute gradient (all aligned)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply covariance penalty"
+        },
+        {
+          "t": "output",
+          "s": "Strong, unambiguous weight updates"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: Weighted penalty on covariance",
+    "words": "loss = main_offline_rl_loss + lambda * sum over weights of (importance_score times covariance_within_cluster_squared)",
+    "equation": "L = L_base(phi) + lambda * sum_k F_k * Cov_k(g_prime, g)^2",
+    "symbols": [
+      ["L", "total loss to minimize"],
+      ["L_base(phi)", "the original offline RL objective (CQL, TD3, or IQL)"],
+      ["phi", "the weights being trained"],
+      ["lambda", "how strongly we penalize covariance (small, 0.01 to 0.1)"],
+      ["F_k", "importance score: how often weight k appears in the cluster"],
+      ["Cov_k(g_prime, g)", "covariance between the target gradient and current gradient within cluster"],
+      ["k", "index over clusters"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we have a cluster of 8 transitions. The target gradients are [0.5, 0.6, 0.4] and current gradients are [0.48, 0.61, 0.39].",
+        "Covariance = measure of how synchronized they are. Here they are very synchronized, so Cov ≈ 0.005 (small, good).",
+        "Penalty = lambda * F_k * Cov^2 = 0.05 * 2.0 * 0.005^2 = 0.05 * 2.0 * 0.000025 = 0.0000025 (negligible because covariance is already small).",
+        "If the two gradient vectors were opposite (bad batch mix), Cov ≈ -0.1, then Penalty = 0.05 * 2.0 * 0.01 = 0.001 (now nonzero, slowing that bad update).",
+        "Takeaway: a single clean cluster incurs almost no penalty; a mixed cluster gets penalized proportionally to its internal conflict."
+      ]
+    },
+    "note": "This equation translates the insight into practice: the penalty term is tiny for well-separated clusters but grows when gradients within a cluster still disagree, encouraging the learning algorithm to respect cluster boundaries."
+  },
+  "bars": {
+    "h2": "Offline RL returns before and after",
+    "charts": [
+      {
+        "title": "Standard mixed sampling",
+        "rows": [
+          ["Small data baseline", 32, "bad"],
+          ["Small data after training", 38, "bad"],
+          ["Test on new tasks", 35, "bad"]
+        ],
+        "note": "Gradients cancel out. Gains are minimal even with training."
+      },
+      {
+        "title": "Clustered partitions (this paper)",
+        "rows": [
+          ["Small data baseline", 32, "bad"],
+          ["Small data after training", 58, "good"],
+          ["Test on new tasks", 54, "good"]
+        ],
+        "note": "Partitioning stops cancellation. The same data teaches the policy 50% more in returns."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Clustering is noisy on tiny datasets.",
+        "html": "If data is so scarce that cluster assignments are unreliable (fewer than ~10 transitions per cluster), the method loses its benefit, because the clusters become meaningless — they do not reliably separate good from bad lessons anymore. The paper works best with at least 100 transitions per cluster."
+      },
+      {
+        "warn": true,
+        "b": "OOD data stays OOD.",
+        "html": "Partitioning stops the nudges from canceling each other, but the underlying data is still limited and sparse. In extremely OOD regimes where the robot sees something never in the saved data, the policy can still fail because no partition has examples to learn from. The method reduces conflicts within your saved data, making it teachable, but it cannot teach what is not there."
+      },
+      {
+        "warn": true,
+        "b": "Overhead if clusters are imbalanced.",
+        "html": "If most data falls into one cluster and very little into another, the method rejects most transitions. Sampling becomes inefficient. The paper uses importance weighting to handle this but it adds computational cost."
+      },
+      {
+        "b": "Works well when data has natural structure.",
+        "html": "If the data naturally separates (e.g., expert vs random vs noisy), partitioning exploits that structure so the good and bad lessons do not mix, and gains are large (up to 30%). The method improves performance across standard benchmarks in many domains because the separation holds."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple offline RL task: a 2D navigation problem where the saved data includes 50% expert trajectories (straight to the goal) and 50% random noise (uniformly wandering). Train a standard offline RL algorithm (e.g., simple conservative Q-learning) first on mixed batches, then on clustered partitions. Measure the return (distance to goal) on a held-out test set."
+    ],
+    "metric_eq": "improvement = (clustered_return - mixed_return) / mixed_return * 100%",
+    "closing": "The demo must show that the same data teaches the policy 20% to 50% more in return value when separated into clusters, proving that gradient cancellation was the bottleneck, not the data itself."
+  }
+}

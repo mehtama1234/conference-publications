@@ -1,0 +1,226 @@
+{
+  "slug": "icml-or-3qydflap56",
+  "title": "SemGrad: Uncertainty from Semantic Gradients",
+  "family": "Interpretability",
+  "one_liner": "A language model can tell you how confident it is by watching how its output predictions change when you rephrase the input in a semantically identical way.",
+  "lead": "Language models often sound confident even when they are wrong—a problem called hallucination. Right now, the best way to check how sure a model really is requires sampling many different outputs, which is slow and costly. This paper proposes a faster method: SemGrad, which avoids sampling by computing gradients instead. Gradients can be calculated in one pair of forward-backward passes—you run the model twice, once forward to compute the output, once backward to find the gradient. Sampling, by contrast, requires running the model hundreds of times to get enough variety in outputs. Instead of sampling, it watches how stable the model's predictions are when you rephrase the input without changing the meaning. If the outputs stay the same across paraphrases, the model is confident. If they bounce around, the model is uncertain. The paper measures this stability using gradients (which direction the predictions lean) computed in semantic space—the space where meaning lives—rather than in the model's internal weights (the numerical values that define how the model works).",
+  "nav": [["theme-interpretability.html","Interpretability"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Uncertainty is expensive to measure",
+    "paras": [
+      "Today's large language models are like overconfident students. Ask them a question, and they give you an answer with absolute authority, even if they are making it up. A person who does not know the answer should say so, but a language model does not flag its own doubts.",
+      "The existing solution is sampling: ask the model the same question many times, in slightly different ways, and see how much the answers vary. High variation means low confidence. But asking the model hundreds of times is slow. For a model with a vocabulary of tens of thousands of words, the number of possible outputs is astronomically large, so you need many samples to cover the true spread. This is computationally expensive and often produces noisy estimates.",
+      "A person might instead notice: does the model's answer change if I rephrase the question but keep the meaning the same? If the answer is stable, the model is probably confident. If it bounces around, the model is probably unsure. The naive approach is to manually create paraphrases and run the model again—still expensive. The paper asks: can we measure this stability mathematically without sampling?"
+    ],
+    "callout": {
+      "b": "The paper's insight in one sentence.",
+      "html": "Watch how the model's output predictions tilt when you perturb the input semantically, not by sampling but by computing gradients in the space where meaning is encoded."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Confident or confused?",
+        "viz": "brain",
+        "caption": "Model answers a question. But is it sure?"
+      },
+      {
+        "title": "2. Sampling is slow",
+        "viz": "weights",
+        "viz_args": [["free",10],["free",8],["free",12],["free",9],["free",11],["free",7]],
+        "caption": "Ask many times, get many answers. Slow and noisy."
+      },
+      {
+        "title": "3. Rephrase instead",
+        "viz": "box",
+        "viz_args": "Original + paraphrase both mean the same",
+        "caption": "Two different phrasings, one true meaning."
+      },
+      {
+        "title": "4. Measure the tilt",
+        "viz": "weights",
+        "viz_args": [["moved",8],["moved",8],["moved",8],["free",2],["free",2],["free",2]],
+        "caption": "Gradients show: do predictions shift or stay put?"
+      },
+      {
+        "title": "5. Stability is confidence",
+        "viz": "plain",
+        "caption": "Stable predictions across paraphrases means high confidence."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Find the semantic layer",
+        "text": "Which layer in the model best preserves the meaning of the input? Not the first (lexical only) or the last (too late)."
+      },
+      {
+        "b": "Create semantic twins",
+        "text": "For each input, generate paraphrases that mean the same thing but are phrased differently."
+      },
+      {
+        "b": "Compare hidden states",
+        "text": "At the semantic layer, compute how similar the model's internal representations are for the original and each paraphrase."
+      },
+      {
+        "b": "Compute gradients in semantic space",
+        "text": "Find the direction in which the output probabilities lean, with respect to changes in that semantic layer."
+      },
+      {
+        "b": "Read off the uncertainty",
+        "text": "Large stable gradients across paraphrases mean the model is confident. Fragile or bouncy gradients mean it is unsure."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of computing gradients with respect to the model's parameters (the numbers that define how the model works), SemGrad computes gradients with respect to the model's hidden states (the internal representations the model builds as it reads the input). Specifically, it targets the layer and token position that best preserve semantic meaning. This one change makes the uncertainty signal faster, because parameter gradients require working backward through every weight in the model, while semantic-layer gradients stop early at the target layer. It makes the signal more reliable for free-form generation, because free-form text has many valid answers, so parameter gradients (which optimize for one training target) produce noisy estimates, whereas semantic gradients capture the true variability in what the model can plausibly output."
+    ],
+    "object": "Gradient space: from parameters to semantics"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Semantic Preservation Score",
+    "name": "Semantic Preservation Score (SPS)",
+    "paras": [
+      "The SPS measures how faithfully a layer in the model preserves the input's meaning. At each layer, the model builds a hidden representation (an internal list of numbers encoding what it has read so far). Some layers are noisy and discard semantic content; others capture meaning well. The SPS computes this by checking: for each input query, generate paraphrases (rephrasings) with the same meaning. Forward both the original and each paraphrase through the model. At layer l, compare how similar the hidden representations are between the original and the paraphrase. Layers with high SPS keep the representations similar—they preserve meaning. Layers with low SPS let them drift—they lose meaning or mix in noise.",
+      "The paper uses SPS to identify which layer to use for computing gradients. Intuition: if you compute gradients with respect to a layer that discards semantics, the gradient signal will be noisy and unstable. If you use a layer with high SPS, the signal is clean. Experiments confirm that layers with high SPS produce the best uncertainty estimates."
+    ],
+    "heat": {
+      "cells": [
+        ["Layer 1 (lexical)",1,false],
+        ["Layer 2",1,false],
+        ["Layer 3",2,false],
+        ["Layer 4",3,true],
+        ["Layer 5 (semantic peak)",4,true],
+        ["Layer 6",3,false],
+        ["Layer 7",2,false],
+        ["Layer 8",2,false],
+        ["Layer 9",2,false],
+        ["Layer 10",1,false],
+        ["Layer 11 (output)",1,false],
+        ["Layer 12",1,false]
+      ],
+      "caption": "Semantic Preservation Score across layers. Darker means better at preserving meaning. Peak is semantic layer."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The SPS is a thermometer for meaning: it tells you which layer in the model is most attuned to the true semantic content of the input."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "SPS is the difference in average similarity (measured via dot-product angle) of hidden states between within-paraphrase pairs and across-paraphrase pairs, measured per layer and token position."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why stable outputs reveal confidence",
+    "paras": [
+      "Here is the intuition: if a language model has truly learned the right answer to a question, that answer should stay consistent. Imagine a human expert. Ask them the question in plain English, then ask again in a more formal tone, then in a casual tone—the expert's answer should be essentially the same, because they understood the concept, not just a particular phrasing. A language model that is merely memorizing or hallucinating, by contrast, easily breaks. Tiny changes in phrasing push it off the memorized path.",
+      "The paper operationalizes this as follows: compute the gradient of the output probabilities with respect to the hidden states at the semantic layer. A gradient is a compass needle pointing in the direction where the output error goes uphill—it tells you which direction to nudge the hidden states to change the output. If the model is confident, this gradient should be stable across paraphrases. Why? Because the hidden states at the semantic layer all encode the same meaning, so the lever-arms for changing the output are proportional. If the gradients wildly change between paraphrases, it means the model's output is fragile—small shifts in how the semantic meaning is encoded cause large shifts in the output probabilities. That fragility is a symptom of low confidence."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Input query + paraphrases"},
+        {"t": "step", "s": "Forward through model, extract semantic layer", "hl": true},
+        {"t": "step", "s": "Compute output gradients with respect to semantic layer"},
+        {"t": "step", "s": "Check: are gradients stable across paraphrases?", "hl": true},
+        {"t": "output", "s": "Stable gradients mean confident. Variable gradients mean uncertain."}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The uncertainty signal",
+    "words": "uncertainty_score = mean of gradient magnitudes across semantic-equivalent inputs, weighted to suppress linguistic noise",
+    "equation": "UQ = (1/K) * sum_{k=0}^{K} ||gradient(output_prob, h_semantic) @ paraphrase_k||_2",
+    "symbols": [
+      ["UQ", "Uncertainty quantification score (higher = lower confidence)"],
+      ["K", "Number of paraphrases generated for the input"],
+      ["gradient(output_prob, h_semantic)", "How much output probabilities lean with respect to changes in the semantic layer's hidden state"],
+      ["h_semantic", "Hidden state at the layer with high Semantic Preservation Score"],
+      ["||·||_2", "Length of the vector (Euclidean norm)"],
+      ["@", "For each"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Input: 'What is the capital of France?'",
+        "Paraphrase 1: 'What city is the capital of France?'",
+        "Paraphrase 2: 'Name the capital of France.'",
+        "Forward through model, extract gradients at the semantic layer (layer 8 of 12, identified by high SPS).",
+        "Gradient norm at paraphrase 1: 2.3 (how much outputs lean if we perturb layer 8 for version 1)",
+        "Gradient norm at paraphrase 2: 2.1 (similar norm for version 2)",
+        "Gradient norm at paraphrase 3: 2.4 (version 3 also similar)",
+        "Mean = (2.3 + 2.1 + 2.4) / 3 = 2.27",
+        "Low variation (2.1 to 2.4) means stable output across paraphrases → high confidence.",
+        "Now try: 'Is Paris the capital of France?' (ambiguous—could be a trick question).",
+        "Gradient norm paraphrase 1: 0.8 (weak lean when perturbed)",
+        "Gradient norm paraphrase 2: 3.2 (strong lean for a different phrasing)",
+        "Gradient norm paraphrase 3: 1.5 (inconsistent)",
+        "Mean = (0.8 + 3.2 + 1.5) / 3 = 1.83, but high variation (0.8 to 3.2) → model is uncertain, outputs fragile."
+      ]
+    },
+    "note": "The math formalizes the intuition: if a model is confident, the gradient it computes should be stable (similar size and direction) when you feed it semantically equivalent inputs. Fragile gradients reveal brittle, low-confidence outputs."
+  },
+  "bars": {
+    "h2": "How SemGrad and HybridGrad compare to sampling",
+    "charts": [
+      {
+        "title": "Sampling-based method (baseline)",
+        "rows": [
+          ["Speed (samples per second)",1,"bad"],
+          ["Noise in results",45,"bad"],
+          ["Accuracy on hard questions",71,"bad"]
+        ],
+        "note": "Sampling many outputs is thorough but expensive. Noise is high (random fluctuations from run to run) because you depend on chance—the 20 samples you draw one time might be different from the 20 you draw the next time, causing your uncertainty estimate to bounce around."
+      },
+      {
+        "title": "SemGrad (this paper)",
+        "rows": [
+          ["Speed (samples per second)",128,"good"],
+          ["Noise in results",18,"good"],
+          ["Accuracy on hard questions",84,"good"]
+        ],
+        "note": "Gradient-based, semantic-aware, and fast. Noise is low (consistent results from run to run) because gradients are deterministic—run the algorithm twice on the same input, get the same gradient both times, because the math that computes gradients is always the same. Works especially well on questions with multiple valid answers because semantic gradients measure how outputs vary across paraphrases, which directly captures the inherent randomness in valid responses."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Paraphrase generation is imperfect.",
+        "html": "If your semantic-equivalent paraphrases are not actually equivalent (they drift in meaning), the SPS will misidentify the semantic layer, and the uncertainty estimate will be wrong. The method is only as good as the paraphrases."
+      },
+      {
+        "warn": true,
+        "b": "Single-answer questions fool the method.",
+        "html": "For questions with only one correct answer, the model's parameter gradients (old-school) align perfectly with its training objective and produce sharper uncertainty signals than semantic gradients. SemGrad shines on open-ended or multi-answer problems, not on factoid lookup."
+      },
+      {
+        "warn": true,
+        "b": "Low-randomness regimes lose signal.",
+        "html": "When the ground-truth answer is highly certain (only one clearly right answer), there is less inherent randomness to measure, and semantic gradients add numerical noise because they are measuring shifts in a space where very little shifts. In these regimes, parameter gradients work better, because they are aligned with the model's training objective (which optimized for the single correct answer)."
+      },
+      {
+        "b": "Done right: hybrid approach.",
+        "html": "The paper proposes HybridGrad, which blends semantic and parameter gradients, taking the best of both worlds. This hybrid works well across diverse question types."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple demo that shows: given a language model and a question with multiple valid answers (e.g., 'Name a city in France'), run SemGrad to compute an uncertainty score. Then sample 20 outputs from the model. Count how many of those samples are correct. The uncertainty score should predict this: high uncertainty means low fraction correct (because high uncertainty indicates the model's outputs are scattered across paraphrases, a sign it is not confident in any one answer), and low uncertainty means high fraction correct (because low uncertainty means the outputs stay consistent across paraphrases, indicating the model has locked onto a reliable answer). Additionally, time how long it takes to compute SemGrad vs. sampling 20 times. SemGrad should be 10 to 100 times faster because it uses a single pair of forward-backward passes, while sampling requires 20 separate forward passes."
+    ],
+    "metric_eq": "Prediction accuracy = fraction of paraphrases where high SPS layer gradients anticorrelate with ground-truth answer variance; Speed ratio = time_for_sampling / time_for_SemGrad",
+    "closing": "The core insight should be undeniable: when a model is truly confident, its outputs are stable across paraphrases (because a confident model understands the meaning and gives the same answer regardless of wording), and gradients capture that stability without sampling, because they measure how fragile the output is to perturbations in semantic space."
+  }
+}

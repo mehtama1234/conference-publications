@@ -1,0 +1,239 @@
+{
+  "slug": "iclr-or-rprnadjrlx",
+  "title": "Structured Policy Initialization (SPIN) for Offline RL",
+  "family": "Reinforcement Learning",
+  "one_liner": "Pre-learn what valid action combinations look like, then train the policy only to choose among them, not to invent new ones.",
+  "lead": "When a robot picks up a cup with multiple moving joints at once (shoulder, elbow, wrist), moving them independently often creates twisted, impossible poses. This paper shows how to first train an assistant to understand the shape of physically plausible combinations (the set of valid poses where all joints work together), then train the main controller to pick good combinations from that safe set, rather than letting it roam freely and discover validity by trial and error.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why independent sub-actions fail in large discrete spaces",
+    "paras": [
+      "A robot arm has many joints. When you need to pick one action for the shoulder, one for the elbow, and one for the wrist all at once, the total number of possible combinations grows explosively: 10 choices for shoulder, 10 for elbow, 10 for wrist gives 1000 combinations, and it only gets worse with more joints. A training algorithm has to learn which combinations are physically sensible (the shoulder doesn\\'t twist backward, the elbow doesn\\'t go through the table).",
+      "The naive approach: train a policy that picks each joint action independently. But this breaks immediately. The wrist might extend while the elbow is still bent, creating an impossible pose. Or the shoulder might spin while the arm is extended too far, hitting the workspace boundary. The policy never learns because valid and invalid poses look randomly scattered in the action space—there\\'s no pattern to grab onto."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "SPIN first learns the shape of the space of valid combinations, then trains only how to navigate inside it."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: independent choices explode",
+        "viz": "weights",
+        "viz_args": [["free", 10], ["free", 8], ["free", 7], ["free", 9], ["free", 6]],
+        "caption": "Each joint picks independently; most combinations are invalid."
+      },
+      {
+        "title": "2. Training fails to find the pattern",
+        "viz": "box",
+        "viz_args": "Scattered valid poses (5%), 95% invalid twists.",
+        "caption": "No structure for the algorithm to learn from."
+      },
+      {
+        "title": "3. SPIN pre-trains an Action Structure Model",
+        "viz": "weights",
+        "viz_args": [["hot", 10], ["hot", 9], ["warm", 7], ["hot", 8], ["hot", 7]],
+        "caption": "ASM learns which sub-action pairs and triples co-occur."
+      },
+      {
+        "title": "4. ASM captures the manifold of valid actions",
+        "viz": "box",
+        "viz_args": "Manifold: valid combos live on a thin surface.",
+        "caption": "Now there\\'s a clear structure to follow."
+      },
+      {
+        "title": "5. Policy learns control by navigating the surface",
+        "viz": "weights",
+        "viz_args": [["moved", 8], ["moved", 7], ["moved", 6], ["moved", 9], ["moved", 8]],
+        "caption": "Policy picks which valid combo, not whether it\\'s valid."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Stage 1: Mask and predict sub-actions",
+        "text": "ASM trains on old trajectories: hide some sub-actions, predict them from others."
+      },
+      {
+        "b": "Weigh each visible sub-action against others",
+        "text": "A model reads all visible sub-actions, computes how strongly each one influences the prediction, then predicts the hidden one."
+      },
+      {
+        "b": "Learn co-occurrence structure",
+        "text": "Over many examples, the model learns which sub-actions go together."
+      },
+      {
+        "b": "Freeze the structure, train the policy",
+        "text": "Use the learned encoder; train a lightweight head to pick actions from the surface."
+      },
+      {
+        "b": "Result: faster convergence, no invalid poses",
+        "text": "Policy learns which valid pose is good, not how to make poses valid."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": [
+      "Instead of letting the policy learn the full space of 1000+ combinations, SPIN constrains it to learn only from the low-dimensional manifold of co-occurring sub-actions. The policy\\'s output (its weights that decide which action to pick) now operates inside the learned representation, not in the raw action space."
+    ],
+    "object": "The action representation"
+  },
+  "hidden": {
+    "h2": "The manifold of valid joint actions",
+    "name": "The low-dimensional surface where valid combinations live",
+    "paras": [
+      "When many sub-actions must coordinate (shoulder, elbow, wrist), the set of valid combinations—ones that make physical sense and match the environment state—does not fill the whole 1000-combination space. Instead, they live on a lower-dimensional surface, a thin sheet hidden inside a high-dimensional space. Think of it as the surface of a sheet of paper: even though the room is three-dimensional, the paper only spans a 2D surface inside it. An elbow angle of 45 degrees pairs with only certain wrist angles, never random ones.",
+      "The ASM learns to measure this surface by predicting masked sub-actions. If it sees many examples where shoulder and elbow always move together, it infers they are tied; the model learns to weight how much one sub-action influences the prediction of another. The paper shows that even 20 pre-training epochs—a tiny amount of data—are enough to build a useful map of the surface."
+    ],
+    "heat": {
+      "cells": [
+        ["s1 alone", 1, false],
+        ["s1+s2 together", 4, true],
+        ["s2 alone", 1, false],
+        ["s1+s2+s3 triangle", 4, true],
+        ["s3 alone", 1, false],
+        ["s1+s3 rare", 2, false],
+        ["s2+s3 sometimes", 3, false],
+        ["all four moving", 4, true],
+        ["s1 inverse", 1, false],
+        ["s2+s4 conflict", 1, false],
+        ["rotation locked", 4, true],
+        ["s4 independent", 2, false]
+      ],
+      "caption": "Darker: sub-actions that co-occur in valid poses; lighter: isolated or conflicting moves."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Imagine you\\'re arranging toys in a box. Some toys always face the same direction when they\\'re both in the box (chairs and table). Some never fit together no matter how you orient them (two big dolls). The manifold is the set of all arrangements that actually fit together."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The manifold is the set of valid joint actions that appear in the offline data, conditioned on the state. ASM learns a compressed representation of it via masked conditional modeling, the same way a language model learns patterns in text."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why freezing the structure and training the policy works",
+    "paras": [
+      "The paper\\'s insight is a division of labor. The manifold has two properties: which sub-actions are physically coherent together (structure), and which of those coherent combos are good for the task at hand (control). Learning both at once—the standard approach—forces the policy to waste training time figuring out what\\'s valid while also figuring out what\\'s good. By learning structure first in Stage 1 (on any offline data, even generic trajectories), Stage 2 only needs to learn control. When the policy is trained on the frozen structure, it only explores directions that move inside the safe zone; there\\'s no wasted effort on invalid poses.",
+      "Faster convergence follows because fewer hypotheses need testing. In the raw 1000-combination space, the policy might try shoulder=left with wrist=extended, a pose that never works; it learns nothing. With ASM frozen, the policy only proposes combos that the pre-training has flagged as plausible. Each trial gives stronger signal because the training algorithm does not waste updates on invalid poses; every update nudges the policy on a valid combo, so feedback is clean and directional. The paper shows that after 20 ASM epochs, downstream policy training reaches SOTA performance, and total wall-clock time drops by up to 12.8 times."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Offline trajectories with multi-joint actions"
+        },
+        {
+          "t": "step",
+          "s": "ASM masks and predicts sub-actions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Learn which sub-actions co-occur"
+        },
+        {
+          "t": "step",
+          "s": "Freeze ASM encoder"
+        },
+        {
+          "t": "step",
+          "s": "Train policy head on the frozen surface",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Fast, stable control policy with zero invalid poses"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The masked prediction loss",
+    "words": "For each masked sub-action, cross-entropy between the prediction and the true label, summed over all masked positions.",
+    "equation": "L_ASM = sum over i in M of CrossEntropy(f_i(H_i), a_i)",
+    "symbols": [
+      ["i", "the index of a sub-action (1=shoulder, 2=elbow, etc.)"],
+      ["M", "the set of sub-actions that were masked out during training"],
+      ["H_i", "the output embedding for slot i from the ASM transformer"],
+      ["f_i", "a slot-specific linear layer that turns the embedding into scores over choices"],
+      ["a_i", "the true sub-action at slot i"],
+      ["CrossEntropy", "a measure of how far the predicted distribution is from the true label"]
+    ],
+    "worked": {
+      "title": "Tiny worked example: predicting masked shoulder action",
+      "lines": [
+        "Scenario: a 4-joint arm, one trajectory. Elbow=45 deg, wrist=90 deg, grip=open are visible. Shoulder is masked. ASM predicts probabilities over shoulder angles: front=0.7, side=0.2, back=0.1.",
+        "True label: shoulder=front (1.0).",
+        "CrossEntropy loss: -log(0.7) = 0.36 (prediction was confident and correct, small loss).",
+        "Compare: if the model guessed shoulder=back (0.1), loss = -log(0.1) = 2.3 (wrong guess, large penalty).",
+        "Over 1000 trajectories with random masking, the model learns: when elbow=45, wrist=90, grip=open appear together, shoulder is almost always front. That co-occurrence pattern is the manifold."
+      ]
+    },
+    "note": "The loss measures how well the ASM predicts what it can\\'t see, which forces it to learn the structure of what it can see."
+  },
+  "bars": {
+    "h2": "Wall-clock convergence time and final performance",
+    "charts": [
+      {
+        "title": "Independent sub-action policy (baseline)",
+        "rows": [
+          ["Time to 95% performance", 260, "bad"],
+          ["Final return on new task", 78, "good"],
+          ["Wall-clock minutes", 250, "bad"]
+        ],
+        "note": "Slow convergence because the policy wastes updates on invalid poses; experiments show average 250+ minutes on medium-expert datasets."
+      },
+      {
+        "title": "SPIN (this paper)",
+        "rows": [
+          ["Time to 95% performance", 62, "good"],
+          ["Final return on new task", 89, "good"],
+          ["Wall-clock minutes", 62, "good"]
+        ],
+        "note": "Paper reports 12.8x speedup and up to 39% higher final return; numbers here are illustrative but reflect the published scale (62 min vs 250+ min on medium-expert)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "ASM pre-training on the wrong data",
+        "html": "If the ASM is trained on only expert trajectories, it learns a narrow manifold—only the best sub-action combinations. When the downstream policy tries to explore, it is blocked by what the ASM considers invalid. Pre-train on a diverse offline dataset (expert + medium + random) to capture the full breadth of plausible actions."
+      },
+      {
+        "warn": true,
+        "b": "Not enough ASM pre-training epochs",
+        "html": "The paper shows that 20 epochs is a turning point; below that, the manifold is noisy and the policy still struggles. Too few epochs leaves the surface incomplete; the policy runs into hard edges."
+      },
+      {
+        "warn": true,
+        "b": "Incompatibility with some offline RL methods",
+        "html": "Some offline RL methods explicitly penalize actions far from the training set; SPIN restricts actions to the learned manifold, a different form of constraint. The two can conflict. SPIN works with algorithms like IQL (implicit Q-learning) that weight by advantage, not penalty."
+      },
+      {
+        "b": "Done right: diverse pre-training data + enough epochs + compatible offline RL method",
+        "html": "When all three align, SPIN converges 10x faster because the manifold is well-formed, complete, and the downstream RL algorithm can actually use it without fighting against conflicting constraints. Higher returns follow because the policy never wastes updates on invalid poses; it only learns from clean signal on the valid surface."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a multi-joint task (e.g., an arm reaching a target with shoulder, elbow, wrist all moving). (1) Train a baseline policy that picks actions independently. (2) Pre-train an ASM on a small offline dataset of random or medium trajectories for 20 epochs, then freeze it. (3) Train a policy using the frozen ASM for the same number of downstream steps. Measure wall-clock time and final return. (4) Plot the invalid-pose rate over time: how many of the baseline\\'s actions violate joint limits? (It should be high; SPIN\\'s should be zero.)"
+    ],
+    "metric_eq": "Speedup = minutes_baseline / minutes_SPIN; Return_diff = return_SPIN - return_baseline; Invalid_ratio = fraction of baseline actions that violate constraints",
+    "closing": "SPIN should show near-zero invalid poses, reach 95% of final performance in a fraction of the time, and do so without any model-based simulation or oracle feedback. The manifold is learned purely from structure in the offline data."
+  }
+}

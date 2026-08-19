@@ -1,0 +1,218 @@
+{
+  "slug": "icml-or-lvksvubxc9",
+  "title": "LoRA-DA: Data-Aware Initialization for Low-Rank Adaptation",
+  "family": "Efficiency & Systems",
+  "one_liner": "Start LoRA with the statistically optimal guess based on target data, so fine-tuning lands in a good region fast.",
+  "lead": "When you adapt a large pretrained model to a new task with LoRA (a frugal way to add learnable components), where you place those components at the start matters hugely. Most methods pick them blindly, or only look at immediate gradient directions. This paper says: use target-domain data to calculate the mathematically best starting point, one that accounts for both the direction and the uncertainty in your data. This works because it lands you closer to the true task-specific optimum in the first place, so fewer training steps are needed to reach the target accuracy.",
+  "nav": [["theme-efficiency-systems.html","Efficiency & Systems"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "LoRA initialization: luck or theory?",
+    "paras": [
+      "LoRA (Low-Rank Adaptation) is a common trick: instead of retraining all weights of a giant model for a new task, you insert small learnable matrices alongside the frozen ones. But where do you start those new matrices? Most methods pick random or zero. Others look at the gradient direction from a single step on a few examples. Either way, you might start in a bad valley—one that takes many training steps to escape.",
+      "A beginner would try: compute one gradient step on the target data and use that to guide initialization. But this misses two things: first, it only sees the immediate slope, not the full task-specific terrain of loss valleys and hills. Second, it ignores the noise in your data—luck plays a role in which examples you sampled, and that uncertainty should shape where you park the weights."
+    ],
+    "callout": {
+      "b": "The paper's move:",
+      "html": "Use target-domain data to estimate the mathematically optimal initialization by accounting for both the direction of steepest descent and the variance from random sampling."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The cold start",
+        "viz": "weights",
+        "viz_args": [["free",20],["free",22],["free",18],["free",21],["free",19]],
+        "caption": "All LoRA weights begin at zero or random. No signal from the task."
+      },
+      {
+        "title": "2. The beginner's fix",
+        "viz": "weights",
+        "viz_args": [["moved",15],["moved",18],["moved",12],["moved",20],["moved",16]],
+        "caption": "One gradient step nudges weights. But one step misses the full terrain."
+      },
+      {
+        "title": "3. Measuring the task landscape",
+        "viz": "box",
+        "viz_args": "A sample of target data → compute gradient and Fisher curvature",
+        "caption": "From target examples, extract two clues: which way to move, how uncertain."
+      },
+      {
+        "title": "4. Optimal placement",
+        "viz": "weights",
+        "viz_args": [["moved",24],["moved",19],["moved",26],["moved",21],["moved",25]],
+        "caption": "Weights land farther along the gradient, weighted by Fisher curvature."
+      },
+      {
+        "title": "5. Faster descent",
+        "viz": "box",
+        "viz_args": "Training steps: fewer to reach target accuracy",
+        "caption": "Starting from the right spot, training converges 15 to 30 percent faster."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "1. Grab target data",
+        "text": "Sample a small batch from the task you are adapting to."
+      },
+      {
+        "b": "2. Compute the gradient",
+        "text": "Measure which direction on the weight terrain points downhill on the target loss."
+      },
+      {
+        "b": "3. Estimate the curvature",
+        "text": "Use Fisher information (a fast approximation called K-FAC) to measure how sensitive the loss is to tiny weight changes in each direction."
+      },
+      {
+        "b": "4. Account for sampling noise",
+        "text": "Build the variance term: different data batches will give slightly different gradients, so uncertainty matters."
+      },
+      {
+        "b": "5. Solve for best start",
+        "text": "Set LoRA weights to the spot that minimizes combined expected error from both direction and noise."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how you initialize LoRA's trainable matrices at the very start—before any training on the target task. Instead of picking them at random or from a shallow one-step gradient, it computes them from target-domain statistics (gradient direction and curvature structure)."
+    ],
+    "object": "LoRA initial matrices"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Fisher information",
+    "name": "Fisher curvature per weight",
+    "paras": [
+      "Fisher information measures how steeply the loss goes up and down as you change each weight. If a weight has high Fisher, the ground is steep there: the loss curve is pitched at a sharp angle, so even tiny nudges of that weight cause large swings in the loss. This means the model relies critically on that weight to control the loss. In such a steep place, waiting for training to gradually explore the terrain wastes steps; you want to start close to where that weight will end up and move boldly from the beginning in that direction. If it is flat (low Fisher), the slope is gentle so that weight barely affects the loss, the model does not rely on it, and you barely move there to avoid wasting the model's limited learning power on irrelevant knobs. The paper estimates Fisher from the target data using K-FAC, a fast Kronecker-based approximation that breaks the full curvature structure into smaller, faster pieces so it runs in time proportional to the data size, not the square of the model size.",
+      "The method uses Fisher to weight the initialization: a weight with high Fisher gets moved farther along the gradient (because the model pays attention to it), while a low-Fisher weight stays closer to zero (because the model does not care much). This is how you avoid wasting the model's careful attention on directions that do not matter."
+    ],
+    "heat": {
+      "cells": [["w1",4,true],["w2",2,false],["w3",4,true],["w4",1,false],["w5",3,true],["w6",2,false],["w7",4,true],["w8",1,false],["w9",3,false],["w10",2,false],["w11",4,true],["w12",1,false]],
+      "caption": "Dark means high Fisher, model is sensitive there. Light means low Fisher, model does not care. Marked weights get strong initialization."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Fisher information is the model's attentiveness map: a weight with high Fisher is like a dial the model pays close attention to, while a low-Fisher weight is a dial nobody checks."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Fisher (the curvature grid, a table of numbers) is the expected outer product of gradients, approximated as a Kronecker product (a fast way to combine layer-input covariances and reverse-pass gradient covariances) via K-FAC."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the path from target data to smart weights",
+    "paras": [
+      "The core idea: pretrain put the model in a good neighbourhood, but there is still a target-specific sweet spot inside that neighbourhood. You want to initialize LoRA to point toward that spot. The paper frames it as a math problem: minimize the expected error if you fine-tune from your initialization.",
+      "That error has two parts. First, bias: how far are you from the true target optimum in the direction that matters? The gradient tells you the direction, but not all directions are equal—Fisher curvature tells you which directions the model actually responds to. So instead of following the raw gradient equally, you follow it scaled by Fisher: big steps on high-Fisher dimensions (where the model is awake) and tiny steps on low-Fisher dimensions (where it is asleep).",
+      "Second, variance: your sample of target data is random, so every time you resample, the gradient shifts a tiny bit. The Fisher information also measures that noise—it tells you how much your gradient estimate should wiggle around the truth. Accounting for this variance in your initialization is what separates LoRA-DA from older one-step methods that only see the gradient but not the noise."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Target-domain data sample"
+        },
+        {
+          "t": "step",
+          "s": "Compute gradient direction",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Estimate Fisher curvature via K-FAC"
+        },
+        {
+          "t": "step",
+          "s": "Blend: gradient scaled by Fisher, plus variance term"
+        },
+        {
+          "t": "output",
+          "s": "Optimal LoRA initialization"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: optimal initialization in closed form",
+    "words": "LoRA initial matrix = negative gradient scaled by inverse Fisher, plus a correction for sampling variance. In the scalar case: A_optimal = G / (F + variance_scale), where G is gradient, F is Fisher curvature, and variance_scale accounts for noise.",
+    "equation": "A_DA = - F^{-1} * (G + V)",
+    "symbols": [
+      ["A_DA","optimal LoRA initialization matrix"],
+      ["F","Fisher information matrix (curvature at pretrain point)"],
+      ["G","gradient of target loss at pretrain point"],
+      ["V","variance term, scales sampling randomity"]
+    ],
+    "worked": {
+      "title": "Tiny worked example",
+      "lines": [
+        "Suppose one LoRA weight: gradient G=0.4 (points downhill), Fisher F=2.0 (model is sensitive).",
+        "Pure gradient method: initialize to 0.4 (move one step along gradient).",
+        "LoRA-DA: rescale using Fisher. If F=2.0, init = 0.4/2.0 = 0.2 in curvature-scaled space.",
+        "This means: a steep slope (high Fisher 2.0) makes you move less boldly (0.2 instead of 0.4).",
+        "If variance term adds 0.05 uncertainty: final init = 0.2 + 0.05 = 0.25. More conservative than raw gradient 0.4, but not zero.",
+        "Training finds that 0.25 gets to target task accuracy in 150 steps instead of 200 (25 percent faster)."
+      ]
+    },
+    "note": "Dividing gradient by Fisher (instead of following gradient blindly) redistributes credit: high-Fisher weights move boldly, low-Fisher weights barely move, and you account for random fluctuations in the data."
+  },
+  "bars": {
+    "h2": "Convergence speed: initialization matters",
+    "charts": [
+      {
+        "title": "Random or zero init",
+        "rows": [["Step 50",18,"bad"],["Step 150",48,"mixed"],["Step 300",72,"good"]],
+        "note": "Slow early progress; exploring the terrain takes time."
+      },
+      {
+        "title": "One-step gradient init",
+        "rows": [["Step 50",32,"mixed"],["Step 150",62,"good"],["Step 300",79,"good"]],
+        "note": "Faster than random because the gradient gives you a signal, but lacks curvature awareness so weights move equally regardless of how much the model cares about them."
+      },
+      {
+        "title": "LoRA-DA (Fisher-aware init)",
+        "rows": [["Step 50",42,"good"],["Step 150",71,"good"],["Step 300",82,"good"]],
+        "note": "Lands in the sweet spot fast; every step counts."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Mismatch between target data and actual task.",
+        "html": "If your target-data sample is tiny or not representative (e.g., only easy examples), Fisher and gradient will be noisy. Initialization will miss the true optimum. Solution: use a diverse, reasonably-sized batch."
+      },
+      {
+        "warn": true,
+        "b": "Fisher singularity on tiny models.",
+        "html": "On very small layers or with degenerate data, Fisher can become non-invertible. K-FAC approximation may fail. Solution: add regularization or skip LoRA-DA for tiny layers."
+      },
+      {
+        "warn": true,
+        "b": "Overhead cost on huge models.",
+        "html": "Computing Fisher via K-FAC scales with layer size. On huge models with billions of weights, the initialization cost can become noticeable. Paper shows it is small but not free."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use a diverse target-domain batch (typically 100-500 examples), apply K-FAC Fisher estimation once, initialize LoRA, and train normally. The upfront cost pays back in fewer training steps."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small fine-tuning loop on any dataset (GSM8K math questions, or a classification task like CIFAR). Start with three initialization methods: random, one-step gradient, and LoRA-DA with Fisher. Train LoRA for a fixed number of steps (say 300) on each. Plot loss and accuracy curves to show LoRA-DA reaches target accuracy fastest."
+    ],
+    "metric_eq": "convergence_speedup = (steps_to_80_percent_accuracy_baseline) / (steps_to_80_percent_accuracy_DA)",
+    "closing": "The demo must show that LoRA-DA reaches the same accuracy in materially fewer training steps—typically 20 to 30 percent faster on the first few hundred steps, because the initialization is closer to the true target optimum so fewer corrective steps are needed."
+  }
+}

@@ -1,0 +1,239 @@
+{
+  "slug": "icml-or-cvm6pcgops",
+  "title": "Fixing Vision-Language Models for Compressed Images",
+  "family": "Computer Vision",
+  "one_liner": "When images are squashed to save bandwidth, vision-language models fail not because of lost detail, but because they never learned to handle squashed images—and you can fix that part with a lightweight adapter.",
+  "lead": "Vision-language models (systems that read text and images together) work great on pristine, full-size images. But in the real world, images get compressed to save bandwidth. A compressed image loses detail irreversibly, but it also looks distorted in ways the model has never seen during training. This paper asks: which part of the failure can we fix?",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Vision-language models hit two walls with compressed images",
+    "paras": [
+      "A vision-language model reads an image and text together to answer questions or describe what it sees. It learns on clean, high-quality images. In the real world, images get compressed to fit through internet pipes. Compression reduces file size by throwing away detail and introducing visible artifacts—blurry edges, color banding, blocky patterns.",
+      "When you show a compressed image to a model trained on clean images, two things go wrong. First: the model truly cannot see details that were deleted by compression. Second: the compression artifacts (the blotchy patterns) look like nothing in the model's training data, so the model is confused and makes bad guesses even where detail still exists—because its internal weights were tuned by millions of examples of clean images, so when it encounters a new pattern (blocky JPEG artifacts), its computations produce confidence scores in the wrong places. A beginner might think: train on more detail-preserving compression codecs. But the real wall is that the model has no experience with any distorted images at all."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Add a lightweight adapter that teaches the model which codec and bitrate created each compressed image, so it can compensate for that specific distortion pattern."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Clean world",
+        "viz": "brain",
+        "caption": "Model trained on pristine images, bright text, sharp edges."
+      },
+      {
+        "title": "2. Compression hits",
+        "viz": "box",
+        "viz_args": "JPEG codec + bitrate level 2",
+        "caption": "Image squashed to save bandwidth. Detail erased. Artifacts born."
+      },
+      {
+        "title": "3. Model sees artifacts it never learned",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["free", 20], ["free", 15], ["free", 25], ["free", 10], ["warm", 18], ["free", 22], ["free", 12], ["free", 30], ["free", 14], ["warm", 16], ["free", 20]],
+        "caption": "Blotchy patterns confuse the encoder. Confidence drops."
+      },
+      {
+        "title": "4. Adapter injects codec signal",
+        "viz": "box",
+        "viz_args": "Codec ID + bitrate -> embedding -> merged with image features",
+        "caption": "Tells the model exactly what kind of squashing happened."
+      },
+      {
+        "title": "5. Model compensates and recovers",
+        "viz": "weights",
+        "viz_args": [["moved", 52], ["moved", 35], ["moved", 38], ["moved", 42], ["moved", 28], ["moved", 45], ["moved", 33], ["moved", 41], ["moved", 35], ["moved", 39], ["moved", 44], ["moved", 37]],
+        "caption": "Encoder learns to decode the artifacts correctly."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Identify the codec",
+        "text": "Use one-hot encoding to label which compression method and bitrate level created the image."
+      },
+      {
+        "b": "Embed the codec signal",
+        "text": "Convert the codec label into a list of numbers via an embedding layer (a small lookup table that turns categories into lists of numbers), same as how text is converted to numbers."
+      },
+      {
+        "b": "Merge with the image",
+        "text": "Add the codec numbers to the image's feature representation so the vision transformer sees both the image and its compression history."
+      },
+      {
+        "b": "Train with distillation",
+        "text": "Use the clean-image features as a target, training the adapter to make the distorted features predict the same answer as if the image were pristine."
+      },
+      {
+        "b": "Test on unseen codecs",
+        "text": "Apply the adapter to images compressed with different codecs and bitrates; it generalizes because it learned the pattern of compensation, not memorized specific artifacts."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper adds a small adapter module between the image and the vision transformer. The adapter takes two inputs: the compressed image and metadata (which codec, what bitrate). It outputs a modified version of the image's feature representation—the numbers the vision transformer reads—tuned to reduce the effect of compression artifacts."
+    ],
+    "object": "image features (numbers representing what the model sees)"
+  },
+  "hidden": {
+    "h2": "The generalization gap—what the adapter measures",
+    "name": "Generalization gap (how much the model fails due to unfamiliar distortion)",
+    "paras": [
+      "When a compressed image is shown to a model trained on clean images, performance drops. The paper separates this drop into two parts. The information gap is the loss that can never be recovered—detail was deleted by compression, it is gone forever. The generalization gap is the extra loss caused because the model's vision encoder has never seen this type of distortion. Only the generalization gap can be fixed.",
+      "The paper estimates which gap is which by comparing the model's behavior on compressed images to its behavior on clean images, using multiple compression codecs. The hidden quantity is a simple subtraction: how much worse does the model perform on compressed images compared to clean, minus the amount of visual detail that was actually lost. That remainder is the generalization gap—the model's unfamiliarity with the distortion pattern. The adapter targets this gap by conditioning the encoder on the codec identity, so the features it produces are normalized for that specific type of squashing."
+    ],
+    "heat": {
+      "cells": [
+        ["Question: Is the cat real?", 2, false],
+        ["Clean image, model sure", 4, true],
+        ["Compressed, model confused", 1, true],
+        ["Gap from information loss", 2, false],
+        ["Measure visual detail remaining", 3, false],
+        ["Gap from generalization failure", 3, true],
+        ["Model sees unfamiliar artifacts", 4, true],
+        ["Adapter gets codec label", 4, true],
+        ["Re-learns features for this codec", 3, false],
+        ["Compressed, model now confident", 4, true],
+        ["Gap closed from generalization", 2, false],
+        ["Information gap stays", 2, false]
+      ],
+      "caption": "Darker means more performance drop. Mark highlights the generalization gap the adapter fixes."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model's failure on compressed images comes from two sources: real detail lost (unfixable) and distortion patterns the model never encountered (fixable). The adapter targets the second source."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper employs performance benchmarks across codecs to decompose the total accuracy drop into information loss (detail not in the signal anymore) and generalization failure (the model lacks experience with that artifact type), then proposes a conditional adapter to close the generalization component."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the adapter works—the compensation loop",
+    "paras": [
+      "The vision transformer is a neural network that processes image features (lists of numbers representing each region). Compression artifacts distort these features in recognizable ways depending on the codec. JPEG produces blocky patterns. Modern learned codecs produce different kinds of blur. When the transformer sees these distorted features, it makes wrong predictions because its weights were optimized for clean features.",
+      "The adapter works by injecting codec metadata (which compression method, how aggressive) as additional input features. This tells the transformer: I am showing you a JPEG at bitrate 2, so here is a map of what JPEG distortions look like at bitrate 2. The transformer can then reweight its own computations to ignore or reinterpret the compromised regions. The transformer learns to say: I know this blotch is JPEG compression, not a real object boundary, so I will treat it differently. The training uses features from clean images as a target, so the adapter learns to make compressed-image features look like clean-image features after accounting for the codec.",
+      "Why does this generalize to unseen codecs? The adapter learns the general principle of codec compensation—that different compression methods create distortions in predictable ways—rather than memorizing specific artifacts. When it meets a new codec at test time, the embedding layer generalizes because it has learned a shared representation space where codecs with similar distortion profiles (e.g., similar blockiness) activate similar compensation circuits."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Compressed image"
+        },
+        {
+          "t": "step",
+          "s": "Extract features with vision transformer encoder",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Encode codec label (which method, which bitrate) into a list of numbers",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Merge codec numbers into the feature representation",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Reweight features to compensate for known distortion",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Corrected features that predict like clean images"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The distillation loss: teaching the encoder to forget the distortion",
+    "words": "Mean squared error between compressed-image features and clean-image features, weighted by codec condition embedding.",
+    "equation": "L_d = MSE(f_compressed_with_adapter, f_clean)",
+    "symbols": [
+      ["f_compressed_with_adapter", "the feature vector from the compressed image after the adapter modifies it"],
+      ["f_clean", "the feature vector from the clean version of the same image (the truth)"],
+      ["MSE", "mean squared error—average of squared differences between the two vectors"],
+      ["L_d", "distillation loss—the penalty for diverging from clean features"]
+    ],
+    "worked": {
+      "title": "Tiny numeric example",
+      "lines": [
+        "Clean image JPEG test: encoder outputs features [0.8, 0.6, 0.9, 0.7].",
+        "Same image compressed as JPEG bitrate 2: encoder outputs [0.5, 0.2, 0.4, 0.3] (confused by artifacts).",
+        "Adapter adds codec signal (JPEG + bitrate 2 embedding), reweighting to [0.75, 0.55, 0.85, 0.65].",
+        "MSE = (0.75-0.8)^2 + (0.55-0.6)^2 + (0.85-0.9)^2 + (0.65-0.7)^2 = 0.0025 + 0.0025 + 0.0025 + 0.0025 = 0.01.",
+        "Training reduces the penalty by learning weights that push compressed features closer to clean features."
+      ]
+    },
+    "note": "The adapter learns to rotate and scale the compressed features so they sit in the same feature space as clean images, conditioned on the codec identity."
+  },
+  "bars": {
+    "h2": "Performance before and after: closing the generalization gap",
+    "charts": [
+      {
+        "title": "Standard vision-language model (no adapter)",
+        "rows": [
+          ["Clean images (baseline)", 95, "good"],
+          ["JPEG compressed images", 68, "bad"],
+          ["Performance drop", 27, "bad"]
+        ],
+        "note": "The model loses 27 accuracy points on JPEG. Part is lost detail, part is unfamiliarity."
+      },
+      {
+        "title": "With codec-aware adapter",
+        "rows": [
+          ["Clean images (unchanged)", 95, "good"],
+          ["JPEG compressed images", 82, "good"],
+          ["Performance drop", 13, "bad"]
+        ],
+        "note": "The adapter closes the generalization gap, recovering 14 points. The remaining 13-point drop is real detail loss because the pixel values were permanently erased during compression and no post-processing can invent them, so only better codecs (or lower compression ratios) can fix this part."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Overfitting to training codecs.",
+        "html": "If the adapter is trained on only JPEG and ELIC, it may not generalize to StableCodec or future codecs. The paper addresses this by testing on held-out codecs and using distillation (not just memorizing artifact patterns)."
+      },
+      {
+        "warn": true,
+        "b": "Codec metadata is unavailable at test time.",
+        "html": "In real applications, you may not know which codec was used or the bitrate. The adapter assumes this metadata is known; without it, you cannot invoke the right compensation. A fallback would be to auto-detect codec and bitrate from the image artifacts (possible but adds latency)."
+      },
+      {
+        "warn": true,
+        "b": "Some codecs have genuinely irreversible losses.",
+        "html": "Extreme compression (bitrate 0.1 bits per pixel) destroys information completely. No adapter can recover what was never transmitted. The generalization gap shrinks as information loss grows."
+      },
+      {
+        "b": "Done right: multi-codec training.",
+        "html": "Training on diverse codecs and bitrates, using distillation against clean features, teaches the adapter to learn general compensation principles rather than codec-specific artifacts. Testing on unseen codecs validates the generalization."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Download a small dataset (e.g., 100 images from COCO). Compress each image using three codecs (JPEG at multiple bitrates, ELIC at multiple bitrates, StableCodec at multiple bitrates). Run a pretrained vision-language model (Qwen-VL or InternVL3) on the compressed images and record accuracy on a simple visual question (e.g., object classification). Then train the codec-aware adapter on half the images (knowing the codec and bitrate), and evaluate on held-out test images with codecs not seen during adapter training. The demo must show two things: (1) baseline accuracy drops when images are compressed, and (2) the adapter recovery is larger than would be explained by random noise, and (3) the adapter works on unseen codecs (generalization is real)."
+    ],
+    "metric_eq": "Recovered accuracy = accuracy_with_adapter - accuracy_baseline_compressed. Generalization = 1 - (accuracy_on_unseen_codec / accuracy_on_seen_codec).",
+    "closing": "The decisive moment: run the adapter on a codec it never saw during training, and show that it still recovers 8+ accuracy points. That proves it learned compensation principles, not artifact memorization."
+  }
+}
