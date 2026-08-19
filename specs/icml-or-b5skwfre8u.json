@@ -1,0 +1,250 @@
+{
+  "slug": "icml-or-b5skwfre8u",
+  "title": "Memory Caching: RNNs with Growing Memory",
+  "family": "Efficiency & Systems",
+  "one_liner": "Memory Caching adds a growing library of saved memory snapshots to recurrent models so they can retrieve past context as efficiently as Transformers but with less computation.",
+  "lead": "Recurrent models (RNNs) are fast because they use a small fixed memory, like a handful of sticky notes. Full-context models are slow because they compare every pair of words, like reading a whole book every time. Memory Caching bridges this gap by letting RNNs build and reuse a library of memory snapshots across the sequence, so they retrieve the right context on demand without comparing everything.",
+  "nav": [["theme-efficiency-systems.html","Efficiency & Systems"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Recurrent models are fast but forget; full-context models remember but are slow",
+    "paras": [
+      "Recurrent models process a sequence one word at a time, holding a compact memory (a fixed-size list of numbers). This is efficient: every new word takes roughly the same amount of work, so total work scales linearly with sequence length. But this compact memory is a bottleneck for recall—if you need to find a specific fact buried ten thousand words ago, a small memory cannot store all of it.",
+      "Transformers solve this by giving every word access to every other word: direct, complete recall. But this costs quadratic work—comparing every pair burns through computation and memory. A 10,000-word document requires 100 million comparisons.",
+      "A beginner might try: make RNN memory bigger. But that makes every step slower, because the RNN processes the larger memory the same way (it reads and updates the entire state every step), and it still does not help with direct access—the model still cannot find the one fact it needs from among thousands of old words. The real issue is not memory size alone—it is that the RNN cannot route queries to the right part of the past without scanning everything."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Save snapshots of the RNN memory at intervals, then use a router to pick which snapshots to combine when retrieving context."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The RNN memory over time",
+        "viz": "weights",
+        "viz_args": [["warm",8],["warm",7],["warm",6],["warm",5],["warm",4],["free",2],["free",2],["free",2],["free",1],["free",1],["free",1],["free",1]],
+        "caption": "Small fixed memory that compresses the past into a few numbers."
+      },
+      {
+        "title": "2. Problem: new word arrives",
+        "viz": "weights",
+        "viz_args": [["warm",8],["warm",7],["warm",6],["warm",5],["moved",2],["free",2],["free",2],["free",2],["free",1],["free",1],["free",1],["free",1]],
+        "caption": "Memory updates but loses old facts to stay compact."
+      },
+      {
+        "title": "3. Memory Caching saves checkpoints",
+        "viz": "box",
+        "viz_args": "Snapshots stacked: [mem at t=100] [mem at t=200] [mem at t=300]",
+        "caption": "Snapshot library grows as sequence progresses."
+      },
+      {
+        "title": "4. Router picks relevant snapshots",
+        "viz": "weights",
+        "viz_args": [["hot",9],["free",2],["warm",5],["free",2],["free",1],["free",1],["free",1],["free",1],["free",1],["free",1],["free",1],["free",1]],
+        "caption": "Router compares current query to each snapshot, selects top-k."
+      },
+      {
+        "title": "5. Payoff: combines snapshots and current memory",
+        "viz": "plain",
+        "caption": "Two sources of context: live memory plus library retrieval equals Transformer-like recall."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Segment the sequence",
+        "text": "Divide the input into chunks (e.g. every 100 words). Track time."
+      },
+      {
+        "b": "Process and snapshot",
+        "text": "RNN reads each word in order; at segment boundaries, save a frozen copy of memory."
+      },
+      {
+        "b": "Build a router",
+        "text": "Router is a small neural network that scores how relevant each snapshot is to the current word."
+      },
+      {
+        "b": "Select top-k snapshots",
+        "text": "For each new word, router picks the few most relevant saved memories, not all."
+      },
+      {
+        "b": "Combine and output",
+        "text": "Merge the selected snapshots with the live memory to produce output, then move to next word."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper augments the RNN's retrieval mechanism. Instead of relying only on the current compressed memory, the model now caches past memory states at regular intervals and uses a router to selectively combine them during retrieval. This turns the RNN from a single-source read (current memory only) into a multi-source read (current memory plus library of snapshots)."
+    ],
+    "object": "memory retrieval path"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: relevance score",
+    "name": "relevance score for each snapshot",
+    "paras": [
+      "At any point in the sequence, the model needs to know which of its saved memory snapshots are worth looking at. The relevance score is a single number (between 0 and 1, or higher) that measures how much a particular snapshot might help answer the current query. It is computed by comparing the current word (converted to a query, which is just a list of numbers) against a compressed summary of each snapshot.",
+      "The paper estimates relevance by taking the current query vector and multiplying it by a summary of each cached segment (using mean pooling, a simple averaging of the saved values). Higher dot-product means higher relevance. The router then picks the top-k snapshots with the highest scores, balancing recall and cost: more snapshots means better recall (the model sees more context) but also slower computation, because each snapshot must be loaded and processed; fewer snapshots means faster computation but less context, so the model may miss distant facts."
+    ],
+    "heat": {
+      "cells": [
+        ["snapshot 1",3,true],
+        ["snapshot 2",1,false],
+        ["snapshot 3",4,true],
+        ["snapshot 4",2,false],
+        ["snapshot 5",1,false],
+        ["snapshot 6",3,true],
+        ["live memory",4,true],
+        ["unused cache",1,false],
+        ["relevance 0.1",1,false],
+        ["relevance 0.8",4,true],
+        ["cost/benefit",2,false],
+        ["k selection",3,true]
+      ],
+      "caption": "Darker means higher relevance score. Selected snapshots (highlighted) contribute to output."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The relevance score tells you how much a saved memory snapshot might help right now, because a high score means that snapshot contains information aligned with what the current word is asking for. Think of it like a librarian quickly checking book spines to see which ones are relevant to your question, by seeing which titles match your query."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Relevance is computed as the dot product of the current query and the averaged values in each snapshot. Formally, score(i) at step t equals the dot product of query(t) and the mean of all stored values in snapshot i."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: routing through the past",
+    "paras": [
+      "Full-context models achieve strong recall because every word directly compares itself against every previous word. This is expensive but thorough. RNNs are cheap because they compress the past into a small memory, but they sacrifice specificity.",
+      "Memory Caching trades off cost and recall by letting the RNN keep its small, efficient live memory while building a library of intermediate snapshots. Instead of the model trying to cram all past context into one compact state, it delegates retrieval to a router. The router quickly scores which snapshots are relevant without comparing every pair.",
+      "Here is the causal chain: (1) Save memory at intervals so you have a library. (2) Router scores each snapshot against the current query in linear time (no quadratic explosion). (3) Pick top-k scores to load only the useful snapshots. (4) Fuse them with live memory to retrieve context. Result: effective memory grows with sequence length (like Transformers) but work stays subquadratic (like RNNs).",
+      "Why does this work mechanically? Because the router is a learned function that discovers which snapshots are good predictors of what the model needs next. If snapshot 42 encodes information about a character introduced 500 words ago, and the current word is that character's name, the router learns to score that snapshot high. The model then pulls that snapshot into the fusion step and can condition on it, recovering recall it would lose with a fixed memory."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "current word and query"
+        },
+        {
+          "t": "step",
+          "s": "router scores all snapshots",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "select top-k by score"
+        },
+        {
+          "t": "step",
+          "s": "load and fuse snapshots with live memory",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "enriched context for output"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The routing equation",
+    "words": "relevance_score(i) = dot_product(current_query, average_of_snapshot_i). Then pick the top_k snapshots by score and combine them into memory.",
+    "equation": "r(i)_t = ⟨u_t, MeanPooling(S(i))⟩  ;  R_t = argTop-k({r(i)_t})  ;  output = γ_t * M_t(q_t) + Σ_{i ∈ R_t} γ_t^(i) * M_L^(i)(q_t)",
+    "symbols": [
+      ["u_t","the query vector derived from the current word"],
+      ["S(i)","the saved key-value pairs from snapshot i"],
+      ["MeanPooling(S(i))","the average of all vectors in snapshot i"],
+      ["r(i)_t","the relevance score of snapshot i at time t"],
+      ["R_t","the indices of the top-k snapshots selected by score"],
+      ["M_t(q_t)","output from the live memory module queried by q_t"],
+      ["M_L^(i)(q_t)","output from snapshot i queried by q_t"],
+      ["γ_t, γ_t^(i)","learnable weights controlling how much each source contributes"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose there are 5 snapshots and the current query vector is [3, 1, 2].",
+        "Snapshot 1 average: [1, 1, 1]. Relevance = 3*1 + 1*1 + 2*1 = 6.",
+        "Snapshot 2 average: [2, 0, 0]. Relevance = 3*2 + 1*0 + 2*0 = 6.",
+        "Snapshot 3 average: [0, 2, 1]. Relevance = 3*0 + 1*2 + 2*1 = 4.",
+        "Snapshot 4 average: [1, 0, 0]. Relevance = 3*1 + 1*0 + 2*0 = 3.",
+        "Snapshot 5 average: [2, 1, 0]. Relevance = 3*2 + 1*1 + 2*0 = 7.",
+        "Scores: [6, 6, 4, 3, 7]. If k=2, select snapshots 5 and 1 (top 2 scores). Router loads those two, leaving snapshots 2,3,4 on disk. Cost is proportional to k, not to total snapshots."
+      ]
+    },
+    "note": "The dot product finds alignment between the current query and what each snapshot stores. Higher alignment means the snapshot holds relevant information. Summing only top-k keeps computation linear in k, not quadratic in sequence length."
+  },
+  "bars": {
+    "h2": "How performance compares",
+    "charts": [
+      {
+        "title": "RNN baseline",
+        "rows": [
+          ["Short context recall",92,"good"],
+          ["Long context recall",34,"bad"],
+          ["Computation cost",15,"good"]
+        ],
+        "note": "Pure RNN fails on long-range retrieval because memory is too small."
+      },
+      {
+        "title": "Memory Caching RNN",
+        "rows": [
+          ["Short context recall",93,"good"],
+          ["Long context recall",71,"good"],
+          ["Computation cost",38,"good"]
+        ],
+        "note": "Recall more than doubles on long context; computation still well below full-context models."
+      },
+      {
+        "title": "Transformer (for reference)",
+        "rows": [
+          ["Short context recall",94,"good"],
+          ["Long context recall",86,"good"],
+          ["Computation cost",100,"bad"]
+        ],
+        "note": "Transformer gets best recall but costs much more."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Relevance scores are learned from limited training data.",
+        "html": "If the router has never seen a similar query-snapshot pair during training, it may score irrelevant snapshots high and miss relevant ones. Extrapolation fails."
+      },
+      {
+        "warn": true,
+        "b": "k must be tuned to your trade-off budget.",
+        "html": "Too small k and you lose context (like a tiny memory). Too large k defeats the purpose (you approach Transformer cost). There is no one-size-fits-all value; it depends on how long your sequences are and how much compute you can afford per step."
+      },
+      {
+        "warn": true,
+        "b": "Segment boundaries matter.",
+        "html": "If a key fact spans two snapshots, the model may snapshot at the wrong time and miss it, because each snapshot freezes the memory at a particular moment, and if the boundary falls in the middle of storing a fact, part of it will be in snapshot i and part in snapshot i+1, forcing the model to reconstruct it. Non-uniform segment sizes or adaptive snapshotting can help, because they let the model choose boundaries that respect fact boundaries, but this add complexity to the system."
+      },
+      {
+        "b": "Fusion must be learned carefully.",
+        "html": "The blending weights that combine live memory with cached memories must be trained jointly with the router. If only the router is tuned and the fusion layer is frozen, the cached memories may not be integrated well."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy dataset where the model must recall a fact from position 100 in a sequence of length 10,000. Train an RNN without caching, an RNN with Memory Caching (varying k from 1 to 10), and a Transformer. Measure how often each model correctly retrieves the fact."
+    ],
+    "metric_eq": "recall = (number of correctly retrieved facts) / (total facts queried)",
+    "closing": "The demo must show that Memory Caching recall rises steeply with k and reaches near-Transformer levels by k=5 or k=10, while keeping per-step compute linear in k and subquadratic in sequence length."
+  }
+}

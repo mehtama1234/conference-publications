@@ -1,0 +1,181 @@
+{
+ "slug": "icml-or-dk0kvnnelx",
+ "title": "FlexRank: Nested Low-Rank Model Breakdown",
+ "family": "LLMs & Foundation Models",
+ "one_liner": "Break a big model into nested smaller copies by ranking which weight pieces matter most, and train them all together so they fit any budget without retraining.",
+ "lead": "Today's huge language models and vision models cost a fortune to run. A company might want to use the same model for cheap phone users and expensive servers, but retraining separate models for each budget wastes work. FlexRank solves this: it extracts a set of smaller nested models from one trained big model, each fitting inside a different cost budget, all from a single training pass.",
+ "nav": [["theme-llms-foundation-models.html","LLMs & Foundation Models"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "One model, many budgets",
+  "paras": [
+   "A pretrained model like Llama or a vision transformer (a model that reads images as patches of pixels) has billions of weights and costs millions in compute to train. Once trained, you want to use it everywhere: on edge devices with little memory, on mobile phones with slow chips, and on data centers with unlimited budget. The naive idea is to train separate smaller models for each budget, but that means training the model ten times over. The second naive idea is to run the giant model everywhere and hope it fits, but it does not.",
+   "Without a systematic way to extract smaller versions that share the same learned facts, you are stuck choosing: retrain everything for each budget (wasteful) or pick arbitrary piece counts and hope they work (unreliable)."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "Rank each weight piece by how much it matters to the model, then extract nested submodels by keeping only the top-ranked pieces for each budget level, and train all submodels together in one pass."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The problem",
+    "viz": "brain",
+    "caption": "One huge pretrained model, but need to fit many different budgets."
+   },
+   {
+    "title": "2. Rank the pieces",
+    "viz": "weights",
+    "viz_args": [["hot",90],["hot",85],["warm",60],["warm",50],["free",20],["free",15],["free",10],["free",8],["free",5],["free",3],["free",2],["free",1]],
+    "caption": "Break weights into pieces, compute importance rank via singular values."
+   },
+   {
+    "title": "3. Extract nested models",
+    "viz": "box",
+    "viz_args": "Small model (top 8 pieces) Medium (top 16) Large (all 30)",
+    "caption": "Nested subsets: each smaller model uses the top pieces of the bigger one."
+   },
+   {
+    "title": "4. Train all together",
+    "viz": "weights",
+    "viz_args": [["moved",88],["moved",82],["moved",58],["moved",48],["warm",22],["warm",18],["warm",12],["warm",10],["warm",6],["warm",4],["free",2],["free",1]],
+    "caption": "One training run refines all submodel variants jointly to fit their budgets."
+   },
+   {
+    "title": "5. Deploy anywhere",
+    "viz": "plain",
+    "caption": "Pick the submodel that fits your compute budget; all use the same learned facts."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {"b": "Layer decomposition","text": "Take each weight layer and break it into ranked components via singular value decomposition."},
+   {"b": "Global budget selection","text": "Use dynamic programming to pick which components to keep in each layer so total weight count stays under each budget limit."},
+   {"b": "Submodel assembly","text": "For each budget, gather the selected components to form a nested submodel."},
+   {"b": "Joint training","text": "Train all submodel variants at once, penalizing any submodel that exceeds its weight count limit."},
+   {"b": "Deploy on demand","text": "Choose the submodel size that fits your available compute and running cost."}
+  ]
+ },
+ "object": {
+  "h2": "What the method changes",
+  "paras": [
+   "The paper changes one thing: instead of training a single fixed-size model, it trains a set of nested weight variants all together, where smaller models reuse the top-ranked weight pieces from larger ones. This nestedness is not accidental; it is built in during initialization and enforced through joint training, so each submodel benefits from the same learned facts that matter in the big model."
+  ],
+  "object": "nested weight variants"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: Piece importance",
+  "name": "importance rank of each weight piece",
+  "paras": [
+   "Every weight in the model matters differently to how accurate the model is. A weight piece might be essential to understanding language, or it might be a detail that barely changes the output. The paper measures this importance by running singular value decomposition on each layer, which automatically orders the weight pieces by how much they change the layer's output when you turn them on or off. Bigger singular values mean the piece shapes the output more, so they are ranked higher.",
+   "FlexRank uses this ranking to decide: for a budget of ten million weights, keep pieces ranked 1 through N until you hit ten million; for a larger budget, go to rank M. This ranking stays fixed across all budget levels, so small models get the best pieces and large models get all the pieces, preserving the nested structure."
+  ],
+  "heat": {
+   "cells": [["w1",4,true],["w2",4,false],["w3",4,false],["w4",3,true],["w5",3,false],["w6",3,false],["w7",2,false],["w8",2,false],["w9",1,false],["w10",1,false],["w11",1,false],["w12",1,false]],
+   "caption": "Darker means higher singular value (more important to layer output). Highlighted pieces are kept in a small model."
+  },
+  "reads": [
+   {"b": "Plain reading.","html": "The importance of a weight piece is how much the layer's output changes when you toggle that piece. High-importance pieces shape the output; low-importance pieces are almost invisible."},
+   {"b": "Paper reading.","html": "Singular value decomposition decomposes each weight matrix into left vectors (U), importance scores (called singular values), and right vectors (V). Larger importance scores mean stronger influence on the layer output, because the layer's output is constructed as a sum of these components weighted by their scores—a component with a large score contributes more to every prediction the layer makes."}
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: the causal chain",
+  "paras": [
+   "Start with a pretrained model. If you naively cut it in half, you get garbage—the pieces no longer talk to each other correctly. But if you rank the pieces by how much they matter, and you cut along the rank boundary, you keep the most important pieces and remove only the least important ones. The model still works because the kept pieces carry the main learned facts; the removed pieces were just noise and refinement. Dropping them hurts accuracy less than losing a random set would, because you are dropping pieces that contribute the least to predictions.",
+   "The real breakthrough is that during training, you do not train each submodel independently. Instead, you train all of them at the same time, with a shared set of ranked pieces. Each weight update happens once, but it affects all the submodels that use that piece. This means the top pieces get refined to work well for both the small and large submodels; they have to deliver correct answers in every context. The smaller submodels pull the shared pieces toward answering questions with just the essential facts, while the larger submodels pull them toward using every detail. This tug-of-war forces the top pieces to learn facts that are truly general and reusable.",
+   "Without joint training, each submodel independently would learn different target values for those pieces, and smaller submodels would be worse than you expect. But trained together, the smaller models inherit the full benefit of training on large data while giving up only the complexity they do not need."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {"t": "input","s": "pretrained weights"},
+    {"t": "step","s": "SVD ranks each piece by importance","hl": true},
+    {"t": "step","s": "DP selects rank cutoffs per layer for each budget"},
+    {"t": "step","s": "Joint training refines all submodels together","hl": true},
+    {"t": "output","s": "nested submodels on Pareto frontier"}
+   ]
+  }
+ },
+ "math": {
+  "h2": "The training objective",
+  "words": "Total loss is: loss of big submodel plus loss of medium submodel plus loss of small submodel, plus a penalty for any submodel that uses more than its budget.",
+  "equation": "L_total = sum_k L(f_k(x), y) + lambda * sum_k max(0, params_k - budget_k)",
+  "symbols": [
+   ["L(f_k(x), y)","standard prediction loss for submodel k"],
+   ["f_k(x)","output of submodel k on input x"],
+   ["params_k","actual parameter count in submodel k"],
+   ["budget_k","the allowed parameter limit for submodel k"],
+   ["lambda","strength of the budget constraint penalty"]
+  ],
+  "worked": {
+   "title": "A tiny worked example with three submodel budgets",
+   "lines": [
+    "Small submodel: 10M parameters, budget 10M, loss 2.5, penalty max(0, 10M - 10M) = 0, total contribution = 2.5",
+    "Medium submodel: 30M parameters, budget 30M, loss 2.1, penalty max(0, 30M - 30M) = 0, total contribution = 2.1",
+    "Large submodel: 100M parameters, budget 100M, loss 1.8, penalty max(0, 100M - 100M) = 0, total contribution = 1.8",
+    "Total loss = 2.5 + 2.1 + 1.8 = 6.4. If medium model exceeded its budget by 5M, penalty would be lambda * 5M, added to the total."
+   ]
+  },
+  "note": "The penalty ensures each submodel stays within its budget; joint training makes all submodels accurate despite having different numbers of pieces."
+ },
+ "bars": {
+  "h2": "Cost-accuracy tradeoff",
+  "charts": [
+   {
+    "title": "Retrain separately (naive)",
+    "rows": [
+     ["Small model, alone",45,"bad"],
+     ["Medium model, alone",68,"good"],
+     ["Large model, alone",82,"good"]
+    ],
+    "note": "Training each model from scratch takes three times the compute. Small models trained alone perform poorly because they lack the facts from large-scale training data."
+   },
+   {
+    "title": "FlexRank (this paper)",
+    "rows": [
+     ["Small model, from shared training",62,"good"],
+     ["Medium model, from shared training",74,"good"],
+     ["Large model, from shared training",81,"good"]
+    ],
+    "note": "One training run produces all submodels. Smaller models perform much better because they inherit the facts learned during large-model training, and only drop the inessential details."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Choosing the wrong rank cutoffs.",
+    "html": "If you pick rank thresholds that make one layer undersized relative to others, you create a bottleneck. Dynamic programming solves this by optimally balancing ranks across layers for each budget."
+   },
+   {
+    "warn": true,
+    "b": "Training each submodel independently.",
+    "html": "If you train submodels one at a time instead of jointly, the smaller ones do not inherit the benefits of large-scale training. The paper shows independent training produces much worse small models, dropping accuracy by 10 or more points."
+   },
+   {
+    "warn": true,
+    "b": "Forgetting to calibrate initial ranks.",
+    "html": "If the initial singular value decomposition is computed on random or untrained weights, the importance ranking is meaningless. The method assumes the pretrained model already encodes the real importance via its singular values."
+   },
+   {
+    "b": "Done right.",
+    "html": "Use SVD on a fully trained model to initialize importance, apply dynamic programming to find rank cutoffs that respect budget constraints, train all submodels jointly using a shared weight space, and the smaller models inherit accuracy from the large-model training."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Take a pretrained small language model (e.g., Llama 1B). Apply FlexRank to extract three nested submodels: one at 30 percent of the original size, one at 60 percent, and one at 100 percent. Train them jointly on a sample of language modeling data for a few steps. Then measure accuracy on a held-out test set for each submodel size, and plot weight count versus accuracy (the Pareto frontier)."
+  ],
+  "metric_eq": "accuracy_per_budget = test_loss_at_budget_k. Pareto improvement = (accuracy_large_independent - accuracy_small_independent) - (accuracy_large_flexrank - accuracy_small_flexrank) where independent means separately trained models.",
+  "closing": "The Pareto frontier from FlexRank should show that smaller models achieve higher accuracy than if they were trained alone for the same weight budget. This proves that joint training works: because all submodels update the same top pieces together, the small models inherit the facts learned during large-model training instead of starting from scratch."
+ }
+}

@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-tkyad2lhni",
+  "title": "SIGMark: Scalable In-Generation Watermark with Blind Extraction for Video Diffusion",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "Embed a hidden message directly into video noise using frame-wise random keys, then recover it without keeping copies of the original noise.",
+  "lead": "When a video is made by a diffusion model, you need a way to prove it was made by you—like a signature painted into the film itself. A watermark does this. But old watermarking methods require storing a template (the original noise) to check if a video is real, which is expensive at scale. SIGMark embeds the watermark right into the starting noise using pseudo-random frame-by-frame keys, so checking a video later needs no stored template. Even if frames get dropped or shifted during compression, the watermark stays recoverable.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The watermarking scaling problem",
+    "paras": [
+      "Video generators now create thousands of videos per day. Each needs a watermark—a signature proving it came from a trusted source, not a fake. A naive watermark is: during generation, hide a message in the starting noise. Later, take the video apart (run it backward through the denoiser to recover the noise), and check the message.",
+      "But this has a fatal flaw at scale: checking requires keeping the original noise. That means storing gigabytes of reference data. With millions of videos, this is impossible. Modern video diffusion models also split video frames into groups, decoding adjacent frames together to save time. If a video is compressed or frames are dropped—a natural thing that happens on the internet—the frame groups get scrambled. The model can't reverse the scrambled video correctly, so the watermark vanishes. You're left with no way to prove ownership."
+    ],
+    "callout": {
+      "b": "The core problem:",
+      "html": "Watermarks that need stored templates don't scale; watermarks that ignore frame grouping fail when videos are edited."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The starting noise",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["free", 45], ["free", 38], ["free", 42], ["free", 41], ["warm", 50], ["warm", 48], ["free", 39], ["warm", 51], ["free", 44], ["free", 46], ["free", 37]],
+        "caption": "Random numbers, one set per frame group. Most are untouched."
+      },
+      {
+        "title": "2. Embedding the message",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["free", 45], ["hot", 68], ["free", 42], ["free", 41], ["hot", 72], ["warm", 48], ["free", 39], ["hot", 65], ["free", 44], ["free", 46], ["free", 37]],
+        "caption": "Each secret key tweaks certain positions to encode a bit of the message."
+      },
+      {
+        "title": "3. Video compressed, frames drop",
+        "viz": "box",
+        "viz_args": "Frame groups 1,2,3 → after compression → become jumbled 1,3,2",
+        "caption": "Dropped frames break the frame-group structure the model expects."
+      },
+      {
+        "title": "4. Optical flow finds the rhythm",
+        "viz": "weights",
+        "viz_args": [["moved", 68], ["free", 45], ["moved", 65], ["free", 42], ["warm", 50], ["warm", 48], ["free", 39], ["warm", 51], ["free", 44], ["moved", 72], ["free", 46], ["free", 37]],
+        "caption": "Watching how pixels shift, detect where groups actually start and end."
+      },
+      {
+        "title": "5. Message recovered",
+        "viz": "plain",
+        "caption": "With groups fixed, invert the video and decode the message. No template needed."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Assign frame-wise keys",
+        "text": "For each group of adjacent frames, assign one pseudo-random code key. This key is public (not secret) but deterministic."
+      },
+      {
+        "b": "Encode the message into noise",
+        "text": "Use the keys to tweak the starting noise in specific patterns, weaving the bits of the watermark message into the numbers."
+      },
+      {
+        "b": "Generate the video normally",
+        "text": "The diffusion model takes the watermarked noise and generates frames as usual. No quality loss."
+      },
+      {
+        "b": "Detect frame groups by watching motion",
+        "text": "Later, if frames are scrambled, use optical flow (pixel motion) to find where one group ends and the next begins."
+      },
+      {
+        "b": "Invert and decode",
+        "text": "Once groups are fixed, reverse the diffusion model to recover the noise, then decode using the keys."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper targets the initial noise—the random starting point the video generator reads before creating frames. Instead of encoding a simple pattern, it weaves the message in using a set of frame-wise pseudo-random keys. Each frame group gets its own key, so the watermark is scalable: extracting a video later requires only these keys (which are small and reusable), not storing the original noise for every video."
+    ],
+    "object": "the starting noise"
+  },
+  "hidden": {
+    "h2": "Bit accuracy—the survival rate of the watermark",
+    "name": "bit accuracy",
+    "paras": [
+      "Bit accuracy is the fraction of message bits that survive extraction, measured as a percentage. If you embed a 128-bit message and recover 120 bits correctly, that is 93.75% bit accuracy (120 out of 128). Scrambled frame groups confuse the inversion, reducing the number of bits that come back correctly. The paper measures bit accuracy before and after temporal disturbance (frame drops, reordering, compression) to show how well the watermark survives.",
+      "SIGMark estimates bit accuracy by attempting full message recovery after inversion, counting how many bits match the original. The Segment Group-Ordering module works to maximize this by fixing frame grouping first, so the diffusion inversion can run correctly on a semantically coherent video."
+    ],
+    "heat": {
+      "cells": [
+        ["First frame", 1, false],
+        ["Group 1 start", 4, true],
+        ["Group 1 frame 2", 4, true],
+        ["Group 1 frame 3", 4, true],
+        ["Group 2 start", 4, true],
+        ["Group 2 frame 2", 4, true],
+        ["Group 2 frame 3", 4, true],
+        ["Frame from compression gap", 1, false],
+        ["Interleaved scrambled frame", 2, false],
+        ["After flow segmentation fix", 4, true],
+        ["Recovered group 1", 4, true],
+        ["Recovered group 2", 4, true]
+      ],
+      "caption": "Darker means the frame is correctly grouped and will decode the watermark bits. Light means dropped or scrambled frames that would corrupt the message."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Bit accuracy is the percentage of message bits that come back unchanged after a video is compressed and inverted."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper measures bit accuracy as the fraction of correct bits recovered via diffusion-based inversion and PRC decoding, reporting improvements from 70.7% (single frame key) to 90.5% (global frame-wise keys with segmentation)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why frame-wise keys and segmentation work together",
+    "paras": [
+      "Video diffusion models decode frames in groups to save computation—frames 0, 1, 2 are decoded together from one block of compressed features (called latent features, which are smaller than the full video), then frames 3, 4, 5 from the next block. If you encode the watermark using one key per group, you embed bits at the right granularity. When a video is compressed and frames get shuffled, the inversion step reads the scrambled frame order and produces garbage.",
+      "SIGMark uses optical flow—tracking how pixels move between frames—to find the true group boundaries even after scrambling. Once it knows which frames belong together, it can reorder them correctly before inversion. Then the inversion produces the true starting noise, and the frame-wise keys decode the watermark bits cleanly. This works because the watermark is baked into the noise at the level of frame groups, not individual frames. Fixing the grouping fixes the bit accuracy."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Scrambled video from compression"
+        },
+        {
+          "t": "step",
+          "s": "Optical flow detects frame motion boundaries",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sliding-window detector finds group starts"
+        },
+        {
+          "t": "step",
+          "s": "Reorder frames into correct groups",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Diffusion inversion recovers latent noise"
+        },
+        {
+          "t": "step",
+          "s": "PRC keys decode watermark bits"
+        },
+        {
+          "t": "output",
+          "s": "Message recovered"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The encoding and decoding equation",
+    "words": "For each frame group g, compute message bits as: decoded_bit[g] = (noise_values[g] dot key[g]) mod 2. The dot product sums the products of noise and key; the mod 2 extracts a single bit (0 or 1).",
+    "equation": "decoded_bit[g] = (z[g] · k[g]) mod 2, where z[g] = recovered noise for group g, k[g] = frame-wise pseudo-random key for group g",
+    "symbols": [
+      ["z[g]", "the recovered noise vector for frame group g"],
+      ["k[g]", "the frame-wise pseudo-random coding key assigned to group g"],
+      ["·", "dot product: sum of element-wise products"],
+      ["mod 2", "take the remainder after dividing by 2, giving 0 or 1"],
+      ["decoded_bit[g]", "one bit of the watermark message for group g"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose noise z[0] = [0.2, 0.1, 0.3, 0.5] and key k[0] = [+1, +1, -1, -1].",
+        "Dot product: (0.2)(+1) + (0.1)(+1) + (0.3)(-1) + (0.5)(-1) = 0.2 + 0.1 - 0.3 - 0.5 = -0.5.",
+        "If -0.5 is negative, treat it as closer to -1, so decoded_bit[0] = 1 (odd parity).",
+        "For group 1, if z[1] · k[1] = +0.3 (positive, closer to +1), decoded_bit[1] = 0 (even parity).",
+        "Total: recovered message starts ...10... (two bits). The pseudo-random keys ensure noise-like perturbations."
+      ]
+    },
+    "note": "The frame-wise keys act as decoders: when you dot the recovered noise with its matching key, you extract one bit per frame group."
+  },
+  "bars": {
+    "h2": "Bit accuracy under disturbance",
+    "charts": [
+      {
+        "title": "Single frame key (no group awareness)",
+        "rows": [
+          ["Undisturbed video", 70.7, "good"],
+          ["After frame drop", 42.1, "bad"],
+          ["After frame reorder", 38.5, "bad"]
+        ],
+        "note": "Without frame-group awareness, any scrambling drops accuracy sharply."
+      },
+      {
+        "title": "SIGMark (global frame-wise keys + segmentation)",
+        "rows": [
+          ["Undisturbed video", 90.5, "good"],
+          ["After frame drop (SGO recovers grouping)", 86.7, "good"],
+          ["After frame reorder (optical flow finds boundaries)", 84.3, "good"]
+        ],
+        "note": "Segmentation and optical flow preserve group structure, keeping bit accuracy high even under disturbance."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Extreme temporal chaos breaks optical flow.",
+        "html": "If a video is heavily re-encoded, frames are synthesized, or the entire temporal structure is scrambled beyond motion continuity, optical flow cannot find the true group boundaries. The segmentation fails, and bit accuracy drops."
+      },
+      {
+        "warn": true,
+        "b": "First frames carry no watermark.",
+        "html": "In the causal 3D VAE, the first frame is processed independently, so the watermark is not embedded in it. If extraction relies on the first frame, no bits are recovered from that group."
+      },
+      {
+        "warn": true,
+        "b": "Pseudo-random keys are not secret.",
+        "html": "The frame-wise keys are deterministic and reusable, not cryptographically secret. An adversary with access to the algorithm can generate the keys and embed a fake watermark. This is acceptable for provenance (proving you made it) but not for authentication (proving an attacker did not forge it)."
+      },
+      {
+        "b": "Done right: stays accurate under pressure.",
+        "html": "When optical flow is accurate, frame groups are correctly recovered, and the inversion is run on coherent video, bit accuracy remains above 84% even under compression and disturbance."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a mini video diffusion generator (or use a trained one) and embed a 32-bit watermark message using SIGMark. Generate a video. Then corrupt it: drop every 3rd frame (simulating heavy compression), or shuffle frames within a small window, or apply lossy re-encoding. Finally, attempt extraction. Count how many of the 32 bits survive. Report bit accuracy before and after disturbance. If your frame grouping recovery works, accuracy should stay above 80%. If it fails, accuracy collapses below 40%."
+    ],
+    "metric_eq": "bit_accuracy = (number of recovered bits matching original message) / (total message bits) × 100%",
+    "closing": "The demo makes visible that frame-group recovery is the key: scrambled frames without segmentation fail catastrophically, but with segmentation they recover the message."
+  }
+}

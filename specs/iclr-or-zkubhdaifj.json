@@ -1,0 +1,217 @@
+{
+  "slug": "iclr-or-zkubhdaifj",
+  "title": "Elastic-Cache: Smart Memory Reuse for Diffusion Language Models",
+  "family": "Efficiency & Systems",
+  "one_liner": "Instead of recalculating all cached memory at every step, reuse old memory in shallow layers and selectively refresh deep ones based on attention stability.",
+  "lead": "Diffusion language models (step-by-step refinement models that denoise token sequences) waste computation by recalculating the same cached memory (keys and values) at every step, even though shallow layers barely change. Elastic-Cache detects when memory is still fresh by watching the most-attended token, then only recalculates deep layers where changes matter, reusing cheap shallow layers—cutting decoding time by 8x to 45x with no quality loss.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Diffusion LLMs recompute everything, even when it hasn't changed",
+    "paras": [
+      "Diffusion language models work by refinement: start with noise, then progressively denoise token-by-token for many steps. At each step, the model recalculates the keys and values (the cached memory it uses to attend to prior tokens) for every single token, in every single layer. But here is the waste: in shallow layers (the early ones), this memory stabilizes after a few steps. Once it settles, recalculating it again is like rechecking a recipe you already read.",
+      "A naive fix: skip recalculation entirely and reuse old memory. But that fails: deep layers do change at every step (they are adjusting subtle semantic meaning), and memory drift from older steps eventually corrupts predictions. The problem needs to detect change smartly, layer-by-layer."
+    ],
+    "callout": {
+      "b": "The waste.",
+      "html": "Shallow layers recompute memory that hasn't changed; deep layers need updates but are treated the same as stable shallow ones."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The starting point",
+        "viz": "brain",
+        "caption": "Diffusion refines one step at a time, recalculating everything fresh."
+      },
+      {
+        "title": "2. The waste emerges",
+        "viz": "weights",
+        "viz_args": [["hot", 78], ["warm", 75], ["warm", 74], ["warm", 73], ["free", 45], ["free", 40]],
+        "caption": "Shallow layers (top bars) stabilize early. Deep layers (bottom) still shifting."
+      },
+      {
+        "title": "3. Watch the most-attended token",
+        "viz": "box",
+        "viz_args": "Attention stability ✓ at step t",
+        "caption": "If the most-attended token's attention pattern stays similar, memory is safe."
+      },
+      {
+        "title": "4. Reuse smartly",
+        "viz": "weights",
+        "viz_args": [["moved", 78], ["warm", 75], ["warm", 74], ["warm", 73], ["moved", 45], ["moved", 40]],
+        "caption": "Reuse shallow cache (warm). Recalculate only deep layers (moved)."
+      },
+      {
+        "title": "5. The payoff",
+        "viz": "box",
+        "viz_args": "8–45× faster, same quality",
+        "caption": "Skip redundant work. Speed up, stay accurate."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "At each refinement step",
+        "text": "Identify the token attended to most by the current layer."
+      },
+      {
+        "b": "Measure attention stability",
+        "text": "Compare its attention pattern to the previous step: if the two are nearly identical, memory is safe to reuse."
+      },
+      {
+        "b": "Decide: refresh or reuse?",
+        "text": "If change is small (below threshold), reuse the cache; otherwise, mark for refresh."
+      },
+      {
+        "b": "Find the refresh boundary",
+        "text": "Start refreshing at the first deep layer where change is large; stop before it."
+      },
+      {
+        "b": "Partial recompute",
+        "text": "Reuse shallow-layer caches, recalculate only layers at the boundary and deeper."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of a fixed schedule (refresh every k steps, treat all layers the same), Elastic-Cache makes two adaptive decisions: when to refresh (triggered by attention instability) and where to refresh (start at a layer boundary, reuse shallower layers). This turns KV cache management from a static rule into an attention-guided control problem."
+    ],
+    "object": "KV cache refresh policy"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: attention drift",
+    "name": "Attention drift in the most-attended token",
+    "paras": [
+      "Attention drift is how much the attention pattern of the single most-attended token changes from one step to the next. The paper measures it by comparing the two attention patterns (a list of scores, one per token the model could look at). A comparison score ranges from 0 (completely different) to 1 (identical). Drift is how much the pattern moved (1 minus the comparison score).",
+      "Why this specific token? It is a clever proxy. If the most-attended token's attention stays stable (score near 1), then the KV states for other tokens are unlikely to have changed much, because the model is still looking at the same things. This one measurement can cover the whole layer. The threshold that decides refresh vs. reuse is tuned per decoding step, adapting to input difficulty."
+    ],
+    "heat": {
+      "cells": [["Layer 0 drift", 1, false], ["Layer 1 drift", 1, false], ["Layer 2 drift", 2, false], ["Layer 3 drift", 2, false], ["Layer 4 drift", 3, true], ["Layer 5 drift", 3, true], ["Layer 6 drift", 4, true], ["Layer 7 drift", 4, true], ["Layer 8 drift", 4, true], ["Layer 9 drift", 4, true], ["Layer 10 drift", 4, true], ["Layer 11 drift", 4, true]],
+      "caption": "Darker means more attention change. Shallow layers (left, light) stabilize; deep layers (right, dark) keep shifting."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Attention drift is how much the model's focus (which token it looks at) changes between steps. Measure it by comparing two attention patterns (a list of scores for each token) and computing how similar they are on a scale from 0 to 1."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "See the math section below for the formal equation and symbol definitions."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why reusing and selective refresh preserves accuracy while cutting compute",
+    "paras": [
+      "The mechanism has two parts. First, shallow layers encode local, syntactic information (word boundaries, punctuation). These patterns lock in place early and then barely move. Reusing their cached keys and values is safe because the model's focus there has stabilized. Second, deep layers encode semantic meaning and long-range reasoning. They adjust at every step as the model refines its interpretation. Skipping refresh in deep layers breaks predictions. So the paper watches the most-attended token's attention pattern: if it is stable (comparison score above a threshold), the input signal to the next layer is unchanged, and reusing KV is safe. If attention shifts by more than the threshold, something important changed—refresh from that layer onward.",
+      "This trades one lightweight measurement (cosine similarity on one token's attention) against expensive recomputation. The boundary layer is recomputed anew at each step, capturing semantic shifts. Shallow layers below it are reused, saving redundant arithmetic. The net result: deep layers get fresh memory when they need it, shallow layers recycle stale memory that hasn't changed, and the detection is automatic and per-step."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current decoding step, previous KV cache"
+        },
+        {
+          "t": "step",
+          "s": "Compute attention weights for all layers using current token"
+        },
+        {
+          "t": "step",
+          "s": "Measure attention drift on most-attended token via cosine similarity",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compare drift to threshold; find boundary layer where change is significant"
+        },
+        {
+          "t": "step",
+          "s": "Recompute KV cache only at boundary and deeper; reuse shallower layers"
+        },
+        {
+          "t": "output",
+          "s": "New KV cache with partial refresh, lower latency"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The attention drift equation",
+    "words": "At each layer and step, measure how much the most-attended token's attention pattern changed using cosine similarity. If change exceeds threshold, refresh the cache from that layer onward.",
+    "equation": "σ_t,l = S_t,l[T_t] · S_t-1,l[T_t-1] / (||S_t,l[T_t]|| × ||S_t-1,l[T_t-1]||)",
+    "symbols": [
+      ["σ_t,l", "Cosine similarity of attention at layer l, step t (ranges 0 to 1; 1 = identical)"],
+      ["S_t,l", "Attention weights at layer l, step t (a vector of scores for each token)"],
+      ["T_t", "The single most-attended token at step t (highest attention weight sum)"],
+      ["S_t,l[T_t]", "The attention scores pointing to token T_t at layer l, step t"],
+      ["·", "Dot product (multiply element-wise and sum)"],
+      ["||...||", "Length of the vector (how far it points from zero)"],
+      ["γ", "Threshold: if σ_t,l < γ, drift is large; refresh from layer l+1"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose at layer 5, the most-attended token's attention at step 9 is [0.6, 0.3, 0.1] and at step 8 was [0.55, 0.35, 0.1].",
+        "Dot product: 0.6×0.55 + 0.3×0.35 + 0.1×0.1 = 0.33 + 0.105 + 0.01 = 0.445.",
+        "Lengths: ||[0.6, 0.3, 0.1]|| = sqrt(0.36 + 0.09 + 0.01) = sqrt(0.46) ≈ 0.68. ||[0.55, 0.35, 0.1]|| ≈ 0.67.",
+        "Cosine similarity: 0.445 / (0.68 × 0.67) ≈ 0.445 / 0.456 ≈ 0.976.",
+        "Drift (1 - similarity) ≈ 0.024. If γ = 0.05 (5% change), 0.024 < 0.05, so attention is stable; reuse cache."
+      ]
+    },
+    "note": "Cosine similarity close to 1 means attention barely moved; below threshold, refresh; above threshold, safely reuse."
+  },
+  "bars": {
+    "h2": "Speedup while keeping accuracy high",
+    "charts": [
+      {
+        "title": "Naive: recompute every layer at every step",
+        "rows": [["Math reasoning accuracy", 94, "good"], ["Code generation accuracy", 89, "good"], ["Decoding latency", 2400, "bad"]],
+        "note": "Fast and accurate model, but every step recalculates all cached memory for all layers."
+      },
+      {
+        "title": "Elastic-Cache: selective refresh + reuse",
+        "rows": [["Math reasoning accuracy", 93, "good"], ["Code generation accuracy", 88, "good"], ["Decoding latency", 275, "good"]],
+        "note": "Reuse shallow layers, refresh deep layers only when attention changes. Latency drops 8 to 45 times because most recomputation is skipped (shallow layers reused at every step); only a small fraction of layers are recalculated per step."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Threshold set too high (refresh too rarely).",
+        "html": "Stale KV cache in deep layers corrupts predictions because genuine semantic changes are ignored. Accuracy degrades; sometimes catastrophically if the model misses a critical shift (e.g., a keyword changing negation)."
+      },
+      {
+        "warn": true,
+        "b": "Threshold set too low (refresh too often).",
+        "html": "Defeats the purpose: the method refreshes almost every step, wasting savings. Defeats the speed gain."
+      },
+      {
+        "warn": true,
+        "b": "Using a global threshold instead of per-step adaptation.",
+        "html": "Easy inputs (e.g. short factual questions) can tolerate high thresholds; hard inputs (e.g. multi-step reasoning) need lower ones. A single threshold sacrifices either speed or accuracy depending on the input."
+      },
+      {
+        "b": "Done right.",
+        "html": "Learn a threshold function that adapts to input difficulty. Watch actual attention changes per-layer, per-step. Trigger refresh at the first layer where drift is large, not uniformly. This is what Elastic-Cache does."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a minimal diffusion LLM decoder (a few layers) and run it on a short reasoning task (e.g., solve a math word problem in 10 steps). Log attention drift per-layer at each step. Plot drift over time for shallow and deep layers separately. Manually set the refresh threshold and record latency and accuracy. Vary the threshold from high (5 percent change allowed) to low (30 percent), measuring latency speedup and accuracy loss. Show that the sweet spot (threshold around 10 to 15 percent) gives 5 to 10 times latency reduction with zero accuracy loss on this task."
+    ],
+    "metric_eq": "speedup = baseline_latency_ms / adaptive_latency_ms; accuracy_loss_pct = (baseline_acc - adaptive_acc) / baseline_acc × 100",
+    "closing": "Shallow layers freeze early and can be safely reused; deep layers change at every step and need fresh memory. Attention drift on the most-attended token is a proxy for when to refresh. Adaptive thresholds let the method adjust per-input and per-layer."
+  }
+}

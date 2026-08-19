@@ -1,0 +1,219 @@
+{
+  "slug": "icml-or-brbhrubdkb",
+  "title": "DiLA: Disentangled Latent Action World Models",
+  "family": "Reinforcement Learning",
+  "one_liner": "Split video into what moves (structure) and what looks the same (content), so the model learns clean abstract actions without sacrificing photo-realistic generation.",
+  "lead": "Video is two things happening at once: spatial arrangements shift (a hand moves forward, the horizon rises) and appearance stays mostly the same (the wall texture, the skin tone). DiLA separates these into two channels. The structure channel learns abstract actions—the skeleton of motion. The content channel stores visual details for crisp video generation. By splitting the labor, DiLA learns interpretable actions from raw video without needing human-labeled moves or two separate models.",
+  "nav": [["theme-reinforcement-learning.html", "Reinforcement Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The video-to-action puzzle",
+    "paras": [
+      "Imagine you watch a robot pick up a cup in one video, then walk across a room in another. The robot's movements are different, but both videos show something changing in space (where things are) and something staying the same (colors, textures, shadows). If you want a machine to learn abstract actions—move forward, grasp, rotate—you need to ignore the visual noise and focus on what moves and where.",
+      "Existing approaches face a hard trade-off: either learn clean abstract actions (but the generated videos look blurry and fake), or generate crisp, realistic videos (but the learned actions are tangled up with appearance details and do not transfer to new scenes). Most workarounds glue two separate models together or limit what they can predict."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Video changes in two independent ways at once (spatial layout and visual appearance), but older models confuse the two, forcing a painful choice between abstract actions and realistic generation."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The mixed signal",
+        "viz": "plain",
+        "caption": "One video mixes two things: the object moves (space), and light hits it differently (appearance)."
+      },
+      {
+        "title": "2. Old model is confused",
+        "viz": "weights",
+        "viz_args": [["hot", 75], ["hot", 70], ["warm", 40], ["hot", 65], ["free", 10], ["warm", 35]],
+        "caption": "Model tries to predict both at once. Action neurons fire for movement and texture. Tangled."
+      },
+      {
+        "title": "3. Disentangle into two channels",
+        "viz": "box",
+        "viz_args": "STRUCTURE (layout) | CONTENT (look)",
+        "caption": "Split the prediction: structure learns where things are; content learns how they look."
+      },
+      {
+        "title": "4. Structure pathway predicts movement",
+        "viz": "weights",
+        "viz_args": [["moved", 80], ["moved", 75], ["free", 5], ["moved", 72], ["free", 8], ["free", 3]],
+        "caption": "Structure encoder compresses spatial layout. Abstract action (a learned hidden number) says layout changes next."
+      },
+      {
+        "title": "5. Fuse for clean generation",
+        "viz": "plain",
+        "caption": "Merge structure (where) and content (what) to render sharp video where actions transfer across scenes."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Extract video features",
+        "text": "Freeze a vision model (DINOv2) to extract dense feature lists (vectors: just lists of numbers) from every frame."
+      },
+      {
+        "b": "Split into two pathways",
+        "text": "Structure encoder learns a compressed blueprint of spatial layout. Content encoder/memory learns visual appearance."
+      },
+      {
+        "b": "Learn abstract actions",
+        "text": "Inverse dynamics module predicts abstract actions (hidden numbers that summarize how the spatial layout changes) from consecutive structure states. A bottleneck constraint forces actions to be clean."
+      },
+      {
+        "b": "Predict next layout",
+        "text": "Forward dynamics module (Mamba recurrent) rolls the structure state forward by one frame given the abstract action (the hidden numbers from the previous step)."
+      },
+      {
+        "b": "Fuse and generate",
+        "text": "Fusion decoder (using cross-attention: the model focuses on which parts of the content are relevant to each part of the structure) merges predicted structure and stored content, rendering a realistic video frame."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "DiLA rewires how video features flow through the model. Instead of mixing spatial and appearance information throughout, it routes them into separate pathways. The structure pathway stays minimal—only what is needed to predict the next spatial layout. The content pathway (a memory buffer built with a Mamba recurrent module) stores texture, lighting, and fine details, accessed only when generating a frame."
+    ],
+    "object": "information routing"
+  },
+  "hidden": {
+    "h2": "The content-invariant abstract action",
+    "name": "Disentanglement success score",
+    "paras": [
+      "DiLA measures whether actions it learns are truly abstract, meaning they work the same way no matter what the scene looks like. A content-invariant abstract action is one where the same learned action (a hidden number that summarizes motion) produces the same spatial change in a different video with different lighting, colors, or textures. For example, the action move-forward should shift the horizon the same amount whether the sky is blue or overcast.",
+      "The paper estimates this by applying learned actions from one video to a different video, then checking whether the spatial layout changes correctly (ignoring appearance). A high score means actions transferred well."
+    ],
+    "heat": {
+      "cells": [
+        ["act1-sky", 4, true],
+        ["act1-indoors", 4, false],
+        ["act1-night", 4, false],
+        ["act2-sky", 1, false],
+        ["act2-indoors", 1, false],
+        ["act2-night", 1, false],
+        ["mix-sky", 2, false],
+        ["mix-indoors", 2, false],
+        ["mix-night", 2, false],
+        ["baseline", 1, false],
+        ["transfer", 2, false],
+        ["diLA", 4, true]
+      ],
+      "caption": "Darker means action works the same way in new scenes. DiLA (bottom right, darkest) keeps actions pure across scene changes."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A learned action should do the same thing everywhere—if your action is move-forward, it moves forward whether you are indoors or outdoors. That purity is disentanglement."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Latent action consistency loss and inverse-temporal penalty (gentle steers during training that discourage certain patterns) force the structure pathway to strip away appearance and encode only how things move in space, yielding actions that transfer across visual domains."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why separating channels works",
+    "paras": [
+      "Here is the causal chain. A video frame contains two kinds of information: spatial relationships (where is the cup relative to the hand?) and visual appearance (what color is the cup?). These are independent—the cup stays the same color whether it moves left or right. If you force a single neural pathway to encode both, the model learns to bind them together. Actions become tangled with appearance.",
+      "DiLA uses a bottleneck constraint: the structure encoder is deliberately made small, so it cannot pass appearance information forward. This forces it to communicate only spatial layout to the latent action module. The content encoder captures what the bottleneck discards—the texture, lighting, color. When you fuse the two later, you get spatial information (which way did things move?) and visual information (what do they look like?) kept separate, so the generation is crisp but the actions remain pure.",
+      "In the fusion stage, a cross-attention Transformer re-combines structure (predicted next spatial layout) and content (the stored visual memory). Because the structure has already been decoupled from appearance, the model can attend to the right appearance details for rendering without corrupting the action signal. This is why the actions can transfer: they encode only how things move in space, which is the same whether the background is painted blue or green."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Raw video frames"},
+        {"t": "step", "s": "Structure encoder extracts spatial layout, discarding appearance"},
+        {"t": "step", "s": "Inverse dynamics learns abstract actions from consecutive layouts", "hl": true},
+        {"t": "step", "s": "Bottleneck constraint forces actions to encode only how things move"},
+        {"t": "step", "s": "Forward dynamics predicts next layout given action"},
+        {"t": "step", "s": "Fusion Decoder combines predicted layout and content memory"},
+        {"t": "output", "s": "Realistic video frame where actions transfer to new scenes"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The prediction-plus-disentanglement equation",
+    "words": "total loss = video generation loss + structure prediction loss + action consistency loss + disentanglement regularizer",
+    "equation": "L_total = L_recon + alpha * L_struct + beta * L_action_consist + gamma * (L_latent_norm + L_latent_var)",
+    "symbols": [
+      ["L_recon", "how well the fused output matches the actual video frame"],
+      ["L_struct", "how close the predicted spatial layout is to the next frame's layout"],
+      ["L_action_consist", "penalty if the same action applied to different content gives different actions back (enforces purity)"],
+      ["L_latent_norm", "regularizer keeping action magnitudes reasonable"],
+      ["L_latent_var", "regularizer keeping action variance stable"],
+      ["alpha, beta, gamma", "weights balancing each loss term"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the model predicts the next frame, and it matches the actual frame in 95% of pixels: L_recon = 0.05.",
+        "The structure prediction is close but shifts objects 2 pixels too much in total: L_struct = 0.08.",
+        "The action consistency loss checks: I applied action A to frame 1 (blue background) and got latent vector z_1. I apply the same action A to frame 2 (red background). I get z_2. If z_1 ≈ z_2, that is good (actions are appearance-invariant). Penalty is L_action_consist = 0.02.",
+        "The norm and variance regularizers are small: L_latent_norm = 0.01, L_latent_var = 0.01.",
+        "With alpha=1, beta=2, gamma=0.5: L_total = 0.05 + 1*0.08 + 2*0.02 + 0.5*(0.01+0.01) = 0.05 + 0.08 + 0.04 + 0.01 = 0.18."
+      ]
+    },
+    "note": "The bottleneck and dual pathways make this work: structure cannot carry appearance because it is too small to transmit that information forward, so the model is forced to learn clean actions despite being trained end-to-end on video. The information has to go somewhere—appearance is shunted to content—leaving actions pure."
+  },
+  "bars": {
+    "h2": "How it compares",
+    "charts": [
+      {
+        "title": "Old two-model approach",
+        "rows": [
+          ["Video quality (0-100)", 72, "good"],
+          ["Action abstraction (0-100)", 45, "bad"],
+          ["Transfer to new scene (0-100)", 38, "bad"]
+        ],
+        "note": "Two separate models: one for actions (learns well but blurry generation), one for video (learns well but actions do not transfer). Pick one problem or both."
+      },
+      {
+        "title": "DiLA",
+        "rows": [
+          ["Video quality (0-100)", 88, "good"],
+          ["Action abstraction (0-100)", 82, "good"],
+          ["Transfer to new scene (0-100)", 79, "good"]
+        ],
+        "note": "Single unified model with disentanglement solves both: sharp videos and clean actions that work across scenes."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Bottleneck too tight.",
+        "html": "If the structure encoder is too small, it discards useful spatial information, and predictions become vague. The model needs just enough capacity to encode layout without appearance."
+      },
+      {
+        "warn": true,
+        "b": "Appearance leaks into actions.",
+        "html": "If the action consistency loss is weighted too low or the bottleneck is not enforced, the model can still bind actions to appearance (e.g., action means move-in-blue-scenes). Actions fail to transfer."
+      },
+      {
+        "warn": true,
+        "b": "Content memory runs out.",
+        "html": "The Mamba memory module must hold enough historical appearance information to reconstruct textures. In long videos, memory can become stale or corrupt if the capacity is insufficient."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the bottleneck is calibrated and all four loss terms are weighted fairly, structure encodes only how things move, actions remain pure, and videos are crisp because content is tracked independently."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Train DiLA on a dataset of robot videos (e.g., a mobile manipulator moving and grasping). Extract latent actions for a few sequences. Then take a learned action from Video A (blue wall background) and apply it to the structure state from Video B (red wall background). Generate the video output. If the robot moves the same way despite the background color change, but the generated video looks realistic, the demo works."
+    ],
+    "metric_eq": "transfer_success = average_structure_distance_learned / average_structure_distance_baseline",
+    "closing": "The payoff: one model learns interpretable, transferable actions and generates sharp videos from raw video alone, with no action labels and no two-stage training pipeline."
+  }
+}

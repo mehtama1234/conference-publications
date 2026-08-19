@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-dqgwqdfdtc",
+  "title": "Internal Planning in Language Models",
+  "family": "Interpretability",
+  "one_liner": "A method to detect planning in language models by compressing their hidden states into compact codes and measuring what information they preserve about future tokens.",
+  "lead": "Language models generate text one word at a time. But do they look ahead while generating, organizing their internal computations to plan several steps forward? Or are they completely myopic, tunnel-visioned on just the next word? This paper develops a technique to peek inside a language model's hidden thoughts to find out.",
+  "nav": [["theme-interpretability.html", "Interpretability"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "We cannot see inside a language model's hidden thoughts",
+    "paras": [
+      "A language model (a program that predicts the next word) has secret computations happening inside. These computations are recorded in hidden states: lists of thousands of numbers that store the model's working thoughts as it reads your input and prepares its response. The question is whether these hidden states encode anything about future words beyond the immediate next one.",
+      "Naively, you might try to just read the hidden states directly, but they are noisy and bloated with useless details: small numerical fluctuations from how individual words (tokens) are positioned, normalization shifts, random noise from the attention mechanism (which decides which parts of the input to focus on). A beginner would stare at these numbers and learn nothing. The problem is that hidden states are redundant and encumbered with fine-grained details that mask the real planning information underneath."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Compress each hidden state into a single discrete code using a learning algorithm, then measure which codes tend to appear together, revealing which information the model preserves."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. What we start with",
+        "viz": "brain",
+        "caption": "A language model reads 'The cat sat on the...' internally recording thousands of numbers."
+      },
+      {
+        "title": "2. Raw hidden states are messy",
+        "viz": "weights",
+        "viz_args": [["free", 12], ["free", 8], ["free", 15], ["free", 9], ["free", 11], ["free", 14]],
+        "caption": "Thousands of noisy, overlapping numbers; real signal buried under junk details."
+      },
+      {
+        "title": "3. Compress to discrete codes",
+        "viz": "weights",
+        "viz_args": [["moved", 8], ["moved", 8], ["moved", 8], ["moved", 8], ["moved", 8], ["moved", 8]],
+        "caption": "A learning algorithm (VQ-VAE) squeezes each hidden state into ONE discrete code."
+      },
+      {
+        "title": "4. Count which codes co-occur",
+        "viz": "box",
+        "viz_args": "Code 7 (prefix)→ Code 3 (future) appears 142x; Code 7 → Code 9 only 8x.",
+        "caption": "Codes that appear together often share information; rare co-occurrence means independence."
+      },
+      {
+        "title": "5. Measure information flow",
+        "viz": "plain",
+        "caption": "Mutual information quantifies how strongly the prefix codes predict future tokens."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Extract hidden states",
+        "text": "Collect the internal states from all layers when the model reads different prefixes."
+      },
+      {
+        "b": "Train a compression algorithm",
+        "text": "A VQ-VAE learns to map each messy hidden state to the nearest point in a small codebook."
+      },
+      {
+        "b": "Create discrete codes for everything",
+        "text": "Apply the trained compressor to all hidden states, converting each to an integer code."
+      },
+      {
+        "b": "Count co-occurrences",
+        "text": "For two hidden-state blocks, tally how often their codes appear together in data."
+      },
+      {
+        "b": "Measure mutual information",
+        "text": "Mutual information (a number between 0 and 1) tells you how much knowing one code narrows down the other."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how we observe a language model's hidden states. Instead of trying to analyze thousands of noisy numbers directly, we compress them into discrete integer codes. This single change — replacing raw continuous numbers with quantized codes — makes everything else possible."
+    ],
+    "object": "hidden state representation"
+  },
+  "hidden": {
+    "h2": "Planning horizon and branch awareness",
+    "name": "Mutual information between prefix computations and future tokens",
+    "paras": [
+      "The hidden quantity is mutual information: a measure of how much knowing one thing tells you about another. Here, it answers: if I know the model's internal state after reading the prefix, how much does that narrow down the possible next tokens?",
+      "The paper estimates this by counting how often pairs of discrete codes appear together across a dataset. If a prefix code nearly always co-occurs with a particular future-token code, mutual information is high (the prefix strongly predicts that future). If they appear independently, mutual information is near zero (the prefix tells you nothing useful about that future token). The paper also measures planning horizon: how many tokens ahead does the model's current computation encode useful information?"
+    ],
+    "heat": {
+      "cells": [
+        ["Prefix code predicts next token", 4, true],
+        ["Prefix predicts token +2", 3, false],
+        ["Prefix predicts token +3", 2, false],
+        ["Prefix predicts token +4", 1, false],
+        ["Preserves alternative path A", 3, true],
+        ["Preserves alternative path B", 2, false],
+        ["Preserves alternative path C", 1, false],
+        ["Noise and unrelated info", 1, false],
+        ["Layer 1 contributes signal", 2, false],
+        ["Layer 5 contributes signal", 4, true],
+        ["Early layers preserve context", 3, false],
+        ["Recent tokens matter most", 4, true]
+      ],
+      "caption": "Darker means more mutual information. Highlight cells show which signals the model actually preserves."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model stores information about future tokens inside itself, even before seeing them. We measure how much by seeing which discrete codes tend to predict which other codes."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Mutual information I(Z_A; Z_B) between discrete codes of prefix blocks and future token blocks, estimated via observed co-occurrence counts in the codebook space."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: cleaning signal from noise",
+    "paras": [
+      "Raw hidden states contain thousands of numbers, most of them noise: tiny variations from token positions, normalization jitters, attention randomness. A VQ-VAE (vector quantized variational autoencoder) is a learning algorithm that forces each hidden state to be reconstructed from a small, fixed set of codes. To achieve good reconstruction, the learning algorithm must choose codes strategically: important, task-relevant information survives compression, while noise and fine-grained details get discarded.",
+      "Once each hidden state is a single code, measuring mutual information becomes tractable. We simply count: how often does code A co-occur with code B in the data? High co-occurrence means they carry related information; rare co-occurrence means independence. This counting is immune to noise in the raw numbers because the codes have already been cleaned by the compression step."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Raw hidden states (noisy, thousands of numbers per state)"
+        },
+        {
+          "t": "step",
+          "s": "VQ-VAE encoder maps state to nearest code",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "VQ-VAE decoder reconstructs from code",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Codebook filters out noise, keeps task-relevant signal",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Count co-occurrences of codes across dataset",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Mutual information: how strongly prefix predicts future"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The information measure",
+    "words": "Mutual information is the sum over all code pairs of the joint probability times the log of the ratio of the joint probability to the product of the marginal probabilities.",
+    "equation": "I(Z_A; Z_B) = sum_i sum_j P(z_A=i, z_B=j) * log[ P(z_A=i, z_B=j) / (P(z_A=i) * P(z_B=j)) ]",
+    "symbols": [
+      ["Z_A", "codes from prefix block A"],
+      ["Z_B", "codes from future block B"],
+      ["P(z_A=i, z_B=j)", "fraction of samples where code i appears in A and code j in B"],
+      ["P(z_A=i)", "fraction of samples where code i appears in A (regardless of B)"],
+      ["P(z_B=j)", "fraction of samples where code j appears in B (regardless of A)"],
+      ["I(Z_A; Z_B)", "mutual information in bits"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose code 3 appears in prefix 100 times, code 7 in future 100 times.",
+        "They co-occur 60 times. By chance alone (independence) they would co-occur 100 * 100 / 10000 = 10 times.",
+        "P(3,7) = 60/1000 = 0.06. P(3) = 100/1000 = 0.1. P(7) = 100/1000 = 0.1.",
+        "Log-ratio = log(0.06 / (0.1 * 0.1)) = log(0.06 / 0.01) = log(6) ≈ 1.79 bits.",
+        "This pair contributes 0.06 * 1.79 ≈ 0.107 bits. Sum all pairs for total I(Z_A; Z_B)."
+      ]
+    },
+    "note": "High mutual information means the model encodes detailed information about future tokens; low means it is myopic."
+  },
+  "bars": {
+    "h2": "Planning across different training objectives",
+    "charts": [
+      {
+        "title": "Standard training (next token only)",
+        "rows": [
+          ["Information about next token", 84, "good"],
+          ["Information about token +2", 22, "bad"],
+          ["Information about token +3", 8, "bad"],
+          ["Preserves alternative paths", 31, "bad"]
+        ],
+        "note": "Model trained to predict only the next token is mostly myopic."
+      },
+      {
+        "title": "With multi-token training",
+        "rows": [
+          ["Information about next token", 85, "good"],
+          ["Information about token +2", 41, "good"],
+          ["Information about token +3", 18, "bad"],
+          ["Preserves alternative paths", 52, "good"]
+        ],
+        "note": "Training with multi-token loss modestly increases horizon and branch awareness."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Codebook collapse.",
+        "html": "If the learning algorithm fails, all hidden states compress to the same few codes. Then mutual information becomes meaningless noise; the signal is lost. Solved by adding penalties that gently steer the codes to spread out and stay active during training."
+      },
+      {
+        "warn": true,
+        "b": "Lossy compression erases real planning.",
+        "html": "If the VQ-VAE compresses too aggressively, even genuine planning information gets discarded. The mutual information will underestimate how far ahead the model truly plans."
+      },
+      {
+        "warn": true,
+        "b": "Task-dependent behavior.",
+        "html": "Planning horizons vary wildly across tasks. A grammar task demands only lookahead of 1-2 tokens; a math reasoning task requires encoding 10+ tokens ahead. One codebook may not capture all planning depths equally well."
+      },
+      {
+        "b": "Done right.",
+        "html": "The paper adds careful regularization: a cosine-similarity penalty to keep codes diverse and a penalty that encourages all codes to be used equally. It tunes codebook size based on what works best per task."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small language model (e.g., a 2-layer transformer on synthetic data: predict the next token in a sequence). Extract hidden states from all layers on a test set of 1,000 examples. Train a VQ-VAE (with 256 codes) to compress these states. Measure mutual information between the hidden state after token 3 and the actual values of tokens 4, 5, 6, 7. Plot mutual information versus distance into the future."
+    ],
+    "metric_eq": "I(hidden_after_token_3; token_at_position_k) for k = 4, 5, 6, 7, 8",
+    "closing": "The demo should show mutual information dropping as you look further ahead, proving the model encodes more information about nearby tokens than distant ones. If using multi-token training, you should see higher mutual information at farther positions than with standard single-token training."
+  }
+}

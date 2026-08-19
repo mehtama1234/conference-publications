@@ -1,0 +1,238 @@
+{
+  "slug": "icml-or-bngk86bqrr",
+  "title": "PANINI: Continual Learning via Structured Memory",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Instead of storing full documents and retrieving chunks over and over, PANINI writes new knowledge as a growing network of entity- and event-aware question-answer pairs, then answers queries by following reasoning chains through that network.",
+  "lead": "When an LLM reads the same documents many times, it wastes compute doing the same reasoning repeatedly. Worse, chunk-based retrieval often pulls in irrelevant context, leading to hallucinations. PANINI solves this by replacing documents with a structured, continuously-updated memory: each new experience is encoded as a network of question-answer pairs (called a Generative Semantic Workspace, or GSW) linked by entities and events. At query time, the model walks through the GSW following reasoning chains instead of retrieving verbatim text, cutting the time the model spends reasoning by 2-30x while actually improving answer accuracy.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The repeated-reasoning trap",
+    "paras": [
+      "Today's retrieval-augmented generation (RAG) systems store full documents and search for relevant chunks at query time. But when the same documents are queried multiple times, the model reasons over them repeatedly, wasting compute with every lookup.",
+      "Chunk retrieval also pulls in neighbours and context that may not be relevant to the actual question, flooding the model with noise. This irrelevant background prompts the model to make up answers not grounded in the evidence.",
+      "One fix is to fine-tune the base model on new documents, but that risks forgetting everything learned during initial training and requires expensive retraining for every batch of new knowledge."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "RAG repeats reasoning over the same texts and injects irrelevant context, wasting the time spent generating answers and breeding hallucinations."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old way: documents in a bin",
+        "viz": "box",
+        "viz_args": "Documents stored as chunks",
+        "caption": "Full text sits in storage, ready to be retrieved."
+      },
+      {
+        "title": "2. Same query, repeated search",
+        "viz": "weights",
+        "viz_args": [["query1", 60], ["query2", 60], ["query3", 60], ["query4", 60], ["compute", 100]],
+        "caption": "Model re-reads the same documents on every new query."
+      },
+      {
+        "title": "3. PANINI builds a QA network",
+        "viz": "weights",
+        "viz_args": [["entity1", 40], ["entity2", 40], ["event1", 35], ["event2", 35], ["link", 50]],
+        "caption": "Knowledge is encoded as question-answer pairs linked by entities and events."
+      },
+      {
+        "title": "4. Traversing the network",
+        "viz": "box",
+        "viz_args": "Chain: Q1→A1→Q2→A2→Q3→A3",
+        "caption": "Queries walk through the network following reasoning chains."
+      },
+      {
+        "title": "5. Fast, grounded answers",
+        "viz": "weights",
+        "viz_args": [["inference", 30], ["compute", 100], ["accuracy", 85], ["hallucination", 10]],
+        "caption": "Fewer words (numbers representing pieces of text) retrieved, grounded answers."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Write phase: encode documents as a QA network",
+        "text": "Each new document is read once; knowledge is extracted as question-answer pairs linked by named entities and events."
+      },
+      {
+        "b": "Build two indices for fast lookup",
+        "text": "One index finds QA pairs by matching entity names; the other finds them by semantic similarity to a query."
+      },
+      {
+        "b": "Decompose incoming query into sub-questions",
+        "text": "The model breaks down the user's query into atomic sub-questions it can answer one step at a time."
+      },
+      {
+        "b": "Walk the network following chains",
+        "text": "For each sub-question, retrieve a QA pair, use its answer to refine the next sub-question, and keep a running chain score."
+      },
+      {
+        "b": "Generate final answer from the collected chain",
+        "text": "Ground the response only in QA pairs actually visited in the network; no hallucination, no filler."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The thing the paper changes",
+    "paras": [
+      "PANINI replaces verbatim document storage with a structured memory: a continually-updated network of question-answer pairs, where each pair is anchored to named entities and events from the document."
+    ],
+    "object": "document representation"
+  },
+  "hidden": {
+    "h2": "The chain relevance score",
+    "name": "reasoning chain quality metric",
+    "paras": [
+      "As the model traverses the QA network, it scores each reasoning chain—a path of linked question-answer hops—using the geometric mean of how well each QA pair matches the sub-questions and entities it encounters. A high score means the chain is coherent and on-topic; a low score means it wandered into irrelevant pairs.",
+      "PANINI uses this score to rank and filter chains before generating the final answer. The model only includes QA pairs in its response if they scored well on this reasoning-grounded path, eliminating low-confidence detours that would otherwise breed hallucinations."
+    ],
+    "heat": {
+      "cells": [
+        ["q1_match", 4, true],
+        ["a1_entity", 3, false],
+        ["q2_coherent", 4, true],
+        ["a2_event", 3, false],
+        ["q3_match", 3, false],
+        ["a3_grounded", 4, true],
+        ["hop1_score", 4, true],
+        ["hop2_score", 3, false],
+        ["hop3_score", 2, false],
+        ["chain_mean", 3, false],
+        ["rank_position", 2, false],
+        ["answer_conf", 4, true]
+      ],
+      "caption": "Darker means higher quality and confidence; highlighted pairs are core to the reasoning path."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A reasoning chain is just a path of linked questions and answers. The model gives each chain a quality score based on how coherent and on-topic it stayed. High-scoring chains are used; low-scoring ones are discarded."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Hops are retrieved via dual search (entity index and dense QA index). Chains are scored as the geometric mean of per-hop relevance scores. RICR beam-searches over chains at each step, assembling the highest-confidence path."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why moving knowledge into a QA network helps",
+    "paras": [
+      "The base LLM is already excellent at reasoning through structured information. Instead of making it search and reason over raw text repeatedly, PANINI preprocesses each document once into a structured network of questions and answers linked by entities and events. This upfront work means the model never has to read the same passage twice.",
+      "When a query arrives, PANINI decomposes it into sub-questions and walks through the QA network following reasoning chains. Because the network is structured around entities and events, each chain stays coherent: the model can follow a logical path from one answer to the next, building confidence as it goes. This is fundamentally different from chunk retrieval, which randomly pulls in whatever text is semantically close to the query, including tangential noise.",
+      "By filtering chains based on their composite reasoning score, PANINI only grounds the final answer in high-confidence paths. Because the model is forced to construct its answer from only the QA pairs it actually retrieved and verified, it cannot invent facts or wander into unvisited corners of the network. Low-scoring chains are discarded entirely, so they never appear in the context the model sees, leaving no opening for hallucination."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Incoming query"
+        },
+        {
+          "t": "step",
+          "s": "Decompose into atomic sub-questions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Search QA network via entity and semantic indices"
+        },
+        {
+          "t": "step",
+          "s": "Score each reasoning chain by hop coherence",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Rank chains, keep top-k high-confidence paths"
+        },
+        {
+          "t": "output",
+          "s": "Answer grounded only in scored chain evidence"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Scoring a reasoning chain",
+    "words": "The score of a chain at step t is the geometric mean of the relevance scores for all hops from step 1 to step t.",
+    "equation": "s_t = (s_1 * s_2 * ... * s_t) ^ (1/t)",
+    "symbols": [
+      ["s_t", "the chain's composite score at step t"],
+      ["s_i", "the relevance score of hop i (how well the QA pair matches the sub-question)"],
+      ["t", "the number of hops completed so far"],
+      ["1/t", "the t-th root, ensuring the score is always between 0 and 1"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Hop 1: Q matches a QA pair with relevance 0.9. Chain score s_1 = 0.9.",
+        "Hop 2: Next entity link yields relevance 0.8. Chain score s_2 = (0.9 × 0.8)^(1/2) = 0.72^0.5 = 0.85.",
+        "Hop 3: Event link yields relevance 0.6. Chain score s_3 = (0.9 × 0.8 × 0.6)^(1/3) = 0.432^(1/3) ≈ 0.76.",
+        "A wandering chain (0.9 → 0.3 → 0.2) scores (0.9 × 0.3 × 0.2)^(1/3) = 0.054^(1/3) ≈ 0.38, and ranks much lower."
+      ]
+    },
+    "note": "The geometric mean penalizes weak links early: one bad hop drags down the whole chain, so only coherent paths survive ranking."
+  },
+  "bars": {
+    "h2": "Performance and efficiency",
+    "charts": [
+      {
+        "title": "Old RAG (full documents + chunk retrieval)",
+        "rows": [
+          ["Answer accuracy", 72, "good"],
+          ["Unsupported answers (hallucinations)", 14, "bad"],
+          ["Words retrieved per query (pieces of text)", 2400, "bad"]
+        ],
+        "note": "Chunk retrieval pulls in irrelevant context, breeding hallucinations and inflating word count."
+      },
+      {
+        "title": "PANINI (QA network + chain retrieval)",
+        "rows": [
+          ["Answer accuracy", 79, "good"],
+          ["Unsupported answers (hallucinations)", 3, "good"],
+          ["Words retrieved per query (pieces of text)", 80, "good"]
+        ],
+        "note": "Grounded in reasoning chains, no filler context. Accuracy up, hallucinations down, 30x fewer words."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Poor QA extraction during write phase.",
+        "html": "If the initial document-to-QA encoding misses important details or creates incomplete questions, the network will have gaps. Queries touching those blind spots will rank chains poorly or fail to answer at all. Quality of the GSW depends heavily on the document parser and QA model used."
+      },
+      {
+        "warn": true,
+        "b": "Entities and events are ambiguous or mislabeled.",
+        "html": "If two different entities are tagged the same name, or an event link connects unrelated QA pairs, chains will cross-contaminate. A query about Alice might accidentally follow a path about Bob because both were tagged entity_person_1."
+      },
+      {
+        "warn": true,
+        "b": "Chain relevance scores are unreliable with multi-hop reasoning.",
+        "html": "A geometric mean can be manipulated: a chain with one very high score and many medium scores may rank higher than a chain with all solid scores. For deeply nested reasoning, the model may need to re-rank by different metrics (e.g. final-hop specificity) to avoid false confidence."
+      },
+      {
+        "b": "Done right.",
+        "html": "Strong QA extraction, careful entity resolution, and validation of chain rankings on development data ensure the network stays coherent and the model only retrieves when it is confident."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small QA network from three short documents (e.g. Wikipedia excerpts about three historical figures, each 300 tokens). Parse each into a hand-crafted GSW: extract 5-8 question-answer pairs per document, link them by named entities (person names, dates, places) and events (born, died, discovered, published). Then run five multi-hop queries (e.g. 'What did Alice accomplish after Bob's discovery?') and count: (1) how many inference tokens were used to retrieve and ground the answer, (2) whether the final answer is grounded only in high-scoring chains or includes dangling unranked hops, (3) whether the answer is factually correct and never hallucinates."
+    ],
+    "metric_eq": "tokens_saved = (chunks_retrieved_baseline * tokens_per_chunk) - (chains_retrieved_panini * tokens_per_chain); hallucination_rate = unsupported_answers / total_answers",
+    "closing": "The demo must make it impossible to miss that PANINI answers the same multi-hop questions with a fraction of the compute and zero made-up facts."
+  }
+}

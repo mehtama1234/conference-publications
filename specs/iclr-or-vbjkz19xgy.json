@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-vbjkz19xgy",
+  "title": "Multi-Head Low-Rank Attention",
+  "family": "Efficiency & Systems",
+  "one_liner": "Break one big bottleneck into four independent ones so GPUs can split the memory work.",
+  "lead": "When a language model answers a long question, it has to remember everything from before. That memory, called the KV cache (the saved Key and Value numbers from earlier words), must be loaded from slow storage into each GPU's fast chip-memory at every step. On a single GPU this is fast enough, but when spreading work across many GPUs (splitting the computation across multiple devices), recent methods like MLA cannot split that memory neatly, so each GPU still has to load the full thing. MLRA changes this by decomposing the memory into four independent pieces that each GPU can load separately, cutting per-GPU memory traffic by 2.8 times.",
+  "nav": [["theme-efficiency-systems.html","Efficiency & Systems"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Long context means a traffic jam",
+    "paras": [
+      "Decoding a language model one word at a time is slow because the model has to read the entire KV cache—a growing memory of all previous words—from off-chip storage into the chip's fast memory before generating the next word. When one GPU is doing this alone, one GPU can complete this load quickly. But when you spread the work across four GPUs (splitting the computation across devices to decode faster), each GPU still has to load the full cache even though it only needs one quarter of the computation, because the compressed form is a single list of numbers that cannot be divided. This forces all four GPUs to load redundantly and wastes memory bandwidth. Standard attention (called MHA) loads 4 times as much per GPU as needed; newer methods like MLA compress this to 1.5 times per GPU, but the compression squeezes everything into a single latent list, which cannot be split. So each GPU is forced to load the whole thing anyway.",
+      "A beginner would try to split MLA's single vector into pieces, but that breaks the math: the inner product that MLA relies on requires all four pieces to be multiplied together at once. The paper's approach is to restructure the math so the four pieces can be multiplied independently, then summed at the end—making splitting possible without breaking quality."
+    ],
+    "callout": {
+      "b": "The bottleneck:",
+      "html": "When splitting work across multiple GPUs, each GPU loads 4.5 numbers per word in MLA because the single latent state cannot be sharded (split and distributed)."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Before: one GPU, one cache",
+        "viz": "weights",
+        "viz_args": [["hot",65],["hot",62],["hot",58],["hot",61],["hot",60],["warm",40],["warm",35],["warm",38],["warm",36],["warm",37],["free",10],["free",8]],
+        "caption": "Single GPU loads the full KV cache every decode step."
+      },
+      {
+        "title": "2. The problem: four GPUs, one unsplittable cache",
+        "viz": "box",
+        "viz_args": "MLA cache: single latent state (cannot split across 4 devices)",
+        "caption": "Each GPU tries to shard work but the cache stays whole."
+      },
+      {
+        "title": "3. MLRA's move: break into four independent pieces",
+        "viz": "weights",
+        "viz_args": [["moved",50],["moved",48],["moved",52],["moved",49],["free",15],["free",12],["free",18],["free",14],["free",10],["free",11],["free",9],["free",13]],
+        "caption": "Four latent heads, each computed independently per GPU."
+      },
+      {
+        "title": "4. Each GPU loads only one piece (1.5 numbers per token)",
+        "viz": "box",
+        "viz_args": "GPU1: branch1 | GPU2: branch2 | GPU3: branch3 | GPU4: branch4",
+        "caption": "Memory traffic cut to one quarter per device."
+      },
+      {
+        "title": "5. Sum the four pieces at the end (same answer, faster)",
+        "viz": "weights",
+        "viz_args": [["hot",72],["hot",68],["hot",70],["hot",71],["warm",45],["warm",42],["warm",48],["warm",43],["free",5],["free",6],["free",4],["free",7]],
+        "caption": "Final attention output: branch1 + branch2 + branch3 + branch4."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Decompose the latent state into four branches",
+        "text": "Instead of one latent vector, create four separate low-rank projections."
+      },
+      {
+        "b": "Compute attention independently per branch",
+        "text": "Each GPU handles one branch using standard attention math."
+      },
+      {
+        "b": "Assign each branch to one GPU under device parallelism",
+        "text": "GPU1 owns branch1 and loads only 1.5 times the head size; GPU2 owns branch2; etc."
+      },
+      {
+        "b": "Compute query-side absorption to eliminate redundant math",
+        "text": "Reorganize matrices so branch multiplication happens in lower-dimensional space."
+      },
+      {
+        "b": "Sum branch outputs and rescale to fix variance",
+        "text": "Add the four attention outputs together and correct the amplitude so training stays stable."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes: the latent state structure",
+    "paras": [
+      "MLA uses a single low-rank latent state (a single compressed vector). MLRA replaces it with four independent low-rank latent states (four separate vectors), each feeding its own attention computation. This decomposition is invisible to the outside world—the model still takes queries and produces the same answer—but internally, the four branches can be distributed across GPUs."
+    ],
+    "object": "latent state structure"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: per-device memory footprint",
+    "name": "per-device KV cache size across multiple devices",
+    "paras": [
+      "When you split inference across four GPUs (each handling one quarter of the computation), each GPU must load a portion of the KV cache. Standard MHA requires each device to load 4.5 times the hidden head dimension per word; MLA compresses this to 4.5 times, but because MLA uses a single latent vector, it cannot be split (divided across devices), so each GPU still loads the full 4.5. MLRA breaks the single vector into four branches, so each GPU loads only 1.5 times the head dimension—one quarter of the original.",
+      "The paper measures this by counting floating-point operations divided by bytes loaded from memory (arithmetic intensity). MLRA increases this ratio dramatically, meaning the GPU does more actual computation relative to memory traffic, shifting the bottleneck from bandwidth-bound (waiting for data) to compute-bound (limited by how fast the chip can calculate)."
+    ],
+    "heat": {
+      "cells": [
+        ["GPU1-branch1", 1, true],
+        ["GPU2-branch2", 1, true],
+        ["GPU3-branch3", 1, true],
+        ["GPU4-branch4", 1, true],
+        ["GPU1-unused", 4, false],
+        ["GPU2-unused", 4, false],
+        ["GPU3-unused", 4, false],
+        ["GPU4-unused", 4, false],
+        ["shared-head-MLA", 4, false],
+        ["shared-head-old", 4, false],
+        ["waste-old-gpu2", 4, false],
+        ["waste-old-gpu3", 4, false]
+      ],
+      "caption": "Darker means more memory per GPU. MLRA (top left) spreads load evenly; MLA (bottom right) forces all GPUs to load full cache."
+    },
+    "reads": [
+      {
+        "b": "Plain reading:",
+        "html": "Imagine four people splitting a job. With MLA, even though they split the job, they all still have to read from the same filing cabinet. With MLRA, each person gets their own small cabinet with just the files they need."
+      },
+      {
+        "b": "Paper reading:",
+        "html": "Arithmetic intensity (floating-point operations per byte loaded) measures how much computation happens relative to data movement. MLRA increases this by factoring the latent state into four independent low-rank projections, reducing per-device KV cache from 4.5 times the head size to 1.5 times the head size and boosting arithmetic intensity."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: independence through low-rank decomposition",
+    "paras": [
+      "The core idea is to exploit the mathematics of low-rank projection. MLA compresses the KV cache by mapping it into a smaller space (a technique called low-rank compression). This saves memory but creates a single bottleneck: because all attention heads must operate on this one compressed vector, a single GPU must hold the entire vector even when spreading work across many GPUs. MLRA decomposes this into four separate low-rank projections, each producing its own intermediate attention output. Because the final output is simply adding up these four independent computations, the paper reorganizes the numerical operations (multiplying tables of numbers) so that query-side absorption eliminates redundant steps, and each branch can live on a different GPU without any device needing to know about the others.",
+      "The mechanism works in three steps. First, the latent KV structures (arrays of numbers) are reorganized into branch-wise form. Second, attention is computed for each branch independently using an optimized code routine (FlashAttention-3), avoiding the need to materialize all four branches in the same place at once. Third, the intermediate outputs are summed and rescaled to preserve the variance that the model learned during training. The rescaling must be applied because summing four independent random variables increases variance; if the rescaling is not applied, the outputs grow too large and the training nudges (gradients) become unreliable. Because each branch is computed independently, each GPU owns exactly one branch and loads exactly one quarter of the cache."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Query, four KV branches"
+        },
+        {
+          "t": "step",
+          "s": "Reorganize latent arrays into head-wise structure",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Compute attention independently per branch (branch1: GPU1, branch2: GPU2, etc.)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sum the four attention outputs"
+        },
+        {
+          "t": "step",
+          "s": "Rescale to preserve variance"
+        },
+        {
+          "t": "output",
+          "s": "Final attention output (sharded decoding complete)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: branched, scaled attention",
+    "words": "For each branch, compute the attention logits (query dot product with keys), apply softmax (turn raw scores into percentages), multiply by values, then sum all four branches and scale by the variance correction factor.",
+    "equation": "output = sum_{b=0}^{3} (1/tau) * softmax(Q * KV_branch_b^T) * V_branch_b, where tau = 1/sqrt(d_h + d_R_h)",
+    "symbols": [
+      ["Q", "the query (what we are looking for)"],
+      ["KV_branch_b", "the b-th independent key-value branch"],
+      ["d_h", "the hidden head dimension (number count)"],
+      ["d_R_h", "the low-rank dimension (how compressed)"],
+      ["tau", "the rescaling factor to fix variance"],
+      ["softmax(...)", "turn scores into percentages that add to 1"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose d_h = 64 (64 numbers per head) and d_R_h = 16 (low-rank, 16 numbers).",
+        "tau = 1/sqrt(64 + 16) = 1/sqrt(80) = 1/8.94 ≈ 0.112.",
+        "GPU1 computes branch1 attention output (say result = 0.8 units).",
+        "GPU2 computes branch2 attention output (say result = 0.7 units).",
+        "GPU3 computes branch3 attention output (say result = 0.9 units).",
+        "GPU4 computes branch4 attention output (say result = 0.75 units).",
+        "Raw sum = 0.8 + 0.7 + 0.9 + 0.75 = 3.15 units (too large; variance exploded from 0.4 to 3.15).",
+        "After rescaling by tau: 3.15 * 0.112 ≈ 0.35 units (back to expected size, training stays stable)."
+      ]
+    },
+    "note": "The tau factor corrects for the fact that summing four independent pieces makes the result too large if the pieces were not designed to be summed."
+  },
+  "bars": {
+    "h2": "Decoding speed and quality",
+    "charts": [
+      {
+        "title": "MLA on many GPUs (unshard-able)",
+        "rows": [
+          ["Per-device KV cache", 45, "bad"],
+          ["Memory traffic (relative)", 100, "bad"],
+          ["Decode latency per word", 32, "bad"]
+        ],
+        "note": "Each GPU loads the full amount because the single latent state cannot be split."
+      },
+      {
+        "title": "MLRA on four GPUs (shard-able)",
+        "rows": [
+          ["Per-device KV cache", 15, "good"],
+          ["Memory traffic (relative)", 35, "good"],
+          ["Decode latency per word", 11, "good"]
+        ],
+        "note": "Each GPU loads only one quarter. Combined with compute-optimal code, latency drops 2.8 times."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Unequal branch spread.",
+        "html": "If the four branches are not equally sized, some GPUs load more than others. The slowest GPU (the one handling the largest branch) sets the speed for all, because decoding must wait for all GPUs to finish before generating the next word. MLRA requires careful partitioning (dividing the computation into balanced pieces) to keep branch sizes equal."
+      },
+      {
+        "warn": true,
+        "b": "Initialization instability.",
+        "html": "The paper found that random initialization with variance 0.02 can cause training to diverge early (first 20 billion words). Zero initialization for output projections fixes this; if initialization is not handled correctly, loss spikes and training fails."
+      },
+      {
+        "warn": true,
+        "b": "Missing variance correction.",
+        "html": "If the rescaling factor tau is not applied after summing the four branches, the model outputs grow too large and the gradients (nudges during training) become unreliable."
+      },
+      {
+        "b": "Done right.",
+        "html": "When branches are evenly sized, initialization and rescaling are tuned, and the model is trained end-to-end with MLRA, the prediction accuracy stays as good as standard attention while decoding is 2.8 times faster, because each GPU's memory load is one quarter and GPUs finish tasks at nearly the same time."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small language model (2.9 billion model weights, same as the paper) with MLRA attention on a machine with four GPUs. Train it on a chunk of text data (say 100 billion words). During training, log the loss curve and perplexity (a measure of prediction accuracy). After training, measure decoding latency for a single word when spreading the work across four GPUs. Compare decoding latency against standard MLA and GQA baselines. Measure per-GPU memory usage and confirm each GPU loads only one quarter of the original memory."
+    ],
+    "metric_eq": "speedup = (MLA_latency_per_word) divided by (MLRA_latency_per_word); per_device_cache = maximum memory used on any single GPU during decode",
+    "closing": "The demo should make it obvious that each GPU's memory footprint is exactly one quarter of MLA, and the decode speedup is between 2.5 and 3.0 times faster than MLA because each GPU finishes its work sooner, so the whole process completes faster."
+  }
+}

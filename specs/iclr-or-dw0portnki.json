@@ -1,0 +1,217 @@
+{
+  "slug": "iclr-or-dw0portnki",
+  "title": "MILR: Test-Time Latent Reasoning for Image Generation",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Instead of changing how a model is trained, nudge its internal thoughts at the moment it generates an image to better match what the user asked for.",
+  "lead": "Making a model generate a detailed image is hard because the model has to know what you want and then hold that idea while building the picture, all in one pass. This paper says: do not retrain anything. Instead, when the model is already working on an image, gently nudge its internal thoughts (the vector lists it creates midway) so they better match both your text description and image quality rules. The nudging uses a reward signal (like a scoring rubric) and happens only at test time, so no retraining is needed.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why current methods hit a wall",
+    "paras": [
+      "When you ask a model to draw something, the model generates an image in one forward pass: it reads your text, then builds the image by breaking it into small chunks (like words in a sentence) and drawing one chunk at a time. If the model missed something in your request, the image comes out wrong. You might think: retrain the model on better examples so it learns the right behavior. But retraining is slow, expensive, and you need high-quality training data.",
+      "A beginner tries: fine-tune the model on hand-picked image examples with perfect text descriptions. This works if you have the data, but it is costly and slow. Some papers tried reasoning methods before now, but they either reason only about the image (ignoring text) or reason only about text (ignoring the image), or they require retraining. You want to reason about both at once, without touching the model weights."
+    ],
+    "callout": {
+      "b": "The core idea:",
+      "html": "At test time, nudge the model's internal thoughts (its latent vector representations) to match both your request and image quality, using no retraining."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Normal image generation",
+        "viz": "brain",
+        "caption": "Model reads text and builds image in one pass with fixed internal thoughts."
+      },
+      {
+        "title": "2. Internal thoughts are just vectors",
+        "viz": "weights",
+        "viz_args": [["free", 30], ["free", 40], ["warm", 50], ["free", 25], ["free", 35]],
+        "caption": "Midway through generation, the model has lists of numbers (vectors) representing both text and image chunks."
+      },
+      {
+        "title": "3. Score the partial image",
+        "viz": "box",
+        "viz_args": "Quality = 0.62",
+        "caption": "Stop midway, score how well the image matches your request using a reward rubric."
+      },
+      {
+        "title": "4. Nudge the vectors",
+        "viz": "weights",
+        "viz_args": [["warm", 32], ["free", 38], ["hot", 68], ["moved", 45], ["warm", 50]],
+        "caption": "Nudge those vectors to raise the quality score, then finish the image generation."
+      },
+      {
+        "title": "5. Better final image",
+        "viz": "plain",
+        "caption": "The nudged vectors flow to a better-aligned image without retraining the model."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Forward pass starts",
+        "text": "Model processes your text description and begins building image by creating vector representations."
+      },
+      {
+        "b": "Extract latent vectors",
+        "text": "At a specific layer, capture the vector lists representing both text and image."
+      },
+      {
+        "b": "Score the current state",
+        "text": "Run a quality rubric to see how well the image-so-far matches your request."
+      },
+      {
+        "b": "Nudge the vectors using the score",
+        "text": "Calculate which small changes to those vectors would raise the quality score higher."
+      },
+      {
+        "b": "Finish with nudged vectors",
+        "text": "Feed the nudged vectors through the rest of the model to produce the final image."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper does not change the model's weights or training. Instead, it changes the latent vector representations (the lists of numbers the model creates midway through generation) by nudging them based on a quality score. The nudging is small and only applied at test time."
+    ],
+    "object": "Latent vectors"
+  },
+  "hidden": {
+    "h2": "Alignment score: how well image matches request",
+    "name": "Alignment between text intent and generated image",
+    "paras": [
+      "This is a number (0 to 1) that measures how well the generated image matches what you asked for. It combines image quality (does it look realistic?) with faithfulness (does it contain the right objects and relationships?). MILR estimates this score by running the image-so-far through a pre-trained rubric model designed for each benchmark.",
+      "The paper measures this score at each step of latent optimization. When the score is higher, the vectors are better aligned with your intent. By nudging vectors to increase this score, MILR makes the model reason during generation."
+    ],
+    "heat": {
+      "cells": [["color accuracy", 1, false], ["shape correctness", 4, true], ["spatial layout", 3, true], ["texture detail", 2, false], ["semantic match", 4, true], ["global structure", 3, true], ["fine details", 1, false], ["prompt adherence", 4, true], ["illumination", 2, false], ["style consistency", 2, false], ["composition", 3, true], ["clarity", 2, false]],
+      "caption": "Darker cells show aspects the alignment score weights more heavily; highlights mark what MILR focuses on most."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Alignment is how much the image looks like what you described. MILR tries to make this number bigger."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "MILR uses a pre-trained reward model (benchmark-specific) to compute alignment at each latent iteration, computing which way to nudge the vectors using the reward change, without altering the model weights."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why nudging latents makes images better",
+    "paras": [
+      "Here is the causal chain. The model builds an image by processing tokens sequentially: the first few text and image tokens control the overall semantic structure (what objects are where), while later tokens refine details. Normally, the model locks in these decisions in one forward pass. MILR intercepts midway and asks: how well does this draft match the user's intent? Then it nudges the early tokens' vector representations to slightly different values because the model is designed so that slightly different input vectors will produce a different image that fits the user's request better.",
+      "Why does this work? Because the vectors are just numbers. If the quality score says the current draft is off-track, MILR computes which tiny changes to those vector values would make the score higher, based on how sensitive the score is to each number. It makes those changes and lets the rest of the model run forward. Since the early tokens have the most influence on overall structure, nudging them has the biggest impact. The model already has learned how to turn any reasonable vector pattern into a coherent image, so changing those vectors nudges the image toward your intent without breaking its visual logic."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Text description"
+        },
+        {
+          "t": "step",
+          "s": "Generate draft image tokens"
+        },
+        {
+          "t": "step",
+          "s": "Score draft against user intent",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Nudge text and image vectors toward higher score"
+        },
+        {
+          "t": "output",
+          "s": "Final image from nudged vectors"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The nudge equation",
+    "words": "penalty equals the reward score gradient times the learning rate times the step size",
+    "equation": "z_nudged = z_original + alpha * dR/dz",
+    "symbols": [
+      ["z_original", "the latent vector before nudging"],
+      ["alpha", "the learning rate controlling nudge size"],
+      ["dR/dz", "the gradient of the reward score with respect to the vectors"],
+      ["z_nudged", "the updated vector after the nudge"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Start: image text vector = [0.5, -0.3, 0.8], reward score = 0.62.",
+        "Reward gradient dR/dz points to [0.1, 0.05, 0.02], meaning these directions raise the score.",
+        "With learning rate alpha = 0.01: nudge is [0.001, 0.0005, 0.0002].",
+        "Result: new vector = [0.501, -0.2995, 0.8002]; score now 0.64.",
+        "Repeat: after 5 nudges, the vector has shifted toward better alignment and score reaches 0.73."
+      ]
+    },
+    "note": "The nudge is tiny (alpha is small) so the vectors stay close to what they were before, meaning the model's internal machinery still responds the way it was trained to, just pointed at a slightly different target; this is why the image improves instead of breaking."
+  },
+  "bars": {
+    "h2": "Benchmark results: MILR vs training-based methods",
+    "charts": [
+      {
+        "title": "Training-based reasoning (retrain model)",
+        "rows": [
+          ["GenEval (zero-shot)", 0.87, "good"],
+          ["T2I-CompBench color", 0.79, "good"],
+          ["WISE knowledge-intensive", 0.35, "bad"]
+        ],
+        "note": "Training-based methods work well on standard benchmarks but lag on knowledge-intensive tasks."
+      },
+      {
+        "title": "MILR (test-time nudging, no retraining)",
+        "rows": [
+          ["GenEval (zero-shot)", 0.95, "good"],
+          ["T2I-CompBench color", 0.81, "good"],
+          ["WISE knowledge-intensive", 0.63, "good"]
+        ],
+        "note": "MILR achieves higher scores without any model retraining, especially strong on knowledge-heavy tasks (80% improvement on WISE)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Reward model is biased.",
+        "html": "If the scoring rubric (the reward model) has blind spots or prefers certain image styles, MILR nudges toward those preferences even if they do not match your intent. The nudges are only as good as the reward model."
+      },
+      {
+        "warn": true,
+        "b": "Nudging too many vectors breaks coherence.",
+        "html": "If you nudge all the tokens equally, the model loses its sense of visual coherence and produces noise. MILR only nudges the first few tokens (roughly 30 percent for text, 30 percent for image) because early tokens control global structure; later tokens add details and should not be overridden."
+      },
+      {
+        "warn": true,
+        "b": "Test-time cost is high.",
+        "html": "Each nudge requires a forward pass to score the image, then a compute-heavy step to figure out which direction to nudge each vector. With multiple nudge steps, the test-time cost can be 5–10x higher than normal generation."
+      },
+      {
+        "b": "Done right.",
+        "html": "Nudge only early tokens because they control the big picture, use a reward model that accurately scores what you care about (so nudges point toward your goal, not some side effect), and accept that generating one image takes 5–10 times longer, which is worth it if you want high-quality images without retraining."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a minimal text-to-image system that runs MILR: (1) Start with a small pretrained diffusion model or discrete-VAE model that can generate images from text. (2) Implement a reward function that scores image quality (e.g., CLIP score for text alignment, or a simple heuristic like color variance or object count). (3) At generation time, extract the vector lists at the midpoint, compute which direction to nudge them based on the reward score, and nudge the first 30 percent of text and 30 percent of image vectors. (4) Finish generation with the nudged vectors and compare the final image to the non-nudged baseline."
+    ],
+    "metric_eq": "alignment_gain = reward_score_after_nudge - reward_score_before_nudge",
+    "closing": "The demo must show that nudging increases the alignment score without retraining, and that the nudged image is visibly closer to the text description than the non-nudged baseline."
+  }
+}

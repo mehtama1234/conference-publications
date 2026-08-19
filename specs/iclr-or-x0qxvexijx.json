@@ -1,0 +1,500 @@
+{
+ "slug": "iclr-or-x0qxvexijx",
+ "title": "Controlling Repetition in Protein Language Models",
+ "family": "AI for Science",
+ "one_liner": "A protein-writing model is taught to avoid pathological repetition by learning steering vectors that target the hidden direction of repetition, applied at inference with no retraining.",
+ "lead": "Protein language models write new protein sequences but often get stuck in a rut: repeating the same amino acids (like AAAAAAA instead of varied sequences), which breaks the protein's 3D shape and function. Previous tricks tried to penalize repetition during decoding\u2014but those usually broke the protein's ability to fold properly. This paper introduces a new way: find the internal direction inside the model that points toward repetition, then push away from that direction during generation. No retraining needed.",
+ "nav": [
+  [
+   "theme-ai-for-science.html",
+   "AI for Science"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Proteins get stuck in repetition",
+  "paras": [
+   "Protein language models are neural networks trained on thousands of real proteins to learn what a valid protein sequence looks like. When you give such a model a starting snippet (like the first 10% of a protein) and ask it to fill in the rest, it sometimes produces garbage: long stretches of the same amino acid repeated over and over\u2014AAAAAAA or PPPPPP. In real proteins, amino acids vary. Repetition makes the chain collapse into a tangled mess, and AlphaFold (a separate tool that predicts 3D shape from sequence) gives low confidence, meaning the output is useless.",
+   "A naive first attempt: penalize repetition during decoding. Modify the model's output scores before sampling, so repeated amino acids look bad. But this almost always backfires: the penalty squashes the diversity needed for the protein to fold correctly. The model learns that to stay folded it must repeat\u2014and now forcing diversity breaks foldability. You cannot simply trade one for the other; they are tangled together in the model's logic."
+  ],
+  "callout": {
+   "b": "The hidden tradeoff.",
+   "html": "Naively penalizing repetition does not work because repetition and structural validity are baked together into the model's learned weights."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The model writes proteins",
+    "viz": "brain",
+    "caption": "A trained neural network generates amino acids one by one or all at once."
+   },
+   {
+    "title": "2. It gets stuck in repetition",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "moved",
+      8
+     ],
+     [
+      "moved",
+      8
+     ],
+     [
+      "moved",
+      8
+     ],
+     [
+      "free",
+      3
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      1
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      3
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      1
+     ]
+    ],
+    "caption": "Instead of varying amino acids, it outputs the same one repeatedly. Darker bars show stuck repetition."
+   },
+   {
+    "title": "3. Steering vectors separate repetition from quality",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      7
+     ],
+     [
+      "warm",
+      4
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "warm",
+      3
+     ],
+     [
+      "warm",
+      3
+     ],
+     [
+      "hot",
+      6
+     ],
+     [
+      "warm",
+      2
+     ],
+     [
+      "free",
+      1
+     ],
+     [
+      "warm",
+      3
+     ],
+     [
+      "warm",
+      4
+     ],
+     [
+      "warm",
+      2
+     ],
+     [
+      "free",
+      1
+     ]
+    ],
+    "caption": "Contrastive pairs reweight hidden activations\u2014high-rep vs low-rep (same quality), revealing the pure direction of repetition."
+   },
+   {
+    "title": "4. Injected at inference, steering pulls away from repetition",
+    "viz": "box",
+    "viz_args": "Repetition direction \u2190\u2192 Variety direction",
+    "caption": "At generation time, push activations in the opposite direction: away from repetition, toward healthy variation."
+   },
+   {
+    "title": "5. Result: proteins stay valid and diverse",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "warm",
+      5
+     ],
+     [
+      "warm",
+      4
+     ],
+     [
+      "warm",
+      6
+     ],
+     [
+      "warm",
+      5
+     ],
+     [
+      "warm",
+      5
+     ],
+     [
+      "warm",
+      4
+     ],
+     [
+      "warm",
+      6
+     ],
+     [
+      "warm",
+      5
+     ],
+     [
+      "warm",
+      4
+     ],
+     [
+      "warm",
+      3
+     ],
+     [
+      "warm",
+      5
+     ],
+     [
+      "warm",
+      4
+     ]
+    ],
+    "caption": "The completed sequence varies naturally, folds confidently, remains biologically sound."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Measure repetition and quality",
+    "text": "For each candidate protein sequence, compute two scores: how repetitive it is (same amino acids bunched together) and how likely it is to fold correctly (biological validity)."
+   },
+   {
+    "b": "Build constrained contrastive pairs",
+    "text": "Take a large pool of sequences. Filter to keep only sequences whose quality is near some average (to cancel quality differences). Then split into two buckets: one with low repetition, one with high repetition\u2014as far apart as possible in repetition while staying equal in quality."
+   },
+   {
+    "b": "Extract the repetition direction",
+    "text": "Feed both buckets through the model and capture the hidden activations (the internal numbers the model computes before outputting letters). Compute the average difference vector: this is the direction in hidden space that points toward repetition."
+   },
+   {
+    "b": "Inject during generation",
+    "text": "When generating a new sequence, at certain layers inside the model, subtract a multiple of this direction from the hidden state. This steers generation away from repetition."
+   },
+   {
+    "b": "Verify the result",
+    "text": "Compare: repetition should drop, quality (AlphaFold confidence) should hold steady. If quality drops, adjust the steering strength."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper changes the hidden activations\u2014the internal numbers the model computes while generating. Specifically, it subtracts a learned direction (a list of numbers pointing toward repetition) from the activations at certain layers, pushing them away from the learned direction of repetition. No weights are updated, no retraining happens; only the intermediate values flowing through the model are adjusted."
+  ],
+  "object": "Hidden activations"
+ },
+ "hidden": {
+  "h2": "The hidden direction of repetition",
+  "name": "Repetition direction vector",
+  "paras": [
+   "Inside a neural network, information flows as lists of numbers called activations (also called hidden states or internal values). As the network processes a protein prefix and generates the next amino acid, each layer transforms these numbers. The paper discovers that when the model produces repetitive sequences, its hidden activations cluster in a particular subspace\u2014a direction in the high-dimensional space of all possible numbers. This direction can be quantified: compute the average hidden state for all high-repetition sequences, subtract the average for all low-repetition sequences (both of equal quality), and the difference is the repetition direction.",
+   "The paper estimates this direction by collecting hidden activations from both a low-repetition dataset and a high-repetition dataset, then computing their mean difference using Pearson correlation and layer-wise activation analysis. Once you have this vector, you can literally subtract multiples of it from any sequence's hidden state during generation to pull away from repetition."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "h1",
+     1,
+     false
+    ],
+    [
+     "h2",
+     3,
+     true
+    ],
+    [
+     "h3",
+     2,
+     false
+    ],
+    [
+     "h4",
+     4,
+     true
+    ],
+    [
+     "h5",
+     2,
+     false
+    ],
+    [
+     "h6",
+     1,
+     false
+    ],
+    [
+     "h7",
+     3,
+     true
+    ],
+    [
+     "h8",
+     2,
+     false
+    ],
+    [
+     "h9",
+     4,
+     true
+    ],
+    [
+     "h10",
+     1,
+     false
+    ],
+    [
+     "h11",
+     2,
+     false
+    ],
+    [
+     "h12",
+     3,
+     true
+    ]
+   ],
+   "caption": "Darker means more aligned with repetition direction. Highlighted cells (borders) show layers used for steering injection."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The model's brain has a direction pointing toward repetition. Steer in the opposite direction."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "Given contrastive sets D+(low repetition, balanced utility) and D-(high repetition, balanced utility), compute mean difference in hidden activations h_L across layer L, normalized by the Pearson correlation with a repetition score R(x). This direction captures the hidden subspace of pathological repetition independent of foldability."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why steering the activations stops repetition",
+  "paras": [
+   "A neural network for protein generation learns patterns from thousands of examples. During that learning, the weights inside the network encode every association it discovered: certain patterns of amino acids cluster in hidden space, certain chains fold well, certain sequences repeat. When you ask the model to generate, it follows those learned associations. If repetition was common in the training data or if the model learned a shortcut where repetition helps it 'stay confident' (because repeating one amino acid is a safe bet the model can always output something, rather than trying to predict more varied next steps), the hidden states will drift toward the repetition subspace as it generates.",
+   "By computing steering vectors from contrastive data (low-rep vs high-rep, same quality), the paper isolates the specific direction of repetition in hidden space. Because the contrastive sets are matched on structural quality, the difference vector points purely at repetition, not at other features like foldability. When you subtract this vector from the hidden state during generation, you are literally pulling the sequence's path away from the learned repetition subspace. Each layer's hidden state is nudged in the opposite direction: instead of accumulating associations that lead to repetition, the computation drifts toward associations that encode variety and regularity. Since the steering is applied at inference only (no retraining), the model's weights stay the same\u2014only the trajectory through hidden space changes."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Protein prefix plus generation target"
+    },
+    {
+     "t": "step",
+     "s": "Pass through layers 1\u201310, capturing hidden activations",
+     "hl": false
+    },
+    {
+     "t": "step",
+     "s": "At layer 12 (key layer identified in ablation), subtract steering vector from hidden state",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Continue through remaining layers with adjusted activations",
+     "hl": false
+    },
+    {
+     "t": "output",
+     "s": "Output probabilities for next amino acids; sample varied, non-repetitive sequence"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The steering injection formula",
+  "words": "The penalty applied to shifting the hidden activations is: penalty equals alpha times the magnitude of the steering adjustment, where alpha is a hyperparameter controlling how strongly we steer away from repetition",
+  "equation": "h_L_new = h_L_old - alpha * direction_L",
+  "symbols": [
+   [
+    "h_L_old",
+    "Hidden activations at layer L before steering"
+   ],
+   [
+    "h_L_new",
+    "Hidden activations at layer L after steering"
+   ],
+   [
+    "direction_L",
+    "The repetition direction vector computed from contrastive pairs at layer L"
+   ],
+   [
+    "alpha",
+    "Steering strength (how far to push; tuned per model and dataset)"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose at layer 12 the model produces hidden state h_12_old = [3.2, -1.5, 4.1, 0.8, -2.3].",
+    "The learned repetition direction is direction_12 = [0.4, -0.1, 0.3, 0.05, -0.2] (pointing toward repetition).",
+    "We set alpha = 0.5 (moderate steering strength).",
+    "We compute: h_12_new = [3.2, -1.5, 4.1, 0.8, -2.3] - 0.5 * [0.4, -0.1, 0.3, 0.05, -0.2]",
+    "= [3.2 - 0.2, -1.5 - (-0.05), 4.1 - 0.15, 0.8 - 0.025, -2.3 - (-0.1)]",
+    "= [3.0, -1.45, 3.95, 0.775, -2.2]",
+    "Now the hidden state is nudged away from repetition. Downstream layers see this adjusted state and generate less repetitive outputs."
+   ]
+  },
+  "note": "The subtraction directly moves the hidden state's position away from the learned repetition direction, forcing the generation path through a different region of the model's learned space."
+ },
+ "bars": {
+  "h2": "Repetition vs. quality trade-off",
+  "charts": [
+   {
+    "title": "Naive repetition penalty (breaks quality)",
+    "rows": [
+     [
+      "Low-rep sequences (no steering)",
+      94,
+      "good"
+     ],
+     [
+      "Low-rep sequences (with penalty)",
+      78,
+      "bad"
+     ],
+     [
+      "Repetition score",
+      35,
+      "bad"
+     ]
+    ],
+    "note": "Simple decoding penalties kill quality while reducing repetition, because the model learned to couple them together."
+   },
+   {
+    "title": "UCCS (steering vector; preserves quality)",
+    "rows": [
+     [
+      "Low-rep sequences (baseline)",
+      94,
+      "good"
+     ],
+     [
+      "Low-rep sequences (with steering)",
+      91,
+      "good"
+     ],
+     [
+      "Repetition score",
+      72,
+      "good"
+     ]
+    ],
+    "note": "By targeting only the repetition direction (not quality), steering keeps AlphaFold confidence high while cutting repetition in half."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Steering strength too high.",
+    "html": "If alpha is too large, you push so far from repetition that you overshoot into gibberish. The sequence becomes incoherent because you are steering away from too much of the learned patterns, not just repetition."
+   },
+   {
+    "warn": true,
+    "b": "Contrastive sets are not truly balanced on quality.",
+    "html": "If the high-repetition and low-repetition datasets have different average structural quality, the difference vector will encode quality differences too, not just repetition. Then steering backfires: you pull away from quality along with repetition."
+   },
+   {
+    "warn": true,
+    "b": "The wrong layers are chosen for steering.",
+    "html": "If you inject the steering at layers 1\u20135 (early layers), it has no effect because those layers process the prefix, not generation. If you inject at layers 25\u201330 (too late), the model has already committed to repetition. Ablations show the sweet spot is layers 12\u201315 for most protein models."
+   },
+   {
+    "b": "Done right.",
+    "html": "The paper carefully controls utility score bands to ensure contrastive balance, measures alpha per model and dataset, and uses layer ablations to identify optimal injection points. This removes the confounds and makes the method reliable."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "A demo script should: (1) load a pretrained protein language model (ESM-3 or ProtGPT2); (2) prepare a small test set of protein prefixes (say, 50 sequences, each the first 10% of a real protein from CATH or UniRef50); (3) generate completions with three settings: baseline (no steering), naive repetition penalty (baseline + temperature sampling), and UCCS steering (with alpha tuned to the model); (4) for each completion, compute repetition score (measure how many homopolymer runs of length >4 exist) and foldability score (run AlphaFold2, extract pLDDT confidence or a simplified validation metric); (5) report side-by-side: baseline repetition vs. UCCS repetition, baseline quality vs. UCCS quality. The demo must show that UCCS cuts repetition by >30% while keeping quality within 5% of baseline."
+  ],
+  "metric_eq": "improvement = (repetition_baseline - repetition_uccs) / repetition_baseline; quality_delta = abs(quality_baseline - quality_uccs) / quality_baseline",
+  "closing": "The non-negotiable finding: UCCS achieves lower repetition and equal or better AlphaFold confidence, while naive penalties always sacrifice one for the other\u2014because UCCS isolates only the repetition direction (not quality), whereas penalties suppress the entire learned range of outputs and thus remove quality-preserving information too."
+ }
+}

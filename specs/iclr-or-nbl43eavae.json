@@ -1,0 +1,250 @@
+{
+  "slug": "iclr-or-nbl43eavae",
+  "title": "MAGREF: Masked Guidance for Any-Reference Video Generation",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Stop video models from confusing multiple people and objects in the same frame by storing each subject's appearance in its own channel and tying it to its text label.",
+  "lead": "When a video model is asked to generate a video of two people from reference photos, it often mixes up their faces and clothing, creating blurred hybrids. MAGREF fixes this by treating each person's appearance as a separate data stream, spatially masking where each person belongs, and anchoring each stream to its name in the text prompt, so the model learns that 'woman' maps to one set of pixels and 'man' maps to another.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Mixing up subjects in video",
+    "paras": [
+      "Today's video models learn to draw humans, animals, and objects by watching thousands of videos. But when you ask one to generate a video with TWO people in it (both painted from reference photos), the model struggles. It forgets whose face is whose, blends their clothing together, and copies one person's arm directly from the reference without moving it naturally (a copy-paste artifact).",
+      "A naive first approach is to fine-tune the model separately for each new person you want to draw (using methods like LoRA or DreamBooth). This works but is slow: retrain for every new identity. The faster alternative is training-free inference, which just loads the reference images and runs the model once without retraining. This is faster because you skip the expensive retraining step and use the model's existing learned knowledge directly. But training-free methods rely on a mechanism called cross-attention (a kind of lookup that says 'which pixels in the reference should I attend to?'). When multiple references are involved, the model stores all their pixel data in a single list and tries to remember which pixels belong to whom. Since the list is unorganized, the model cannot reliably tell them apart, so it blends features from both people together and produces blurry, confused output."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "MAGREF places each subject's appearance in a separate channel, masks its spatial region, and tags it with its name from the text. This solves the mixing problem because the model no longer has to guess which pixels belong to whom: the organization is explicit."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "brain",
+        "caption": "Model receives two reference photos and text: 'a woman and a man'."
+      },
+      {
+        "title": "2. Old way: jumbled list",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["warm", 35], ["warm", 42], ["warm", 38], ["warm", 45], ["warm", 40]],
+        "caption": "Vanilla method stacks references into one list. Model forgets which pixels belong to whom."
+      },
+      {
+        "title": "3. MAGREF: layered canvas",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["free", 40], ["hot", 45], ["free", 35], ["free", 42], ["free", 38]],
+        "caption": "MAGREF places each subject on its own layer. Hot bars are woman features, free bars are man features."
+      },
+      {
+        "title": "4. Mask and label",
+        "viz": "box",
+        "viz_args": "Left half masked 'woman', right half masked 'man'. Each tied to its text tag.",
+        "caption": "Spatial mask + text anchor keeps identity separate in memory."
+      },
+      {
+        "title": "5. Output: separate identities",
+        "viz": "plain",
+        "caption": "Video preserves both people's faces and clothing without blending or copy-paste."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Place subjects on canvas",
+        "text": "Take N reference photos, position each at a spatial location on a blank canvas."
+      },
+      {
+        "b": "Compress into channels",
+        "text": "Merge the canvas into one image, encode it with a VAE (a lossy compressor), then stack the compressed features channel-by-channel (not token-by-token)."
+      },
+      {
+        "b": "Add spatial mask",
+        "text": "Apply a binary mask that marks which regions belong to which subject, telling the model 'this channel covers only these pixels'."
+      },
+      {
+        "b": "Inject semantic labels",
+        "text": "Directly inject the semantic meaning of each subject (e.g., 'woman', 'man') into its corresponding image region using text from the prompt."
+      },
+      {
+        "b": "Generate and measure",
+        "text": "Feed the masked, labeled input to the diffusion model. Measure identity consistency and semantic alignment to verify no mixing."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of concatenating reference images into a flat list of tokens (which makes subjects indistinguishable), MAGREF concatenates them along the channel dimension and adds spatial masking. Think of a channel as a separate data layer (like a transparent sheet): woman's features go into channels 1-100, man's features go into channels 101-200. Each layer is also masked spatially, so channels 1-100 are marked 'only applies to the left half of the video' and channels 101-200 are marked 'only applies to the right half.' Because the layout is explicit, the model cannot accidentally use woman's facial features to draw the man, because those features are physically stored and masked for the left half only."
+    ],
+    "object": "reference appearance encoding"
+  },
+  "hidden": {
+    "h2": "Identity consistency and subject disentanglement",
+    "name": "how well each subject's face and clothing stay faithful",
+    "paras": [
+      "The paper measures two key quantities: identity consistency (a cosine similarity score that compares the face embeddings of the reference person and the generated video frames—higher means the face stayed faithful), and subject similarity (how well the model kept one subject's appearance distinct from the others). These are not computed during training; instead, they are measured post-hoc to evaluate whether the method worked.",
+      "A third hidden quantity is copy-paste artifacts. The paper suppresses these by carefully curating training data to include smooth motion and semantic diversity, rather than just random video clips."
+    ],
+    "heat": {
+      "cells": [
+        ["woman-face", 4, true],
+        ["woman-clothing", 4, true],
+        ["man-face", 1, false],
+        ["man-clothing", 1, false],
+        ["background", 2, false],
+        ["motion-smoothness", 3, false],
+        ["woman-semantic", 4, true],
+        ["man-semantic", 2, false],
+        ["woman-consistency", 1, false],
+        ["man-consistency", 1, false],
+        ["blend-artifact", 1, false],
+        ["copy-paste-artifact", 1, false]
+      ],
+      "caption": "Darker means the quantity is measured and kept high during training. Highlights (box) mark identity and semantic signals."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "After training, measure how many facial features from the woman's reference photo appear in the video frames where she appears. If 80% of her facial landmarks are preserved, identity consistency is high. Separately, check whether the man's face is confused with the woman's—if not, subject disentanglement is working."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "ID-Sim: cosine similarity between face embeddings (reference vs. generated). Subj-Sim: how well each subject remains distinct. GmeScore: vision-language alignment via retrieval. All metrics are computed on generated videos and compared to baseline methods."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why separate channels stop subjects from mixing",
+    "paras": [
+      "The core insight is about memory organization. A standard video model compresses reference images into a token sequence—a flat list of numbers. When two people's images are in the same list, the model's cross-attention mechanism (which is responsible for looking up 'where should I copy pixels from?') sees no boundary between them. It freely blends features from both, especially in ambiguous regions like the background.",
+      "MAGREF changes the layout. Instead of a flat list, it organizes the reference features into a 2D spatial canvas. Each person occupies a distinct spatial region (e.g., left half vs. right half) and a distinct set of channels (like using different ink colors for each person). The spatial mask tells the model, 'this person's features only influence the left half of the output.' The text label (e.g., 'woman') is injected directly into that region's embedding, anchoring the association: 'woman' maps to left-half pixels, 'man' maps to right-half pixels. Because the channels are separate and spatially masked, the model physically cannot use woman's facial features (stored in left-half channels) to draw the man's face on the right half—the mask blocks it.",
+      "A secondary mechanism suppresses copy-paste artifacts. The training data is curated to include smooth motion (evaluated by a motion-quality metric) and diverse object types. Because the model only trains on videos where people move naturally from frame to frame (not abruptly teleport or paste), it learns motion patterns rather than paste patterns. When asked to generate new videos, it imitates natural motion instead of copying."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Two reference photos and text 'woman in red, man in blue'"
+        },
+        {
+          "t": "step",
+          "s": "Place each photo at a spatial location on a blank canvas",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Compress canvas with VAE, preserve appearance in channels",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply binary mask: woman region, man region",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Inject text labels ('woman', 'man') into each region",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Video where each person's face and clothing stay faithful"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The injection formula",
+    "words": "For each subject, take the semantic embedding (meaning) derived from the text label, multiply it by a binary mask that marks that subject's region, and add it directly into the latent image features. Repeat for all subjects.",
+    "equation": "z_0' = z_0 + alpha * sum_{k=1}^{K} (M_k * v_k)",
+    "symbols": [
+      ["z_0", "the compressed first frame of the video"],
+      ["z_0'", "the updated first frame after semantic injection"],
+      ["M_k", "binary mask for subject k (1 in that subject's region, 0 elsewhere)"],
+      ["v_k", "semantic embedding of subject k from the text prompt"],
+      ["alpha", "how strongly to inject (a small number, tuned to not overwhelm the model)"],
+      ["sum_{k=1}^{K}", "repeat this for all K subjects in the prompt"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the first frame z_0 is a 4 x 4 grid of features (16 values), initially [0.1, 0.2, 0.3, ... ].",
+        "Subject 1 (woman) has a mask M_1 = [1, 1, 0, 0, 1, 1, 0, 0, ...], marking left half.",
+        "Subject 1's semantic embedding v_1 = 0.5 (simplified).",
+        "Subject 2 (man) has mask M_2 = [0, 0, 1, 1, 0, 0, 1, 1, ...], marking right half.",
+        "Subject 2's embedding v_2 = 0.3.",
+        "Set alpha = 0.1.",
+        "After injection: z_0' = [0.1 + 0.1*0.5*1, 0.2 + 0.1*0.5*1, 0.3 + 0.1*0.3*1, ...] = [0.15, 0.25, 0.33, ...] for the left half, and z_0' = [0.1, 0.2, 0.33, 0.35, ...] for the right half.",
+        "Left-half features are now anchored to 'woman', right half to 'man'. Model learns not to swap them."
+      ]
+    },
+    "note": "The mask acts as a gate: semantic information only flows into the region it belongs to, preventing cross-subject bleeding."
+  },
+  "bars": {
+    "h2": "Identity consistency and subject disentanglement scores",
+    "charts": [
+      {
+        "title": "Baseline (training-free, no masking)",
+        "rows": [
+          ["Identity consistency (woman)", 58, "bad"],
+          ["Identity consistency (man)", 52, "bad"],
+          ["Subject disentanglement", 48, "bad"],
+          ["Copy-paste artifact rate", 35, "bad"]
+        ],
+        "note": "Baseline method concatenates references into a flat list. Faces blur and subjects mix."
+      },
+      {
+        "title": "MAGREF (masked guidance + disentanglement)",
+        "rows": [
+          ["Identity consistency (woman)", 80, "good"],
+          ["Identity consistency (man)", 78, "good"],
+          ["Subject disentanglement", 75, "good"],
+          ["Copy-paste artifact rate", 12, "good"]
+        ],
+        "note": "Masking and semantic injection preserve each subject's appearance and prevent mixing."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Mask resolution too coarse.",
+        "html": "If the spatial mask is too low-resolution, fine details (like a person's hair or jewelry) can bleed across subject boundaries. The mask must match the resolution of the VAE's compressed space."
+      },
+      {
+        "warn": true,
+        "b": "Text labels don't match visual regions.",
+        "html": "If the text prompt says 'woman in red on left' but the reference canvas places her on the right, the model receives conflicting signals. The semantic injection will anchor the wrong meaning to the wrong region."
+      },
+      {
+        "warn": true,
+        "b": "Alpha too large.",
+        "html": "If the injection strength (alpha) is set too high, the semantic signal overwhelms the learned appearance features. The video becomes overly abstract, losing facial detail."
+      },
+      {
+        "warn": true,
+        "b": "Training data includes copy-paste videos.",
+        "html": "If training videos contain frames where a person is literally pasted without motion, the model learns that pattern. Careful data curation (filtering for motion smoothness) prevents this."
+      },
+      {
+        "b": "Done right.",
+        "html": "With careful mask resolution, consistent text-region alignment, tuned injection strength, and high-quality training data, the method preserves identity and prevents mixing."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small video generation model (or use a pretrained one) and test it on this scenario: give it two reference photos (a woman and a man, both facing the camera) and a text prompt 'a woman in red standing on the left, a man in blue standing on the right, walking forward together.' Generate a 5-frame video. Measure identity consistency by comparing face embeddings (reference vs. generated). Measure subject disentanglement by checking how much the woman's face features appear in the man's side of the output. Measure copy-paste artifacts by checking whether any single pixel is copied directly (unchanged) from frame to frame—real motion should change pixel values."
+    ],
+    "metric_eq": "identity_consistency = cosine_similarity(face_embedding_woman_ref, face_embedding_woman_gen) [measure woman]; subject_disentanglement = 1 - (overlap of woman features in man region / total woman features); artifact_rate = (frames with >50% pixel-wise copying) / total frames",
+    "closing": "The demo must show that MAGREF's identity consistency is at least 15 points higher than baseline, and that subject disentanglement is above 70%, with artifact rate below 15%."
+  }
+}
