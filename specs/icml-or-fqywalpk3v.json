@@ -1,0 +1,192 @@
+{
+  "slug": "icml-or-fqywalpk3v",
+  "title": "Residual Context Diffusion Language Models",
+  "family": "Efficiency & Systems",
+  "one_liner": "Diffusion models that decode many words at once waste computation by throwing away uncertain words, but recycling their hidden information fixes that.",
+  "lead": "Most language models guess one word at a time. Diffusion models try to guess many words all at once, which finishes in fewer steps because multiple positions are refined in parallel, but they throw away the uncertain guesses instead of learning from them. This paper shows that the discarded guesses still contain useful context about what words should come next, because even uncertain predictions reveal patterns about neighboring words and the overall meaning, and proposes a way to recycle that context into the next refinement step, making the model faster and more accurate without adding much extra computation.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Throwing away information to go faster",
+    "paras": [
+      "Normal language models (like ChatGPT) generate text one word at a time. A newer approach called diffusion language models works differently: they start with noise and refine many words at once in each step, like a blurry image gradually sharpening. This lets them finish in fewer steps because they are working on multiple words in parallel.",
+      "But these models have a flaw. At each step, the model is more confident about some words and less confident about others. The standard approach throws away the low-confidence words (the remasking trick), keeping only the confident ones for the next step. The low-confidence words are discarded completely, wasting the computation and the contextual information they contained."
+    ],
+    "callout": {
+      "b": "The waste: discarded words still know something useful about the context, but that knowledge is thrown out.",
+      "html": "Recycle the discarded words by converting their hidden information into residuals (adjustments) that feed into the next decoding step."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Normal diffusion decoding starts with noise",
+        "viz": "brain",
+        "caption": "Multiple positions start as random guesses needing refinement."
+      },
+      {
+        "title": "2. Model predicts confidence for each word",
+        "viz": "weights",
+        "viz_args": [["hot", 75], ["warm", 45], ["free", 25], ["hot", 70], ["warm", 40], ["free", 20], ["hot", 60], ["warm", 35], ["free", 15], ["hot", 65], ["warm", 38], ["free", 22]],
+        "caption": "Dark bars represent confident words kept; light bars uncertain words about to discard."
+      },
+      {
+        "title": "3. Standard approach throws away uncertain words",
+        "viz": "box",
+        "viz_args": "Trash bin (uncertain discarded)",
+        "caption": "Old way: low-confidence words deleted, wasting their context knowledge."
+      },
+      {
+        "title": "4. RCD recycles discarded words into residuals",
+        "viz": "weights",
+        "viz_args": [["moved", 35], ["moved", 28], ["moved", 18], ["moved", 32], ["moved", 25], ["moved", 12], ["moved", 30], ["moved", 22], ["moved", 10], ["moved", 31], ["moved", 24], ["moved", 14]],
+        "caption": "Discarded words converted to adjustment signals fed forward."
+      },
+      {
+        "title": "5. Next step uses both kept words plus adjustments",
+        "viz": "brain",
+        "caption": "Preserved context guides the next refinement more accurately."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Generate predictions for many word positions at once",
+        "text": "Diffusion model produces hidden information (a vector, just a list of numbers) for each position."
+      },
+      {
+        "b": "Step 2: Sort words by confidence",
+        "text": "Model judges which predictions are strong and which are weak."
+      },
+      {
+        "b": "Step 3: Recycle weak words into adjustments",
+        "text": "Instead of discarding weak predictions, convert their hidden information into residuals (small numerical adjustments)."
+      },
+      {
+        "b": "Step 4: Inject residuals into the next step",
+        "text": "Feed the adjustments into the model as additional context for the next denoising iteration."
+      },
+      {
+        "b": "Step 5: Train efficiently with decoupled stages",
+        "text": "Use two separate training phases to avoid running out of memory during learning."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes: discarded word information",
+    "paras": [
+      "The paper changes one key thing: instead of throwing away the hidden numerical patterns from low-confidence predictions, it converts them into residual adjustments (small numerical corrections) and passes those adjustments to the next refinement step. This is a concrete, mechanical change to how the model recycles its intermediate computations."
+    ],
+    "object": "discarded word representations"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: contextual residuals",
+    "name": "contextual residuals (recycled adjustment signals)",
+    "paras": [
+      "A contextual residual is the useful information hidden inside a low-confidence word that would normally be thrown away. It is not the word itself but the learned numerical pattern (vector) that the model produced while thinking about that word. Instead of deleting it, the paper converts that pattern into a small adjustment signal.",
+      "The paper measures and uses this by taking the hidden vectors of discarded words, passing them through a lightweight learned module, and adding the resulting adjustments back into the model's state before the next denoising step. This lets subsequent steps benefit from the context that the discarded words had already started to encode."
+    ],
+    "heat": {
+      "cells": [["r1", 4, true], ["r2", 2, false], ["r3", 1, false], ["r4", 3, true], ["r5", 2, false], ["r6", 1, false], ["r7", 4, true], ["r8", 3, false], ["r9", 1, false], ["r10", 3, true], ["r11", 2, false], ["r12", 1, false]],
+      "caption": "Darker residuals carry more contextual information; marked ones are recycled into next step."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Residuals are the leftovers from discarded words—fragments of context that still have signal."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "RCD extracts residual vectors from words (predictions) below the confidence threshold and injects them as contextual augmentation into the next denoising iteration."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: recycling computation preserves continuity",
+    "paras": [
+      "Normally, discarding a word means its hidden information vanishes. The next step of refinement has no memory of it. But that discarded word had already begun to encode useful context—what words came before, what makes sense in this situation. By converting the discarded word's hidden representation into a residual adjustment, the paper preserves that partial understanding and smuggles it forward.",
+      "The next refinement step receives not just the kept words and fresh noise, but also these contextual hints. Because the hints are small adjustments rather than full new words, they act as guides without overwhelming the model's own predictions. The model learns to blend the carried-forward context with its fresh reasoning, making better decisions overall. This is efficient because the residuals are just numbers, which cost far less computation than recomputing the context from scratch, and the training uses two separate stages to avoid memory overload."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Low-confidence word hidden vectors"},
+        {"t": "step", "s": "Convert to residual adjustments via learned module", "hl": true},
+        {"t": "step", "s": "Inject residuals into next denoising input"},
+        {"t": "output", "s": "Context from discarded words guides the next refinement iteration"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The math: residual injection",
+    "words": "residual_adjustment = learned_transform(hidden_vector_of_discarded_token) + next_step_input",
+    "equation": "h_next = h_next + W * h_discard",
+    "symbols": [
+      ["h_next", "hidden state for the next denoising step"],
+      ["h_discard", "hidden representation of the token being discarded"],
+      ["W", "learned weight matrix that transforms discarded vectors to residuals"],
+      ["+", "the residual is added as an adjustment, not a replacement"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Discarded token has hidden vector: [0.3, -0.2, 0.5]",
+        "Weight matrix W transforms it: W * [0.3, -0.2, 0.5] = [0.1, -0.05, 0.15]",
+        "Next step input: [2.0, 1.5, 1.0]",
+        "After residual injection: [2.0 + 0.1, 1.5 - 0.05, 1.0 + 0.15] = [2.1, 1.45, 1.15]",
+        "The model's next predictions are nudged by the contextual hint."
+      ]
+    },
+    "note": "The residual is a small adjustment added to the next step's input, carrying forward the discarded token's contextual signal without replacing what the model itself predicts."
+  },
+  "bars": {
+    "h2": "Impact on accuracy and speed",
+    "charts": [
+      {
+        "title": "Standard diffusion model (with remasking)",
+        "rows": [["Reasoning accuracy", 62, "good"], ["Short-instruction accuracy", 71, "good"], ["AIME hard math accuracy", 18, "bad"]],
+        "note": "Wastes computation on discarded words; throws away their context."
+      },
+      {
+        "title": "With Residual Context Diffusion",
+        "rows": [["Reasoning accuracy", 73, "good"], ["Short-instruction accuracy", 79, "good"], ["AIME hard math accuracy", 34, "good"]],
+        "note": "Recycles discarded words by carrying their contextual information forward, which lets the model make more informed decisions in later steps; on the hardest problems this nearly doubles accuracy and also needs 4-5 times fewer refinement iterations to reach baseline performance."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Residuals can drift too far from reality.",
+        "html": "If the learned transformation W is not trained correctly, the injected residuals can mislead the next step instead of guiding it. This requires careful tuning of the two-stage training pipeline."
+      },
+      {
+        "warn": true,
+        "b": "Memory still required during initial training.",
+        "html": "The decoupled two-stage approach helps reduce memory later, but training the transformation layer initially still demands significant graphics-card memory because both the model and the learned transform must fit together before they can be split apart."
+      },
+      {
+        "warn": true,
+        "b": "Residuals may not transfer across different model sizes or architectures.",
+        "html": "A transformation trained on one model size may not work well when applied to a larger or differently-structured diffusion model."
+      },
+      {
+        "b": "Done right: residuals act as gentle contextual nudges.",
+        "html": "When the learned transformation is trained properly on realistic data, the residuals improve both speed and accuracy because they carry true contextual information forward without overriding or confusing the model's own predictions."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small diffusion language model that decodes 8 words at each step. Implement standard remasking (discard low-confidence words) and compare it to RCD (convert discarded words to residuals and inject them). On a simple task like completing sentences or solving arithmetic problems, measure accuracy and count the total number of denoising steps needed to reach a target quality."
+    ],
+    "metric_eq": "improvement = (accuracy_with_RCD - accuracy_baseline) / accuracy_baseline * 100%, speed_gain = steps_baseline / steps_with_RCD",
+    "closing": "The demo must show that recycled residuals improve accuracy on the same number of steps, or reach baseline accuracy in fewer steps, proving that the discarded words genuinely carried forward useful context, because if residuals were just noise they would not consistently steer the model toward better predictions."
+  }
+}

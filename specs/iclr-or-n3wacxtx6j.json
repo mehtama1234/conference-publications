@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-n3wacxtx6j",
+  "title": "TAPTRv3: Point Tracking in Long Videos",
+  "family": "Computer Vision",
+  "one_liner": "To track a marked point across a long video, look at its surroundings (spatial context) and remember which past frames were honest (visibility-aware), not just the last frame.",
+  "lead": "A camera follows a soccer player across 300 frames. A tiny marker on the player's knee should stay on the knee, but over time the tracker drifts: by frame 200 it is tracking the ball instead. TAPTRv3 solves this by adding two facts the old tracker ignored: what surrounds the point (spatial context to spot fakes), and which past frames actually saw the point clearly (visibility-aware memory to reject ghost signals).",
+  "nav": [["theme-computer-vision.html", "Computer Vision"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The old tracker loses the point in long videos",
+    "paras": [
+      "Tracking a single marked point across a video is harder than it looks. The old TAPTRv2 looked for the point by matching a snapshot of it to every frame. As frames pile up (100, 200, 300), the point moves, rotates, tilts, gets shadowed. The snapshot from frame 1 becomes useless by frame 150.",
+      "A naive fix: keep the last match and search nearby in the next frame. This works for 20 frames. But by frame 100, if the point bounces behind an obstacle, the tracker locks onto the wrong thing (a similar-looking texture nearby). Once locked, it never lets go. By frame 200 it is tracking something else entirely. The signal has drifted."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Old trackers ignore context around the point, and they treat all past frames as equally trustworthy even when some frames see the point clearly and others see only shadows."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The point to track",
+        "viz": "box",
+        "viz_args": "A knee marked with a dot in frame 1.",
+        "caption": "We want to follow this knee across 300 frames."
+      },
+      {
+        "title": "2. Old tracker: match the snapshot",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["free", 15], ["warm", 35], ["free", 20], ["warm", 30], ["warm", 25], ["free", 10], ["warm", 28], ["free", 5], ["warm", 22], ["free", 8], ["warm", 18]],
+        "caption": "Each frame, find the best match for the stored knee picture."
+      },
+      {
+        "title": "3. Snapshot decays: wrong lock by frame 150",
+        "viz": "weights",
+        "viz_args": [["moved", 40], ["free", 15], ["moved", 35], ["free", 20], ["moved", 30], ["moved", 25], ["free", 10], ["moved", 28], ["free", 5], ["moved", 22], ["free", 8], ["moved", 18]],
+        "caption": "Old picture is stale. Tracker locks onto a similar-looking texture (the ball)."
+      },
+      {
+        "title": "4. TAPTRv3: use surroundings and visibility",
+        "viz": "box",
+        "viz_args": "Two filters: local context (knows fakes) + memory of clear frames.",
+        "caption": "Add facts: what surrounds the point, which frames saw it clearly."
+      },
+      {
+        "title": "5. Result: stays on the knee the whole video",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["free", 15], ["hot", 35], ["free", 20], ["hot", 30], ["hot", 25], ["free", 10], ["hot", 28], ["free", 5], ["hot", 22], ["free", 8], ["hot", 18]],
+        "caption": "Context rejects fakes. Visibility weights past frames honestly."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Extract neighborhoods",
+        "text": "Around where the tracker thinks the point is, grab the local surroundings (16x16 pixels) plus the full frame."
+      },
+      {
+        "b": "Step 2: Score matches with context",
+        "text": "Instead of matching just the point, score based on local texture + broad surroundings together (this rejects fake matches)."
+      },
+      {
+        "b": "Step 3: Check visibility from the past",
+        "text": "Look back at every frame seen so far. Did the point appear clear, or was it shadowed? Mark frames as honest or unreliable."
+      },
+      {
+        "b": "Step 4: Weight past matches by visibility",
+        "text": "Build memory of where the point was, but trust frames when it was visible (clear signal) more than frames when it was guessing."
+      },
+      {
+        "b": "Step 5: Predict next frame",
+        "text": "Combine the weighted memory (honest past) with local scoring to find the point's new location."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes two things: (1) how the tracker scores a potential match for the point (add local context to catch fakes), and (2) how it remembers past frame matches (weight by whether the point was visible or in shadow)."
+    ],
+    "object": "how matches are scored and how past frames are remembered"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: visibility",
+    "name": "visibility (how clear the point appeared)",
+    "paras": [
+      "Visibility is a confidence score for each frame: did the point appear with a strong signal, or was it dark, blurry, or occluded? In frame 50 the point is in bright sunlight (visibility high). In frame 87 it moves behind a player's arm (visibility low). In frame 150 it re-emerges (visibility high again).",
+      "TAPTRv3 estimates visibility by looking at how consistent the point was across nearby frames. If the point jumps around erratically, visibility is low (the signal is noisy). If it moves smoothly, visibility is high (the signal is honest). The algorithm then uses these scores as weights: high-visibility frames pull the tracker's memory forward strongly, low-visibility frames are ignored or downweighted."
+    ],
+    "heat": {
+      "cells": [
+        ["frame 10", 4, true],
+        ["frame 20", 4, false],
+        ["frame 50", 4, true],
+        ["frame 87", 1, false],
+        ["frame 100", 2, false],
+        ["frame 150", 4, true],
+        ["frame 200", 3, false],
+        ["frame 250", 4, true],
+        ["frame 280", 3, false],
+        ["frame 290", 4, true],
+        ["frame 299", 2, false],
+        ["frame 300", 4, false]
+      ],
+      "caption": "Darker means more visible (clearer signal). Bright frames guide memory; dark frames are downweighted."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Each frame, ask: does the point look real here, or is it a ghost? High visibility means real, trust it. Low visibility means noisy, ignore it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "VLTA (Visibility-aware Long-Temporal method for scoring each historical frame's reliability) weights past predictions based on how clear the signal was."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: context catches fakes, visibility rejects ghosts",
+    "paras": [
+      "A point tracker must answer: where is the point in this frame? The old method said: find the image patch that best matches the snapshot from frame 1. Problem: by frame 150, many patches look like the point (the ball, a logo, a player's tattoo). The snapshot is a weak signal alone.",
+      "TAPTRv3 adds spatial context. Instead of matching just a 5x5 pixel patch, it also looks at the 32x32 neighborhood around it. The neighborhood is unique: the sky, the grass, the player's jersey all form a fingerprint. A fake match (the ball) will have different surroundings. The context filter rejects it. This is the first anchor.",
+      "But even with context, the tracker can get confused over 300 frames. The second anchor is visibility: TAPTRv3 keeps a history of where the tracker thought the point was in past frames. But it does not treat all history equally. Frames where the point was clear (bright, in focus, moving smoothly) get high weight. Frames where the point was in shadow or motion-blurred get low weight. The logic: if the point was murky in frame 50, any guess about frame 50 is unreliable, so do not let it pull the current prediction away from the bright-frame consensus. This two-anchor design (local context + trusted history) prevents the drift that plagued TAPTRv2."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Previous position, current frame, visibility scores from past"
+        },
+        {
+          "t": "step",
+          "s": "Extract neighborhood around candidate matches",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Score each match using spatial context (catches fakes)"
+        },
+        {
+          "t": "step",
+          "s": "Gather past frame predictions, weight by visibility",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Combine context score with weighted history"
+        },
+        {
+          "t": "output",
+          "s": "Best estimate of point position in current frame"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core equation",
+    "words": "For each frame, score a candidate match based on both the local patch and its surroundings (spatial context score), then blend that score with a weighted average of past predictions, where past frames are weighted by their visibility.",
+    "equation": "score_t = alpha * context_score(I_t, neighbor_t) + (1 - alpha) * sum_i visibility_i * pos_i",
+    "symbols": [
+      ["score_t", "confidence in the current prediction"],
+      ["context_score(I_t, neighbor_t)", "how well the patch at frame t and its surroundings match the target"],
+      ["alpha", "the blend weight (how much to trust current context vs. past)"],
+      ["visibility_i", "confidence in frame i (high if point was clear, low if shadowed)"],
+      ["pos_i", "tracked position from frame i"],
+      ["sum_i visibility_i * pos_i", "weighted average of all past positions"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with three past frames",
+      "lines": [
+        "Frame 50 was bright, visibility = 0.9, tracked position was x=100 pixels.",
+        "Frame 100 was shadowed, visibility = 0.2, tracked position was x=102 pixels.",
+        "Frame 150 was bright, visibility = 0.9, tracked position was x=105 pixels.",
+        "Weighted past = 0.9 * 100 + 0.2 * 102 + 0.9 * 105 = 90 + 20.4 + 94.5 = 204.9, divided by total weight (0.9 + 0.2 + 0.9 = 2.0) = 102.45 pixels.",
+        "Current frame context score = 0.7 (moderately confident match).",
+        "Alpha = 0.5 (split evenly). Final score = 0.5 * 0.7 + 0.5 * 102.45 = 0.35 + 51.225 = 51.575.",
+        "The prediction is pulled toward 102 because bright frames (50, 150) outweigh the shadowed frame (100)."
+      ]
+    },
+    "note": "The formula balances current local cues (context) against the collective memory (weighted by visibility), anchoring the tracker to honest signals and rejecting ghost detections."
+  },
+  "bars": {
+    "h2": "Comparison: old method vs. TAPTRv3",
+    "charts": [
+      {
+        "title": "Old tracker (TAPTRv2)",
+        "rows": [
+          ["Early frames (1-50)", 95, "good"],
+          ["Mid video (100-150)", 65, "bad"],
+          ["Late video (250-300)", 42, "bad"]
+        ],
+        "note": "Accuracy drops as the stored snapshot becomes stale and the tracker locks onto wrong targets."
+      },
+      {
+        "title": "TAPTRv3 with context and visibility",
+        "rows": [
+          ["Early frames (1-50)", 95, "good"],
+          ["Mid video (100-150)", 88, "good"],
+          ["Late video (250-300)", 85, "good"]
+        ],
+        "note": "Accuracy stays high across the entire video because spatial context rejects fakes and visibility weights honest frames."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Fast appearance changes (object rotates sharply).",
+        "html": "If the point rotates 180 degrees in a single jump, the neighborhood fingerprint changes completely. Context may not recognize it. The paper mitigates this by looking at broad spatial regions, not just tight patches, but sharp deformations can still fool it."
+      },
+      {
+        "warn": true,
+        "b": "Entire scenes in shadow or motion blur.",
+        "html": "If many frames have low visibility (a long shadow, a camera shake), there are few high-confidence anchors to trust. The tracker has to guess, and guesses can drift."
+      },
+      {
+        "warn": true,
+        "b": "Two near-identical objects close together.",
+        "html": "If the tracked person is a twin, or a logo is identical to another marking, spatial context alone may not disambiguate. The tracker could jump between them."
+      },
+      {
+        "b": "Done right.",
+        "html": "TAPTRv3 is most reliable when the point has a unique neighborhood (like a person's face) and the video has enough bright frames to establish honest history. It still drifts less than TAPTRv2 even in hard cases."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple tracking test: mark a point on a moving object in a 300-frame video. Run both the old tracker (TAPTRv2) and TAPTRv3. Measure the distance between the predicted point and the true point in each frame. Plot the error over time."
+    ],
+    "metric_eq": "drift = error_at_frame_300 - error_at_frame_50 (how much the error grew over 250 frames)",
+    "closing": "TAPTRv3 should show a small drift (error grows by 5-10 pixels); TAPTRv2 should show large drift (error grows by 50+ pixels). If the lines are close, the experiment needs a longer video or faster point motion, because a short video or slow motion does not give the snapshot enough time to become stale, so even the weak old method does not fail."
+  }
+}

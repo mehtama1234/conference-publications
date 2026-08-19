@@ -1,0 +1,198 @@
+{
+  "slug": "icml-or-uuh2sk0mh0",
+  "title": "NavOL: Online Learning for Robot Navigation",
+  "family": "Robotics & Control",
+  "one_liner": "A robot learns to navigate by practicing in a simulator and copying exact trajectories from a privileged global planner, not from a human.",
+  "lead": "Learning robot navigation faces a problem: trained on old recorded paths, a robot gets stuck when the scene looks different; training from scratch with reward signals is slow and requires hand-tuning. NavOL solves this by running the robot in a simulator, asking a perfect global planner for the right next moves, and teaching the robot to copy those moves. The robot improves itself online by collecting thousands of new rollouts per hour, because each rollout provides fresh examples of states the robot will encounter at test time, paired with correct answers from the planner.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Two broken paths to robot navigation",
+    "paras": [
+      "A typical approach: record thousands of human or expert robot trajectories (paths through an environment), train a neural network on those paths, then deploy. The problem is distribution shift — when the robot sees a scene slightly different from training, it drifts into errors. A mistake early in a rollout cascades: the robot ends up in a state it never saw during training, its next guess is worse, and it crashes. A beginner tries to fix this by collecting more diverse data. It never catches all edge cases.",
+      "The alternative is reinforcement learning: the robot explores freely and learns from numerical reward signals (e.g., 'you got 0.5 points for being closer to the goal'). This works but requires careful reward design — most domain experts cannot write a reward function that captures what good navigation truly is. Training is slow because the robot stumbles around learning what works. When the task changes, the reward no longer guides the right behavior."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "NavOL collects fresh rollouts by rolling out in simulation while asking a privileged global planner for ground-truth trajectory labels, then trains on the robot's own mistakes corrected by those labels."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The old problem: replay a recorded path",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["warm", 35], ["free", 20], ["warm", 45], ["free", 15], ["warm", 38], ["free", 25], ["warm", 42], ["free", 18], ["warm", 40], ["free", 22], ["warm", 38]],
+        "caption": "Trained only on human paths; robot drifts in new scenes."
+      },
+      {
+        "title": "2. Roll out: robot explores the simulator",
+        "viz": "box",
+        "viz_args": "Robot steps through maze. Asks planner for best next move.",
+        "caption": "Simulator runs 2000 trajectories per hour across 50 scenes."
+      },
+      {
+        "title": "3. Privileged global planner answers",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["hot", 52], ["moved", 50], ["hot", 55], ["moved", 48], ["hot", 51], ["moved", 46], ["hot", 54], ["moved", 49], ["hot", 53], ["moved", 47], ["hot", 52]],
+        "caption": "Planner sees full map. Provides exact optimal waypoint for each state."
+      },
+      {
+        "title": "4. Train: robot learns to copy the planner",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["warm", 48], ["moved", 52], ["warm", 50], ["moved", 49], ["warm", 51], ["moved", 48], ["warm", 49], ["moved", 51], ["warm", 50], ["moved", 50], ["warm", 49]],
+        "caption": "Each observation paired with ground-truth trajectory; weights adjust."
+      },
+      {
+        "title": "5. Deployment: learned robot mimics the planner",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["free", 25], ["hot", 51], ["free", 26], ["hot", 49], ["free", 24], ["hot", 52], ["free", 27], ["hot", 48], ["free", 23], ["hot", 50], ["free", 25]],
+        "caption": "Robot navigates without planner or human rewards; generalizes to real world."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {"b": "Start with a pretrained diffusion policy", "text": "The robot model already understands how to take local camera views and predict the next waypoint; it just needs refinement."},
+      {"b": "Roll out in simulator", "text": "The robot acts in IsaacLab (a fast physics simulator) from random start-goal pairs, collecting observations at each step."},
+      {"b": "Query privileged planner", "text": "For each observed state, ask a global path planner (which can see the full map) for the optimal path segment — the ground-truth trajectory label."},
+      {"b": "Collect rollout-trajectory pairs", "text": "Pair each observed state with its correct next moves, creating a dataset of what the robot saw versus what it should have done."},
+      {"b": "Train on collected data", "text": "Update the robot's weights to reduce the gap between its prediction and the planner's answer; repeat."}
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "NavOL changes the training dataset itself. Instead of using old, static, human-recorded paths, it builds a new dataset online: each iteration, the robot rolls out and collects its own observations, then pairs them with ground-truth trajectory labels from a privileged planner. The planner sees the full environment map (information the robot's camera does not have) and returns the optimal move. This breaks the distribution shift cycle: the robot is always trained on states it can actually reach, labeled with the right answer."
+    ],
+    "object": "Training dataset construction"
+  },
+  "hidden": {
+    "h2": "Distribution shift: the gap between training and deployment",
+    "name": "Distribution shift in rollout states",
+    "paras": [
+      "Distribution shift is the invisible barrier that cripples replay learning. It is the difference between the states (camera views, robot poses, scene layouts) the model saw during training and the states it encounters when deployed. Early in training, the robot only knows the states in the human-recorded dataset. The moment it makes a small error at rollout, it is in a new state — one it was never trained on. Its next prediction is worse. The model has no idea how to handle it. The error compounds.",
+      "NavOL measures distribution shift indirectly by collecting fresh rollouts online. Every new rollout, by definition, contains states the model is about to visit in deployment. By training on these rollouts (labeled by the planner), the model learns the true distribution it will face at test time, not some approximate replay distribution."
+    ],
+    "heat": {
+      "cells": [
+        ["State from recorded demo", 1, false],
+        ["State from early rollout", 2, false],
+        ["State from later rollout", 3, true],
+        ["State from domain randomization", 4, true],
+        ["Pose variation", 2, false],
+        ["Lighting variation", 3, true],
+        ["Scene clutter", 3, true],
+        ["Goal reachability", 4, true],
+        ["Start position variation", 2, false],
+        ["Camera angle", 3, true],
+        ["Obstacle proximity", 4, true],
+        ["Recovery from drift", 4, true]
+      ],
+      "caption": "Darker means closer to the true deployment distribution; highlights show NavOL's online rollout coverage."
+    },
+    "reads": [
+      {"b": "Plain reading.", "html": "The robot is trained on old paths. At test time, it explores new corners of the environment map. Those new corners are invisible in the old training data. When the robot steps into them, it fails."},
+      {"b": "Paper reading.", "html": "Online imitation learning reduces distribution mismatch by sampling trajectories from the policy's own rollout distribution and labeling them with privileged oracle feedback, ensuring the model trains on the states it will encounter at deployment."}
+    ]
+  },
+  "mechanism": {
+    "h2": "Why online rollout and privileged labels break the distribution shift cycle",
+    "paras": [
+      "The core chain is simple. First: offline learning trains only on replay states (the old demonstrations). At rollout, the policy makes a small error and lands in a new state, one never in the replay data. The error compounds. Second: NavOL breaks this by forcing the policy to roll out in the simulator (generating its own states) and immediately labeling those states with ground-truth moves from a planner. Every rollout state becomes a training example. The policy sees a dense coverage of the distribution it will face at test time. Compounding errors shrink because the policy is trained to recover from the exact mistakes it will make.",
+      "A second mechanism: the privileged planner gives global information the robot's camera does not have — it can see the full map and return the globally optimal waypoint. The robot, watching only its local camera, learns to match those optimal waypoints by inferring the map structure from visual patterns. This is a form of imitation learning where the student (robot) copies the teacher (planner) who has more information. Over many rollouts and updates, the robot internalizes enough of the environment structure to navigate well without the planner present."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Pretrained diffusion navigation model"},
+        {"t": "step", "s": "Roll out in IsaacLab simulator with random start-goal pairs", "hl": true},
+        {"t": "step", "s": "Collect observation-state pairs from rollouts"},
+        {"t": "step", "s": "Query privileged global planner for ground-truth trajectory labels", "hl": true},
+        {"t": "step", "s": "Train model on collected observation-trajectory pairs"},
+        {"t": "output", "s": "Updated robot navigation policy"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training objective",
+    "words": "loss equals average squared distance between predicted trajectory and ground-truth trajectory from planner across all rollout samples",
+    "equation": "L = (1/N) * sum_i ||y_i_predicted - y_i_planner||^2",
+    "symbols": [
+      ["L", "training loss (lower is better)"],
+      ["N", "number of observation-trajectory pairs collected"],
+      ["y_i_predicted", "the waypoint the robot predicts for observation i"],
+      ["y_i_planner", "the optimal waypoint from the global planner for observation i"],
+      ["||...||^2", "squared distance (how far apart the predictions are in space)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the robot predicts waypoint (5, 3) but the planner says (5, 1). Distance is sqrt((5-5)^2 + (3-1)^2) = 2.",
+        "Squared distance is 2^2 = 4. Loss contribution for that pair is 4.",
+        "Over 100 pairs, if the average squared distance is 0.1, the loss is 0.1. During training, each update nudges weights to shrink this loss.",
+        "Collect fresh rollouts: new pairs are added. Train again: the model adjusts to match the planner better on the new states."
+      ]
+    },
+    "note": "Each rollout-trajectory pair is a learning signal: the robot sees a state it actually encountered and learns the correct move according to the planner."
+  },
+  "bars": {
+    "h2": "Performance gains from online learning",
+    "charts": [
+      {
+        "title": "Offline imitation (old approach)",
+        "rows": [
+          ["Accuracy on training scenes", 88, "good"],
+          ["Accuracy on held-out scenes", 52, "bad"],
+          ["Accuracy with camera jitter", 38, "bad"],
+          ["Generalization to real-world", 35, "bad"]
+        ],
+        "note": "Replay learning works only on familiar scenes; distribution shift causes severe degradation."
+      },
+      {
+        "title": "NavOL (online imitation learning)",
+        "rows": [
+          ["Accuracy on training scenes", 90, "good"],
+          ["Accuracy on held-out scenes", 78, "good"],
+          ["Accuracy with camera jitter", 72, "good"],
+          ["Generalization to real-world", 71, "good"]
+        ],
+        "note": "Online rollouts expose the model to varied states, reducing distribution shift and improving real-world transfer."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Privileged planner is weak or slow.",
+        "html": "NavOL depends on a good global planner that can answer queries quickly. If the planner is slow, rollout collection bottlenecks. If the planner is suboptimal, the robot learns suboptimal habits. The paper uses a standard graph-based planner (likely RRT or similar); custom domains may need their own oracle."
+      },
+      {
+        "warn": true,
+        "b": "Simulation does not match real-world variability.",
+        "html": "The paper randomizes camera angles and start-goal pairs in simulation to improve generalization, because exposing the model to diverse training conditions teaches it patterns that generalize beyond any single scenario. However, if the simulated variability does not match real-world changes (different lighting, surfaces, object arrangements), the learned policy may still fail on real hardware. Sim-to-real transfer is not automatic."
+      },
+      {
+        "warn": true,
+        "b": "Compounding errors during rollout.",
+        "html": "Even with online learning, early errors in a rollout can push the robot into truly unfamiliar states where the planner's label is not useful. If the robot drifts far from the optimal trajectory, the imitation signal becomes weak."
+      },
+      {
+        "b": "Done right.",
+        "html": "Extensive real-world experiments validate that NavOL policies transfer well and outperform offline baselines, suggesting the online updates and domain randomization successfully close the sim-to-real gap, because the online rollouts expose the model to realistic state distributions and the randomization trains invariance to camera noise and scene variations that differ between simulator and hardware."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A minimal demo would show: (1) Train a navigation model offline on recorded trajectories, run it on a held-out test scene, measure success rate. (2) Train the same architecture using NavOL — roll out in simulator for 10 iterations, querying a perfect oracle (a precomputed ground-truth path) for labels, train on collected pairs. (3) Run both on the same held-out scene. The demo must show NavOL's success rate is visibly higher, especially on scenes with new obstacles or room layouts not in the offline training set."
+    ],
+    "metric_eq": "improvement = (NavOL_success_rate - offline_success_rate) / offline_success_rate * 100 percent",
+    "closing": "The demo proves that training on the robot's own rollouts, labeled by a global oracle, beats training on stale replay data. The robot learns to recover from its own mistakes."
+  }
+}

@@ -1,0 +1,196 @@
+{
+  "slug": "iclr-or-dxb6gbjhby",
+  "title": "LearnPruner: Rethinking Attention-based Token Pruning in Vision Language Models",
+  "family": "Efficiency & Systems",
+  "one_liner": "Drop unimportant image patches selectively to speed up vision-language models while keeping the same answer quality.",
+  "lead": "Vision-language models (models that read both images and text) can answer detailed questions about photos but are slow because they process every pixel in the image. LearnPruner drops the junk pixels early and keeps only the useful ones, speeding up the model 3 times over while preserving the same answer quality.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Images are long sequences, models are slow",
+    "paras": [
+      "A vision-language model reads an image by breaking it into small patches (think: cutting the photo into 100 tiny squares), then processes each square one at a time. With 100 patches, and a text prompt on top, the model has to do expensive scoring calculations (where it looks at which patches relate to the text) on all 100 patches even if only 5 matter for answering the question.",
+      "A naive approach: use attention scores (the model's own estimate of which patches matter) to drop low-scoring patches. But this doesn't work well. The vision part of the model (vision encoder) has a problem: it pays too much attention to a catch-all patch and ignores the actual foreground objects in the photo. The text part (language model) seems promising but it too has hidden biases—it favors early patches just because they come first, not because they matter. Both guides are broken."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Prune image patches early using a learned gate, then prune again in the language model's middle layer, because the language model has learned what patches actually help answer questions while the vision encoder gets confused."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Image input",
+        "viz": "box",
+        "viz_args": "Photo split into 100 patches",
+        "caption": "A photo broken into 100 small squares to process."
+      },
+      {
+        "title": "2. Attention sink",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["free", 10], ["free", 8], ["free", 12], ["free", 15], ["free", 9], ["free", 7], ["free", 20], ["free", 5], ["free", 11], ["free", 18], ["free", 6]],
+        "caption": "Vision encoder locks onto one catch-all patch, ignores real objects."
+      },
+      {
+        "title": "3. Learnable gate drops junk",
+        "viz": "weights",
+        "viz_args": [["hot", 85], ["free", 10], ["moved", 0], ["moved", 0], ["free", 15], ["moved", 0], ["moved", 0], ["moved", 0], ["free", 5], ["moved", 0], ["free", 18], ["moved", 0]],
+        "caption": "First stage: pruning module drops 70 patches, keeps only useful ones."
+      },
+      {
+        "title": "4. Language model attends wisely",
+        "viz": "box",
+        "viz_args": "30 patches → LLM layer → pick 5",
+        "caption": "Second stage: language model's middle layer refocuses on task-relevant patches."
+      },
+      {
+        "title": "5. Same answer, much faster",
+        "viz": "plain",
+        "caption": "Only 5 patches needed for the model to answer, computation drops dramatically."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {"b": "Stage 1: Vision encoder", "text": "Run image through vision encoder (standard model part), get 100 patches."},
+      {"b": "Stage 2: Learnable gate", "text": "Train a small gate module to score each patch, drop 70% that score low."},
+      {"b": "Stage 3: Language model", "text": "Pass remaining 30 patches through language model's first few layers."},
+      {"b": "Stage 4: Middle attention prune", "text": "At the language model's middle layer, look at which patches the model attends to most, drop the rest."},
+      {"b": "Stage 5: Output", "text": "Remaining 5 patches feed into final layers, answer the question at full speed."}
+    ]
+  },
+  "object": {
+    "h2": "What the method changes",
+    "paras": [
+      "The paper changes how image patches are selected—instead of relying on one broken attention signal, it uses two independent checks at different points in the pipeline. First a learned gate prunes aggressively. Second, the language model's middle layers prune again based on their own attention."
+    ],
+    "object": "which patches to keep"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Which patches matter",
+    "name": "patch importance (learned + language attention)",
+    "paras": [
+      "The paper measures two kinds of importance. First: a learned importance score trained on examples (via a small learnable module after the vision encoder). Second: the attention weight the language model assigns to each patch in its middle layers. The second signal is better because language models are trained on text-to-image pairs and actually learn which visual details answer questions.",
+      "The paper discovers that vision encoders have an attention sink: they lock onto one special patch and ignore everything else. But language models, when looking at image patches in their middle layers, don't suffer from this bias—they genuinely look at whatever patches matter for the current question."
+    ],
+    "heat": {
+      "cells": [
+        ["patch 1 (catch-all)", 4, true],
+        ["patch 2 (edge)", 1, false],
+        ["patch 3 (sky)", 1, false],
+        ["patch 4 (object)", 3, false],
+        ["patch 5 (object detail)", 2, false],
+        ["patch 6 (background)", 1, false],
+        ["patch 7 (object)", 3, false],
+        ["patch 8 (object detail)", 2, false],
+        ["patch 9 (edge)", 1, false],
+        ["patch 10 (background)", 1, false],
+        ["patch 11 (object)", 2, false],
+        ["patch 12 (noise)", 1, false]
+      ],
+      "caption": "Darker means higher importance by language model. Vision encoder locks onto patch 1 (attention sink); language model spreads attention across real objects."
+    },
+    "reads": [
+      {"b": "Plain reading.", "html": "The language model learns which patches are useful for answering questions because it was trained on images paired with correct answers. The vision encoder, being a generic image feature extractor, gets confused and focuses on a single summary patch instead."},
+      {"b": "Paper reading.", "html": "Text-to-vision attention in LLM middle layers demonstrates resistance to position bias and provides effective pruning guidance; vision encoder attention suffers from attention sink phenomenon."}
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Two stages beat one",
+    "paras": [
+      "The pipeline works because it uses two different, complementary views. The vision encoder is fast but blind (it defaults to a catch-all patch). A learnable gate trained on examples can learn patterns of what matters in images, and it prunes aggressively—dropping 70 patches. This cuts memory cost early.",
+      "The language model is smarter because it was trained on actual image-text pairs where it learned to look at patches that help answer questions. In the language model's middle layers, the attention weights genuinely align with task relevance. A second pruning pass here drops redundancy that slipped through the first stage. By using both signals, the method avoids the failure modes of either alone."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "100 image patches"},
+        {"t": "step", "s": "Vision encoder extracts features"},
+        {"t": "step", "s": "Learnable gate scores patches (trained on data)", "hl": true},
+        {"t": "step", "s": "Drop 70 patches (keep 30)"},
+        {"t": "step", "s": "Language model processes 30 patches"},
+        {"t": "step", "s": "Language model middle layer: examine attention", "hl": true},
+        {"t": "step", "s": "Drop irrelevant patches (keep 5)"},
+        {"t": "output", "s": "Answer from 5 patches (32x speedup)"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The pruning rule",
+    "words": "importance_score = learned_gate_output × language_model_attention",
+    "equation": "score_i = gate(patch_i) * attention_llm(patch_i, query)",
+    "symbols": [
+      ["score_i", "importance of patch i"],
+      ["gate(patch_i)", "learnable pruning module's output for patch i (0 to 1)"],
+      ["attention_llm(patch_i, query)", "how much the language model attends to patch i for the current question"],
+      ["query", "the text question being asked"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Patch 1 (dog face): gate score 0.9, LLM attention 0.8 → combined 0.72 → keep",
+        "Patch 2 (background sky): gate score 0.3, LLM attention 0.1 → combined 0.03 → drop",
+        "Patch 3 (dog tail): gate score 0.7, LLM attention 0.6 → combined 0.42 → keep",
+        "Patches with combined score above threshold are retained; below threshold are discarded."
+      ]
+    },
+    "note": "Both signals must agree: a patch is only kept if the learned gate approves AND the language model attends to it."
+  },
+  "bars": {
+    "h2": "Accuracy and speed trade-off",
+    "charts": [
+      {
+        "title": "Naive approach (vision attention only)",
+        "rows": [
+          ["Speed compared to original", 15, "bad"],
+          ["Accuracy preserved", 62, "bad"],
+          ["Patches dropped", 65, "bad"]
+        ],
+        "note": "Vision encoder lock-on problem (attention sink) causes both slowness and accuracy drop."
+      },
+      {
+        "title": "LearnPruner",
+        "rows": [
+          ["Speed compared to original", 95, "good"],
+          ["Accuracy preserved", 95, "good"],
+          ["Patches dropped", 94, "good"]
+        ],
+        "note": "Two-stage pruning preserves 95% accuracy using only 5.5% of patches, achieving 3.2x user-visible speedup."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "If the learnable gate is undertrained.",
+        "html": "If the gate module does not see enough examples during training, it will drop important patches. The model needs labeled data saying which patches matter for the task."
+      },
+      {
+        "warn": true,
+        "b": "If the language model's middle layers are not task-aligned.",
+        "html": "Some models may have learned to look at early patches more just because they come first, rather than looking at what patches actually matter. The pruning loses information if middle-layer attention does not correlate with actual relevance."
+      },
+      {
+        "warn": true,
+        "b": "If first-stage pruning is too aggressive.",
+        "html": "If the learnable gate drops important patches too early, the language model cannot recover that information later. The two stages must be calibrated so the gate only removes obvious junk."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train the learnable gate on a representative dataset for the target task, inspect language model attention patterns before committing to thresholds, and validate on held-out examples that the two stages complement each other (first stage catches obvious junk, second stage filters real redundancy)."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple vision-language model on a small dataset (e.g., visual question answering on 100 images with 5 questions each). Train LearnPruner's learnable gate on 80 images, then measure on 20 held-out images. Report the accuracy and latency with 100 patches vs. with LearnPruner's pruning."
+    ],
+    "metric_eq": "accuracy_ratio = accuracy_with_pruning / accuracy_without_pruning",
+    "closing": "The demo should show that you keep 95% of accuracy while using only 5% of patches, because the two pruning stages eliminate redundancy without losing the visual details needed to answer correctly."
+  }
+}

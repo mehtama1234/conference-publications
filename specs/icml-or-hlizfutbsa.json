@@ -1,0 +1,233 @@
+{
+  "slug": "icml-or-hlizfutbsa",
+  "title": "DiffuMamba: High-Throughput Diffusion LMs with Mamba Backbone",
+  "family": "Efficiency & Systems",
+  "one_liner": "Diffusion language models run 8 times faster by swapping the slow Transformer backbone for a speedy Mamba backbone.",
+  "lead": "Diffusion language models generate text step-by-step by gradually turning noise into words, unlike the normal way (one word at a time). But they have been slow because they use Transformers, which scan every pair of words in the text—a quadratic (squared-cost) job. This paper replaces that with Mamba, which processes each word only once and keeps a rolling summary in a fixed-size hidden state instead of comparing it to all others, reducing the cost from squared to linear. Since the summary is good enough for most tasks, it can match the quality while running 8 times faster on long texts.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Slow diffusion: Transformers scan every pair of words",
+    "paras": [
+      "Diffusion language models build text by starting with noise and gradually cleaning it up over many steps, each step guessing which words should replace the noise. A naive person might think: use a Transformer to look at the whole sequence and make the guess. Transformers do this by computing a score for every pair of words to decide which ones are relevant to each other. But that score-computation is quadratic—if your text is 1000 words, you compute 1,000,000 pairs, then 1,000,000 pairs again at the next step. On very long texts this becomes impossibly slow.",
+      "To speed this up, engineers add a trick: save the computed scores from one step (called a key-value cache, or KV-cache) so they don't recompute them. But that cache grows with the text length, eating precious graphics-card memory. So Transformers are stuck: fast when answering with short texts, but slow and memory-hungry on long ones."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "DiffuMamba replaces the slow Transformer backbone with Mamba, which processes text in linear time (not squared time) and never needs a cache."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Diffusion setup",
+        "viz": "plain",
+        "caption": "Start with noise, gradually denoise to reveal the word sequence."
+      },
+      {
+        "title": "2. Transformer way (slow)",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["hot", 38], ["free", 15], ["hot", 42], ["free", 12], ["hot", 35], ["hot", 40], ["free", 18], ["hot", 38], ["free", 14], ["hot", 36], ["free", 16]],
+        "caption": "Every word pair scored: quadratic cost, huge cache grows."
+      },
+      {
+        "title": "3. Mamba way (fast)",
+        "viz": "weights",
+        "viz_args": [["moved", 28], ["moved", 26], ["moved", 18], ["moved", 30], ["moved", 22], ["moved", 25], ["moved", 28], ["moved", 20], ["moved", 26], ["moved", 19], ["moved", 25], ["moved", 17]],
+        "caption": "Each word scanned once: linear cost, no cache."
+      },
+      {
+        "title": "4. Output quality check",
+        "viz": "box",
+        "viz_args": "Matches Transformer, 8x faster",
+        "caption": "Same text quality, far less time spent."
+      },
+      {
+        "title": "5. Long sequences benefit most",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["moved", 48], ["moved", 52], ["moved", 49], ["moved", 51], ["moved", 47], ["moved", 50], ["moved", 48], ["moved", 52], ["moved", 49], ["moved", 51], ["moved", 47]],
+        "caption": "Longer texts save more time; linear wins."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Replace Transformer layers with Mamba layers",
+        "text": "Each Transformer block that scanned all pairs is swapped for a Mamba block that processes the sequence in one pass."
+      },
+      {
+        "b": "Add bidirectional processing",
+        "text": "Both Transformer and Mamba read left-to-right and right-to-left so they see context from both directions."
+      },
+      {
+        "b": "Optional hybrid: interleave Mamba and Transformer layers",
+        "text": "DiffuMamba-H alternates Mamba blocks (fast) with occasional Transformer blocks (precise), balancing speed and quality."
+      },
+      {
+        "b": "Keep the diffusion training loop",
+        "text": "The backbone swaps but the diffusion objective stays: start with noise, predict which words replace it, step by step."
+      },
+      {
+        "b": "Measure answer speed and memory on long texts",
+        "text": "Run the model on sequences of varying lengths and compare throughput (words per second) and memory used."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changed",
+    "paras": [
+      "The paper swaps out the sequence processor inside the diffusion model. Instead of a Transformer (which scores all pairs of words), it uses Mamba (which scans each word once in sequence). This single swap removes the quadratic cost and the cache problem."
+    ],
+    "object": "Sequence processor backbone"
+  },
+  "hidden": {
+    "h2": "Compute cost: linear versus quadratic",
+    "name": "Answer time per sequence length",
+    "paras": [
+      "The hidden quantity is how the time to answer one denoising step grows as the text gets longer. For a Transformer, this cost grows quadratically (if the text is twice as long, answering takes four times longer). For Mamba, it grows linearly (twice as long text takes twice as long). The paper measures this by recording how many words per second the model generates on texts of different lengths.",
+      "Because Mamba processes each word only once (in a fixed-time hidden state) instead of comparing it to all other words, the total cost is proportional to the sequence length, not the length squared."
+    ],
+    "heat": {
+      "cells": [
+        ["Seq len 100", 1, false],
+        ["Seq len 200", 1, false],
+        ["Seq len 500", 2, false],
+        ["Seq len 1000", 2, false],
+        ["Seq len 2000", 2, false],
+        ["Seq len 5000", 3, true],
+        ["Transformer time", 4, true],
+        ["Mamba time", 2, false],
+        ["Cache memory", 4, false],
+        ["No cache needed", 1, false],
+        ["Linear scaling", 2, true],
+        ["Quadratic scaling", 4, false]
+      ],
+      "caption": "Darker means more time or memory. Mamba stays light even on long texts."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The cost to process a text grows with its length. Transformers multiply the cost by the length squared; Mamba just multiplies by the length once. On a 100-word text both are fast, but on a 10,000-word text the Transformer takes 10,000 times longer while Mamba takes 100 times longer."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Transformer cost grows with the square of sequence length N; Mamba cost grows linearly with N via a recurrent state transition without explicit pairwise scoring, hence no KV-cache and flat throughput scaling."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why Mamba is fast: recurrent scanning versus pairwise scoring",
+    "paras": [
+      "A Transformer scores every word pair because it needs to know which words are related. It is like filing: to find which documents go together, you compare every pair (expensive). Mamba works differently. It reads the text left-to-right (and in a variant, right-to-left) and updates a single small hidden state as it goes, like a train moving along a track and picking up one piece of information at each station. The hidden state contains enough information to predict the next word; you do not need to score all pairs.",
+      "Because each word is processed exactly once—read in, update the state, predict, move on—the cost is linear in the text length. The trade-off is that Mamba has less direct context: it knows the past (via the hidden state) but the hidden state is a fixed size, so it can only hold a summary. Transformer can score word 1000 against word 2000 directly even if they are far apart. But in practice, for many tasks Mamba's summary is good enough, especially if the text is not pathologically long."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Text with noise"
+        },
+        {
+          "t": "step",
+          "s": "Read word, update hidden state",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Predict replacement for this position"
+        },
+        {
+          "t": "step",
+          "s": "Move to next word (repeat)"
+        },
+        {
+          "t": "output",
+          "s": "Denoised text"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The Mamba transition equation",
+    "words": "new_state = input_times_matrix_times_old_state_plus_input",
+    "equation": "h_{t} = A * h_{t-1} + B * x_{t}",
+    "symbols": [
+      ["h_t", "the hidden state at time step t (a summary of the text seen so far)"],
+      ["h_{t-1}", "the hidden state from the previous step"],
+      ["A", "a matrix that decides which parts of the old state to keep"],
+      ["B", "a matrix that decides how much the new input word contributes"],
+      ["x_t", "the input word at time step t"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say the hidden state is a list of 4 numbers: [2, 1, 3, 1]",
+        "The new word x_t contributes [0.5, 0.2, 0.1, 0.3]",
+        "A keeps 50% of the old state: multiply [2, 1, 3, 1] by 0.5 = [1, 0.5, 1.5, 0.5]",
+        "B scales the new input: [0.5, 0.2, 0.1, 0.3]",
+        "Sum them: new state = [1 + 0.5, 0.5 + 0.2, 1.5 + 0.1, 0.5 + 0.3] = [1.5, 0.7, 1.6, 0.8]",
+        "This state now carries information about all words seen so far, compact and updated once per word."
+      ]
+    },
+    "note": "Instead of storing all word pairs in a cache, Mamba stores one small state and updates it one word at a time, making it linear-time."
+  },
+  "bars": {
+    "h2": "Performance comparison on long sequences",
+    "charts": [
+      {
+        "title": "Transformer diffusion",
+        "rows": [
+          ["Short sequence (100 words)", 540, "good"],
+          ["Medium sequence (500 words)", 410, "bad"],
+          ["Long sequence (2000 words)", 70, "bad"]
+        ],
+        "note": "Throughput drops sharply as sequence grows; cache memory swells."
+      },
+      {
+        "title": "DiffuMamba",
+        "rows": [
+          ["Short sequence (100 words)", 520, "good"],
+          ["Medium sequence (500 words)", 430, "good"],
+          ["Long sequence (2000 words)", 560, "good"]
+        ],
+        "note": "Throughput stays stable; linear scaling with length means no cache cliff."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Very long context forgets early details.",
+        "html": "The hidden state is fixed-size, so on a very long text (50,000+ words), the state may not hold all the detail from early paragraphs. Transformer has no such problem because it can directly score word 1 against word 50,000. If the task requires remembering fine details from far apart, Mamba may lose them."
+      },
+      {
+        "warn": true,
+        "b": "Mamba weights are task-specific.",
+        "html": "The matrices A and B control what the state remembers. These must be learned during training. If training is weak (too few examples or noisy data), Mamba may learn to save the wrong details. Transformers have the same problem but have been more widely studied, so engineers know more tricks to train them well."
+      },
+      {
+        "warn": true,
+        "b": "Hybrid variant (DiffuMamba-H) reintroduces some overhead.",
+        "html": "If you add Transformer layers back to gain quality, you bring back the quadratic cost. The speedup shrinks. The paper shows a 4.3x speedup for DiffuMamba-H versus 8.2x for pure Mamba, because the interleaved Transformer layers still cost time."
+      },
+      {
+        "b": "Done right: measure both quality and speed.",
+        "html": "On a standard benchmark (language modeling or text generation), confirm that Mamba diffusion matches Transformer diffusion in final text quality. Only then is the speedup a real win, not a loss disguised as efficiency."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small diffusion language model with both a Transformer backbone and a Mamba backbone, train both on the same dataset for the same number of steps, then measure: (1) final text quality (e.g., accuracy on a simple language task or a human-judged sentence score), (2) inference throughput in words per second on sequences of length 100, 500, 1000, 2000, and (3) peak graphics-card memory used. Plot inference time (y-axis) versus sequence length (x-axis) for both backbones. The Transformer curve should rise steeply (quadratic), while Mamba should stay nearly flat (linear)."
+    ],
+    "metric_eq": "throughput = (total words generated) / (total inference time in seconds)",
+    "closing": "If Mamba stays fast and flat while Transformer gets slower on long sequences, and both achieve similar final text quality, the mechanism is proven: you swapped a bottleneck."
+  }
+}

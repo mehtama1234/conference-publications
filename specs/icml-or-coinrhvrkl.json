@@ -1,0 +1,240 @@
+{
+  "slug": "icml-or-coinrhvrkl",
+  "title": "FAB: Distributed Bilevel Optimization with Push-Pull",
+  "family": "Optimization",
+  "one_liner": "FAB solves the hyperparameter tuning problem in distributed learning by running two nested loops simultaneously over messy, time-varying communication networks.",
+  "lead": "In real distributed learning, machines talk to each other over unreliable, one-way communication paths. Existing algorithms struggle because they must both coordinate (consensus bias) and tune their learning rate at the same time. FAB separates these into two independent loops: the inner loop learns with a fixed learning rate while the outer loop slowly adjusts that rate based on how well the inner loop is progressing. This works because the inner loop only needs to reach stable agreement among machines (using a communication trick called Push-Pull that handles one-way directed networks), and once it is stable, the outer loop can simply watch that stability and nudge the learning rate up or down—without restarting the whole network coordination.",
+  "nav": [["theme-optimization.html", "Optimization"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The nested tuning problem in distributed learning",
+    "paras": [
+      "When multiple machines learn together, they split a task and share gradients—the direction to nudge weights to reduce error. But they only talk via directed, unreliable channels: Machine A can send to B, but B may not reply. A naive fix: average all messages (consensus). But consensus over one-way links is hard, and even if it works, the learning rate (how big each nudge is) is fixed by hand before training starts.",
+      "In practice, the best learning rate changes as training progresses. Hyperparameter tuning (choosing the learning rate well) requires a second optimization loop: try different rates, measure which works best, adjust. Running two loops over messy, directed networks creates a compound problem: the inner loop must reach agreement, the outer loop must estimate quality from those noisy averages, and they interfere."
+    ],
+    "callout": {
+      "b": "The problem.",
+      "html": "FAB is a first-order distributed algorithm that tunes the learning rate automatically while training, over one-way networks, without breaking convergence."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Machines on a one-way network",
+        "viz": "box",
+        "viz_args": "A→B→C→A (arrows only one direction)",
+        "caption": "Three machines, but each can only send to its neighbor, not receive back directly."
+      },
+      {
+        "title": "2. The consensus bias trap",
+        "viz": "weights",
+        "viz_args": [["hot", 10], ["free", 35], ["hot", 20], ["free", 40], ["hot", 15], ["free", 45]],
+        "caption": "Averaging messages from neighbors creates imbalance; senders forget old info, bias accumulates."
+      },
+      {
+        "title": "3. Push-Pull sends help in both directions",
+        "viz": "weights",
+        "viz_args": [["moved", 25], ["warm", 25], ["moved", 25], ["warm", 25], ["moved", 25], ["warm", 25]],
+        "caption": "One machine broadcasts (push), another collects (pull), canceling bias without requiring replies."
+      },
+      {
+        "title": "4. Two nested loops run at once",
+        "viz": "box",
+        "viz_args": "Inner: learn | Outer: tune rate",
+        "caption": "Inner loop uses current learning rate; outer loop adjusts it based on performance of inner."
+      },
+      {
+        "title": "5. Automatic tuning converges together",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["free", 10], ["hot", 48], ["free", 8], ["hot", 42], ["free", 15]],
+        "caption": "Both loops reach steady state; learning rate is auto-tuned, no hand-picked value needed."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Build the network graph.",
+        "text": "Each machine knows which neighbors can send it messages; the graph can be directed and change over time."
+      },
+      {
+        "b": "Initialize the learning rate.",
+        "text": "Pick a starting value; FAB will adjust it, so the initial guess is not critical."
+      },
+      {
+        "b": "Inner loop: apply Push-Pull to share gradients.",
+        "text": "Machines broadcast (push) their weight updates and collect (pull) from neighbors, reducing one-way bias."
+      },
+      {
+        "b": "Outer loop: measure performance and nudge the rate.",
+        "text": "Estimate how well the inner loop is progressing; if it is slow, decrease learning rate; if it is overshooting, increase it."
+      },
+      {
+        "b": "Repeat until convergence.",
+        "text": "Both loops run together, inner refining weights, outer refining the learning rate, until both stabilize."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "FAB changes the learning rate automatically as training progresses, using feedback from the distributed training process. Instead of picking one value by hand before starting, the algorithm measures convergence quality and nudges the rate up or down to match the network's actual communication speed and the problem's difficulty."
+    ],
+    "object": "Learning rate trajectory"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: local error estimate",
+    "name": "Per-machine progress estimate",
+    "paras": [
+      "Each machine privately estimates whether its local gradients are pointing in a useful direction (whether updates are shrinking error or bouncing around). This estimate is a single number (not a list of numbers, just one value per machine) that measures local convergence quality.",
+      "The outer loop collects these estimates from all machines and uses them to decide: is the learning rate too high (estimates are noisy, updates bounce), or too low (estimates are small, training is slow)? If estimates are stable and large, training is healthy; if noisy, the rate is cut; if flat, the rate is raised."
+    ],
+    "heat": {
+      "cells": [
+        ["Machine 1 estimate", 3, true],
+        ["Machine 2 estimate", 4, true],
+        ["Machine 3 estimate", 3, false],
+        ["Machine 4 estimate", 2, false],
+        ["Machine 5 estimate", 4, true],
+        ["Machine 6 estimate", 2, false],
+        ["Average (used to tune)", 3, true],
+        ["Noise level", 2, false],
+        ["Decide: cut rate?", 1, false],
+        ["Healthy signal", 4, true],
+        ["Low signal", 1, false],
+        ["Feedback to rate controller", 3, true]
+      ],
+      "caption": "Darker cells show stronger local estimate; the outer loop uses this to detect whether the learning rate is right."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Each machine keeps a private scorecard of whether its training is going well; the network collects scorecards and uses them to auto-adjust the learning rate."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "FAB uses a value function estimate (gradient of the outer-loop objective with respect to the inner-loop hyperparameter) to measure progress; this estimate is computed locally and aggregated via Push-Pull."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why two-level optimization works on messy networks",
+    "paras": [
+      "The core insight: bilevel optimization separates the two sources of difficulty. The inner loop (learning) uses Push-Pull to handle one-way network bias: by broadcasting and collecting in a specific order, machines cancel the imbalance that consensus alone creates. This lets the inner loop converge reliably without knowing the global learning rate.",
+      "The outer loop (tuning) is separate: it only has to measure the inner loop's health and adjust one scalar value (the learning rate). This separation of concerns means the outer loop does not have to solve the network-bias problem again; it just watches the inner loop's progress and nudges the rate. Because the inner loop is stable (Push-Pull handles the network), the outer loop's estimates are reliable, and the feedback is sound. The result: automatic tuning that respects network topology and convergence speed."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Batch of gradients from all machines"
+        },
+        {
+          "t": "step",
+          "s": "Push: broadcast local updates to neighbors",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Pull: aggregate received messages with cancellation"
+        },
+        {
+          "t": "step",
+          "s": "Measure inner loop quality via local estimate",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Outer loop: adjust learning rate based on estimate"
+        },
+        {
+          "t": "output",
+          "s": "Updated weights + tuned learning rate"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The update rule",
+    "words": "new weight equals old weight minus learning rate times gradient, and new learning rate is adjusted by outer loop feedback, with penalty term enforcing alignment.",
+    "equation": "theta_k^{t+1} = theta_k^t - alpha^t * g_k^t + lambda * v^t (theta_k^t - theta_k^{t-1}), alpha^{t+1} = alpha^t - beta * d_alpha^t",
+    "symbols": [
+      ["theta_k^t", "weight at machine k, time t"],
+      ["alpha^t", "learning rate (tuned by outer loop)"],
+      ["g_k^t", "gradient at machine k, estimated via Push-Pull"],
+      ["lambda", "strength of penalty for weight drift"],
+      ["v^t", "outer loop estimate of convergence quality"],
+      ["beta", "learning rate for tuning the rate itself"],
+      ["d_alpha^t", "gradient of outer objective (how much to nudge alpha)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Machine 1 at time t: weight=2.0, gradient=0.4, learning rate=0.1",
+        "Inner update: 2.0 - 0.1*0.4 = 1.96 (nudge in gradient direction)",
+        "Outer loop detects: convergence quality estimate v=0.8 (healthy)",
+        "Rate adjustment: 0.1 - 0.01*0.02 = 0.0998 (small decrease, training is stable)",
+        "Next step, Machine 1 uses alpha=0.0998, tuned automatically; no hand-picking needed."
+      ]
+    },
+    "note": "The outer loop adjusts alpha (learning rate) based on how well the inner loop is progressing; Push-Pull ensures the gradient estimates are not corrupted by one-way network bias."
+  },
+  "bars": {
+    "h2": "Convergence comparison: hand-tuned vs. automatic",
+    "charts": [
+      {
+        "title": "Fixed learning rate (hand-tuned once)",
+        "rows": [
+          ["Iteration 100", 0.8, "good"],
+          ["Iteration 500", 0.5, "bad"],
+          ["Iteration 1000", 0.48, "bad"]
+        ],
+        "note": "Learning rate 0.1 works well early, but becomes too large; training bounces and never converges cleanly."
+      },
+      {
+        "title": "FAB (auto-tuned)",
+        "rows": [
+          ["Iteration 100", 0.82, "good"],
+          ["Iteration 500", 0.75, "good"],
+          ["Iteration 1000", 0.78, "good"]
+        ],
+        "note": "Learning rate starts at 0.1, drops to 0.05 by iteration 300 (outer loop detects bouncing), then stays near optimal. Steady convergence."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Network topology changes too fast.",
+        "html": "If communication links appear and disappear faster than the inner loop converges, Push-Pull cannot build stable averages, because Push-Pull works by machines taking turns to broadcast and collect—if the neighbors vanish mid-turn, the message gets lost and the average becomes corrupted. FAB assumes the network changes slowly enough for each inner loop batch to reach reasonable agreement; rapid switching breaks this."
+      },
+      {
+        "warn": true,
+        "b": "Local gradients are highly heterogeneous.",
+        "html": "If different machines have very different loss surfaces (e.g., one machine's data is much noisier), the local estimates of convergence quality become unreliable. The outer loop may tune the rate incorrectly, or the inner loop may not converge at all."
+      },
+      {
+        "warn": true,
+        "b": "The outer loop oscillates.",
+        "html": "If the outer learning rate (beta, how fast to adjust alpha) is too high, the learning rate itself bounces up and down, confusing the inner loop. Beta must be tuned carefully or the whole algorithm becomes unstable."
+      },
+      {
+        "b": "Done right: balanced data, stable topology, modest outer rate.",
+        "html": "When data is reasonably balanced across machines, the network topology is stable enough for Push-Pull to work, and the outer learning rate is modest, FAB converges smoothly and adapts the learning rate automatically."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simulated distributed training task: two machines, each with half of a simple regression dataset. Connect them with directed edges (e.g., A can send to B, B can send to A, but communication is delayed or noisy). Run the same training twice: once with a fixed learning rate (chosen by hand), once with FAB. Plot the loss over time for both. The demo should show that FAB's loss curve is smoother and stays lower, because the algorithm auto-adjusts the learning rate to match the actual network speed and data difficulty. Also plot the learning rate trajectory to show it changing over time."
+    ],
+    "metric_eq": "final_loss_fixed - final_loss_fab (positive means FAB converges better); also plot: learning_rate_fixed (constant) vs learning_rate_fab (over time, showing tuning)",
+    "closing": "The visual proof: FAB's learning rate starts at the same guess but automatically lowers itself when needed, avoiding the overshoot that ruins the fixed-rate version. No hand-tuning required."
+  }
+}
