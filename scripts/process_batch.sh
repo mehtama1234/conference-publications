@@ -22,13 +22,31 @@ for fp in glob.glob("specs/*-or-*.json"):
 PY
 python3 scripts/build_paper_explainer.py --all >/dev/null 2>&1
 
-C=$(python3 scripts/clarity_lint.py 2>&1 | grep -oE 'TOTAL issues: [0-9]+' | grep -oE '[0-9]+$')
-if [ "$C" != "0" ]; then
-  echo "CLARITY NOT CLEAN ($C issues) — NOT committing. Flags:"
-  python3 scripts/clarity_lint.py 2>&1 | grep '  \['
+# GATE the BATCH being committed (specs in arg-2 slug-list, else data/rollout/auto-pass.json).
+# The no-analogies rule applies going forward; older specs keep their analogies, so we gate the
+# batch rather than the whole corpus.
+BATCH="${2:-data/rollout/auto-pass.json}"
+C=$(python3 - "$BATCH" <<'PY'
+import json, sys, subprocess
+slugs = json.load(open(sys.argv[1]))
+tot = 0
+for s in slugs:
+    out = subprocess.run(["python3","scripts/clarity_lint.py",f"specs/{s}.json"],capture_output=True,text=True).stdout
+    n = out.count("  [")
+    if n:
+        tot += n
+        for l in out.splitlines():
+            if l.strip().startswith("["): print(f"{s}: {l.strip()}")
+print("TOTALBATCH", tot)
+PY
+)
+BAD=$(echo "$C" | grep -oE 'TOTALBATCH [0-9]+' | grep -oE '[0-9]+$')
+if [ "$BAD" != "0" ]; then
+  echo "CLARITY NOT CLEAN in batch ($BAD issues) — NOT committing. Flags:"
+  echo "$C" | grep ': \[' | head -30
   exit 2
 fi
-echo "clarity: 0 | why: $(python3 scripts/why_audit.py 2>&1 | grep -o 'TOTAL unexplained claims: [0-9]*')"
+echo "batch clarity: 0"
 
 python3 scripts/build_subthemes.py >/dev/null 2>&1
 python3 scripts/build_fieldmap.py >/dev/null 2>&1

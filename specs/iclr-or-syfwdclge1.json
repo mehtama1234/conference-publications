@@ -1,0 +1,241 @@
+{
+  "slug": "iclr-or-syfwdclge1",
+  "title": "δ-Adapter: Post-Processing Shifts for Time Series",
+  "family": "Time Series & Sequential",
+  "one_liner": "A tiny add-on module nudges the inputs and tweaks the outputs of a frozen forecaster, improving accuracy and trust without retraining.",
+  "lead": "When a time-series forecaster (a model that predicts the next values in a sequence) is already deployed, retraining it is costly and risky. This paper introduces a slim post-processing module that lives outside the forecaster and makes small, learned corrections at the boundaries—gently shifting the input data the forecaster sees and patching the numbers it outputs. The method works on any forecaster, keeps the original model untouched, and needs almost no extra compute.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The deployed forecaster is stuck",
+    "paras": [
+      "A time-series forecaster is a model trained to look at recent data (the history) and predict the next few values (the forecast). Once deployed, you want it to get better with new data: either more accurate predictions (lower error because new patterns are captured) or more honest estimates of how sure it should be (confidence intervals that actually match reality because they adapt to new data characteristics).",
+      "The naive approach: retrain the entire model on new data. This is slow, risky (old knowledge can vanish), and often not possible if the model is locked away behind an interface. A forecaster works until it does not, and by then you have no direct access to its internals."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Learn a tiny external module that tweaks inputs going in and outputs coming out, with changes bounded to stay small, while the original forecaster stays completely frozen."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The frozen forecaster",
+        "viz": "brain",
+        "caption": "A deployed forecaster reads recent data and outputs predictions. It never changes."
+      },
+      {
+        "title": "2. Inputs need nudging",
+        "viz": "weights",
+        "viz_args": [["free", 30], ["free", 25], ["free", 28], ["free", 32], ["free", 29], ["free", 31]],
+        "caption": "Raw input features go in. Some are noisy or misleading for this forecaster's blind spots."
+      },
+      {
+        "title": "3. Input adapter shifts them gently",
+        "viz": "weights",
+        "viz_args": [["moved", 35], ["moved", 22], ["moved", 33], ["moved", 29], ["moved", 34], ["moved", 27]],
+        "caption": "A tiny learned adapter edits the inputs slightly—lifting useful signals, dampening noise."
+      },
+      {
+        "title": "4. Output correction patches the forecast",
+        "viz": "box",
+        "viz_args": "Output: 102 → + 8 → 110",
+        "caption": "The forecaster's prediction is still made from original weights. An output adapter adds a small fix."
+      },
+      {
+        "title": "5. Improved accuracy and calibration",
+        "viz": "plain",
+        "caption": "Forecast is more accurate. Uncertainty intervals are honest about when it should be less confident."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Freeze the forecaster",
+        "text": "Take the deployed model and mark it as read-only. Do not change any of its weights."
+      },
+      {
+        "b": "Step 2: Train an input nudger",
+        "text": "Learn a small network that reads the raw input data and outputs tiny edits—which features to lift, which to dampen, which horizon (time ahead) matters most."
+      },
+      {
+        "b": "Step 3: Train an output corrector",
+        "text": "Learn another small network that reads the frozen forecaster's prediction and its inputs, then outputs a residual (a patch): how much to add or multiply to the forecast."
+      },
+      {
+        "b": "Step 4: Add calibrators for honesty",
+        "text": "Train modules that learn uncertainty: quantile offsets (offset the point forecast up and down for confidence intervals) and conformal scaling (learn how wide intervals should be in different situations)."
+      },
+      {
+        "b": "Step 5: Deploy as a sandwich",
+        "text": "The frozen forecaster stays in the middle. Inputs enter through the nudger, outputs exit through the corrector and calibrators. Zero changes to the forecaster itself."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The thing that moves",
+    "paras": [
+      "The paper moves three things: the input data (before it reaches the forecaster), the output numbers (after the forecaster predicts), and the uncertainty estimates (the width and shape of confidence intervals). But all three stay bounded—the edits are small, controlled by a correction bound that keeps changes tiny."
+    ],
+    "object": "Inputs, outputs, and uncertainties"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Local descent correlation",
+    "name": "Descent direction alignment",
+    "paras": [
+      "The paper measures a hidden quantity: how well the learned input nudge points in the same direction as the direction that shrinks the forecasting error. Think of error as a surface: some directions make error smaller (downhill), others make it larger (uphill). The learned input nudge should point downhill. Or at minimum, should not point uphill.",
+      "The paper estimates this alignment implicitly: when you train the input adapter on real data, it discovers which edits shrink the loss (error). If the edits point in the downhill direction, loss decreases. The paper proves that when this alignment is strong enough, the forecast error strictly shrinks even though the forecaster itself never retrains."
+    ],
+    "heat": {
+      "cells": [
+        ["Horizon 1 feat A", 4, true],
+        ["Horizon 1 feat B", 2, false],
+        ["Horizon 2 feat A", 3, true],
+        ["Horizon 2 feat B", 1, false],
+        ["Horizon 3 feat A", 4, true],
+        ["Horizon 3 feat B", 1, false],
+        ["Horizon 1 feat C", 2, false],
+        ["Horizon 2 feat C", 3, true],
+        ["Horizon 3 feat C", 2, false],
+        ["Offset magnitude", 4, true],
+        ["Reliability score", 3, false],
+        ["Sparse mask", 2, false]
+      ],
+      "caption": "Darker means stronger alignment with downhill direction. Highlight marks features with most influence on the particular horizon."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The input nudger learned to push data in the direction that shrinks error. Stronger push (darker) means more aligned with shrinkage, because training the adapter on real data discovered which edits made the frozen forecaster's errors smaller."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper bounds this via a learned damped step: the input nudge approximates a conservative step in the downhill direction of error. Alignment quantifies how much this step helps shrink loss because on the training data, inputs that were edited in the trained direction had lower error when fed to the frozen forecaster."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Three tiny forces",
+    "paras": [
+      "The core trick is that even though the forecaster is frozen, the data around it is not. An input nudge is a learned redescription of the input—emphasizing what the forecaster is blind to, or dampening signals that confuse it. If you can figure out which edit (which small change to the input) would shrink the error, you apply that edit before the frozen forecaster sees it. The forecaster then makes a better prediction because it is looking at a better-curated version of the same data.",
+      "The output corrector works because forecasters are rarely perfect. They tend to systematically under-predict or over-predict in certain contexts—confidence is too high in some regimes, too low in others. A tiny learned network that reads both the forecast and the raw input can spot these patterns and patch them: if the forecaster always undershoots when variance is high, add a compensation term proportional to variance. These corrections are bounded (they cannot be too large), so they never override the main forecast but can nudge it in the right direction.",
+      "Calibrators (quantile and conformal) go a step further: they learn to be honest about uncertainty. A quantile calibrator learns offset functions—how much to add to or subtract from the point forecast for a 90% confidence interval in this particular data regime. A conformal calibrator learns a scale function that makes intervals wider or narrower based on patterns in the residuals (the differences between past forecasts and true values). Both can be trained on new data without touching the forecaster."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Raw input features (history and covariates)"
+        },
+        {
+          "t": "step",
+          "s": "Input nudger edits feature values slightly",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Frozen forecaster reads nudged input, outputs prediction"
+        },
+        {
+          "t": "step",
+          "s": "Output corrector adds residual patch to prediction",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Calibrators learn uncertainty (quantiles and intervals)"
+        },
+        {
+          "t": "output",
+          "s": "Improved forecast with honest confidence bounds"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: Bounded residual correction",
+    "words": "The output-corrected forecast equals the original forecast plus a learned residual, bounded by a scale factor delta. The residual can be additive (add a fixed offset) or multiplicative (multiply by a small factor near 1). Training minimizes the loss of the corrected forecast while keeping the original forecaster frozen.",
+    "equation": "Ỹ = F(X) + δ·A_out(F(X), X)  (additive)\nŸ = F(X) ⊙ (1 + δ·A_out(F(X), X))  (multiplicative)\nwhere A_out is the learned correction network, δ bounds the magnitude of correction, X is input, F(X) is frozen forecast.",
+    "symbols": [
+      ["Ỹ", "the corrected forecast (what we output)"],
+      ["F(X)", "the frozen forecaster's original prediction"],
+      ["A_out(F(X), X)", "the learned output correction, reads both forecast and raw input"],
+      ["δ", "a small bound on how large corrections can be"],
+      ["⊙", "element-wise multiply (scale each output separately)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the frozen forecaster predicts next-day temperature as 72 degrees (F(X) = 72).",
+        "The output adapter learns A_out = +3 (add 3 degrees in this regime: high recent variance, evening hour).",
+        "Set δ = 0.1 (corrections limited to 10% of prediction magnitude).",
+        "Corrected forecast: Ỹ = 72 + 0.1 × 3 = 72.3 degrees.",
+        "The adapter learned to nudge +3, but δ constraint caps it at +0.3. Now suppose δ = 0.5 instead.",
+        "Corrected forecast: Ỹ = 72 + 0.5 × 3 = 73.5 degrees. Larger δ lets more correction through.",
+        "Training adjusts A_out to minimize error on new data. If true temps turn out near 73–74, the network learns bigger corrections; if near 72, it learns zero. The δ bound prevents runaway edits."
+      ]
+    },
+    "note": "The correction bound is the key safety valve: it lets the adapter help, but prevents it from overwriting the forecaster's core logic because if the bound is small enough, the correction is just a nudge (10% or less of the forecast), not a complete replacement."
+  },
+  "bars": {
+    "h2": "Accuracy and calibration comparison",
+    "charts": [
+      {
+        "title": "Naive method: retrain the forecaster",
+        "rows": [
+          ["Accuracy on old data", 82, "good"],
+          ["Accuracy on new data", 45, "bad"],
+          ["Retraining compute", 240, "bad"],
+          ["Model interface changes", 1, "bad"]
+        ],
+        "note": "Retraining often forgets old knowledge because the model weights are overwritten to fit new data, erasing patterns learned from old data. New-data accuracy improves but old knowledge vanishes (a problem called catastrophic forgetting), which hurts because the model now fails on the original task it was trained for. High compute cost. Deployed interface must change."
+      },
+      {
+        "title": "δ-Adapter: post-processing",
+        "rows": [
+          ["Accuracy on old data", 82, "good"],
+          ["Accuracy on new data", 78, "good"],
+          ["Retraining compute", 8, "good"],
+          ["Model interface changes", 0, "good"]
+        ],
+        "note": "Adapter trains only on new data. Old forecast knowledge stays intact because forecaster is frozen. Compute is minimal. Original model interface is never touched."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Overfitting the adapter.",
+        "html": "If you train the adapter on too little new data or with no regularization, it learns spurious patterns that do not generalize. The fix: use regularization (add a penalty for large corrections) and validate on held-out test data."
+      },
+      {
+        "warn": true,
+        "b": "Overshooting the correction bound.",
+        "html": "If the correction bound is set too large, the adapter stops being a gentle nudge and becomes a major override—essentially retraining the forecaster in disguise. The forecaster's core stability is lost. The fix: tune the bound on a separate validation set and keep it small."
+      },
+      {
+        "warn": true,
+        "b": "Concept drift faster than the adapter learns.",
+        "html": "Time series can shift in distribution over months or years. A static adapter, trained once, may grow stale. The fix: retrain adapters periodically or use online learning to update them incrementally."
+      },
+      {
+        "b": "Done right.",
+        "html": "The frozen forecaster is treated as a black box. The adapter learns only from new data on the side. Corrections are bounded, regularized, and validated. The original model interface never changes, so deployment is transparent."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple time-series forecaster (e.g., a linear regression or shallow neural net trained on the first 80 days of a stock price or temperature dataset). Deploy it as frozen. Collect 20 days of new data. Train a tiny post-processor (a 2-layer network for input nudging, a 2-layer network for output correction) on this new data for 50 epochs. Measure accuracy (mean absolute error, or MAE) before and after the adapter. Measure how well the uncertainty intervals (from the quantile calibrator) match the true coverage—if you claim 90% confidence, does the actual interval contain the true value 90% of the time?"
+    ],
+    "metric_eq": "Accuracy gain = MAE_before - MAE_after\nCalibration = (claimed_coverage - actual_coverage)^2\nCompute cost = training_time_adapter / training_time_original",
+    "closing": "The demo must show: (1) MAE improves by at least 5–10% with the tiny adapter because the adapter learned to nudge inputs toward more predictable states and correct systematic biases; (2) uncertainty intervals are honest (coverage matches claim) because the calibrators learned patterns in residuals that reveal when the forecaster is uncertain; (3) adapter training is orders of magnitude faster than retraining the original forecaster because the adapter has far fewer weights and the main forecaster never changes."
+  }
+}

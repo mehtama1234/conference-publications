@@ -42,6 +42,10 @@ VAGUE = ["leverage", "robust", "powerful", "novel", "various", "seamless", "rich
          "significantly", "effectively", "efficiently improve", "meaningful", "geometry",
          "notion of", "in the world of", "it turns out", "remarkable", "fascinating"]
 
+ANALOGY = ["imagine a", "imagine you", "think of it as", "think of it like", "it's like ",
+           "like a ", "as if it were", "picture a ", "picture an ", "kind of like", "just like a",
+           "analogy", "metaphor", "similar to how a"]
+
 ORDER = ["lead", "problem", "object", "comic", "flow", "hidden", "mechanism", "bars", "failures", "demo", "math"]
 def okey(path):
     for i, k in enumerate(ORDER):
@@ -90,6 +94,10 @@ def lint_spec(fp):
             if v in low:
                 i = low.find(v)
                 issues.append(("VAGUE", v.strip(), path, text[max(0,i-18):i+25]))
+        for a in ANALOGY:
+            if a in low:
+                i = low.find(a)
+                issues.append(("ANALOGY", a.strip(), path, text[max(0,i-18):i+30]))
     return issues
 
 def main():
