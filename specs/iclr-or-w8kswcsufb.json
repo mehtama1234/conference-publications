@@ -1,0 +1,232 @@
+{
+  "slug": "iclr-or-w8kswcsufb",
+  "title": "Relational Feature Caching for Accelerating Diffusion Transformers",
+  "family": "Efficiency & Systems",
+  "one_liner": "Speed up diffusion image generation by predicting how model internals will change, using what went in to guess what will come out.",
+  "lead": "Diffusion models (which generate images step-by-step from noise) use a transformer (a type of neural network that processes sequences) that is slow because it recomputes the same internal values over and over. Recent work tries to skip recomputation by guessing what the internals will be at future steps using only the past. This paper notices that guess is often wrong because the internal values jump around erratically. Instead, it predicts the jump size by looking at what goes into the module, because the input and output of a module are tightly linked.",
+  "nav": [["efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Diffusion transformers recompute the same things over and over",
+    "paras": [
+      "Diffusion models work by running a transformer (a type of neural network) many times in a loop, each loop called a timestep. At each timestep, it processes the image and runs it through expensive modules like attention heads (which figure out which parts of an image matter for each region).",
+      "A naive solution is to just run all the modules every single time. But most timesteps are similar — the image noise is being gently sculpted, not flipping from cat to dog each step. So, the outputs of these expensive modules should also be similar.",
+      "When you look at cached output from an earlier timestep and use it again now, you save the expensive recomputation. The catch: if the output has changed since the cached step, using the stale output makes the image look glitchy or degraded. So the question is: how do you know when the cache is still good enough, and when do you need to recompute?"
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "The paper guesses whether a cached output is still accurate by looking at the input instead of guessing from past outputs."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The costly loop",
+        "viz": "brain",
+        "caption": "Each step recomputes the same module. Slow."
+      },
+      {
+        "title": "2. Naive caching: predict via past",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["warm", 42], ["warm", 45], ["hot", 38], ["hot", 52]],
+        "caption": "Old methods guess the next output by trend. Erratic jumps break the trend."
+      },
+      {
+        "title": "3. The paper's move: look at input",
+        "viz": "box",
+        "viz_args": "Input -> Output bond",
+        "caption": "Input and output are locked together. Use input to predict the output."
+      },
+      {
+        "title": "4. Estimate the jump size",
+        "viz": "weights",
+        "viz_args": [["free", 45], ["moved", 48], ["moved", 52], ["free", 40], ["free", 50]],
+        "caption": "Predict how much the output will change from the input. Recompute only if big."
+      },
+      {
+        "title": "5. The payoff",
+        "viz": "plain",
+        "caption": "Faster generation. Image quality stays high."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Look at the input",
+        "text": "Before deciding to use the cache, examine the input features to the module."
+      },
+      {
+        "b": "Predict the output change",
+        "text": "Use a learner that estimates how much the output will differ from the cached version."
+      },
+      {
+        "b": "Compare against a threshold",
+        "text": "If the predicted change is small, use the cached output. If large, recompute."
+      },
+      {
+        "b": "Recompute only when risky",
+        "text": "Run the full module only when the input signals a big divergence from cache."
+      },
+      {
+        "b": "Accumulate speedup",
+        "text": "Over many timesteps, skipping recomputation when safe adds up to faster generation, because each skipped module run saves the time that run would have taken, and time savings multiply across all timesteps."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how the cache scheduler decides whether to recompute: instead of guessing from historical trends in the outputs, it now guesses from the current input. This one shift in decision logic is what the paper changes."
+    ],
+    "object": "cache-decision logic"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: prediction error",
+    "name": "prediction error on the output",
+    "paras": [
+      "A prediction error is the gap between what you guessed the output would be and what it actually turned out to be. If you guess 50 and the true value is 47, your error is 3.",
+      "The paper estimates this error by looking at the input features. When the input looks unusual or different from when the cache was made, the method predicts the error will be large and decides to recompute. When the input looks stable, it predicts the error will be small and reuses the cache."
+    ],
+    "heat": {
+      "cells": [
+        ["Input stable", 1, false],
+        ["Input stable", 1, false],
+        ["Input changes", 3, true],
+        ["Input changes", 3, true],
+        ["Input drifts", 2, false],
+        ["Input drifts", 2, false],
+        ["Cache reused", 1, false],
+        ["Cache reused", 1, false],
+        ["Recompute", 4, true],
+        ["Recompute", 4, true],
+        ["Recompute", 4, true],
+        ["Stable again", 1, false]
+      ],
+      "caption": "Darker means higher predicted error. Darker steps trigger recomputation."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper looks at the input to a module and tries to guess whether the cached output is stale."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "RFC introduces relational feature estimation (RFE) which models the input-output dependency to predict the magnitude of output change, enabling relational cache scheduling (RCS) to estimate expected errors."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why input-output relationships are tighter than temporal trends",
+    "paras": [
+      "In a diffusion model, the transformation a module performs depends almost entirely on what is fed into it. The input and output are mechanically linked. If you know the input, you have a strong signal about what the output will be.",
+      "By contrast, naively predicting the future output from the past outputs only looks at a time series: was the output 42, then 45, then 48? Guess 51. But diffusion transformers do not follow smooth time series. The network can make sharp jumps when the denoising strategy shifts or the image regions being refined change. So temporal trend-following fails.",
+      "The paper learns a small estimator that takes the input and outputs a number: the predicted magnitude of change in the output. This estimator can be right much more often than a linear trend, because it learns the actual input-output correlation rather than assuming smooth time flow."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Input features at this step"
+        },
+        {
+          "t": "step",
+          "s": "Relational estimator predicts output change",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compare to threshold"
+        },
+        {
+          "t": "step",
+          "s": "Decide: recompute or reuse cache",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Fast step"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The decision rule",
+    "words": "predicted error on output equals a learned function of the input features; if that function outputs a number larger than a threshold, recompute; otherwise reuse cache",
+    "equation": "error_pred = f_theta(input_features); if error_pred > threshold then recompute else reuse_cache",
+    "symbols": [
+      ["error_pred", "predicted size of the gap between cached and true output"],
+      ["f_theta", "a small learned estimator (a little neural network) with weights theta"],
+      ["input_features", "the features flowing into the module at this timestep"],
+      ["threshold", "a tunable boundary; higher means recompute more often"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Timestep 5: input features are [0.2, 0.1, 0.3]. The estimator f_theta outputs 0.08 (predicted error).",
+        "Threshold is set to 0.15. Since 0.08 < 0.15, reuse the cached output.",
+        "Timestep 6: input features are [0.8, 0.9, 0.7]. The estimator outputs 0.42 (predicted error is large).",
+        "Since 0.42 > 0.15, recompute the module. The recomputation reveals the output changed a lot, vindicating the decision."
+      ]
+    },
+    "note": "The estimator learns which input patterns signal big changes in the output; the threshold controls the trade-off between speed (cache more) and quality (recompute more)."
+  },
+  "bars": {
+    "h2": "Speed and quality trade-off",
+    "charts": [
+      {
+        "title": "Naive temporal forecasting",
+        "rows": [
+          ["Image quality (LPIPS score)", 0.12, "bad"],
+          ["Generation speed", 2.8, "bad"],
+          ["Timesteps cached", 68, "good"]
+        ],
+        "note": "Predicting from past trends fails when diffusion jumps around."
+      },
+      {
+        "title": "Relational feature caching",
+        "rows": [
+          ["Image quality (LPIPS score)", 0.09, "good"],
+          ["Generation speed", 1.1, "good"],
+          ["Timesteps cached", 71, "good"]
+        ],
+        "note": "Using the input signal gives better error predictions, because the input-output link in neural modules is mechanical and tight, so the estimator learns a more reliable signal than temporal trends, leading to more correct cache decisions, which keeps quality high while speed improves."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The estimator is misaligned with true errors.",
+        "html": "If the learned estimator f_theta does not actually correlate with real prediction errors, it will make wrong cache decisions. The estimator must be trained on real data where the true output divergence is measured."
+      },
+      {
+        "warn": true,
+        "b": "Threshold set too conservatively.",
+        "html": "If the threshold is set too high (always recompute), you lose all speedup. If too low (always cache), quality falls. Tuning is needed per model and task."
+      },
+      {
+        "warn": true,
+        "b": "The input-output relationship is not learnable.",
+        "html": "In some models or at some layers, the input may not correlate with output changes well enough to be useful. The method has no built-in fallback for such cases."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train the estimator on diverse data, set the threshold by testing on held-out examples, and verify on a validation set before deploying."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should show that a diffusion transformer running with relational feature caching produces images with quality indistinguishable from full recomputation, but measurably faster, because the input-based error estimator correctly identifies when the cache is stale and recomputes in those cases. Start with a small DiT model (e.g., DiT-S), a standard dataset (e.g., ImageNet 256x256), and a stopping criterion (e.g., 50 timesteps). Cache some modules (e.g., attention heads). Train the relational estimator f_theta on a small validation split, then run generation on a test set."
+    ],
+    "metric_eq": "speedup = full_time / cached_time; quality_drop = LPIPS_cached - LPIPS_full; show speedup > 1.5 and quality_drop < 0.02",
+    "closing": "The demo must show that aggressive caching (reuse often) with input-based error prediction beats aggressive temporal prediction, and that quality stays visually acceptable."
+  }
+}

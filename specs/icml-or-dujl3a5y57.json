@@ -1,0 +1,241 @@
+{
+  "slug": "icml-or-dujl3a5y57",
+  "title": "LangForce: Making Robots Listen to Instructions",
+  "family": "Agents & Tool Use",
+  "one_liner": "Robots often ignore language instructions and rely only on vision; LangForce forces them to use language by measuring how much instructions explain the action, then rewarding actions that truly need the language to make sense.",
+  "lead": "Vision-Language-Action (VLA) models teach robots to act based on images and text instructions. But in practice, they develop a dangerous shortcut: they learn to predict actions from images alone, ignoring the instruction entirely. LangForce detects this cheating by building two separate models—one that sees only images, one that sees both images and language—and measures whether language actually changes the action. If language is irrelevant, the method penalizes it hard, forcing the robot to listen.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Robots that ignore instructions",
+    "paras": [
+      "A robot learning from video demonstrations and text instructions should do what the text says. But often it cheats. If the same scene appears in the training data with many different instructions (e.g., 'pick the carrot', 'move to the shelf', 'grasp the pepper'), the robot learns that the visual details alone—lighting, background, object positions—predict what to do. The instruction becomes redundant. The robot has found a shortcut.",
+      "A beginner might think: just add a loss term that penalizes ignoring language. But how do you measure whether language is actually being used? You can't tell from the final action whether it came from language or from visual cues."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Training datasets often repeat the same scene across many tasks, so a robot can predict actions from images alone and never needs to read the instruction."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The shortcut",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["warm", 40], ["free", 10], ["free", 5], ["free", 8], ["free", 12]],
+        "caption": "Robot learns: this scene means grasp. Language never mattered."
+      },
+      {
+        "title": "2. Vision-only branch",
+        "viz": "weights",
+        "viz_args": [["warm", 65], ["free", 15], ["free", 12], ["free", 10], ["free", 8], ["free", 5]],
+        "caption": "Train one network on images alone. Records its action predictions."
+      },
+      {
+        "title": "3. Language-conditioned branch",
+        "viz": "weights",
+        "viz_args": [["hot", 68], ["warm", 30], ["free", 8], ["free", 6], ["free", 5], ["warm", 25]],
+        "caption": "Train second network on images plus language. Shares vision encoder."
+      },
+      {
+        "title": "4. Measure the gap",
+        "viz": "box",
+        "viz_args": "If language changes the action, reward it. If action is same, penalize.",
+        "caption": "Mutual Information: does language actually flip the choice?"
+      },
+      {
+        "title": "5. Result",
+        "viz": "plain",
+        "caption": "Robot now truly grounds language because ignoring it costs training loss."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Record the vision-only prediction",
+        "text": "Feed an image into a standalone network, get an action prediction with no language input."
+      },
+      {
+        "b": "Record the language-conditioned prediction",
+        "text": "Feed the same image plus the instruction into a second network, get a different action prediction."
+      },
+      {
+        "b": "Train both networks in parallel",
+        "text": "Use flow-matching loss (a diffusion-style training method) on both branches to predict real actions."
+      },
+      {
+        "b": "Measure how much language matters",
+        "text": "Compute the pointwise mutual information: a score that says whether language makes the action different from vision-only."
+      },
+      {
+        "b": "Penalize shortcuts with the mutual information score",
+        "text": "The final loss combines action-matching from both branches plus a bonus for high mutual information between language and action."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "LangForce changes the training objective. Instead of simply trying to predict the right action, it adds a measurement of mutual information—a score that quantifies whether language and action are dependent on each other. The training objective penalizes low mutual information, forcing the network to rely on language."
+    ],
+    "object": "Training objective"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Mutual Information between Language and Action",
+    "name": "Pointwise Mutual Information (PMI)",
+    "paras": [
+      "Pointwise Mutual Information is a number that answers the question: does this instruction change what action the robot picks? If the robot would pick the same action whether or not it reads the instruction, PMI is near zero. If language switches the action, PMI is high. The paper measures PMI by comparing the vision-only network output to the language-conditioned network output on the same example.",
+      "The paper estimates PMI as a log-likelihood ratio: the probability the language-conditioned model assigns to the real action divided by the probability the vision-only model assigns. A high ratio means language was needed to pick the right action. Low ratio means vision alone was enough."
+    ],
+    "heat": {
+      "cells": [
+        ["language ignored", 1, false],
+        ["language ignored", 1, false],
+        ["language used", 3, true],
+        ["language used", 4, true],
+        ["language used", 4, true],
+        ["language ignored", 1, false],
+        ["language used", 3, true],
+        ["language ignored", 2, false],
+        ["language used", 3, true],
+        ["language used", 4, true],
+        ["language ignored", 1, false],
+        ["language used", 3, true]
+      ],
+      "caption": "Darker means language influenced the action choice. Lighter means vision alone was sufficient."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Mutual information is a single number between 0 and large positive. High means the instruction was essential; low means ignoring it would not change the action."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper uses log-likelihood ratio between a language-conditioned model (posterior: the full distribution after seeing language) and a vision-only model (prior: what comes before language), derived from information theory, to quantify conditional mutual information I(a; language | vision)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: The dual-branch trap",
+    "paras": [
+      "The mechanism is simple but clever. You cannot directly forbid the robot from using a vision shortcut—it will find one anyway if the data allows it, because the training loss has no term that detects the shortcut. Instead, you build a second network that knows what the vision shortcut looks like. This second network—the vision-only baseline—acts as a mirror. It shows you what a cheating robot would do. Then you train a language-conditioned version alongside it, and measure how often they differ.",
+      "Here is why it works: if language is truly irrelevant (information collapse), both networks converge to the same action. The mutual information score collapses to zero, and the loss term explodes, punishing the model. If language truly matters, the two networks produce different actions on the same example, the mutual information is high, and the loss term rewards the model. This forces the robot to learn that language changes the outcome, because the training loss will keep pushing it toward that state.",
+      "The method incurs almost no overhead at test time—both branches share the vision encoder, and you discard the vision-only branch at deployment. Only language-conditioned decisions are used."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Image plus instruction"
+        },
+        {
+          "t": "step",
+          "s": "Vision encoder (shared)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Branch 1: vision-only action prior",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Branch 2: language-conditioned posterior",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Measure mutual information between branches",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Language-grounded policy (discard Branch 1)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The mutual information objective",
+    "words": "Total training loss equals action-matching loss from both branches plus a mutual information bonus term. The mutual information term is the log-likelihood ratio: log of (language-conditioned probability of real action) divided by (vision-only probability of real action).",
+    "equation": "Loss_total = Loss_vision_prior + Loss_language_posterior + lambda * (-log_likelihood_ratio)",
+    "symbols": [
+      ["Loss_vision_prior", "how well the vision-only network predicts the real action"],
+      ["Loss_language_posterior", "how well the language-conditioned network predicts the real action"],
+      ["log_likelihood_ratio", "log of (P_language(action) / P_vision(action))"],
+      ["lambda", "how strongly to reward high mutual information"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Example: an image of a carrot and instruction 'pick the carrot'.",
+        "Vision-only network outputs: 60% grasp, 20% move, 20% drop.",
+        "Language-conditioned network outputs: 80% grasp, 10% move, 10% drop.",
+        "Real action in training data: grasp.",
+        "Log-likelihood ratio = log(0.80 / 0.60) = log(1.33) ≈ 0.285.",
+        "This positive value rewards the model: language raised the probability of the correct action from 60% to 80%.",
+        "Conversely, if both networks output 60% grasp, the ratio is 1.0, log-likelihood is 0, and the model is not rewarded for language."
+      ]
+    },
+    "note": "The loss term penalizes the model when language is unused, and rewards it when language flips the action choice."
+  },
+  "bars": {
+    "h2": "Training outcome",
+    "charts": [
+      {
+        "title": "Standard VLA (shortcut)",
+        "rows": [
+          ["On training scene with language", 88, "good"],
+          ["Same scene, vision only", 86, "good"],
+          ["Out-of-distribution test (new instruction)", 41, "bad"]
+        ],
+        "note": "Vision-only and language-conditioned performances are nearly identical on training data, showing language is being ignored."
+      },
+      {
+        "title": "LangForce (language-grounded)",
+        "rows": [
+          ["On training scene with language", 82, "good"],
+          ["Same scene, vision only", 52, "bad"],
+          ["Out-of-distribution test (new instruction)", 66, "good"]
+        ],
+        "note": "Vision-only performance drops sharply, proving language is essential. Out-of-distribution generalization is much stronger because the model learned that language changes the action, not just the visual shortcut."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Training becomes bimodal.",
+        "html": "If the mutual information term is too strong, the model might oscillate between relying only on vision and relying only on language, never finding a stable balance. Tuning lambda (the weight of the mutual information term) is critical."
+      },
+      {
+        "warn": true,
+        "b": "Computational overhead during training.",
+        "html": "Running two forward passes (vision-only and language-conditioned) doubles computation during training. The paper mitigates this by sharing the vision encoder and reusing its outputs, but training time still increases. This is only a training cost; at test time (when the model answers new questions) only the language-conditioned branch is used, so deployment is no slower."
+      },
+      {
+        "warn": true,
+        "b": "Dataset diversity matters.",
+        "html": "If the training data has true redundancy (the same scene really does always mean the same action), then maximizing mutual information between language and action may harm in-distribution performance. The paper shows this on LIBERO: where training and test are nearly identical, the method achieves comparable or slightly lower language-grounded performance because there is less ambiguity to resolve."
+      },
+      {
+        "b": "Stable grounding when data is ambiguous.",
+        "html": "The method works best when the same visual scene truly requires different actions depending on the instruction. On datasets like SimplerEnv and RoboCasa, where ambiguity is high and language is genuinely necessary, the method achieves large gains."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A convincing demo trains two small robot control networks on a dataset where the same scene repeats with different instructions (e.g., four vegetables in the same tabletop setup with 100 demonstrations each, but different task instructions). The demo should show that (1) a standard VLA model achieves similar loss with or without language, proving the shortcut, and (2) LangForce's dual-branch loss explicitly penalizes this shortcut, and the resulting policy generalizes to new instructions the robot has never seen on that scene."
+    ],
+    "metric_eq": "Language_grounding_score = (Vision_only_accuracy - Language_conditioned_accuracy) / Vision_only_accuracy. Higher = language is more essential.",
+    "closing": "The demo must make impossible to miss that standard training creates vision-only policies, and that LangForce's mutual information objective forces true language dependence."
+  }
+}
