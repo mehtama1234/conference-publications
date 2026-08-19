@@ -31,7 +31,7 @@ def prose(o, path=""):
     elif isinstance(o, str): out.append((path, o))
     return out
 
-SKIP_PATH = (".h2", ".title", ".worked", "].b", ".caption", "one_liner", ".kick")
+SKIP_PATH = (".h2", ".title", ".worked", "].b", ".caption", "one_liner", ".kick", ".name")
 def audit(fp):
     s = json.load(open(fp))
     flags = []

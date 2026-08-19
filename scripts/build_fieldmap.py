@@ -60,9 +60,9 @@ summary:before{{content:"\\25B8 ";color:var(--accent)}}details[open]>summary:bef
 .subname{{font-size:14.5px;color:var(--ink);text-decoration:none;font-weight:600}}.subname:hover{{color:var(--accent)}}
 .dl{{margin-top:5px;font-size:12.5px;line-height:1.7}}.dl a{{color:var(--accent);text-decoration:none;font-family:var(--mono)}}.dl a:hover{{text-decoration:underline}}
 </style></head><body><div class="wrap">
-<div class="top"><a href="index.html">Landscape</a><a href="hub.html">The Machine</a><a href="idea-graph.html">Idea Graph</a><a href="paper-explainers.html">Explainer inventory</a></div>
+<div class="top"><a href="index.html">Landscape</a><a href="themes.html">Themes explained</a><a href="hub.html">The Machine</a><a href="math.html">Mathematics</a><a href="idea-graph.html">Idea Graph</a><a href="paper-explainers.html">Explainer inventory</a></div>
 <h1>The field map</h1>
-<p class="sub0">The whole corpus, top to bottom: {nt} themes, each split into first-principles subthemes, down to the papers. Subthemes with a <span class="deep">deep</span> badge have full first-principles explainer pages — click a theme to open it, or jump straight to a deep dive.</p>
+<p class="sub0">The whole corpus, top to bottom: {nt} themes, each split into first-principles subthemes, down to the papers. Subthemes with a <span class="deep">deep</span> badge have full first-principles explainer pages — click a theme to open it, or jump straight to a deep dive. Want each theme and subtheme <b>explained in plain words</b> first? Read <a href="themes.html">every theme explained from scratch</a>.</p>
 <div class="stat">{np:,} papers · {nt} themes · {nsub} subthemes · {nd} deep explainers so far</div>
 {body}
 </div></body></html>
