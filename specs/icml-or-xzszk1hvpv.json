@@ -1,0 +1,242 @@
+{
+  "slug": "icml-or-xzszk1hvpv",
+  "title": "Reflex: Real-Time Vision-Language-Action Control through Streaming Inference",
+  "family": "Robotics & Control",
+  "one_liner": "A robot learns to act from camera images by making a flow-matching model stream actions one at a time without re-doing math each step.",
+  "lead": "Vision-Language-Action models let robots learn precise continuous control by reading camera images and writing movement commands. The standard way these models work uses a denoising process that starts with random noise and iteratively refines it into a clean action. But this process has a fatal flaw for real-time robots: each step changes a hidden state called a timestep, which breaks a speed trick (KV-cache reuse) that lets the model answer faster. Reflex fixes this by realizing the parts that read the camera are independent of the parts that denoise, so you can cache the camera work and only redo the denoising.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why denoising breaks real-time robots",
+    "paras": [
+      "A Vision-Language-Action model reads a camera image and outputs a robot movement command. To learn, it uses a denoising process: start with pure noise, then run the model over and over, each time subtracting a tiny bit of noise until you have a clean action. This works great for learning.",
+      "But each denoising step gets a global signal: which step of the denoising loop are we in? The model uses this to adjust how much noise to subtract each time. A speed trick, called KV-cache reuse, remembers the camera encoding from the previous step so the model does not have to re-read the camera each time—this works because the same camera frame is used over all denoising steps. The catch: the global step number breaks this trick. If the step number changes, the math that was cached becomes wrong, because the model tuned the math for step 1 but now we are at step 2; so the model either re-reads the camera every time (slow quadratic arithmetic—work grows as step-count squared) or reuses the cached math anyway (wrong answers)."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Global timestep injection breaks KV-cache reuse, forcing a choice between slow recomputation or mathematically incorrect cache reuse."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The naive loop",
+        "viz": "box",
+        "viz_args": "Camera -> Model -> Action",
+        "caption": "Read camera, run denoising loop to get action."
+      },
+      {
+        "title": "2. The cache breaks",
+        "viz": "weights",
+        "viz_args": [["cached",50],["new",15],["cached",45],["new",20],["cached",55]],
+        "caption": "Timestep number changes, cached camera work becomes invalid."
+      },
+      {
+        "title": "3. The insight",
+        "viz": "box",
+        "viz_args": "Camera IS independent of timestep",
+        "caption": "Camera encoder does not use the denoising step number."
+      },
+      {
+        "title": "4. Partition the cache",
+        "viz": "weights",
+        "viz_args": [["static",60],["sliding",35],["dynamic",25],["static",55],["sliding",40]],
+        "caption": "Split cache into static (never changes), sliding, dynamic parts."
+      },
+      {
+        "title": "5. Stream at 50Hz",
+        "viz": "box",
+        "viz_args": "Camera cached, denoising fast: 50 actions per second",
+        "caption": "Camera work stays cached, denoising reruns in O(1) per step."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "One: recognize independence",
+        "text": "The encoder that reads the camera does not use the global step number, so its output can be reused."
+      },
+      {
+        "b": "Two: split the memory context",
+        "text": "Partition the cache into static (encoder output, never changes), sliding (a memory window that shifts), and dynamic (recomputed each denoising step). The parts of the cache that are always used must be kept frozen; parts that change with the denoising step must be recomputed."
+      },
+      {
+        "b": "Three: incremental updates",
+        "text": "When the denoising step changes, only update the dynamic and sliding parts; static stays unchanged in memory."
+      },
+      {
+        "b": "Four: stabilize numerics",
+        "text": "Add AdaRMSNorm, a layer that prevents precision loss by gating (turning on and off) based on the denoising phase."
+      },
+      {
+        "b": "Five: run in parallel",
+        "text": "Decouple camera reading from action generation in separate threads; fuse multiple low-level operations into one."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Reflex changes how the model stores and updates its internal cache when the robot runs the model in real time. Normally, the entire cache becomes invalid when the timestep changes. Reflex partitions the cache into three zones: parts that never change (cached), parts that slide (move through a window), and parts that are recomputed each step. This splits the problem so the model can reuse the camera encoding without lying about the math, because the camera-dependent parts are separated from the timestep-dependent parts and each is handled correctly."
+    ],
+    "object": "Cache partitioning and incremental updates"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: cache reuse depth",
+    "name": "Fraction of cached computation reused across denoising steps",
+    "paras": [
+      "The paper measures how much of the cached math can be safely reused when the timestep changes. Without Reflex, zero percent of the cache is valid (it all breaks). With Reflex, the static portion (encoder output) stays valid, plus the sliding window is updated in place without re-reading the entire context. This fraction directly determines how fast the model runs when the robot uses it in real time.",
+      "The paper estimates this by analyzing how the model decides which parts to use (the decision mechanism). It observes that the encoder layer does not read the timestep number at all—only the denoising layers do. So the encoder output is invariant (stays the same regardless of timestep). Reflex then tracks which parts of the model's decision context depend on the encoder (static or sliding) versus only on the denoising step (dynamic), and caches accordingly."
+    ],
+    "heat": {
+      "cells": [
+        ["camera_read",4,true],
+        ["cache_save",4,true],
+        ["timestep_inject",2,false],
+        ["reuse_static",4,true],
+        ["update_sliding",3,false],
+        ["recompute_dynamic",2,false],
+        ["output_action",4,true],
+        ["cache_hit_rate",4,true],
+        ["memory_layout",3,false],
+        ["async_pipeline",3,false],
+        ["normalization",2,false],
+        ["throughput",4,true]
+      ],
+      "caption": "Darker means higher reuse; marked cells are the core insight (encoder invariance, static cache, sliding update)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Cache reuse depth is the percentage of the internal math that does not need to be redone when denoising steps forward. Reflex maximizes this by keeping the camera encoding frozen and only updating the parts that depend on the step number."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The Timestep-Invariance Property states that perception encoders are functionally independent of the denoising loop timestep. Reflex uses this insight by partitioning attention into static (encoder, constant overhead), sliding (constant-cost updates), and dynamic (linear-cost recompute), achieving constant-time amortized cache updates instead of quadratic recomputation."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why partitioning the cache solves the problem",
+    "paras": [
+      "The core mechanism is recognizing that the model has two independent jobs: reading the camera, and refining actions. The camera encoder runs once and produces a fixed output (a list of numbers representing what the camera saw). The denoising loop then uses this fixed output to decide how much noise to subtract at each step. The global timestep number is only used by the denoising loop, not the encoder.",
+      "This means you can cache the encoder output and reuse it across all denoising steps. The encoder never sees the timestep, so its output is true at step 1, step 2, and step 50—no recalculation needed. Meanwhile, the denoising loop runs the part of the model that does use the timestep (the dynamic layers), but it only needs to recompute this small part. This splits a problem that seemed unsolvable (cache is either 100% wrong or 100% right) into a solvable one (cache part of the work, recompute only the timestep-dependent parts).",
+      "AdaRMSNorm adds stability. When you reuse cached numbers over 50 rapid steps, floating-point errors (tiny rounding mistakes) add up. AdaRMSNorm gently scales the numbers to stay in a safe range, preventing the 16-bit floating-point format (BFloat16) from losing precision and crashing. The async pipeline runs the camera reading on one thread and denoising on another, so while one thread waits for the camera frame, the other finishes denoising the last frame. Operator fusion squashes multiple low-level operations into one, reducing scheduling overhead."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Camera frame (once per 50Hz step)"
+        },
+        {
+          "t": "step",
+          "s": "Encoder reads camera, produces context",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Cache encoder output (static)"
+        },
+        {
+          "t": "step",
+          "s": "Denoising loop: inject timestep, update sliding window",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "AdaRMSNorm stabilizes numbers"
+        },
+        {
+          "t": "step",
+          "s": "Operator fusion reduces overhead"
+        },
+        {
+          "t": "output",
+          "s": "Clean action, ready to send to robot"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The cache reuse equation",
+    "words": "Total inference cost is the cost to encode the camera once, plus the cost to run the denoising loop on the static-cached encoder output.",
+    "equation": "total_cost = encode_cost + denoising_steps * (update_sliding + recompute_dynamic) where encode_cost is paid only once and cached",
+    "symbols": [
+      ["total_cost","arithmetic cost for one action (camera + denoising)"],
+      ["encode_cost","cost to read camera and build the encoder output"],
+      ["denoising_steps","how many refinement steps in the loop (typically 4-10)"],
+      ["update_sliding","cost to shift and update the sliding window of context"],
+      ["recompute_dynamic","cost to recompute the layers that use the timestep"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose encode_cost = 100 units, denoising_steps = 5, update_sliding = 5 units, recompute_dynamic = 10 units.",
+        "Without Reflex: recompute entire attention for all steps = 5 * (100 + 5 + 10) = 575 units.",
+        "With Reflex: encode once, then only update/recompute = 100 + 5 * (5 + 10) = 100 + 75 = 175 units.",
+        "Speedup: 575 / 175 = 3.3x, matching the observed 2.58x speedup on real models (difference due to overhead)."
+      ]
+    },
+    "note": "Reflex beats the naive loop by paying the camera encoding cost once and amortizing it across all denoising steps."
+  },
+  "bars": {
+    "h2": "Real-time throughput gains",
+    "charts": [
+      {
+        "title": "Naive denoising (recompute every step)",
+        "rows": [
+          ["Latency (ms per action)",42,"bad"],
+          ["Throughput (actions/sec)",23,"bad"],
+          ["Cache misses per step",100,"bad"]
+        ],
+        "note": "Camera is re-read and encoder re-run on every denoising step, causing quadratic total work (grows as step-count squared)."
+      },
+      {
+        "title": "Reflex (cache static parts)",
+        "rows": [
+          ["Latency (ms per action)",16,"good"],
+          ["Throughput (actions/sec)",50,"good"],
+          ["Cache misses per step",15,"good"]
+        ],
+        "note": "Camera encoding is cached and reused; only timestep-dependent layers rerun, achieving 2.58x speedup."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Numerics collapse under high frequency.",
+        "html": "If you run 50 denoising steps at 50Hz without normalization, floating-point errors accumulate and the 16-bit format loses precision, producing garbage actions. AdaRMSNorm prevents this by detecting when numbers drift out of range and gently rescaling them."
+      },
+      {
+        "warn": true,
+        "b": "Timestep signals baked into the cache invalidate it.",
+        "html": "If the timestep number is mixed into the encoder output (built into the static cache), then changing the timestep breaks the assumption that the cache is invariant. Reflex requires strict separation: encoder output must not include any timestep signal."
+      },
+      {
+        "warn": true,
+        "b": "Sliding window misalignment causes attention errors.",
+        "html": "The sliding window (context that shifts as you step through denoising) must be updated precisely. If the shift is off-by-one or the boundary is wrong, the model attends to the wrong part of the context and produces incorrect refinement."
+      },
+      {
+        "b": "Done right: measure cache reuse by observation.",
+        "html": "Validate that the encoder output is truly invariant by running the model with and without caching and checking that the attention weights match when the timestep changes."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should start with a real Vision-Language-Action model (e.g., trained on LIBERO robot manipulation tasks) and run a single action loop repeatedly. For each camera frame, measure the time to run the encoder with and without caching. Then, over 5 denoising steps, measure the time to update the sliding/dynamic parts only (Reflex) versus re-running the full encoder each step (naive). Record latency and throughput at 50Hz. The demo should also log the cache hit rate (percentage of the model output that was reused without recomputation) and show that it stays above 80% over sustained high-frequency running."
+    ],
+    "metric_eq": "speedup = naive_total_latency / reflex_total_latency, sustained_throughput = actions_per_second at 50Hz target",
+    "closing": "The demo must show sustained 50Hz inference (one action per 20ms) without numerical collapse, proving that cache reuse plus adaptive normalization enable real-time robot control, because the speed comes from not re-reading the camera and the stability comes from preventing floating-point errors from accumulating."
+  }
+}

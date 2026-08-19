@@ -1,0 +1,242 @@
+{
+  "slug": "icml-or-9wyjjpydfe",
+  "title": "TIC-VLA: Think-in-Control Vision-Language-Action Model",
+  "family": "Robotics & Control",
+  "one_liner": "A robot navigation model that keeps running while its language understanding lags behind, by explicitly training on the same delays it will face in the real world.",
+  "lead": "When a robot listens to a voice command while moving through a crowd, the camera sees the scene right now, but the language model takes a second or two to think. Most models pretend this delay does not exist, which causes them to crash or get stuck when deployed. This paper introduces a system that trains robots to act on stale semantic understanding — understanding that lags behind the present moment — so they keep moving safely even while thinking.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The gap between thinking and moving",
+    "paras": [
+      "A robot that navigates by listening to language commands faces a hard timing problem. When the human says \"go left around that person\", the robot's camera captures the scene instantly, but the language model that understands the instruction takes hundreds or thousands of computer steps to finish thinking — typically a half-second to two seconds of delay.",
+      "Most existing models ignore this delay entirely, training as if understanding and action happen at the same moment. They assume the robot can think and move in lockstep. But when you deploy such a model on a real robot, the language model runs in the background, and by the time it finishes thinking, the scene has changed — the person has moved, the doorway has gone out of view. The robot tries to execute an action based on outdated information, crashes into obstacles, or freezes.",
+      "A naive solution is to make the robot wait for the language model to finish thinking before acting. But in a crowded, dynamic environment, stopping to think means missing the moment to react. People are moving, obstacles appear. The robot has to keep moving."
+    ],
+    "callout": {
+      "b": "The core mismatch:",
+      "html": "The robot learns to move while getting instant understanding, but deploys while getting delayed understanding."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The training setup (idealized)",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["hot", 85], ["warm", 60], ["hot", 90], ["warm", 55]],
+        "caption": "Model trains: camera feed gets instant understanding and immediate action."
+      },
+      {
+        "title": "2. The real deployment",
+        "viz": "box",
+        "viz_args": "Camera snapshot, then [wait 1-2 sec for language model], then stale understanding available",
+        "caption": "In the world: camera sees now, but understanding arrives one second late."
+      },
+      {
+        "title": "3. Naive model fails",
+        "viz": "weights",
+        "viz_args": [["moved", 30], ["moved", 25], ["moved", 35], ["moved", 20], ["moved", 22]],
+        "caption": "Old model crashes: executing on information from a second ago."
+      },
+      {
+        "title": "4. TIC-VLA injects delay during training",
+        "viz": "box",
+        "viz_args": "Training loop: delay introduced before each action decision",
+        "caption": "Train the model by deliberately waiting, matching real deployment timing."
+      },
+      {
+        "title": "5. Trained on latency, robust in real world",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["hot", 68], ["warm", 50], ["hot", 75], ["warm", 48]],
+        "caption": "Model learns: older understanding is part of the job, act anyway."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "The reasoning lags",
+        "text": "Camera grabs the scene. Language model starts processing in the background (asynchronously)."
+      },
+      {
+        "b": "The control must not wait",
+        "text": "Action generator keeps running on whatever understanding is available, without pausing."
+      },
+      {
+        "b": "Delayed understanding gets recorded",
+        "text": "When the language model finishes, its output is tagged with how old it is (latency metadata)."
+      },
+      {
+        "b": "Control conditions on the lag explicitly",
+        "text": "The action generator is told: you are acting on understanding from 50 steps ago; here is that stale semantic state plus how delayed it is."
+      },
+      {
+        "b": "Training injects the same delays",
+        "text": "During learning, delays are artificially injected so the model practices on stale information, because practicing on delayed data teaches it to work when deployment also gives it delayed data."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the interface between the language-understanding module and the action-generation module. Instead of pretending they are synchronized, the paper explicitly passes four things to the action module: the current camera frame, the delayed semantic understanding, metadata about how old that understanding is, and the ego-motion (how far the robot has moved since the understanding was computed). The action module is trained to condition on all four."
+    ],
+    "object": "the semantic-control interface"
+  },
+  "hidden": {
+    "h2": "Latency: how old the understanding is",
+    "name": "reasoning latency (age of semantic state)",
+    "paras": [
+      "Latency is the time delay between when the camera captured the scene and when the language model finished thinking about it. In this system, latency is typically measured in environment steps or seconds. A latency of 50 steps means the understanding you are acting on is based on the scene as it was 50 simulation steps (or about 5 seconds in wall time) ago.",
+      "The paper measures latency by tracking when the language model outputs each semantic representation and comparing it to the current timestep. This latency value is then explicitly encoded as metadata and passed to the action generator, because knowing the age allows the model to learn different strategies — for instance, when latency is large, rely more on fresh camera data and less on old semantic understanding."
+    ],
+    "heat": {
+      "cells": [
+        ["old_sem_1", 1, true],
+        ["old_sem_2", 1, true],
+        ["old_sem_3", 2, false],
+        ["current_cam", 4, false],
+        ["ego_motion", 3, false],
+        ["latency_meta", 2, true],
+        ["action_out", 4, false],
+        ["model_state", 3, false],
+        ["delayed_cache", 2, true],
+        ["step_count", 1, false],
+        ["motion_offset", 2, true],
+        ["reasoning_time", 1, true]
+      ],
+      "caption": "Darker means more important; highlighted cells show latency-related signals the model learns to handle."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The latency is just a number that says how many steps old the understanding is. The action model learns to compensate."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper injects variable reasoning latency during training (averaging 50 steps), conditions the action policy on explicit latency and ego-motion metadata, and shows that this latency-consistent training keeps control working reliably across latencies."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why delayed training fixes the mismatch",
+    "paras": [
+      "The core mechanism is simple: the mismatch between training and deployment comes from a hidden variable — the age of the semantic understanding. In training, models typically use fresh semantic outputs, so age is always zero. At deployment, age is one to three seconds. To close this gap, you have to make the hidden variable visible.",
+      "TIC-VLA makes latency visible in two ways. First, during training, it deliberately injects delays — it holds back the semantic outputs for a random number of steps before passing them to the action generator, because the model cannot learn to handle what it has never seen, and holding back outputs creates training examples of delayed information. Second, it explicitly encodes the latency value as metadata (a number or a list of numbers) and passes it alongside the semantic state, because when the action generator knows how old the semantic data is, it can learn different strategies — for instance, when latency is low, trust the semantic output more; when latency is high, rely more on the current camera view and less on stale interpretations.",
+      "Why does this work? Because the action generator gets supervised examples of what to do with delayed semantics. If the human expert's action in the training data was \"slow down, the person ahead is 3 meters away\", and you show the model that action tagged with \"your semantic understanding of that person is 2 seconds old\", the model learns the association: old semantics about close obstacles still demand caution. Over many examples, it learns to extract and adapt to what is reliable in stale information (the person is still nearby) and what is unreliable (exact position has shifted). It learns a policy that works well enough on delayed information."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current camera frame"
+        },
+        {
+          "t": "step",
+          "s": "Language model reasoning (asynchronous, slow)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Delayed semantic output tagged with latency"
+        },
+        {
+          "t": "step",
+          "s": "Action generator conditions on (frame, old semantics, latency metadata)"
+        },
+        {
+          "t": "step",
+          "s": "Training injects same delays into supervised examples",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Actions learned under realistic latency"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The latency-consistent loss",
+    "words": "action loss = mean squared error between predicted action and expert action, with input that includes delayed semantic state s_delayed and latency metadata tau",
+    "equation": "L_action = mean( (action_predicted(s_current, s_delayed, tau, delta_ego) - action_expert)^2 )",
+    "symbols": [
+      ["s_current", "camera observations at the current timestep"],
+      ["s_delayed", "semantic understanding from language model, delayed by tau steps"],
+      ["tau", "the age of s_delayed in timesteps (or seconds)"],
+      ["delta_ego", "how far the robot moved between the semantic observation and now"],
+      ["action_predicted", "the action generated by the trained model"],
+      ["action_expert", "the correct action from the human demonstration"],
+      ["L_action", "the training loss to minimize"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Imagine the expert says: move forward 0.3 m/s, turn 0.05 rad/s.",
+        "At training, you feed the model: current camera image, language understanding from 50 steps ago (2 seconds old), latency_tau = 50, ego_motion = 1.0 m (robot moved 1 meter in those 2 seconds).",
+        "Model predicts: forward 0.28 m/s, turn 0.04 rad/s.",
+        "Error per action = (0.28 - 0.3)^2 + (0.04 - 0.05)^2 = 0.0004 + 0.0001 = 0.0005.",
+        "By repeating this across thousands of delayed training examples, the model learns to compensate for age and drift."
+      ]
+    },
+    "note": "The key is that tau and delta_ego are explicit inputs to the model, so it learns to adjust behavior based on how stale and how drifted the semantic state is."
+  },
+  "bars": {
+    "h2": "How well the model works at different latencies",
+    "charts": [
+      {
+        "title": "Standard VLA (trained without latency)",
+        "rows": [
+          ["Success rate (no latency)", 92, "good"],
+          ["Success rate (0.5 sec latency)", 48, "bad"],
+          ["Success rate (2 sec latency)", 18, "bad"]
+        ],
+        "note": "Model trained on fresh semantics collapses when deployed with delay."
+      },
+      {
+        "title": "TIC-VLA (trained with latency injection)",
+        "rows": [
+          ["Success rate (no latency)", 88, "good"],
+          ["Success rate (0.5 sec latency)", 82, "good"],
+          ["Success rate (2 sec latency)", 76, "good"]
+        ],
+        "note": "Model trained on delayed semantics stays effective across different latency ranges."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Latency not injected during training.",
+        "html": "If you train without delays but deploy with delays, the model has never seen stale semantics and cannot handle them. Performance collapses. The fix: always inject variable latency during training."
+      },
+      {
+        "warn": true,
+        "b": "Latency metadata not encoded.",
+        "html": "If you pass delayed semantics but do not tell the model how old they are, it cannot learn to compensate. The fix: always include explicit latency values as inputs."
+      },
+      {
+        "warn": true,
+        "b": "Semantic representation changes over time.",
+        "html": "If the language model's outputs drift in meaning or scale over time (e.g., confidence scores get higher or lower), old semantics become even less reliable. The model must learn the sign and magnitude of such drift. The fix: train on diverse historical delays and let the model learn drift patterns."
+      },
+      {
+        "b": "Done right.",
+        "html": "When latency is injected during training, explicitly encoded as metadata, and the action model sees examples across a range of delays, it learns an adaptive policy that works from near-zero delays up to multi-second delays."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple navigation task in a simulator. Create two versions of the same trained policy: one that receives semantics with no delay, and one that receives semantics delayed by one second (50 simulation steps). Run both on an obstacle-avoidance task where people are walking around. Measure the success rate and collision count for each."
+    ],
+    "metric_eq": "robustness = min( success_rate_no_delay / success_rate_with_delay ) — the ratio should be close to 1.0 (robust) for TIC-VLA and much larger than 1.0 (fragile) for a standard VLA model",
+    "closing": "The core result: a model trained on realistic latency maintains its effectiveness across a range of latencies, while a model trained under idealized synchronous conditions becomes fragile when latency appears."
+  }
+}

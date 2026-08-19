@@ -1,0 +1,249 @@
+{
+  "slug": "icml-or-snlgkhi2i9",
+  "title": "Neural Control: Adjoint Learning Through Equilibrium Constraints",
+  "family": "Robotics & Control",
+  "one_liner": "A robot learns to control floppy objects by treating each shape as a solution to a physics equation and computing gradients without replaying all the iterations.",
+  "lead": "When a robot bends a rope or strip to a target shape, the shape itself is determined by solving physics equations—not by a simple formula. Unlike typical learning where one action produces one result, here the same bend can create different shapes depending on history. The paper shows how to learn controller actions by computing gradients that flow backward through these equilibrium equations using adjoints (a calculus trick), avoiding the memory cost of replaying all solver iterations.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Bending things breaks normal learning",
+    "paras": [
+      "When a robot controls a rope, strip of cloth, or any soft object, the result shape is not just a function of the controls applied—it depends on solving a physics equation for static equilibrium. The same boundary condition (same tug on the ends) can yield different midpoint shapes depending on which way the strip was bent previously.",
+      "A naive learner would try to backpropagate gradients (compute how to adjust the controller) by replaying every iteration of the physics solver that found each shape. This is ruinously expensive: each solver step must store its state in memory, and the backward pass must recompute or unroll thousands of steps."
+    ],
+    "callout": {
+      "b": "The core fix.",
+      "html": "Compute gradients by differentiating the equilibrium equations themselves using adjoints, avoiding the unrolled solver iterations, while still using the actual converged shapes for the forward rollout."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "brain",
+        "caption": "Same rope ends, different middle shapes depending on history."
+      },
+      {
+        "title": "2. Naive approach",
+        "viz": "box",
+        "viz_args": "thousands of solver iterations stored in GPU memory",
+        "caption": "Backward pass replays every solver step—crushes memory."
+      },
+      {
+        "title": "3. The paper's move",
+        "viz": "weights",
+        "viz_args": [["solver", 20], ["adjoint", 80], ["memory", 10]],
+        "caption": "Skip the replay, use adjoint equations directly for gradients."
+      },
+      {
+        "title": "4. Receding horizon",
+        "viz": "box",
+        "viz_args": "cut problem into short horizons, re-anchor each time",
+        "caption": "Plan in chunks, replan when stuck in the wrong shape."
+      },
+      {
+        "title": "5. Result",
+        "viz": "plain",
+        "caption": "Robot shapes rope to target, gradients computed 10x faster."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Forward pass",
+        "text": "Apply control, solve equilibrium equations to convergence, measure distance from goal at each step."
+      },
+      {
+        "b": "Adjoint setup",
+        "text": "Write down equations that say how a tiny error in position depends on a tiny error in control."
+      },
+      {
+        "b": "Backward adjoints",
+        "text": "Propagate error sensitivity backward through these equations without replaying solver iterations."
+      },
+      {
+        "b": "Compute control gradient",
+        "text": "Combine adjoints to get how much to adjust each control value."
+      },
+      {
+        "b": "Replan in horizon chunks",
+        "text": "Every few steps, re-anchor the plan to the actual shape found, avoiding getting trapped in wrong branch."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the method changes",
+    "paras": [
+      "The paper changes how gradients are computed when the forward pass solves implicit equations. Instead of storing and replaying solver iterations, it computes proxy gradients by differentiating the equilibrium conditions themselves. The forward rollout still solves the full physics to convergence—it just computes the backward gradients differently."
+    ],
+    "object": "gradient computation path"
+  },
+  "hidden": {
+    "h2": "The proxy adjoint: sensitivity to controls",
+    "name": "trajectory-dependent proxy gradient",
+    "paras": [
+      "At each step during learning, the method tracks a hidden quantity: how much the shape at that step would change if the control were nudged slightly. Normally this would require replaying the entire solver. Instead, the adjoint approach computes this by satisfying a special equation (the adjoint equation) that relates error propagation without needing to unroll iterations.",
+      "The paper estimates this proxy gradient by treating the equilibrium equations as constraints and using the implicit function theorem: if position x satisfies physics equations as a function of control z, then how x changes with z is given by differentiating those equations, not by differentiating the solve process."
+    ],
+    "heat": {
+      "cells": [
+        ["control_1", 2, false],
+        ["shape_1", 4, true],
+        ["control_2", 2, false],
+        ["shape_2", 4, true],
+        ["control_3", 3, false],
+        ["shape_3", 4, true],
+        ["error_1", 1, false],
+        ["adjoint_1", 3, true],
+        ["error_2", 1, false],
+        ["adjoint_2", 3, true],
+        ["control_grad", 4, true],
+        ["next_step", 2, false]
+      ],
+      "caption": "Bright means adjoint equations computing gradient; no solver iterations stored."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The proxy gradient is a shortcut for how much the shape changes per unit control change, computed by differentiating the physics constraint rather than replaying the solver."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The effective adjoint at each step combines two pieces: the loss sensitivity from the next step and the influence of current state changes on future states. This combined adjoint encodes how much the total loss changes for tiny shifts in position or control, derived directly from the equilibrium equations without solver replay."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why adjoint equations beat solver unrolling",
+    "paras": [
+      "In standard backprop through a solver, you must save the state at each iteration and replay forward steps in reverse. With a converged equilibrium, the final shape satisfies a physics equation (shape and control must satisfy the physics constraint for static equilibrium). The implicit function theorem tells us how much shape changes when control changes, and this can be computed from the equilibrium equation itself without ever replaying the solver: the sensitivity is found by solving an adjoint equation backward from the loss.",
+      "The equilibrium condition itself (not the path to reach it) determines what gradients must be. By differentiating the equilibrium condition with respect to controls, the method computes gradients that are consistent with the actual optimizer trajectory but without the memory and compute overhead of unrolling Newton or conjugate-gradient iterations.",
+      "Receding-horizon continuation anchors this further: instead of planning one long horizon from an ambiguous starting state, the method plans in short segments, converges to an equilibrium, then re-anchors and replans from that realized point. This prevents the optimizer from drifting into a different (multistable) configuration during long horizons."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "control sequence and initial shape"
+        },
+        {
+          "t": "step",
+          "s": "solve equilibrium equations to convergence",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "measure error from goal"
+        },
+        {
+          "t": "step",
+          "s": "apply adjoint equations backward (no unroll)"
+        },
+        {
+          "t": "step",
+          "s": "compute control gradient"
+        },
+        {
+          "t": "step",
+          "s": "re-anchor to converged shape, plan next horizon"
+        },
+        {
+          "t": "output",
+          "s": "updated control values (network weights)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The adjoint equations for implicit control",
+    "words": "loss equals terminal error plus running errors; adjoint a traces loss-sensitivity backward through states; effective adjoint d combines state and control adjoints; control gradient is continuous operation times effective adjoint",
+    "equation": "L = phi(x_K, z_K) + sum_k w_k * ell(x_k, z_k); d_L/d_u_k = Delta_lambda * B_k^T * d_k; d_k = g_{k+1} + S_k^T * a_{k+1}",
+    "symbols": [
+      ["L", "total loss (error from goal)"],
+      ["phi(x_K, z_K)", "terminal loss at final step K"],
+      ["ell(x_k, z_k)", "running loss (error from goal) at step k"],
+      ["w_k", "weight for running loss at step k (0 if only terminal loss)"],
+      ["d_L/d_u_k", "gradient of loss with respect to control u at step k"],
+      ["Delta_lambda", "step size in continuation (how far controls move per step)"],
+      ["B_k", "how control affects dynamics at step k"],
+      ["d_k", "effective continuation adjoint (combined sensitivity)"],
+      ["g_{k+1}", "sensitivity of loss to boundary control at next step"],
+      ["S_k", "sensitivity matrix (how shape x changes with control z)"],
+      ["a_{k+1}", "sensitivity of loss to position at next step"],
+      ["S_k^T", "transpose of sensitivity (maps position gradient to control gradient)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we want the rope midpoint at position 5, and currently it is at position 3, so error is 2.",
+        "At step k, control gradient d_u_k includes term B_k^T * d_k, where B_k is how much the next shape changes per unit control (say B_k = 0.8).",
+        "If the effective adjoint d_k = 0.5 (meaning a change of 1 in this state causes 0.5 units of loss change), then d_u_k includes 0.8 * 0.5 = 0.4.",
+        "If we nudge control by 0.1, the rope shifts by 0.8 * 0.1 = 0.08, and loss changes by roughly 0.4 * 0.1 = 0.04 less (closer to target).",
+        "This gradient was computed without replaying any solver iterations, just differentiating equilibrium equations."
+      ]
+    },
+    "note": "The equilibrium constraint embeds the physics: only shapes that satisfy the physics equation get the right proxy gradients, and adjoints flow these gradients backward without unrolling the solver."
+  },
+  "bars": {
+    "h2": "Learning efficiency comparison",
+    "charts": [
+      {
+        "title": "Gradient-free baseline (SPSA / iCEM)",
+        "rows": [
+          ["Initial loss", 3.2, "bad"],
+          ["After 20 updates", 2.1, "bad"],
+          ["After 50 updates", 1.8, "bad"],
+          ["After 100 updates", 1.5, "bad"]
+        ],
+        "note": "Gradient-free methods plateaus under fixed evaluation budget; every evaluation costs one full rollout and they cannot use directional information efficiently."
+      },
+      {
+        "title": "Neural Control (adjoint + receding horizon)",
+        "rows": [
+          ["Initial loss", 3.2, "bad"],
+          ["After 20 updates", 1.6, "good"],
+          ["After 50 updates", 0.9, "good"],
+          ["After 100 updates", 0.4, "good"]
+        ],
+        "note": "Adjoint-based gradients point downhill efficiently; receding-horizon re-anchoring prevents drifting into multistable wrong shapes; achieves target shape in fewer updates and lower memory."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Discontinuous branches.",
+        "html": "If the equilibrium has sharp bifurcations (sudden jumps to a different configuration), the proxy adjoint assumes smoothness and may give stale gradients. Fix: receding-horizon re-anchoring detects and corrects branch switches."
+      },
+      {
+        "warn": true,
+        "b": "Ill-conditioned equilibrium matrices.",
+        "html": "If the equilibrium has a direction where shape barely responds to control nudges (near-singular sensitivity), the adjoint equations become numerically unstable and gradients are unreliable. Fix: add damping to the solver or detect and skip ill-conditioned steps."
+      },
+      {
+        "warn": true,
+        "b": "Long horizons without re-anchoring.",
+        "html": "If controls drift gradually, the optimizer may assume the wrong branch for later steps. Fix: shorten horizon and always replan from a newly solved equilibrium."
+      },
+      {
+        "b": "Done right.",
+        "html": "Short planning horizons (5–10 steps), solve equilibrium to tight tolerance at each anchor, check that the sensitivity (how shape responds to control) is well-behaved numerically, use receding-horizon replanning to re-anchor to realized configurations."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple deformable strip simulator (a few points connected by springs and bend-stiffness constraints). Initialize the controller as a neural network that takes a step counter (continuation value) and outputs a boundary displacement. Solve the strip equilibrium under that displacement (finding the midpoint position). Compute loss as the squared distance from a target midpoint position. Run gradient-free (SPSA) and adjoint-based (Neural Control) optimizers for a fixed number of forward evaluations, and plot loss vs. optimization step. The demo proves adjoint learning converges much faster because every gradient points downhill; you should see adjoint reach target loss in fewer steps."
+    ],
+    "metric_eq": "convergence_speedup = steps_for_SPSA_to_reach_loss_L / steps_for_NeuralControl_to_reach_loss_L",
+    "closing": "The demo must show that adjoint-based gradients (computed without unrolling the solver) let the optimizer descend faster than gradient-free methods, because gradients point directly downhill while random search must sample many directions to find improvement."
+  }
+}

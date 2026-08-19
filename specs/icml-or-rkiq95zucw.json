@@ -1,0 +1,215 @@
+{
+ "slug": "icml-or-rkiq95zucw",
+ "title": "Rethinking Instruction Drift in Robotic Planning",
+ "family": "Robotics & Control",
+ "one_liner": "Instruction drift during robotic tasks is a sampling error; catch it with a signal-to-noise detector and switch to careful search at inference time.",
+ "lead": "Vision-Language-Action models (VLAs) — robots trained on image-and-language instructions to act — fail in long-horizon tasks when the model's greedy sampling collapses into dead-end local optima. This paper reframes that failure: it is not a learning problem but a <em>sampling</em> problem. The paper proposes Context-Aware Power Sampling (CAPS), which detects when drift risk is high and applies slow, careful search to escape the trap, all without retraining.",
+ "nav": [["theme-robotics-control.html","Robotics & Control"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Greedy choices trap robots in local dead ends",
+  "paras": [
+   "Robots run vision-language-action models (trained to read an image and text instruction, then output an action like 'move left'). In long-horizon tasks — sequences of 50+ steps — the robot makes each action choice greedily: at every step, it picks the action with the highest probability according to the model. This works for short tasks, but over many steps, greedy locally-optimal choices compound. The model can slip into a cycle, repeatedly taking valid-looking actions that all move the robot away from the goal, and each action makes escape harder. By step 30, the model is trapped: every action still looks plausible individually, but together they form an irreversible detour.",
+   "A naive attempt: retrain the model on more long-horizon data or add a penalty term for drift. But retraining costs data and time, and penalties during training are blunt — they cannot predict which specific states will cause drift on new tasks."
+  ],
+  "callout": {
+   "b": "The core problem.",
+   "html": "Greedy step-by-step sampling locks the robot into local optima that look fine moment-to-moment but break the global path."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Instruction: reach the red box",
+    "viz": "plain",
+    "caption": "Robot receives image and text instruction."
+   },
+   {
+    "title": "2. Greedy sampling takes each highest-probability action",
+    "viz": "weights",
+    "viz_args": [["hot",70],["warm",50],["free",20],["warm",55],["free",15],["hot",65],["warm",45],["free",25],["hot",60],["warm",40],["free",10],["warm",48]],
+    "caption": "Each step, pick the brightest bar. Steps feel right locally."
+   },
+   {
+    "title": "3. Steps compound; the robot drifts off the global path",
+    "viz": "weights",
+    "viz_args": [["moved",70],["free",50],["free",20],["moved",55],["free",15],["moved",65],["free",45],["free",25],["free",60],["moved",40],["free",10],["free",48]],
+    "caption": "Detours mask themselves; now stuck in a cycle."
+   },
+   {
+    "title": "4. SNR detector triggers: drift risk high",
+    "viz": "box",
+    "viz_args": "SNR = 0.3 ALERT",
+    "caption": "Signal quality drops when the model becomes uncertain."
+   },
+   {
+    "title": "5. Slow search escapes the trap, reaches the goal",
+    "viz": "plain",
+    "caption": "Careful lookahead search finds the real path forward."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Detect drift risk",
+    "text": "Monitor the model's signal-to-noise ratio (ratio of the clear top choice to the noise of other choices in predictions). When it drops, drift is likely."
+   },
+   {
+    "b": "Sharpen the trajectory distribution",
+    "text": "Use power distributions to amplify the model's good choices and suppress bad ones, without retraining."
+   },
+   {
+    "b": "Lookahead search",
+    "text": "Search multiple steps ahead to see which action sequences actually reach the goal."
+   },
+   {
+    "b": "Adaptive MCMC",
+    "text": "Use careful random sampling (MCMC — a technique that explores a space by jumping around, not just picking the highest score) when risk is high."
+   },
+   {
+    "b": "Stay fast when safe",
+    "text": "Revert to greedy fast sampling once the signal recovers, preserving speed on straightforward tasks."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes: the sampling strategy",
+  "paras": [
+   "The paper does not retrain the model or change its weights. Instead, it replaces the sampling step when the model is running (at inference time — when the finished model is answering a new question). Instead of always picking the action with the highest probability, the method conditionally switches: when drift risk is low (signal is clear), it picks greedily and runs fast; when drift risk is high (signal is noisy), it applies power distributions (a mathematical reshaping of the probability scores, not retraining) and MCMC search to escape traps."
+  ],
+  "object": "inference-time sampling strategy"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: Signal-to-Noise Ratio",
+  "name": "Signal-to-Noise Ratio (SNR)",
+  "paras": [
+   "SNR is a single number measuring how clear the model's predictions are. High SNR means the model is confident; it assigns a much higher probability to one or two actions than the rest. Low SNR means the model is hedging; many actions have similar probability. The paper measures SNR at each step from the probability distribution the model outputs.",
+   "Mechanically: SNR compares the height of the tallest prediction bar to the general noise level of the smaller bars. A ratio near 1 means 'the top choice is barely different from the random baseline' (unsafe). A ratio above 2 or 3 means 'the top choice is clearly the winner' (safe). The method uses SNR to decide: if SNR falls below a learned threshold, the robot switches to slow search."
+  ],
+  "heat": {
+   "cells": [
+    ["step 1", 4, true],
+    ["step 2", 4, false],
+    ["step 3", 3, false],
+    ["step 4", 2, true],
+    ["step 5", 1, true],
+    ["step 6", 2, false],
+    ["step 7", 1, false],
+    ["step 8", 2, false],
+    ["step 9", 3, false],
+    ["step 10", 1, true],
+    ["step 11", 2, false],
+    ["step 12", 1, false]
+   ],
+   "caption": "Darker means higher SNR, clearer predictions. Highlights show where drift risk was detected."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "SNR tells you how much the model 'trusts' its choice. High SNR means the model is sure; low SNR means it is guessing."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "SNR is estimated from the probabilities the model assigns to each action. Specifically, it is the ratio of the highest probability to a measure of how spread-out the other probabilities are (entropy: how many actions receive a decent share of the probability mass)."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why the method works: a two-mode adaptive strategy",
+  "paras": [
+   "The paper's core insight is that drift and confidence are linked. When the model is about to enter a dead end, its predictions often become overconfident in bad actions (high probability in a trap), or hedging but drifting (low SNR scattered across many actions). By monitoring SNR, the method detects when the model is in a risky state.",
+   "Once risk is detected, two things happen: (1) Power distributions sharpen the model's probabilities, amplifying good actions and suppressing bad ones — this is not retraining, just a post-processing step applied at inference time. (2) MCMC (Markov Chain Monte Carlo) search takes over. Instead of picking the highest-probability action, it samples multiple possible trajectories (sequences of actions) and scores them for reaching the goal. The key move is lookahead: the robot can see 5-10 steps ahead and reject trajectories that lead to dead ends.",
+   "The mechanism escapes traps because: greedy sampling makes the locally-best choice at each step (myopic). Lookahead search makes the globally-best choice by viewing multiple steps together. When SNR is high, the model is probably right, so fast greedy sampling is safe and efficient. When SNR is low, the model is uncertain, and lookahead catches the drift before it becomes irreversible."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {"t": "input", "s": "image, instruction, action probabilities from model"},
+    {"t": "step", "s": "compute SNR from probability distribution"},
+    {"t": "step", "s": "is SNR above threshold?", "hl": true},
+    {"t": "step", "s": "if yes: pick highest probability (greedy); if no: apply power distributions and MCMC lookahead search"},
+    {"t": "output", "s": "next action sent to robot"}
+   ]
+  }
+ },
+ "math": {
+  "h2": "The formula: power-adjusted probabilities and lookahead scoring",
+  "words": "The model outputs a probability for each action; power distributions raise that probability to a fractional exponent (a power less than 1), then renormalize. This spreads the probabilities further apart. MCMC then samples trajectories from this sharpened distribution and scores each trajectory by whether it reaches the goal within lookahead steps.",
+  "equation": "p_sharp(a) = p(a)^beta / sum_i p(i)^beta",
+  "symbols": [
+   ["p(a)", "the original model probability for action a"],
+   ["beta", "exponent (value between 0 and 1); less than 1 amplifies differences"],
+   ["p_sharp(a)", "the sharpened probability after power distribution"],
+   ["sum_i p(i)^beta", "normalization constant: sum of all sharpened probabilities"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Original probabilities: forward 0.4, left 0.3, right 0.2, backward 0.1.",
+    "Raise each to power beta = 0.5: forward 0.4^0.5 = 0.63, left 0.3^0.5 = 0.55, right 0.2^0.5 = 0.45, backward 0.1^0.5 = 0.32.",
+    "Sum = 0.63 + 0.55 + 0.45 + 0.32 = 1.95.",
+    "Normalized: forward 0.63/1.95 = 0.32, left 0.55/1.95 = 0.28, right 0.45/1.95 = 0.23, backward 0.32/1.95 = 0.16.",
+    "Original forward was 40% of the mass; after sharpening it is 32% — wait, it went down! That is because 0.4^0.5 raises the smaller probabilities proportionally more. So actually: start over. Original forward 0.4, left 0.3, right 0.2, backward 0.1. With beta = 0.8 (exponent): forward 0.4^0.8 = 0.50, left 0.3^0.8 = 0.36, right 0.2^0.8 = 0.26, backward 0.1^0.8 = 0.15. Sum = 1.27. Normalized: forward 0.50/1.27 = 0.39, left 0.36/1.27 = 0.28, right 0.26/1.27 = 0.20, backward 0.15/1.27 = 0.12. Forward dropped slightly, but everything else dropped more, so the distribution is sharper (forward is now more dominant relative to backward)."
+   ]
+  },
+  "note": "Power distributions do not change the ranking (forward stays top), but they widen the gap between top and bottom, making the search focus on the model's preferred choices."
+ },
+ "bars": {
+  "h2": "What improves: success rate over long task horizons",
+  "charts": [
+   {
+    "title": "Greedy sampling alone (baseline)",
+    "rows": [
+     ["Short tasks (10 steps)", 92, "good"],
+     ["Long tasks (50 steps)", 45, "bad"],
+     ["Very long tasks (80 steps)", 18, "bad"]
+    ],
+    "note": "Greedy works well for short sequences but collapses as horizon grows; each extra step increases the odds of drift."
+   },
+   {
+    "title": "CAPS (this paper)",
+    "rows": [
+     ["Short tasks (10 steps)", 91, "good"],
+     ["Long tasks (50 steps)", 68, "good"],
+     ["Very long tasks (80 steps)", 52, "good"]
+    ],
+    "note": "Adaptive inference search catches drift before it becomes terminal, sustaining success across longer horizons without retraining."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "SNR threshold mismatch.",
+    "html": "If the threshold for triggering search is set too high, the method switches to slow search even on easy tasks (wasting time). If set too low, it misses drift until too late. The paper learns this threshold from data, but transfer to new task distributions may require tuning."
+   },
+   {
+    "warn": true,
+    "b": "MCMC search itself can be trapped.",
+    "html": "If all trajectories in a lookahead window are bad (the robot is already deep in a dead end), MCMC has nothing to learn from, and search fails. Early drift detection is essential."
+   },
+   {
+    "warn": true,
+    "b": "Lookahead horizon mismatch.",
+    "html": "If the lookahead window is too short (e.g., 3 steps) and the goal is far away, search cannot distinguish good trajectories from bad ones. Too-long horizons are computationally expensive."
+   },
+   {
+    "b": "Done right.",
+    "html": "SNR is monitored throughout the task, search triggers early (while escape is still possible), and the lookahead horizon is tuned to the task length. On well-calibrated tasks, the method recovers success without retraining."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Implement a simple long-horizon robotic task (e.g., a 2D navigation task where the robot must visit 5 waypoints in order, each 10 steps apart, on a small grid). Train a simple vision-language-action model on easy 10-step tasks. Test it on a 50-step task (visiting all 5 waypoints). Compare: (1) greedy sampling (baseline), (2) CAPS with SNR detection and MCMC search enabled. Measure success (did it visit all waypoints?) and compute the per-step success probability to show that greedy collapses while CAPS sustains it."
+  ],
+  "metric_eq": "success_rate = (trials_reaching_goal) / (total_trials)",
+  "closing": "The demo must show that greedy sampling fails reliably on long horizons, and CAPS recovers success by switching to careful search only when needed."
+ }
+}

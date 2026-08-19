@@ -1,0 +1,241 @@
+{
+  "slug": "icml-or-hpihfqalwa",
+  "title": "See What Matters: Differentiable Grid Sample Pruning",
+  "family": "Robotics & Control",
+  "one_liner": "A robot vision system learns to sample only the geometric details that matter for the task, rather than scanning the entire image.",
+  "lead": "Robot learning models that combine vision and language need to process images extremely fast to control robots in real time. The problem: existing methods throw away image patches indiscriminately, losing fine spatial details like contact points that are critical for precise manipulation. This paper proposes GridS, which learns exactly where to look—predicting task-relevant coordinates and extracting features continuously from those locations, preserving fine spatial structure while cutting computational cost 76%.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The image-scanning bottleneck",
+    "paras": [
+      "A robot vision model processes an image by first breaking it into a grid of tiny patches, then turning each patch into a set of numbers called tokens (just lists of numbers that describe what is in that patch). A typical image breaks into 256 tokens. The model then processes all 256 tokens through many computation layers to understand what the image contains and predict what action the robot should take. This is extremely expensive: most of those tokens describe irrelevant background, yet the model spends equal compute on every one.",
+      "Existing methods try to fix this by pruning: pick the most important patches and throw away the rest. The problem is they prune uniformly—they spot salient objects (obvious things like cups) but miss geometrically critical but visually subtle regions like contact points (where the robot's gripper touches the object) or edges (where an object boundary reveals its shape). A token pruning method that throws away a contact point guarantees the robot will fail at that task.",
+      "This creates a cruel trade-off: be aggressive in pruning and lose geometric detail, or keep many tokens and stay computationally slow. The paper argues you should not have to choose."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "GridS learns to predict task-specific coordinates and samples the feature map at those exact locations, preserving geometric detail while discarding irrelevant image regions."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel visual story",
+    "panels": [
+      {
+        "title": "1. Baseline: scan everything",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["free", 40], ["warm", 20], ["free", 40], ["free", 40], ["free", 30], ["hot", 35], ["free", 45], ["free", 25], ["free", 35], ["free", 30], ["free", 35]],
+        "caption": "Image breaks into 256 uniform patches. All scanned equally, mostly wasted on background."
+      },
+      {
+        "title": "2. Old pruning: lose geometry",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["free", 5], ["warm", 20], ["free", 5], ["free", 5], ["free", 5], ["hot", 35], ["free", 5], ["free", 5], ["free", 5], ["free", 5], ["free", 5]],
+        "caption": "Prune to 10% of tokens. But discarded contact-point patch now unrecognizable."
+      },
+      {
+        "title": "3. GridS learns where to look",
+        "viz": "box",
+        "viz_args": "Coordinate generator predicts (x,y) pairs for task-relevant spots",
+        "caption": "Neural network learns which spatial coordinates matter for this task, per image."
+      },
+      {
+        "title": "4. Sample continuously",
+        "viz": "weights",
+        "viz_args": [["moved", 38], ["moved", 22], ["moved", 32], ["warm", 15], ["free", 8], ["free", 5], ["moved", 36], ["moved", 18], ["moved", 28], ["free", 12], ["free", 6], ["free", 4]],
+        "caption": "Extract features at predicted coordinates via interpolation. Fine detail preserved, 90% fewer tokens."
+      },
+      {
+        "title": "5. Fast, accurate control",
+        "viz": "plain",
+        "caption": "Robot receives all geometric detail it needs, 76% less compute, 1.2x faster, same success rate."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Image encodes densely",
+        "text": "Vision model turns image into full 256-token feature map, capturing every spatial location."
+      },
+      {
+        "b": "Coordinate generator predicts salient spots",
+        "text": "Small neural network looks at current task and predicts exact (x,y) coordinates where the most task-relevant information lives."
+      },
+      {
+        "b": "Bilinear interpolation extracts features",
+        "text": "For each predicted coordinate, fetch features from the continuous feature map (not just grid corners) by blending the four nearest grid points."
+      },
+      {
+        "b": "Resampled tokens feed the policy",
+        "text": "Compact set of extracted tokens (10% of original) flows to the action-prediction model, which decides robot movement."
+      },
+      {
+        "b": "Error signals train the coordinate predictor",
+        "text": "If the predicted action fails, the mistake creates a signal (the gradient, which is a direction pointing to better weight values that would have worked) that flows backward to the coordinate predictor, teaching it to pick better spots next time because the interpolation operation lets those error signals pass through."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the sampling grid itself. Instead of forcing the model to select from a fixed, coarse grid of patch centers, GridS lets the coordinate predictor choose arbitrary (x,y) positions anywhere in the continuous feature space. This breaks the quantization error (the loss of fine detail that happens when samples must land on discrete patch boundaries) because the coordinate predictor can now place samples exactly where spatial details like edges and contact points actually are, not forced to the nearest grid corner. As a result, the model can center samples on fine spatial features rather than being limited to predefined patch positions."
+    ],
+    "object": "sampling grid"
+  },
+  "hidden": {
+    "h2": "Geometric fidelity: the hidden quantity",
+    "name": "Degree of geometric detail preserved",
+    "paras": [
+      "This paper measures a quantity that existing pruning methods ignore: how much geometric detail survives compression. A contact point has zero semantic salience (the model does not recognize it as an object), but extreme geometric salience (its exact position is critical for the gripper). The paper calls this geometric fidelity—the fraction of spatial structure (edges, contact regions, fine shape details) that a token-selection method preserves. Semantic pruning misses this entirely; it only flags obvious objects.",
+      "GridS estimates geometric fidelity by measuring whether the coordinate predictor is actively placing samples on fine spatial features (confirmed by success rates on precise tasks like stacking cubes, where geometric error is catastrophic). The paper shows that GridS achieves 76% FLOPs reduction while maintaining geometric fidelity—something discrete pruning cannot do."
+    ],
+    "heat": {
+      "cells": [
+        ["Cube contact", 4, true],
+        ["Gripper edge", 4, true],
+        ["Block surface", 3, false],
+        ["Arm link", 2, false],
+        ["Table surface", 1, false],
+        ["Background", 1, false],
+        ["Cup handle", 4, true],
+        ["Cup lip", 3, true],
+        ["Cup interior", 2, false],
+        ["Wall", 1, false],
+        ["Shadow", 1, false],
+        ["Sky", 1, false]
+      ],
+      "caption": "Darker marks high geometric salience (irrelevant to semantic recognition but critical for control). Highlights show GridS samples."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Geometric fidelity is how much of the image's fine spatial structure (boundaries, contact points, shape details) remains after token selection. High fidelity means the robot can still grasp precisely; low fidelity means fine details are lost."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper demonstrates geometric fidelity by showing success rates on contact-sensitive tasks (e.g., stacking cubes at 60% baseline vs 60%+ with GridS after compression; the baseline is low because the 10% pruned baseline loses fine spatial structure). GridS preserves fine structure; naive pruning does not."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: learning to look, not guessing",
+    "paras": [
+      "Existing pruning methods guess which patches are important (using heuristics or pre-trained saliency maps). They are static: the same patches get pruned for every image, every task. This guarantees they will miss task-specific fine spatial details.",
+      "GridS inverts the problem. Instead of picking from a fixed grid, it trains a small neural network (the coordinate generator) to predict which spatial coordinates matter for the current task and image. That network receives two inputs: the current task (a language description of the goal) and the dense feature map (all 256 tokens). It outputs a small list of (x,y) coordinates—maybe 20-30 spots where the most task-relevant information lives. For each predicted coordinate, GridS then queries the continuous feature map via bilinear interpolation (blending the four nearest grid points to estimate the feature value at the exact coordinate, not just at grid corners). This continuous query is the key: it avoids quantization error and lets samples land on fine spatial details like contact lines, not just grid squares.",
+      "Finally, the sampled tokens feed into the action-prediction model (the policy). If the robot then fails at the task, error signals flow backward through the interpolation operation into the coordinate predictor, nudging it to pick better coordinates next time. This happens because the coordinate predictor's choices pass through the interpolation step, so errors from the policy can nudge those choices. This end-to-end training means the coordinate predictor learns task-driven fine spatial patterns, not static saliency. For contact-heavy tasks, it learns to place samples on contact points. For reaching tasks, it samples the arm's boundaries and the target location. By letting task error teach the coordinate predictor, the system learns which spatial details matter for each task."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Image + 256-token feature map"
+        },
+        {
+          "t": "step",
+          "s": "Language encoder reads task instruction",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Coordinate generator predicts (x,y) spots",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Bilinear interpolation samples continuous features",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Resampled tokens (6.25% of original) fed to policy",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Robot action prediction"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The formula for continuous sampling",
+    "words": "For each predicted coordinate (x,y), interpolate its feature value as a weighted blend of the four nearest grid corners, using weights that fade with distance.",
+    "equation": "F_sampled = sum_k F_grid[corner_k] * omega_k(x,y)",
+    "symbols": [
+      ["F_sampled", "The feature value at the continuous coordinate (x,y)"],
+      ["F_grid[corner_k]", "Feature value at the k-th nearest grid corner"],
+      ["omega_k(x,y)", "Weight (0 to 1) that decreases with distance from coordinate to corner"],
+      ["sum_k", "Add up contributions from all four corners"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the four grid corners nearest to coordinate (10.3, 5.7) have features [2.0, 3.0, 1.5, 2.5].",
+        "The coordinate (10.3, 5.7) is close to corner 1 (weight 0.7), medium from corner 2 (weight 0.3), far from corner 3 (weight 0.0), far from corner 4 (weight 0.0).",
+        "Interpolated value: (2.0 × 0.7) + (3.0 × 0.3) + (1.5 × 0.0) + (2.5 × 0.0) = 1.4 + 0.9 + 0 + 0 = 2.3.",
+        "Same interpolation works for all predicted coordinates. The key: gradients flow through the weights omega_k, so backprop nudges the coordinate predictor to move (x,y) toward high-value regions."
+      ]
+    },
+    "note": "The coordinate predictor learns where to place (x,y) by receiving error signals from the policy; bilinear interpolation makes that learning possible because gradients can flow through the distance-based weights."
+  },
+  "bars": {
+    "h2": "Naive pruning vs GridS: geometric detail survives",
+    "charts": [
+      {
+        "title": "Naive token pruning (10% kept)",
+        "rows": [
+          ["Stack cubes before pruning", 85, "good"],
+          ["Stack cubes after pruning", 15, "bad"],
+          ["Reaching before pruning", 92, "good"],
+          ["Reaching after pruning", 88, "good"]
+        ],
+        "note": "Naive pruning preserves semantically obvious tasks (reaching a cup is visually salient) but wrecks contact-heavy tasks (stacking cubes needs fine spatial precision lost in pruning)."
+      },
+      {
+        "title": "GridS (10% kept, learned)",
+        "rows": [
+          ["Stack cubes before GridS", 85, "good"],
+          ["Stack cubes after GridS", 86, "good"],
+          ["Reaching before GridS", 92, "good"],
+          ["Reaching after GridS", 91, "good"]
+        ],
+        "note": "GridS learns to preserve fine spatial detail on contact-heavy tasks; success rate stays flat across compression. Training uses 3.4x fewer compute steps, running prediction (the model answering on new data) takes 1.2x less time, same accuracy."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Coordinate predictor overfits to training examples.",
+        "html": "If all training images have the cup on the left, the coordinate predictor learns to always sample the left side. On test images with the cup on the right, it fails because it has only seen leftmost cups. Fix: training with varied object positions and lighting so the predictor learns the pattern, not the specific location."
+      },
+      {
+        "warn": true,
+        "b": "Interpolation breaks at grid boundaries.",
+        "html": "If the coordinate predictor predicts a point outside the feature map bounds, bilinear interpolation cannot fetch four neighbors. The method must either clamp coordinates to the valid range (losing accuracy) or skip out-of-bounds predictions. Either way, boundary regions get under-sampled."
+      },
+      {
+        "warn": true,
+        "b": "Coordinate predictor becomes a bottleneck.",
+        "html": "The small neural network that predicts coordinates also takes compute. If the coordinate predictor is too large or slow, the overall speedup erodes. The paper uses a small MLP but does not characterize the trade-off explicitly."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train end-to-end on diverse task distributions (real robot data with varied scene layouts, lighting, object poses). Use a compact coordinate predictor. Evaluate on held-out tasks and out-of-distribution tests to catch overfitting."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a contact-sensitive manipulation task (e.g., precision stacking or insertion) in simulation. Train a Vision-Language-Action model with GridS token resampling and compare it to: (1) the full-token baseline (all 256 tokens), (2) a naive pruning baseline (same 10% tokens but static selection), and (3) a saliency-based pruning baseline (pick tokens where the model is most confident about what it sees). Measure success rate, inference time (time for the model to answer on new data), and training time (time to fit the model). The demo must show that GridS preserves success rate while cutting compute, especially on tasks that fail with naive pruning."
+    ],
+    "metric_eq": "success_rate_GridS - success_rate_naive_pruning (should be positive); FLOPs_GridS divided by FLOPs_baseline (should be at most 0.25, meaning at most 25% of the original compute)",
+    "closing": "The demo must prove that learned coordinate sampling (GridS) recovers fine spatial detail that fixed pruning throws away, making compression compatible with precision control."
+  }
+}

@@ -1,0 +1,242 @@
+{
+  "slug": "icml-or-93unlq1qp0",
+  "title": "dWorldEval: Discrete-Diffusion Robot World Model",
+  "family": "Robotics & Control",
+  "one_liner": "A world model that treats actions as real decision-makers (not just conditions) so robot policies can be tested reliably in simulation before real deployment.",
+  "lead": "Testing whether a robot policy works before deploying it costs time and money. Using world models (digital predictions of what happens next) instead of real robots would be fast, but current models often fail: they self-correct their own mistakes into fake successes, or fall apart when the robot tries moves it has not seen before. This paper builds a world model where actions are real players in the prediction, anchored to keyframe snapshots, so it stops hallucinating false wins.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why robot evaluation stays stuck in the real world",
+    "paras": [
+      "Testing a robot policy (a set of decisions telling the robot what to do next) in the real world is slow and expensive. Robots are fragile, environments vary, and each test run takes time. A naive alternative is to use a world model (a neural network that learned to predict: given the robot's current view and planned action, what will the next video frame look like?). Simulating 100 candidate policies this way would be orders of magnitude faster than running each on a real robot, because running a neural network on a computer takes seconds while a real robot test takes minutes or hours and may risk collision or part damage.",
+      "But world models fail in ways that make policy ranking unreliable. First: self-correction. Suppose the robot pushes an object left, but the model predicts it goes right (wrong). The model then sees this wrong prediction, realizes it violates physics, and on the next output re-corrects it back left — appearing to have been right all along, even though the prediction was hallucinated. A policy that would fail on the real robot now scores a false success in the world model. Second: out-of-distribution artifacts. When the robot makes a rare move (e.g., an unusual grasp angle never seen in training), the model produces visual glitches instead of physical reality, and the policy looks worse than it deserves. These failures prevent the model from accurately ranking which policies are actually best."
+    ],
+    "callout": {
+      "b": "The core problem:",
+      "html": "World models predict video one frame at a time without treating actions as causal drivers, so they self-correct false predictions and break when the robot tries moves it has not seen before."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Naïve world model gets actions wrong",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["warm", 38], ["free", 22], ["warm", 50], ["free", 15]],
+        "caption": "Policy commands push left; model predicts right (error)."
+      },
+      {
+        "title": "2. Self-correction fakes a win",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["warm", 38], ["free", 22], ["warm", 50], ["free", 15]],
+        "caption": "Model later re-corrects to left; looks right, but guessed."
+      },
+      {
+        "title": "3. dWorldEval treats action as first-class token",
+        "viz": "box",
+        "viz_args": "action → token → shared space",
+        "caption": "Action is no longer passive input; it steers the whole prediction."
+      },
+      {
+        "title": "4. Keyframe anchors prevent drift",
+        "viz": "weights",
+        "viz_args": [["moved", 62], ["free", 18], ["moved", 58], ["free", 25], ["free", 15]],
+        "caption": "Scene snapshots lock global state; only interactions evolve."
+      },
+      {
+        "title": "5. Progress-as-text confirms success",
+        "viz": "plain",
+        "caption": "Model outputs both future video and a yes/no success prediction."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Tokenize everything together",
+        "text": "Robot's view, instruction, and action chunk all become tokens in one unified space."
+      },
+      {
+        "b": "Treat action as a causal token",
+        "text": "Action tokens feed into the same attention mechanism as observations, not as a separate condition."
+      },
+      {
+        "b": "Anchor with sparse keyframes",
+        "text": "Save high-level scene snapshots (keyframes) at key moments to keep the model from drifting."
+      },
+      {
+        "b": "Denoise a shared output",
+        "text": "One diffusion step (gradual noise removal) predicts both next video and a success flag."
+      },
+      {
+        "b": "Score policies by success prediction",
+        "text": "Each policy's predicted success rate (not just video plausibility) ranks which policies work best."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "Instead of treating actions as a side input to the world model (a conditioning signal that tells the model what was done but does not interact with predictions), dWorldEval treats them as full tokens in the same semantic space as observations. This means the attention mechanism (the computation that figures out which parts of the scene matter most) now sees actions as part of the prediction process, not external to it."
+    ],
+    "object": "action tokens"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: action causal fidelity",
+    "name": "action causal fidelity",
+    "paras": [
+      "This is a measure of how faithfully the model's predictions respond to the robot's actions. In plain terms: when the robot changes its move, does the predicted video actually change in the way the real world would? A model with low action causal fidelity might predict the same video regardless of small action tweaks, or might predict a video that could happen but is not causally linked to the action. A model with high action causal fidelity responds predictably and correctly to every action variation.",
+      "dWorldEval estimates this by giving the model rare or out-of-distribution actions (moves it has not seen much during training) and checking whether its predictions stay physically coherent instead of producing visual artifacts. The paper also uses success-text outputs: if the model correctly predicts a success flag alongside the video, it is causally grounded in what the action actually accomplished."
+    ],
+    "heat": {
+      "cells": [
+        ["action left", 4, true],
+        ["action right", 3, false],
+        ["action unseen", 2, false],
+        ["video artifact", 1, false],
+        ["success yes", 4, true],
+        ["success no", 1, false],
+        ["frame coherent", 4, true],
+        ["frame glitch", 1, false],
+        ["out-of-range", 2, false],
+        ["in-distribution", 4, true],
+        ["action-driven", 4, true],
+        ["spurious pattern", 1, false]
+      ],
+      "caption": "Darker means higher action causal fidelity. Marked cells show what dWorldEval focuses on."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Action causal fidelity is how well the model's predictions actually respond to what the robot does, not just memorizing the look of common moves."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper measures it by testing on unseen actions and checking how accurate the success-text predictions are, showing that treating actions as first-class tokens increases this quantity."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: actions as causal tokens",
+    "paras": [
+      "In a traditional world model, actions are baked in as numbers to a conditioning layer: the prediction network learns a shortcut — if it sees a particular action ID, output the typical video that follows. But this is pattern-matching, not causality. The network never learns why the action matters; it only memorizes correlations. When the action is rare, the network has no data-point to copy, so it defaults to hallucinating or to producing an artifact.",
+      "By treating actions as full tokens in the same space as video-frames and instruction-tokens, the attention mechanism (a computation that learns which parts of the input matter most) can now see actions as causal inputs. When the robot moves the arm left, the left-motion token interacts with arm-position tokens in the video through the attention mechanism, and the model learns that moving the arm causes the observed pixels to change in a specific way. This is not memorization; it is learning a causal link. The model must explain what changed and why.",
+      "The keyframe memory further grounds this: instead of predicting a free-floating continuation, the model is asked to evolve the scene forward while respecting the overall scene shape (locked in by sparse keyframes). This prevents the model from self-correcting hallucinations by drifting far from reality. Finally, the progress-as-text signal (predicting a yes/no success flag) forces the model to commit: either the action led to the goal or it did not. This eliminates the ability to self-correct a false prediction into a true-looking one."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current view, language goal, action chunk"
+        },
+        {
+          "t": "step",
+          "s": "Tokenize all three into shared token space",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Attention: action tokens interact with view tokens causally"
+        },
+        {
+          "t": "step",
+          "s": "Sparse keyframes anchor global scene state",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Diffusion denoising: predict next video and success flag"
+        },
+        {
+          "t": "output",
+          "s": "Next view + success confidence (0 to 1)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: diffusion loss with causal tokens",
+    "words": "loss equals the mean squared error between predicted and actual next frame, plus the mean squared error between predicted and actual success flag, where both are predictions from noise removal (diffusion step). This sums over all timesteps.",
+    "equation": "L = E[ ||denoise_video(z_t, tokens_t) - x_{t+1}||^2 + ||denoise_success(z_t, tokens_t) - s_{t+1}||^2 ]",
+    "symbols": [
+      ["L", "total loss (error to minimize)"],
+      ["z_t", "noisy latent at diffusion step t"],
+      ["tokens_t", "concatenated tokens: video, action, instruction"],
+      ["denoise_video", "function that predicts next clean frame"],
+      ["denoise_success", "function that predicts success flag"],
+      ["x_{t+1}", "actual next video frame"],
+      ["s_{t+1}", "actual success indicator (0 or 1)"],
+      ["E[·]", "average over all timesteps in training"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose one rollout: robot pushes; model predicts next video (MSE = 0.8) and success (predicted 0.7, actual 1.0, error = 0.09).",
+        "Loss from video prediction: 0.8. Loss from success prediction: 0.09. Total: 0.89.",
+        "With a naive model (action as conditioning), if video MSE = 0.8 but success prediction is 0.02 (overconfident wrong), loss = 0.82 (masks bad causality).",
+        "The success term forces both to be learned together; bad action-causality shows up as wrong success flag, not hidden in video realism."
+      ]
+    },
+    "note": "The equation penalizes both video error and success-prediction error equally, forcing the model to link action tokens to both visual and outcome changes."
+  },
+  "bars": {
+    "h2": "Scaling test results",
+    "charts": [
+      {
+        "title": "Naive video diffusion",
+        "rows": [
+          ["Policy A on simulated robot", 88, "good"],
+          ["Policy A on real robot", 42, "bad"],
+          ["Policy B on simulated robot", 91, "good"],
+          ["Policy B on real robot", 89, "good"]
+        ],
+        "note": "Simulation overestimates Policy A; ranking is wrong (A predicted better but B actually better) because the naive model self-corrects its false predictions, making the bad policy appear successful when it would fail in reality."
+      },
+      {
+        "title": "dWorldEval with action tokens",
+        "rows": [
+          ["Policy A on simulated robot", 45, "bad"],
+          ["Policy A on real robot", 42, "bad"],
+          ["Policy B on simulated robot", 87, "good"],
+          ["Policy B on real robot", 89, "good"]
+        ],
+        "note": "Simulation correctly ranks policies; A and B match real-world ordering (A stays low, B stays high)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Out-of-distribution actions still confuse it.",
+        "html": "If the robot makes a move that is wildly different from training data (e.g., a grasp angle 90 degrees from any seen example), the model may still produce artifacts, because token-space learning only reduces drift, it does not eliminate it."
+      },
+      {
+        "warn": true,
+        "b": "Multi-agent or multi-hand scenarios.",
+        "html": "The mechanism learns action causality for single-agent policies; if two robots act in tandem, the model must learn their interaction, which requires more data and can fail if interactions are not well represented."
+      },
+      {
+        "warn": true,
+        "b": "Long rollouts (many steps) still drift.",
+        "html": "Even with keyframes, predicting 30 or 100 steps ahead compounds errors; each prediction becomes a new input, and small errors compound. The longer the policy runs, the less reliable the model's ranking."
+      },
+      {
+        "b": "Correctly grounded in cause and effect.",
+        "html": "When the success-text output is accurate and actions are in-distribution, the ranking of policies matches real-world performance because the model has learned to link action to outcome, not just memorize."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a discrete-diffusion world model on a small robot task (e.g., block pushing with 3 candidate policies). Train it on a dataset of real robot rollouts. Then do the following: (1) Run each of the 3 policies in simulation 20 times each (record predicted success rate for each). (2) Run each of the 3 policies on a real robot 20 times each (record actual success rate). (3) Compute the ranking: which policy scored highest in simulation? Which ranked highest in reality? Do they match? (4) Now replace the model's full-action tokens with action-conditioning (a baseline where actions are inputs only, not tokens). Repeat steps 1-3. Compare: does the action-token model rank policies correctly more often than the conditioning baseline?"
+    ],
+    "metric_eq": "policy_ranking_accuracy = (sim_rank == real_rank for 3 policies) × 100%, or for continuous: sim_success_rate correlation with real_success_rate via Spearman ρ",
+    "closing": "The demo makes it impossible to miss: a model that treats actions as causal tokens ranks policies the same way the real robot does, because learning actions as causal tokens forces the model to explain what the action actually caused, while a model that treats actions as passive inputs often disagrees because it only memorizes and can hallucinate on unseen moves."
+  }
+}

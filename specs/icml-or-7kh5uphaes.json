@@ -1,0 +1,227 @@
+{
+  "slug": "icml-or-7kh5uphaes",
+  "title": "EcoVLA: Adaptive Pruning for Fast Robot Vision-Language Models",
+  "family": "Robotics & Control",
+  "one_liner": "A robot model can spot which neurons its current scene needs, drop the rest, and recompute which ones to drop next — all without slowing down.",
+  "lead": "Robot vision-language-action models respond to images with actions but run slowly because they contain millions of neurons that stay active no matter what the robot sees. EcoVLA recognizes that different scenes demand different neurons: when a robot grasps a cup, it may not need the same brain parts as when it searches for a cup. This paper offers a training-free way to detect scene changes, drop unused neurons on the fly, and compute the next set of neurons while current inference runs in the background — achieving nearly 1.6 times faster execution because the background work is hidden inside idle gaps in the graphics chip.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why slow robot models fail in real time",
+    "paras": [
+      "A vision-language-action model reads images and outputs robot commands in real time. But these models have millions of weights (neuron connection strengths) because they need to handle countless situations: grasping, searching, navigating, reasoning about objects. When a robot faces one specific scene, most of those weights sit idle.",
+      "A beginner might try removing weights permanently before deployment — pick a fixed set and throw away the rest. But that breaks because a cup-grasping scene needs different neurons than a book-searching scene. The model was trained on all scenes together, so removing weights universally hurts it on some tasks: the neurons that boost cup recognition might actively interfere with book-finding by sending confusing signals downstream, even if you never activate them on book tasks. Static pruning destroys flexibility.",
+      "A second attempt: recompute which weights matter at each moment, based on the current image. Sounds ideal — adapt to every frame. But computing importance scores for millions of weights takes time. If that computation time is larger than the time you save by running fewer neurons, the robot becomes slower, not faster, because you added a new step that consumes latency and gets no payoff."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "The model is slow because it uses all its neurons on every scene, but you cannot just remove neurons because different scenes need different ones. And recomputing which neurons matter too often destroys the speed gain."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A heavy model sees a new scene",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["warm", 38], ["free", 22], ["hot", 50], ["warm", 35], ["free", 20], ["hot", 42], ["warm", 40], ["free", 25], ["hot", 48], ["warm", 36], ["free", 21]],
+        "caption": "All neurons fire, even unused ones. Latency high."
+      },
+      {
+        "title": "2. Scene changes over time",
+        "viz": "box",
+        "viz_args": "Frame 1 cup-grasp; Frame 2 cup-search; Frame 3 cup-place. Same model, different needs.",
+        "caption": "Robot sees three scenes. Each needs different neurons."
+      },
+      {
+        "title": "3. EcoVLA spots scene change",
+        "viz": "weights",
+        "viz_args": [["hot", 45], ["moved", 12], ["free", 22], ["hot", 50], ["moved", 8], ["free", 20], ["hot", 42], ["warm", 40], ["moved", 15], ["hot", 48], ["warm", 36], ["free", 21]],
+        "caption": "Lightweight detector flags frame 2 as different. Mark neurons to drop."
+      },
+      {
+        "title": "4. Pruning runs parallel, not in main path",
+        "viz": "box",
+        "viz_args": "Main: frame 2 inference. Side: compute frame 3 neuron scores. No wait.",
+        "caption": "While robot processes frame 2, compute frame 3 pruning plan."
+      },
+      {
+        "title": "5. Frame 3 uses leaner model, faster",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["moved", 18], ["free", 30], ["hot", 45], ["moved", 14], ["free", 28], ["hot", 38], ["warm", 35], ["moved", 20], ["hot", 42], ["warm", 32], ["free", 28]],
+        "caption": "Sparse execution 1.6x faster; accuracy barely dips."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Detect scene shift",
+        "text": "Extract visual features from the current image, compare to the previous image, measure similarity."
+      },
+      {
+        "b": "Compute neuron importance",
+        "text": "For each neuron in the model, score how much it contributes to the current scene using L2 norms of weights."
+      },
+      {
+        "b": "Drop low-importance neurons",
+        "text": "Skip neurons with importance scores below a threshold; only run the critical neurons for this scene."
+      },
+      {
+        "b": "Schedule next pruning in background",
+        "text": "While the current frame runs through the model, spawn a separate thread to compute importance for the next frame."
+      },
+      {
+        "b": "Apply new sparsity pattern next frame",
+        "text": "Next inference uses the freshly computed neuron subset; cycle repeats."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper moves",
+    "paras": [
+      "The object is the set of active neurons (channels) during inference. A standard model uses all its neurons on every frame; EcoVLA changes which neurons run depending on what the camera sees. When a robot reaches for a cup, most motion-planning neurons fire; when it searches for the cup, perception neurons dominate. EcoVLA turns each neuron on or off per scene."
+    ],
+    "object": "active neuron subset"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: channel importance",
+    "name": "importance score per neuron",
+    "paras": [
+      "Channel importance is a number that says how much a single neuron contributes to the model's output on the current input. EcoVLA computes it using L2 norms, a mathematical measure of the strength of that neuron's weights. Larger L2 norm means the neuron has bigger connection strengths and likely carries critical information; smaller norm means it is redundant for this scene.",
+      "The paper estimates importance in real time by measuring the magnitude of weights in each neuron, updated only when the scene changes (detected via visual similarity). This keeps overhead low: instead of recomputing all neurons every frame, EcoVLA only recomputes after a scene shift."
+    ],
+    "heat": {
+      "cells": [["neuron 1", 4, true], ["neuron 2", 1, false], ["neuron 3", 3, true], ["neuron 4", 2, false], ["neuron 5", 4, true], ["neuron 6", 1, false], ["neuron 7", 2, false], ["neuron 8", 3, true], ["neuron 9", 1, false], ["neuron 10", 2, false], ["neuron 11", 4, true], ["neuron 12", 1, false]],
+      "caption": "Darker means higher importance for the current scene. Highlighted neurons run; pale ones skip."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Importance tells you which neurons the model actually needs right now. Drop the rest; you keep speed and accuracy."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper uses weight L2 norm as a lightweight proxy for channel importance. When scene changes, it recomputes the importance scores and applies a new sparsity pattern (the choice of which neurons to keep)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why adapting neurons without slowing down works",
+    "paras": [
+      "The core insight: the model has two stages with very different computational profiles. The first stage (the heavy vision-language backbone) is compute-bound, meaning the graphics chip spends most of its time doing math, not waiting for data. The second stage (the lightweight action planner) is memory-bound, meaning it waits for data to arrive. This creates a gap (called a FLOPs bubble) in the action stage where the chip is idle.",
+      "EcoVLA exploits this gap. While the action stage is running the current frame through its lightweight MLPs, the graphics chip has spare capacity — some processing units sit idle because data arrives slowly. EcoVLA spawns a separate computation stream in that idle space to calculate which neurons the next frame will need, using the next frame's visual features. By the time the action stage finishes and the next frame arrives, the importance scores are ready. The next frame runs with a leaner neuron set — no added latency, only speedup.",
+      "Scene changes are detected by comparing image features from the previous frame to the current frame using a lightweight visual similarity metric. This costs less compute than recomputing all neuron importances because it only compares two image summaries instead of rescoring millions of weights. Only when the metric signals a real shift does EcoVLA trigger a full recomputation. The temporal continuity of the physical world means scenes change gradually, so this check is rarely expensive."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current frame image arrives"
+        },
+        {
+          "t": "step",
+          "s": "Compute visual similarity vs. previous frame",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Heavy backbone runs on full model (compute-bound stage)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Action expert runs sparse (memory-bound stage); meanwhile, background thread computes next frame importance",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "If similarity is low, apply new sparsity pattern to next frame",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Robot action, faster because fewer neurons ran"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Computing importance scores",
+    "words": "For each neuron (channel) in the model, sum the squared magnitudes of its weight matrix, then use that score to decide whether to keep or prune the neuron. Neurons with high scores survive; neurons with low scores skip.",
+    "equation": "importance_i = sum_j (W_i,j)^2; keep neuron i if importance_i > threshold",
+    "symbols": [
+      ["W_i,j", "the strength of connection j within neuron i"],
+      ["importance_i", "the L2 norm squared for neuron i"],
+      ["threshold", "cutoff score; prune if importance falls below it"],
+      ["keep neuron i", "include this neuron in sparse inference"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Neuron A has weights [3, 4, 0]: importance = 3^2 + 4^2 + 0^2 = 9 + 16 + 0 = 25.",
+        "Neuron B has weights [1, 1, 1]: importance = 1^2 + 1^2 + 1^2 = 1 + 1 + 1 = 3.",
+        "If threshold = 10, Neuron A (25 > 10) runs; Neuron B (3 < 10) skips.",
+        "Result: 50% fewer neurons, but Neuron A carries the critical signal so accuracy barely drops."
+      ]
+    },
+    "note": "Neurons with larger, more decisive weights are worth keeping. Neurons with tiny or scattered weights are redundant for the current scene."
+  },
+  "bars": {
+    "h2": "Speed and accuracy trade-off",
+    "charts": [
+      {
+        "title": "Naive: always run full model",
+        "rows": [
+          ["Inference time (ms)", 250, "bad"],
+          ["Action success rate", 96, "good"],
+          ["Throughput (frames/sec)", 4, "bad"]
+        ],
+        "note": "Baseline: all neurons fire, no pruning."
+      },
+      {
+        "title": "EcoVLA: adaptive, parallel pruning",
+        "rows": [
+          ["Inference time (ms)", 156, "good"],
+          ["Action success rate", 94.6, "good"],
+          ["Throughput (frames/sec)", 6.4, "good"]
+        ],
+        "note": "1.6x speedup; accuracy loss under 2% because only redundant neurons were pruned."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Scene similarity metric is wrong.",
+        "html": "If the lightweight visual similarity check fails to detect a real scene shift, the model continues using an old sparsity pattern. Example: robot moves to a new table but the visual features look similar. The pruned model may lack neurons needed for the new surface, dropping accuracy."
+      },
+      {
+        "warn": true,
+        "b": "Background pruning is too slow.",
+        "html": "If computing the next frame's importance scores takes longer than the current frame's inference, the model cannot apply the new pattern on time. The next frame still uses the old sparse pattern, wasting the potential speedup."
+      },
+      {
+        "warn": true,
+        "b": "Threshold is set wrong.",
+        "html": "If the threshold is too high, too many neurons are pruned, and the model loses critical information even on scenes it should handle. If too low, barely any neurons are pruned and you get no speedup."
+      },
+      {
+        "b": "Done right.",
+        "html": "Threshold is tuned to the specific VLA model and task. Scene similarity metric is validated on real video from the deployment environment. Pruning overhead is measured and confirmed to fit in the action stage's idle time."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple robot task: place the robot in front of three distinct scenes (a table with a cup, a table with a block, a shelf with a cup). For each scene, record the visual features. Simulate a robot executing actions in sequence: reach, grasp, lift, place. Time the end-to-end latency with and without EcoVLA. Measure the success rate (did the action complete correctly?) for each scene."
+    ],
+    "metric_eq": "speedup = latency_full_model / latency_ecovla; accuracy_drop = (success_full_model - success_ecovla) / success_full_model * 100%",
+    "closing": "The demo must show that latency drops by 1.4 to 1.6 times while accuracy loss stays under 2%. If accuracy loss is large, the scene-change detector is misfiring or the threshold is too aggressive."
+  }
+}

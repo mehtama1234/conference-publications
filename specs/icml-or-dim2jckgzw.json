@@ -1,0 +1,225 @@
+{
+  "slug": "icml-or-dim2jckgzw",
+  "title": "Scaling by Diversified Experience for Vision-Language-Action Models",
+  "family": "Robotics & Control",
+  "one_liner": "SyVLA decouples reasoning from control by hiding unhelpful reasoning neurons, then stabilizes real-world robot learning by copying training examples similar to what the robot tries.",
+  "lead": "When a robot reads a vision frame and an instruction, it faces two separate jobs: understanding the goal (high-level reasoning) and moving its arm (low-level control). Most current Vision-Language-Action models tangle these two jobs together in the same neural network weights, which breaks both—the model loses its ability to reason about abstract questions, and its arm movements become indecisive and clumsy. SyVLA fixes this by finding which neurons carry reasoning info and which carry control info, then hiding the reasoning neurons when the robot acts. It also learns from robot rollouts more stably by picking practice examples that closely match what the robot actually tried.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Reasoning and control pull in opposite directions",
+    "paras": [
+      "Vision-Language-Action models (or VLAs) are neural networks that take a photo and a text instruction, then output robot arm commands. Most VLAs work by training on two things at once: (1) learning to understand abstract instructions (reasoning), and (2) learning to move the robot arm (control). But these goals conflict. When the model trains on reasoning tasks, it builds internal patterns (called representations) that are detailed and flexible—great for answering 'what is this object?' but terrible for the simple, mechanical job of 'move three inches left.' When it trains on control, those same weights get sharpened for precise motor commands, which erases the reasoning ability.",
+      "The beginner tries two naive fixes, both of which fail. First: train on reasoning data, then train on robot data—but this causes catastrophic forgetting, where the model unlearns everything about vision-language understanding. Second: train on everything at once—but then the model becomes mediocre at both; it never commits fully to either job. After this initial training, when engineers use reinforcement learning to teach the robot real tasks (learning from tries and failures), the training becomes unstable—the robot's policy (its rules for acting) drifts away from the expert demonstrations it learned from, and the robot fails on new tasks it has never seen before."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "SyVLA separates the reasoning job from the control job inside the network, then stabilizes learning from real robot attempts by choosing practice examples that match what the robot actually tried."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: tangled jobs",
+        "viz": "brain",
+        "caption": "One network does reasoning and control. They fight each other."
+      },
+      {
+        "title": "2. Identify reasoning neurons",
+        "viz": "weights",
+        "viz_args": [["hot", 4], ["hot", 3], ["warm", 2], ["free", 1], ["free", 1], ["hot", 3], ["warm", 2], ["free", 1], ["warm", 2], ["free", 1], ["hot", 3], ["warm", 2]],
+        "caption": "Compute gradient of action loss. Tall bars show neurons that matter for control."
+      },
+      {
+        "title": "3. Mask reasoning neurons",
+        "viz": "weights",
+        "viz_args": [["hot", 4], ["hot", 3], ["free", 0], ["free", 0], ["free", 1], ["hot", 3], ["warm", 2], ["free", 0], ["warm", 2], ["free", 0], ["hot", 3], ["warm", 2]],
+        "caption": "Set low-gradient neurons to zero. Control neurons stay, reasoning noise vanishes."
+      },
+      {
+        "title": "4. Stabilize robot learning",
+        "viz": "box",
+        "viz_args": "Current rollout + similar expert examples",
+        "caption": "Mix current attempt with training examples that matched its intent. Reduces drift."
+      },
+      {
+        "title": "5. The payoff",
+        "viz": "plain",
+        "caption": "Robot learns faster, keeps abstract reasoning, succeeds on new tasks."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Freeze the reasoning model",
+        "text": "Start with a large vision-language model already trained to understand images and text. Do not change it."
+      },
+      {
+        "b": "Compute action loss gradient",
+        "text": "Run the model forward once, produce an action, measure how wrong it is. Compute gradients (the numerical score for each neuron showing how much it caused the error) to see which neurons cared about that error."
+      },
+      {
+        "b": "Mask low-gradient neurons",
+        "text": "Find neurons whose gradients were tiny (they barely affected the action loss). Set those hidden states to zero. This hides reasoning noise from control."
+      },
+      {
+        "b": "Teach with matched examples",
+        "text": "When robot tries a new action during learning, find similar examples from training data. Mix them into the batch because training on both current and expert together anchors the policy to behaviors that are known to work."
+      },
+      {
+        "b": "Train the action module",
+        "text": "Update only the small control network. Reasoning weights stay frozen, so they retain all their learned concepts and do not degrade. Robot improves its motor commands without forgetting abstract understanding, because the reasoning part is never touched."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper modifies which neurons the robot actually listens to when it needs to act. Most Vision-Language-Action models use all the outputs from the reasoning part of the network (the 'reasoning representations'). SyVLA computes a gradient mask—a list of which outputs actually mattered for predicting the correct action—and physically zeros out the neurons that did not matter. In effect, it silences the reasoning noise before the action network reads it."
+    ],
+    "object": "reasoning neuron mask"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: control relevance",
+    "name": "control relevance (gradient magnitude per neuron)",
+    "paras": [
+      "When the robot produces an action and that action is wrong, the network computes gradients—a score for each neuron saying 'how much did you cause this mistake?' Neurons with high gradients did a lot to cause the error, which means they carry information about control. Neurons with low gradients barely affected the action, so they are carrying reasoning info that the action network should ignore. SyVLA measures this gradient score for each neuron (specifically, the overall size of the gradient, computed as the L2 norm—the total magnitude combining all directions) and calls that the control relevance.",
+      "The paper identifies control-relevant neurons by comparing these gradient magnitudes during a forward-backward pass through the action loss only. It then masks (sets to zero) the neurons with the smallest magnitudes, which pushes mutual information—shared structure—between the remaining neurons and the reasoning part down to nearly zero. In other words, by removing the noisy low-relevance neurons, the control network sees only the clean control signal, and the reasoning part stays intact."
+    ],
+    "heat": {
+      "cells": [["neuron_1", 4, true], ["neuron_2", 3, false], ["neuron_3", 1, false], ["neuron_4", 2, false], ["neuron_5", 4, true], ["neuron_6", 3, false], ["neuron_7", 2, false], ["neuron_8", 1, false], ["neuron_9", 3, false], ["neuron_10", 2, false], ["neuron_11", 4, true], ["neuron_12", 1, false]],
+      "caption": "Darker means bigger gradient, more control-relevant. Paper masks the light cells (reasoning noise)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Neurons that change the robot's action the most (big gradients, dark cells) are control-relevant. Neurons that hardly matter (small gradients, light cells) are just passing along reasoning info and get silenced."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The gradient of the action loss with respect to each special control element's final neural state is computed. Elements with the smallest gradients are masked, reducing shared structure between the masked states and the reasoning parts."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: two clean separation acts",
+    "paras": [
+      "The mechanism has two parts. First, by masking low-gradient neurons, SyVLA isolates the control signal. When a reasoning neuron fires (e.g., activating because the instruction mentions 'fold'), that spike would normally spread to the action network and confuse it. But the low-gradient mask catches it: any reasoning-only neurons are zeroed before they can reach the action network. So the control network sees a cleaner, simpler input—just the features it needs to move the arm, without the abstract semantic noise. This is why the model keeps its reasoning ability (the reasoning weights are still there, unused), but the action network becomes decisive (it is not distracted).",
+      "Second, similar-sample guided reinforcement learning stabilizes the policy. When the robot tries a move during learning, that move might be very different from anything in the training data—a rare combination of arm angle, object position, and grip strength. The model then trains on that rare move, making big updates to its weights. But rare moves are fragile: the model learns from an outlier and starts to drift from expert behavior. SyVLA solves this by finding training examples that are semantically similar to the current attempt (same goal, similar hand position, similar object), and mixing those examples into the learning batch. Now the model trains on both the new attempt AND the expert examples that match it, which keeps the policy anchored. The expert examples act as a correction—they pull the model back to behaviors it has already verified work."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Vision frame and instruction"
+        },
+        {
+          "t": "step",
+          "s": "Vision-language model processes (frozen)",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Mask low-gradient neurons (hide reasoning noise)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Action network reads clean signal",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "During learning: add similar expert examples to batch",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Arm command + stable policy update"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The gradient mask equation",
+    "words": "For each neuron, compute how much its output changes the action loss. Zero out neurons where this change is small. Specifically, mask neurons whose L2 norm of gradient is below a threshold.",
+    "equation": "h_masked = h_raw * mask, where mask_i = 1 if ||grad_i(L_action)|| >= threshold, else 0",
+    "symbols": [
+      ["h_raw", "the output of the reasoning model before masking"],
+      ["h_masked", "the output after masking"],
+      ["mask_i", "binary flag for neuron i (1 = keep, 0 = zero out)"],
+      ["grad_i(L_action)", "the gradient of the action loss with respect to neuron i"],
+      ["||grad_i||", "the length of the gradient vector for neuron i"],
+      ["threshold", "the cutoff: neurons below this are masked"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Neuron 1: gradient magnitude 3.2. Threshold is 2.0. 3.2 >= 2.0, so mask_1 = 1 (keep it).",
+        "Neuron 2: gradient magnitude 0.8. Threshold is 2.0. 0.8 < 2.0, so mask_2 = 0 (zero it out).",
+        "Neuron 3: gradient magnitude 1.5. Threshold is 2.0. 1.5 < 2.0, so mask_3 = 0 (zero it out).",
+        "Result: h_masked = [h_raw_1 * 1.0, h_raw_2 * 0, h_raw_3 * 0, ...] = keep neuron 1, discard 2 and 3."
+      ]
+    },
+    "note": "Neurons with tiny gradients do not drive action loss—they are reasoning noise. Zeroing them makes the control signal cleaner without losing reasoning ability."
+  },
+  "bars": {
+    "h2": "Learning from rollouts: with and without similar-sample guidance",
+    "charts": [
+      {
+        "title": "Naive RL (no guidance)",
+        "rows": [
+          ["Success on seen tasks", 78, "good"],
+          ["Success on unseen tasks (distribution shift)", 32, "bad"],
+          ["Stability (policy drift)", 45, "bad"]
+        ],
+        "note": "Robot learns the specific rollouts but drifts from expert behavior. Rare moves cause big, unanchored updates."
+      },
+      {
+        "title": "SyVLA (similar-sample guided)",
+        "rows": [
+          ["Success on seen tasks", 82, "good"],
+          ["Success on unseen tasks (distribution shift)", 61, "good"],
+          ["Stability (stays close to expert)", 78, "good"]
+        ],
+        "note": "By mixing current attempts with matched expert examples, the model learns faster and stays grounded in verified behaviors."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Threshold set too high.",
+        "html": "If you zero out too many neurons, you accidentally remove control-relevant information along with reasoning noise. The robot becomes even more indecisive than before. The fix: tune the threshold by holding out a validation set of real robot tasks and checking success rate."
+      },
+      {
+        "warn": true,
+        "b": "Similar-sample retrieval misses the real pattern.",
+        "html": "If the training dataset is small or biased (only contains gripper tasks, never suction tasks), then a current attempt with a suction cup will not find truly similar examples. The policy drifts without expert anchors. The fix: ensure training data covers the range of tasks you expect."
+      },
+      {
+        "warn": true,
+        "b": "Freezing the reasoning model is too rigid.",
+        "html": "Some tasks require the reasoning part to adapt (e.g., learning a new visual concept the original model did not see). Freezing it permanently locks out this flexibility. The fix: add a fine-tuning stage where you unfreeze and update the reasoning model on task-specific data, then refreeze before RL."
+      },
+      {
+        "b": "Done right.",
+        "html": "Threshold is set by validation on real robots. Similar samples are retrieved using the same numerical representations (the internal lists of numbers that encode the image meaning) that the vision model produces. Reasoning model is frozen during RL but pre-trained on enough visual data that it handles the tasks you care about."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple robotic manipulation task (e.g., pick up a block and place it in a box, or fold a cloth). Start with a pretrained Vision-Language-Action model. Split the demo into two runs: (1) standard RL (train only the action network without intention decoupling or similar-sample guidance), and (2) SyVLA (apply the mask, and during training, retrieve and mix in similar examples from a small expert dataset). Measure success rate and how often the model stays close to the expert policy (drift metric: how much the learned policy deviates from the expert actions on the same states). The demo must show that SyVLA succeeds more often because the masked control signal is cleaner, generalizes better to unfamiliar object positions or lighting conditions because the reasoning part stayed intact and learned new visual patterns, and drifts less from the expert because similar-sample guidance keeps the policy anchored to proven behaviors."
+    ],
+    "metric_eq": "success_rate = (tasks_completed / total_tasks) * 100, policy_drift = (1 - cosine_similarity(learned_actions, expert_actions))",
+    "closing": "The core insight the demo must make impossible to miss: when you cleanly separate reasoning from control by masking reasoning noise, the robot learns faster because the control signal is pure and the policy is decisive, and the robot does not forget how to reason because the reasoning weights never change. And when you anchor learning to similar expert examples, the policy stays stable because the expert examples pull the policy back toward proven behaviors whenever the robot's new attempt would drift it into a risky, unfamiliar corner."
+  }
+}

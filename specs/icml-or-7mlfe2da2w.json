@@ -1,0 +1,222 @@
+{
+  "slug": "icml-or-7mlfe2da2w",
+  "title": "SCALE: Adaptive Perception and Action via Self-Uncertainty",
+  "family": "Robotics & Control",
+  "one_liner": "A robot model learns to reconsider what it is seeing, not just what to do, when uncertain — using only the model's own doubt signal, in a single forward pass.",
+  "lead": "Vision-Language-Action models (VLAs) are neural networks that watch a robot's camera feed, read a task instruction, and output a sequence of actions. Most VLAs make their best guess once and commit to it. SCALE notices when the model doubts itself, and when it does, it takes a second look at the camera image — searching more broadly for clues — before deciding the next action. This doubles down on the model's built-in uncertainty signal and requires no retraining.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Models guess once, then regret",
+    "paras": [
+      "A VLA model processes an image and instruction, then outputs action tokens one at a time, picking each next token greedily — the single highest-scoring option at each step. When the image is ambiguous (a blurry object, an unseen angle, shadows), the model's internal confidence plummets, but it still locks into its first guess.",
+      "A naive scaling approach retrains the model with extra supervision modules, or runs it multiple times with different random seeds — both costly and slow. Existing methods also ignore the root problem: when uncertain, the model's <em>visual attention</em> (which parts of the image it looks at) is still fixed. Reconsidering perception is as important as reconsidering action, but most methods only gamble on action."
+    ],
+    "callout": {
+      "b": "The real problem.",
+      "html": "Models doubt themselves but never re-examine the image; they need to search more broadly for clues when uncertain, without retraining."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Normal confidence, laser focus",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["warm", 40], ["free", 10], ["free", 5], ["free", 8], ["free", 3], ["free", 12], ["warm", 35], ["free", 6], ["free", 2], ["free", 4], ["free", 1]],
+        "caption": "When confident, attend sharply to task-relevant regions only."
+      },
+      {
+        "title": "2. Ambiguous image, model doubts itself",
+        "viz": "weights",
+        "viz_args": [["moved", 45], ["moved", 50], ["moved", 48], ["moved", 47], ["moved", 49], ["moved", 51], ["moved", 46], ["moved", 52], ["moved", 44], ["moved", 50], ["moved", 48], ["moved", 49]],
+        "caption": "Blurry or cluttered image raises uncertainty; all action tokens score nearly equally."
+      },
+      {
+        "title": "3. Self-uncertainty signal extracted",
+        "viz": "box",
+        "viz_args": "Uncertainty score = spread of logits",
+        "caption": "Compute a single number measuring model doubt, no retraining needed."
+      },
+      {
+        "title": "4. Broaden visual search under uncertainty",
+        "viz": "weights",
+        "viz_args": [["warm", 60], ["warm", 65], ["warm", 62], ["warm", 68], ["warm", 64], ["warm", 70], ["warm", 61], ["warm", 67], ["warm", 63], ["warm", 69], ["warm", 60], ["warm", 65]],
+        "caption": "Increase attention temperature; vision encoder attends to more regions."
+      },
+      {
+        "title": "5. Exploratory action sampling",
+        "viz": "plain",
+        "caption": "Higher uncertainty means sample near-equal actions, not just the top choice."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode image and instruction",
+        "text": "Vision encoder processes the camera image; model reads the task description and earlier actions."
+      },
+      {
+        "b": "Predict next action token",
+        "text": "Model outputs a probability distribution over possible next tokens (each action is a sequence of these)."
+      },
+      {
+        "b": "Measure self-uncertainty",
+        "text": "Compare the top-scoring token to the distribution of all tokens; high spread means high doubt."
+      },
+      {
+        "b": "Adjust visual attention",
+        "text": "If uncertainty is high, make the vision encoder look at more of the image; if low, focus sharply."
+      },
+      {
+        "b": "Sample or pick the action",
+        "text": "Under high doubt, randomly pick from near-equal candidates; under confidence, take the top choice."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The two things the method changes",
+    "paras": [
+      "SCALE modulates two interdependent outputs: (1) the <em>visual attention temperature</em> — a scaling factor that controls how broadly the vision encoder spreads its attention across the image — and (2) the <em>action sampling strategy</em> — whether to pick the single best action (exploitation) or randomly sample from near-equivalent options (exploration). Both are keyed to the same self-uncertainty signal, computed without retraining."
+    ],
+    "object": "visual attention + action strategy"
+  },
+  "hidden": {
+    "h2": "Self-uncertainty: the model's own doubt",
+    "name": "Deviation of confidence from recent history",
+    "paras": [
+      "At each timestep, compute how much the model's confidence differs from what it has been lately. The paper calls this the exponential moving average (EMA) deviation: is the current uncertainty above or below the rolling trend? When confidence suddenly dips, this deviation spikes, signaling perceptual ambiguity. When confidence stays high and steady, the deviation is near zero.",
+      "The mechanism: each step's uncertainty is compared against its own history (a simple rolling average). If the current step's uncertainty is higher than average, the model knows something about this particular observation is harder. The paper estimates uncertainty by measuring spread in the output logits (the raw scores before converting to probabilities) — specifically, how much the top prediction outscores the second-place one. A tight race means high uncertainty; a runaway winner means confidence. This is training-free: no extra module, no labeled data, purely from the model's output distribution."
+    ],
+    "heat": {
+      "cells": [
+        ["Obs_t", 2, false],
+        ["LogProb_top", 1, true],
+        ["LogProb_2nd", 1, false],
+        ["Spread", 4, true],
+        ["EMA_historical", 2, false],
+        ["Deviation", 4, true],
+        ["Above EMA", 3, true],
+        ["Below EMA", 1, false],
+        ["Action_sample", 3, true],
+        ["Attn_temp", 3, true],
+        ["Vision_broad", 4, true],
+        ["Vision_sharp", 1, false]
+      ],
+      "caption": "Darker cells are higher uncertainty or broader attention; deviation from rolling average (cells 6-7) drives both action and attention changes."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model's own scores tell you when it is confused. Use that signal to search harder."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Self-uncertainty is distributional confidence — divergence from a uniform distribution, drawn purely from output logits, no verifier module."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why adaptive perception fixes the problem",
+    "paras": [
+      "When a robot camera frame is ambiguous, the model's probability scores are spread out — many action tokens look plausible. This manifests as a wide gap (uncertainty). In a normal run, the model still picks the single top token and locks in. But when the probability scores are nearly equal, the difference between the top token and the second-place token is often smaller than the inherent noise in the model's prediction — the model's own numerical precision and random fluctuations when answering. The top token wins by chance or by a tiny computational rounding error, not by genuine superiority. Under high uncertainty, the top-1 choice is noise.",
+      "SCALE reads this uncertainty and adjusts the vision encoder's attention: when uncertainty is high, the encoder is told to attend more evenly across the image (broaden the search), not just to the salient regions it normally fixates on. This gives the model a second chance to see details it missed. Meanwhile, the action selection also shifts: instead of greedily picking top-1, the model randomly samples from the cluster of near-equal candidates. Both moves are inspired by Active Inference, a theory from cognitive science: an agent under uncertainty should explore more broadly, not commit greedily.",
+      "The payoff: when the image is clear, the model focuses tightly (confidence is high, uncertainty low), and picks its best action (efficient, responsive). When the image is ambiguous, the model spreads its visual attention (uncertainty is high) and tries multiple plausible actions (exploratory sampling). The method is adaptive — it self-calibrates using only its own output statistics."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Camera image + instruction"},
+        {"t": "step", "s": "Vision encoder (attention temperature)"},
+        {"t": "step", "s": "Extract features, cross-modal attention"},
+        {"t": "step", "s": "Predict next action token probabilities"},
+        {"t": "step", "s": "Compute uncertainty from logits", "hl": true},
+        {"t": "step", "s": "Compare to recent history (EMA deviation)", "hl": true},
+        {"t": "step", "s": "High deviation adjusts temperature, samples exploratively", "hl": true},
+        {"t": "output", "s": "Next action token (adaptive strategy)"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The attention temperature update",
+    "words": "Attention temperature at the next step is computed by comparing current uncertainty to its rolling average. If uncertainty is above the rolling average, temperature increases (broaden search); if below, temperature decreases (sharpen focus).",
+    "equation": "gamma_t = baseline * exp(delta_u_t / scale), where delta_u_t = u_t - u_bar_{t-1}",
+    "symbols": [
+      ["gamma_t", "attention temperature at step t (1 = normal, >1 = broad search, <1 = sharp focus)"],
+      ["u_t", "uncertainty at step t (how spread the action logits are)"],
+      ["u_bar_{t-1}", "exponential moving average of uncertainty up to step t-1"],
+      ["delta_u_t", "deviation = current uncertainty minus rolling average"],
+      ["baseline", "starting temperature, typically 1"],
+      ["scale", "sensitivity factor, e.g. 2.0"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Baseline temperature: 1.0",
+        "Step 1: uncertainty u_1 = 0.3 (confident), u_bar_0 = 0.5 (historical average), delta_u_1 = 0.3 - 0.5 = -0.2 (below average)",
+        "With scale=2.0: gamma_1 = 1.0 * exp(-0.2 / 2.0) = 1.0 * exp(-0.1) ≈ 0.905 (sharpen focus; <1)",
+        "Step 2: uncertainty u_2 = 0.7 (confused), u_bar_1 ≈ 0.4, delta_u_2 = 0.7 - 0.4 = +0.3 (above average)",
+        "With scale=2.0: gamma_2 = 1.0 * exp(0.3 / 2.0) = 1.0 * exp(0.15) ≈ 1.162 (broaden search; >1)",
+        "Same model; different observations trigger different attention postures — tight focus when expected (low uncertainty), broad search when surprised (high uncertainty)."
+      ]
+    },
+    "note": "The temperature is a scaling factor applied inside the vision encoder's attention calculation. Higher temperature flattens the attention distribution across image regions; lower temperature sharpens it to a few peaks."
+  },
+  "bars": {
+    "h2": "Naive method vs. SCALE",
+    "charts": [
+      {
+        "title": "Baseline VLA (greedy, fixed attention)",
+        "rows": [
+          ["Clear image (low clutter)", 92, "good"],
+          ["Ambiguous image (shadows, clutter)", 64, "bad"],
+          ["Average across mixed scenes", 78, "bad"]
+        ],
+        "note": "Greedy action selection and frozen visual attention fail on ambiguous frames."
+      },
+      {
+        "title": "SCALE (adaptive, single pass)",
+        "rows": [
+          ["Clear image (low clutter)", 91, "good"],
+          ["Ambiguous image (shadows, clutter)", 81, "good"],
+          ["Average across mixed scenes", 86, "good"]
+        ],
+        "note": "Adaptive visual attention and uncertainty-driven sampling recover performance in hard cases, with minimal overhead."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Miscalibrated uncertainty.",
+        "html": "If the model is overconfident (high logit scores but wrong action), or underconfident (low scores but correct), the self-uncertainty signal is noisy. SCALE will broaden attention or sample exploratively when it should not, wasting computation."
+      },
+      {
+        "warn": true,
+        "b": "Attention temperature too aggressive.",
+        "html": "If the temperature grows too large on uncertain steps, the vision encoder scatters attention so broadly that it sees nothing useful — drowning signal in noise. Clamping the temperature to a safe range (e.g., between 0.5 and 2.0) avoids this."
+      },
+      {
+        "warn": true,
+        "b": "Exploratory sampling on time-critical tasks.",
+        "html": "A robot performing a precise insertion task may not afford random exploration; it needs its best guess immediately. SCALE works best on tasks where a pause to resample is acceptable."
+      },
+      {
+        "b": "Attention calibrated well.",
+        "html": "When uncertainty is well-calibrated, confident predictions tend to be correct and uncertain ones tend to be ambiguous. In this case, SCALE sharpens or broadens the right way, and both visual attention and action strategy adapt coherently to the task difficulty."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a trained VLA (e.g., on a simulated robot arm or real robot manipulator). Run it on a sequence of tasks: some with clear, well-lit observations, some with clutter or ambiguity. For each task, log (1) the uncertainty estimate at each step, (2) the attention-temperature adjustment, (3) whether the action was sampled (high uncertainty) or greedy (low uncertainty), and (4) whether the action succeeded. Plot uncertainty vs. success rate: under high uncertainty (where baseline VLA fails), SCALE should successfully recover performance by searching the image more broadly and sampling exploratively. The critical test is ambiguous frames — a shadow, a blurred hand, an obscured target — where baseline greedy selection fails but SCALE's exploratory strategy finds the right action."
+    ],
+    "metric_eq": "Task success rate = (tasks_completed) / (total_tasks_attempted)",
+    "closing": "The demo must show that on hard, ambiguous observations — where the baseline model's top-1 pick is wrong — SCALE's combination of broader visual search and exploratory action sampling recovers success without retraining or multiple forward passes."
+  }
+}

@@ -1,0 +1,239 @@
+{
+  "slug": "icml-or-xgvzyybzhr",
+  "title": "CorrectionPlanner: Self-Correcting Motion in Autonomous Driving",
+  "family": "Robotics & Control",
+  "one_liner": "A driving planner that learns to detect unsafe motion steps and regenerate safer ones by keeping a memory of what it tried and failed.",
+  "lead": "Autonomous vehicles need to plan safe paths in real time, but most learning-based planners commit to an unsafe action the moment they propose it—there is no second chance. CorrectionPlanner adds a built-in feedback loop: after proposing each motion step, a learned collision detector checks if it is unsafe, and if so, the planner regenerates the motion by conditioning on its previous failed attempts. The planner learns this self-correction skill from expert driving data, then from simulated rollouts where it practices.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why planners get stuck with bad moves",
+    "paras": [
+      "An autonomous vehicle's planner works in steps: at each moment in time, it must propose the next small motion—which direction to steer, how hard to accelerate. Once proposed, the planner does not look back; it commits and moves on to the next step. If that motion was unsafe (heading toward another car, for example), there is no built-in way to take it back and try something different.",
+      "A naive approach: the planner learns from expert human drivers and simply copies their style. But human driving is context-sensitive; no two moments are identical. When the planner encounters a situation it has not seen before, it may propose an unsafe move. The human drivers in the training data never hit other cars, so the planner has learned only what safe moves look like, not how to recover when it makes a mistake. Once a collision-course motion is proposed, the planner has no mechanism to catch and correct it—the damage is done."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "The planner generates one motion step at a time; if it proposes an unsafe step, there is no way to revise it because the planner has no memory of what it just tried and rejected."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A planner is born",
+        "viz": "brain",
+        "caption": "A neural network planner learns from expert driving."
+      },
+      {
+        "title": "2. It proposes a motion token (proposed motion)",
+        "viz": "weights",
+        "viz_args": [["free", 30], ["free", 25], ["hot", 50], ["free", 35], ["free", 40], ["free", 28], ["free", 32], ["free", 38], ["free", 26], ["free", 42], ["free", 36], ["free", 29]],
+        "caption": "The planner outputs its next motion; one bar rises (chosen move)."
+      },
+      {
+        "title": "3. Collision critic checks: is this unsafe?",
+        "viz": "box",
+        "viz_args": "UNSAFE: Collision in 2.5 seconds",
+        "caption": "A learned collision detector predicts the motion will crash."
+      },
+      {
+        "title": "4. Memory of failed attempts (correction trace)",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["moved", 35], ["free", 30], ["free", 25], ["free", 40], ["free", 28], ["free", 32], ["free", 38], ["free", 26], ["free", 42], ["free", 36], ["free", 29]],
+        "caption": "The planner remembers the unsafe move and conditions on it."
+      },
+      {
+        "title": "5. New proposal avoids the unsafe path",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["moved", 35], ["free", 30], ["free", 25], ["warm", 48], ["free", 28], ["free", 32], ["free", 38], ["free", 26], ["free", 42], ["free", 36], ["free", 29]],
+        "caption": "A new, safer motion is generated using the failed trace."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Propose",
+        "text": "The planner outputs a motion token (a discrete motion step: direction and speed)."
+      },
+      {
+        "b": "Evaluate",
+        "text": "A learned collision critic scores whether this motion will crash within a short horizon."
+      },
+      {
+        "b": "Correct trace",
+        "text": "If unsafe, the planner saves this failed token in a sequence so it can condition the next attempt on what went wrong."
+      },
+      {
+        "b": "Regenerate",
+        "text": "The planner generates a new motion token, conditioning on the sequence of failures."
+      },
+      {
+        "b": "Repeat or accept",
+        "text": "If the new token is safe, accept and move to the next step; if unsafe, loop again."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper adds a correction trace: a growing sequence of failed motions (discrete motion steps: turns and accelerations) that the planner keeps and feeds back into itself. Instead of proposing once and committing, the planner now retains all unsafe proposals and conditions its next proposal on that history. This gives the planner an explicit signal: here is what you tried that did not work; now try something different."
+    ],
+    "object": "Correction trace (sequence of failed motions)"
+  },
+  "hidden": {
+    "h2": "The collision prediction signal",
+    "name": "Collision risk (critic's binary prediction)",
+    "paras": [
+      "The paper measures a single quantity: whether the proposed motion will cause a collision within a fixed short horizon (2.5 seconds). This is a binary signal—yes or no. The planner does not need to know how likely the collision is or when it will happen; it just needs a yes-no answer to trigger re-planning.",
+      "The collision detector is trained as a learned binary classifier. During training, the paper feeds it rollout trajectories generated by the planner itself and a pretrained world model (a separate network that predicts how other vehicles will react). The classifier learns to recognize motion patterns that lead to crashes. Once trained, this critic runs at every planning step and instantly signals whether the latest proposal is safe."
+    ],
+    "heat": {
+      "cells": [
+        ["Safe", 1, false],
+        ["Safe", 1, false],
+        ["Safe", 1, false],
+        ["Unsafe", 4, true],
+        ["Safe", 1, false],
+        ["Safe", 1, false],
+        ["Safe", 2, false],
+        ["Unsafe", 4, true],
+        ["Safe", 1, false],
+        ["Safe", 2, false],
+        ["Unsafe", 4, true],
+        ["Safe", 1, false]
+      ],
+      "caption": "Darker means the critic predicts a collision will occur. The planner samples motions until the critic says Safe."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The planner keeps trying motion tokens one at a time. Each attempt is scored by a learned safety checker. Unsafe ones are saved and used to guide the next attempt."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "A learned collision critic, trained on rollout trajectories from the policy and world model, predicts binary collision risk at each planning step, triggering re-sampling if unsafe."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why saving failures helps the planner learn safer moves",
+    "paras": [
+      "The core insight is that the planner learns by imitating expert driving data. In that data, every motion is safe. But when the planner faces a new situation, it may generate an unsafe motion—something the experts never did. Without feedback, the planner has no way to know its move was wrong. By adding a collision critic that signals safety, the planner now receives a correction signal: your proposal was bad. Then, by conditioning the next proposal on the sequence of failed attempts, the planner learns a new behavior: when you find yourself proposing unsafe motions of this kind, do something different.",
+      "Here is the causal chain: (1) The planner proposes a motion. (2) The collision critic evaluates it and predicts collision. (3) The planner observes the critic's warning and retains the failed motion in a sequence. (4) The planner generates a new motion, using a self-attention encoder (a neural network layer that weighs each failed motion based on how relevant it is to the current context) to process the correction trace, so it sees the pattern of its own mistakes. (5) Because the new proposal is conditioned on that history, it naturally diverges from the failure pattern. (6) Over many training iterations on rollouts, the planner learns: certain types of motions in this context lead to collisions; the correction trace is a signal to avoid those patterns and pick something safer."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Road, agents, ego trajectory history"
+        },
+        {
+          "t": "step",
+          "s": "Policy network proposes motion token",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Collision critic predicts: safe or unsafe?",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "If unsafe, add to correction trace; encode trace with self-attention",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Policy regenerates motion conditioned on trace",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Safe motion token accepted"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The correction loss during training",
+    "words": "For each unsafe motion in the correction trace, the planner minimizes the error between its corrected prediction and the expert trajectory. The total correction loss is the sum of cross-entropy errors for all rejected and re-proposed motions in that step.",
+    "equation": "L_correction = sum_c cross_entropy(policy_output_c, expert_token_c)",
+    "symbols": [
+      ["L_correction", "Total training loss for a single correction step"],
+      ["policy_output_c", "The planner's predicted motion at correction attempt c"],
+      ["expert_token_c", "The expert's actual motion from the training data"],
+      ["c", "Index of the correction attempt (1st, 2nd, 3rd proposal, etc.)"],
+      ["cross_entropy", "Measure of how wrong the prediction is (lower is better)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Step: ego needs to move forward or turn left.",
+        "1st attempt: planner proposes turn right (expert says turn left). Critique: unsafe. Loss = 2.1.",
+        "2nd attempt: planner proposes forward (expert says turn left). Critique: safe, but not what expert did. Loss = 0.8.",
+        "3rd attempt: planner proposes turn left (expert says turn left). Critique: safe and correct. Loss = 0.05.",
+        "Total correction loss = 2.1 + 0.8 + 0.05 = 2.95. The planner learns: in this context, try harder to match the expert's turn-left move."
+      ]
+    },
+    "note": "By forcing the planner to explain every failed motion and then propose better ones, the planner learns to recognize its own failure patterns and generate safer alternatives."
+  },
+  "bars": {
+    "h2": "Collision rate before and after self-correction",
+    "charts": [
+      {
+        "title": "Planner without self-correction",
+        "rows": [
+          ["Safe lanekeep", 84, "good"],
+          ["After collision episode", 12, "bad"],
+          ["Overall safety", 40, "bad"]
+        ],
+        "note": "Once the planner commits to a motion, unsafe decisions pile up into a crash."
+      },
+      {
+        "title": "CorrectionPlanner",
+        "rows": [
+          ["Safe lanekeep", 84, "good"],
+          ["After collision episode", 68, "good"],
+          ["Overall safety", 78, "good"]
+        ],
+        "note": "The planner catches and corrects unsafe steps before they cascade into a crash. The paper reports over 20 percent collision reduction on real datasets."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Critic misses a collision.",
+        "html": "If the learned collision detector fails—if it says a motion is safe when it will actually crash—the planner accepts the dangerous move. The detector must be trained on diverse, realistic rollouts to catch edge cases. If training data is narrow, the critic will miss rare scenarios."
+      },
+      {
+        "warn": true,
+        "b": "Correction trace grows infinitely.",
+        "html": "If the planner keeps rejecting every proposed motion, the correction trace becomes very long. A very long trace can slow down the planner or confuse the self-attention encoder. The paper likely enforces a maximum trace length or a safety criterion to halt the loop."
+      },
+      {
+        "warn": true,
+        "b": "Critic is too conservative.",
+        "html": "If the detector is overly cautious and flags safe moves as unsafe, the planner will reject too many good motions and waste time in the correction loop. This slows the planner and forces unnecessary re-sampling, hurting efficiency."
+      },
+      {
+        "b": "Critic and planner are well-matched.",
+        "html": "The method works well when the critic is calibrated correctly: catches real collisions and allows safe moves. The paper trains both on the same set of simulated rollouts, so they are likely to agree."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple 2D driving scenario: a single ego vehicle, one other car approaching head-on, a road to navigate. Run the planner without the correction loop (naive imitation): watch it generate a collision-course motion at least once. Then run the planner with the correction loop enabled: watch it propose, get flagged, and regenerate until it proposes a safe lane change or slowdown. Count the number of collision-avoiding interventions and measure the final collision rate."
+    ],
+    "metric_eq": "Collision rate = (number of rollouts ending in collision) / (total number of rollouts) × 100 percent",
+    "closing": "The demo should make it impossible to miss: the planner without correction fails; the planner with correction trace and critic catches itself and succeeds."
+  }
+}

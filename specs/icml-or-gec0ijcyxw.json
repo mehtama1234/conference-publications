@@ -1,0 +1,244 @@
+{
+  "slug": "icml-or-gec0ijcyxw",
+  "title": "DDP-WM: Disentangled Dynamics Prediction for Efficient World Models",
+  "family": "Robotics & Control",
+  "one_liner": "Split scene changes into two types: the few pixels affected by robot actions and the many unchanged background pixels, so you only compute expensive predictions for what matters.",
+  "lead": "Robots need world models (computer programs that predict what the camera will see after the robot moves). But the best current models use dense Transformers (neural networks that look at every pixel and compare it to every other pixel), which are slow. This paper shows that most of a scene stays still—only a small region changes when the robot acts. By predicting those two things separately with different-sized computations, the model runs 9 times faster while actually working better.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Dense models waste computation on still pixels",
+    "paras": [
+      "A robot planner needs to predict what the world will look like after it acts. The best way to do this is with a world model: a neural network trained on video that learns to predict the next camera frame given the current frame and an action. Model-predictive control (MPC) uses this repeatedly: try 100 different action sequences, simulate each one five steps into the future, pick the sequence that reaches the goal, and execute the first action.",
+      "Today's best world models use Transformers (a type of neural network) that work on pre-trained image features (already-extracted visual patterns from a big model like DINOv2). The problem: Transformers compute interactions between every pair of features in the image. If the image is 32 by 32 features, that is over one million pairs. For real-time robot control you need this to run in 50 milliseconds. It does not.",
+      "A naive alternative: predict the whole next frame pixel by pixel. But most pixels stay the same—the background does not move. You end up computing where the table will be (nowhere, it is still there) over and over. That is the waste."
+    ],
+    "callout": {
+      "b": "The method.",
+      "html": "Predict primary dynamics (where the robot caused motion) and background updates (slowly changing surroundings) with two separate, differently-sized neural networks, so the cheap one handles the 90% that barely changes."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Dense model sees everything",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["warm", 38], ["warm", 42], ["warm", 41], ["warm", 39], ["warm", 40], ["warm", 41], ["warm", 40], ["warm", 39], ["warm", 38], ["warm", 40], ["warm", 41]],
+        "caption": "All features compared to all others. Expensive Transformer computes 1M+ interactions."
+      },
+      {
+        "title": "2. Scene has two types of change",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["hot", 62], ["free", 5], ["free", 3], ["free", 4], ["free", 2], ["free", 3], ["free", 5], ["free", 2], ["free", 3], ["free", 4], ["free", 2]],
+        "caption": "Robot pushes one block (hot). Background table stays still (free). Waste: computing the background."
+      },
+      {
+        "title": "3. Split into two predictions",
+        "viz": "box",
+        "viz_args": "Path A: Fast sparse locator finds hot pixels | Path B: Cheap cross-attention updates free pixels",
+        "caption": "Predict where motion happens separately from smooth background."
+      },
+      {
+        "title": "4. Path A + Path B merge smoothly",
+        "viz": "weights",
+        "viz_args": [["moved", 62], ["moved", 65], ["warm", 3], ["warm", 2], ["warm", 4], ["warm", 3], ["warm", 2], ["warm", 5], ["warm", 3], ["warm", 4], ["warm", 2], ["warm", 3]],
+        "caption": "Primary dynamics predicted exactly. Background updated with low-rank math."
+      },
+      {
+        "title": "5. Payoff: faster and more accurate planning",
+        "viz": "plain",
+        "caption": "MPC samples 100 action sequences in 50ms instead of 5 seconds. Task success improves."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "History fusion",
+        "text": "One cross-attention layer folds the last 4 frames into a velocity and acceleration context."
+      },
+      {
+        "b": "Dynamic localization",
+        "text": "A small neural network identifies which image regions contain action-driven motion (the block, not the table)."
+      },
+      {
+        "b": "Sparse primary prediction",
+        "text": "A Transformer processes only the hot regions flagged by localization, predicting exact next-frame features there."
+      },
+      {
+        "b": "Low-rank background correction",
+        "text": "Cross-attention asymmetrically updates background features based on primary motion (one direction only, cheap)."
+      },
+      {
+        "b": "Planner samples action sequences",
+        "text": "MPC uses the merged prediction to score 100 action sequences in real time, picks the best one."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Instead of a dense Transformer that computes interactions between all image features, DDP-WM uses two separate prediction paths: a small, sparse Transformer for primary dynamics and a cheap cross-attention module for background. The routing decision (which pixels are primary vs. background) is learned by the network."
+    ],
+    "object": "prediction decomposition"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Sparsity of primary dynamics",
+    "name": "fraction of features driven by action",
+    "paras": [
+      "The paper measures how much of the image actually changes because of the robot's action versus how much is passive background evolution. In their experiments, on the Push-T task (a robot pushing a block on a table), only about 5–10% of the image features correspond to the moving block. The rest is the table, walls, lighting—things that barely move.",
+      "The paper finds this ratio by looking at prediction errors: where does the dense model (which sees the whole image) actually spend its computation? It shows that even though the dense Transformer computes over one million feature interactions, almost all those interactions involve pixels that will not change. The low-rank correction module (a mathematical trick that compresses those redundant updates) reveals this waste."
+    ],
+    "heat": {
+      "cells": [
+        ["block", 4, true],
+        ["hand", 4, true],
+        ["table", 1, false],
+        ["table", 1, false],
+        ["wall", 1, false],
+        ["floor", 1, false],
+        ["shadow", 2, false],
+        ["light", 1, false],
+        ["table", 1, false],
+        ["reflection", 1, false],
+        ["background", 1, false],
+        ["sky", 1, false]
+      ],
+      "caption": "Darker means region changes a lot when robot acts. Lighter means mostly static. Only 5-10% is truly dynamic."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper directly measures this: they show pictures of what each layer of a dense Transformer outputs, and observe that for 90 percent or more of the pixels, the feature barely changes from layer to layer. That is wasted computation."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper performs a PCA (principal component analysis, a dimensionality-reduction technique that finds the main directions of variation) on the internal feature evolution across Transformer layers. Most features vary along almost none of those main directions, indicating low rank, low information content, and thus good targets for compression."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Irreversible information flow",
+    "paras": [
+      "The core insight is that background updates must happen after primary dynamics are computed. When the robot pushes a block, the table behind the block shifts slightly in the image (parallax), the shadow moves, the reflection changes. But all of these are secondary consequences of the block moving. The background cannot move before the primary motion is resolved.",
+      "This causal ordering means you can use cheap, asymmetric math. Instead of a full Transformer (which lets every pixel influence every other pixel in both directions), the low-rank correction module uses a one-way cross-attention: primary features serve as queries, background features serve as keys and values. Information flows from primary toward background, never backward. Mathematically, this compresses the background update into a rank-r matrix (a small set of patterns) multiplied by the primary features. Computing it costs roughly r times W times H, instead of W squared times H squared, where W and H are image dimensions. For a 32 by 32 image, that is roughly 2,000 operations instead of 1 million.",
+      "The second payoff is a smooth path through the search space. When MPC tries different action sequences, it needs the loss function (a measure of distance from the goal) to have a smooth path—no cliffs, no random jumps. A full Transformer's search space is jagged because every pixel interacts with every other. By splitting, the primary prediction stays precise (smooth Transformer loss), and the background update is low-rank (smooth matrix math). The planner can confidently search."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current frame + action"
+        },
+        {
+          "t": "step",
+          "s": "History fusion: embed velocity context",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Dynamic localization: find primary pixels",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Sparse Transformer: predict primary features",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Low-rank background: cheap cross-attention update",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Next frame prediction (fast, accurate)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The low-rank correction formula",
+    "words": "background update equals primary features times a small matrix plus a bias",
+    "equation": "z_bg_next = z_bg + U V^T z_primary + b",
+    "symbols": [
+      ["z_bg", "background features at current time"],
+      ["z_bg_next", "background features at next time"],
+      ["z_primary", "primary features (motion region) after prediction"],
+      ["U", "a tall, thin matrix (small rank r)"],
+      ["V^T", "a short, wide matrix (r small dimensions)"],
+      ["b", "a bias vector"],
+      ["r", "the rank, typically 8 to 32 (much smaller than image width/height)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Example: background feature at pixel (5,5) starts at 0.8.",
+        "Primary features in the block region sum to 1.2 (after Transformer prediction).",
+        "Low-rank U has shape 100 × 10 (100 background features, rank 10).",
+        "V^T has shape 10 × 64 (rank 10, 64 primary features).",
+        "Compute: U @ V^T @ [1.2, 0.5, ...] = a 10-D intermediate, then multiply by 100-D U. Cost: 10 * 64 = 640 ops, not 100 * 64 = 6400.",
+        "Background feature becomes 0.8 + update_amount = 0.82 (slight shift due to block motion). Same update computed 1000x faster."
+      ]
+    },
+    "note": "The multiplication U @ V^T is never formed as a full matrix; instead, V^T @ z_primary computes first (cheap), then U @ result (cheap). This lazy multiplication is why it avoids forming the dense matrix."
+  },
+  "bars": {
+    "h2": "Efficiency and accuracy gains",
+    "charts": [
+      {
+        "title": "Dense Transformer (old)",
+        "rows": [
+          ["Time to run model 5 times", 4500, "bad"],
+          ["Planning success rate", 90, "bad"],
+          ["Floating-point operations per frame", 1000000, "bad"]
+        ],
+        "note": "Full Transformer predicts all pixels equally. Planning cannot sample enough action sequences in time."
+      },
+      {
+        "title": "DDP-WM (this paper)",
+        "rows": [
+          ["Time to run model 5 times", 500, "good"],
+          ["Planning success rate", 98, "good"],
+          ["Floating-point operations per frame", 120000, "good"]
+        ],
+        "note": "Disentangled prediction: sparse Transformer on 5 percent of pixels, low-rank background on the rest. Planning can sample 100 action sequences in 50ms and explore thoroughly."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Occlusions break the model.",
+        "html": "If a small object suddenly hides a large region (a hand covering a block), the localization network must learn that the covered region is now primary, not background. Early training can confuse these cases, causing inaccurate predictions."
+      },
+      {
+        "warn": true,
+        "b": "Rank too small loses structure.",
+        "html": "If the rank is set too low, the low-rank matrix cannot represent complex background changes like multiple objects casting shadows in different directions. Prediction accuracy degrades."
+      },
+      {
+        "warn": true,
+        "b": "Rank too large wastes speedup.",
+        "html": "If r equals the full image dimension, the low-rank correction becomes dense again, and the whole speedup is lost."
+      },
+      {
+        "b": "Learned balance works well.",
+        "html": "The paper trains the localization network, sparse Transformer, and low-rank module together (in stages), allowing them to learn what counts as primary versus background for each task. On Push-T, this naturally separates the block from the table."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A concrete demo would train DDP-WM on a single robot task (e.g., pushing a block to a goal on a table), then run model-predictive control: at each timestep, sample 100 random action sequences of length 5, simulate each one with the learned world model, score them by distance to the goal, and execute the top action. Plot the success rate (did the block reach the goal?) and the wall-clock time for the full episode."
+    ],
+    "metric_eq": "speedup = time_dense_model / time_ddp_wm; success = (goals reached / 100 episodes)",
+    "closing": "The demo must make it impossible to deny that the model runs at least 5 times faster because most of the image does not change, so expensive computations only run on the few pixels that do. And planning finds better solutions because it can now sample 100 action sequences instead of 20."
+  }
+}

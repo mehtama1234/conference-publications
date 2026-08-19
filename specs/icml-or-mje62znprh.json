@@ -1,0 +1,224 @@
+{
+  "slug": "icml-or-mje62znprh",
+  "title": "SpecPrune-VLA: Faster Robot Vision-Language-Action Models",
+  "family": "Robotics & Control",
+  "one_liner": "Speed up vision-language-action robot models by pruning unnecessary image tokens, using both temporal history from the last step and layer-wise importance scores.",
+  "lead": "Vision-language-action (VLA) models let robots reason about images and follow natural language instructions, but they are slow because they process too many image tokens (small pieces of an image, usually patches) at every inference step (when the finished model answers a new question). This paper observes that consecutive robot steps see nearly identical images, so token selection should reuse what mattered in the prior step (global context) while also checking what each layer actually pays attention to (local layer importance). The result: drop 30-40 percent of image tokens with negligible loss in task success.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Slow robots because of image overload",
+    "paras": [
+      "Vision-language-action (VLA) models read images and text instructions, then generate robot actions. The image encoder produces hundreds of tokens (one per image patch), and the model processes all of them through many layers. A naive approach would be: just keep all image tokens every time. This works but is slow—modern VLA inference can take 100+ milliseconds per action, which makes real robots sluggish.",
+      "A beginner might try removing tokens that look unimportant in the first layer only (e.g., 'boring' patches like walls or shadows get low attention scores early on). But this breaks fast: the first layer does not know the full context yet. By layer 20, that token might matter for reasoning about the task. Dropping it ruins the final answer, and success rate plummets by 20 percent or more. The core tension: early-layer signals are myopic, but computing all layers is expensive."
+    ],
+    "callout": {
+      "b": "The paper's move in one sentence.",
+      "html": "Reuse the global attention patterns from the last action step (which reveal what the whole model cares about) to identify safe tokens to drop, then add layer-by-layer importance scoring to make cuts finer and smarter."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The Robot Problem",
+        "viz": "brain",
+        "caption": "Robot sees image, generates action. But hundreds of image tokens clog every layer."
+      },
+      {
+        "title": "2. Local Pruning Fails",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["free", 20], ["hot", 65], ["free", 25], ["warm", 50], ["free", 30], ["warm", 55], ["free", 20], ["hot", 60], ["free", 28], ["hot", 68], ["free", 22]],
+        "caption": "Dropping tokens by early-layer attention alone misses deep-layer importance. Success: 75 percent."
+      },
+      {
+        "title": "3. Global History Guides",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["free", 20], ["moved", 65], ["free", 25], ["moved", 50], ["free", 30], ["moved", 55], ["free", 20], ["moved", 60], ["free", 28], ["hot", 68], ["free", 22]],
+        "caption": "Reuse which tokens mattered last step. Images are nearly identical, so prior attention is reliable."
+      },
+      {
+        "title": "4. Layer-Wise Ranking",
+        "viz": "box",
+        "viz_args": "Rank tokens per layer by attention + confidence score. Cut bottom 30-40 percent.",
+        "caption": "Each layer gets its own importance estimate, so cuts adapt to layer depth."
+      },
+      {
+        "title": "5. Result: Fast and Accurate",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["free", 20], ["moved", 65], ["free", 25], ["moved", 50], ["free", 30], ["moved", 55], ["free", 20], ["moved", 60], ["free", 28], ["moved", 68], ["free", 22]],
+        "caption": "Same 70 percent of tokens kept, fewer dropped, success stays at 95 percent. Speedup: 1.57x."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Grab attention from last step.",
+        "text": "Before running inference on the new image, check which image tokens the model paid attention to in the last action step (middle and deep layers, saved from before)."
+      },
+      {
+        "b": "Step 2: Mark safe tokens to keep.",
+        "text": "Take the top tokens by attention score from prior inference. These are globally important because the full model voted for them. Aim to keep 60-70 percent."
+      },
+      {
+        "b": "Step 3: Run inference on pruned input.",
+        "text": "Feed only the kept tokens through the model. It runs end to end, just with fewer image tokens at the start."
+      },
+      {
+        "b": "Step 4: Score tokens per layer.",
+        "text": "Inside the model, each layer ranks its input tokens by attention score and a layer-confidence estimate (based on how focused or dispersed the attention is). Layers that scatter attention widely are less confident and keep more tokens."
+      },
+      {
+        "b": "Step 5: Action-aware adjustment.",
+        "text": "Check the robot's end-effector speed. Coarse motion (reaching far) needs rough vision; fine motion (precise grasp) needs detail. Adjust pruning aggressiveness: be more aggressive for coarse actions, retain more tokens for fine ones."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper moves",
+    "paras": [
+      "The paper changes which image tokens are sent into the model at each layer. Instead of passing all image tokens every time, it selectively drops tokens that the prior step's global attention ranked as unimportant, and then uses per-layer importance scores to make further cuts."
+    ],
+    "object": "image tokens per layer"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Layer-wise token importance",
+    "name": "layer confidence score",
+    "paras": [
+      "The layer confidence score is a single number per layer that says how reliably that layer can identify truly important tokens. It is computed as one minus the average 'spread' of attention (entropy). High entropy means attention is dispersed across many tokens—the layer is confused and uncertain, so we keep more tokens to give it options. Low entropy means attention is focused on a few tokens—the layer is confident, so we can prune more aggressively.",
+      "The paper estimates this by looking at the attention matrix of each layer: how evenly or unevenly is attention distributed across image tokens? If the distribution is sharp (a few tokens get almost all the attention), entropy is low and confidence is high. If the distribution is flat (many tokens get similar attention), entropy is high and confidence is low. Mathematically it uses the entropy of the attention weights directly from the model during the prior inference step."
+    ],
+    "heat": {
+      "cells": [["Layer 1", 2, false], ["Layer 5", 2, false], ["Layer 10", 3, true], ["Layer 15", 4, true], ["Layer 20", 3, false], ["Layer 25", 2, false], ["Layer 30", 2, false], ["Layer 32", 4, true], ["Layer 15 deep", 3, true], ["Layer 32 deep", 4, true], ["Global reuse", 3, true], ["Pruning adapts", 3, true]],
+      "caption": "Darker means higher confidence. Deeper layers (15, 32) are confident, so global attention reuse is safe there."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Think of the layer confidence score as the layer's 'certainty meter.' It measures whether the layer has already zeroed in on a small set of important image tokens or is still scatter-brained. A high certainty meter means it is safe to drop tokens; a low meter means keep more because the layer needs options."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper defines layer confidence as one minus the average entropy of the layer's attention matrix. It is computed once per inference step and reused across the model because consecutive robot steps have nearly identical images."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why pruning by global history plus layer confidence works",
+    "paras": [
+      "The core insight is that robot tasks have temporal coherence: the images in consecutive steps are nearly identical (the robot is moving slightly). This means the set of image tokens that mattered for reasoning in step N-1 is likely to still matter in step N. Rather than re-analyze attention from scratch every step (which is expensive), reuse the prior step's deep-layer attention as a global prior. Deep layers have already integrated information from the whole model, so their attention reflects true task importance, not just low-level pattern matching.",
+      "Within each new step, layer-wise importance scoring adds a second lens. Early layers may not yet know what is important (they have only seen direct pixels). Middle layers start to form opinions. Deep layers have the full context. So a layer that is confident (focused attention) can prune aggressively; a layer that is uncertain (spread attention) should keep more tokens to give itself options. This two-level approach—global reuse plus layer-wise confidence—keeps the most-likely-important tokens while adapting to each layer's readiness to make cuts.",
+      "Finally, action awareness is a third lever: if the robot is doing coarse motion (reaching far), rough vision suffices, so prune more. If it is doing fine motion (inserting, grasping), keep more tokens for precision. This heuristic prevents the method from over-pruning during delicate maneuvers."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "new image, prior attention from last step"
+        },
+        {
+          "t": "step",
+          "s": "identify top-K tokens from prior deep-layer attention (global reuse)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "compute layer confidence score (attention entropy per layer)"
+        },
+        {
+          "t": "step",
+          "s": "for each layer, rank tokens by attention and confidence, prune bottom 30-40 percent"
+        },
+        {
+          "t": "step",
+          "s": "adjust aggressiveness by action type (end-effector speed)"
+        },
+        {
+          "t": "output",
+          "s": "inference runs 1.57x faster (from 140ms to 89ms) and success rate stays at 95%, because global reuse plus layer confidence preserves the most-important tokens"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation for layer-wise importance",
+    "words": "importance score for token i at layer l equals (rank-based weight) times (layer confidence score)",
+    "equation": "s(l)_i = omega(l)_rank,i * omega(l)_conf",
+    "symbols": [
+      ["s(l)_i", "importance score for token i at layer l"],
+      ["omega(l)_rank,i", "rank-based weight: token i's position in layer l's attention ranking (top tokens = high weight)"],
+      ["omega(l)_conf", "layer confidence score: one minus average entropy of layer l's attention (high confidence = can prune more)"],
+      ["l", "layer number (1 to 32)"],
+      ["i", "token index"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Layer 10 (early, uncertain): attention entropy = 0.8, so confidence = 1 - 0.8 = 0.2. Token 5 ranks 3rd out of 100 (weight = 0.8). Importance = 0.8 * 0.2 = 0.16.",
+        "Layer 25 (deep, confident): attention entropy = 0.2, so confidence = 1 - 0.2 = 0.8. Same token 5 ranks 3rd (weight = 0.8). Importance = 0.8 * 0.8 = 0.64.",
+        "Tokens with low importance are pruned. Layer 25 will cut token 5 only if its importance drops below the pruning threshold; layer 10 keeps it because overall importance is low (confidence is low, so the layer is uncertain and we give it the benefit of the doubt)."
+      ]
+    },
+    "note": "Confident layers (low entropy, high confidence score) can prune aggressively; uncertain layers keep more tokens because they have not yet committed to what matters."
+  },
+  "bars": {
+    "h2": "Speedup versus success rate",
+    "charts": [
+      {
+        "title": "Naive early-layer pruning",
+        "rows": [
+          ["Inference time before", 140, "bad"],
+          ["Inference time after pruning", 95, "good"],
+          ["Robot success rate before", 96, "good"],
+          ["Robot success rate after pruning", 75, "bad"]
+        ],
+        "note": "Dropping tokens by early-layer attention alone misses deep-layer importance, tanking success."
+      },
+      {
+        "title": "SpecPrune-VLA (global + layer confidence)",
+        "rows": [
+          ["Inference time before", 140, "bad"],
+          ["Inference time after pruning", 89, "good"],
+          ["Robot success rate before", 96, "good"],
+          ["Robot success rate after pruning", 95, "good"]
+        ],
+        "note": "Combining global attention reuse with layer-wise confidence keeps both speed and accuracy high."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Prior attention becomes stale.",
+        "html": "If the robot suddenly switches to a completely new scene or task, the prior step's attention is useless. The method assumes images change gradually. A teleport to a new room breaks this assumption."
+      },
+      {
+        "warn": true,
+        "b": "Layer confidence is misread.",
+        "html": "If the layer's attention entropy is accidentally high when tokens are truly important (model is just exploring options), the method will prune too aggressively and fail. Entropy and importance are correlated but not identical."
+      },
+      {
+        "warn": true,
+        "b": "Action speed classification is coarse.",
+        "html": "The method groups actions into coarse or fine based on end-effector speed. A slow approach followed by a rapid insertion might be misclassified, and pruning will be too aggressive at the wrong moment."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method assumes small temporal changes between steps and that layer entropy reliably reflects certainty. For smooth robotic tasks with continuous observation, these hold, and speedup works reliably."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple scene in a robot simulator (e.g., LIBERO, a standard benchmark for VLA models). Implement the two-level pruning: (1) static token selection using prior attention from a saved inference, (2) layer-wise dynamic pruning based on attention entropy and ranking. Run the same task twice: once with all tokens, once with pruned tokens. Measure wall-clock inference time per action and whether the robot reaches the goal."
+    ],
+    "metric_eq": "speedup = inference_time_all_tokens / inference_time_pruned_tokens; success_rate_drop = success_rate_all_tokens - success_rate_pruned_tokens",
+    "closing": "The demo must show that you can drop 30-40 percent of image tokens without losing success rate, while cutting inference time by 50 percent or more. If success drops by more than 2-3 percent, the layer confidence or action-aware scaling is miscalibrated."
+  }
+}

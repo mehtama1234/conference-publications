@@ -1,0 +1,256 @@
+{
+  "slug": "icml-or-usakwviwng",
+  "title": "SoMA: Real-to-Sim Neural Simulator for Soft-Body Manipulation",
+  "family": "Robotics & Control",
+  "one_liner": "A neural network learns to predict how cloth and deformable objects move by watching real robot videos, then simulates their motion for planning without hand-coded physics.",
+  "lead": "Real robots manipulate cloth, rubber, cables—soft, squishy things that bend and stretch in countless ways. Writing physics equations for these deformable objects is nearly impossible because every tug, fold, and collision changes the dynamics. This paper trains a neural simulator that watches real robot videos and learns the dynamics directly from pixels, without any hand-coded physics rules, enabling long-horizon cloth manipulation.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why cloth simulation is stuck",
+    "paras": [
+      "Simulating cloth in a physics engine requires you to manually set hundreds of parameters: how stretchy each fiber is, how much it resists bending, how heavy it is, how it slides on surfaces. Getting these numbers right from real video footage is extremely hard, and even small errors cause the simulated cloth to diverge wildly from reality after a few seconds.",
+      "A naive approach is to write down explicit physics equations, but cloth is nonlinear and contact-heavy—a small error in how you model friction or bend resistance balloons into instability. Another approach is to fit a simple learned model from video, but existing methods lose accuracy under occlusion (when the robot hand blocks the view) and drift over long sequences because they ignore the physical constraints that make motion coherent."
+    ],
+    "callout": {
+      "b": "The paper's move:",
+      "html": "Learn to predict cloth motion from robot video by representing the cloth as tiny learned particles, letting the robot actions directly drive forces on those particles, and training with both visual signals and physics consistency rules to stay accurate even when the robot occludes the view."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: real cloth, no equations",
+        "viz": "plain",
+        "caption": "A robot picks up cloth. We want a simulator that predicts what happens next frame."
+      },
+      {
+        "title": "2. Particles from pixels",
+        "viz": "weights",
+        "viz_args": [["free",20],["free",25],["free",30],["free",22],["free",28],["free",18]],
+        "caption": "Video gets turned into learned particles, each with position and mass."
+      },
+      {
+        "title": "3. Robot forces push particles",
+        "viz": "weights",
+        "viz_args": [["free",20],["moved",35],["moved",40],["free",22],["free",28],["moved",28]],
+        "caption": "Robot joint angles become forces. Particles move. Hidden particles stay smooth."
+      },
+      {
+        "title": "4. Two supervision paths",
+        "viz": "box",
+        "viz_args": "Visible: pixel loss | Occluded: physics consistency",
+        "caption": "Where we see cloth, match pixels. Where hidden, enforce physical rules."
+      },
+      {
+        "title": "5. Stable long-horizon folding",
+        "viz": "plain",
+        "caption": "Simulator predicts cloth trajectory over many steps without drift."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Watch video from three camera angles",
+        "text": "Capture robot manipulating cloth with synchronized RGB frames and joint angles."
+      },
+      {
+        "b": "Lift pixels into learned particles",
+        "text": "Use Gaussian splats (tiny spheres with learned position, size, and mass) to represent the cloth."
+      },
+      {
+        "b": "Forward pass: predict next state",
+        "text": "From past particle positions and robot actions, a graph neural network predicts new positions."
+      },
+      {
+        "b": "Dual loss: pixels plus physics",
+        "text": "For visible regions, match rendered pixels. For occluded regions, enforce that particles move smoothly."
+      },
+      {
+        "b": "Multi-scale training",
+        "text": "First train with large time jumps to capture long-range motion, then fine-tune with small time steps for detail."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the method changes",
+    "paras": [
+      "The paper modifies the dynamics model—the function that predicts how the cloth moves given the robot's actions. Instead of hand-coded physics or a bare regression from past states, it learns to propagate forces through a particle graph where the robot's joint angles become explicit forces applied to specific particles, coupled with visual and physical constraints."
+    ],
+    "object": "Dynamics prediction function"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: force-driven particle motion under occlusion",
+    "name": "Physics consistency under occlusion",
+    "paras": [
+      "The paper measures an invisible quantity: how well the particles obey physical smoothness even when the robot hand blocks the camera. Direct pixel supervision only works where the cloth is visible. For occluded particles (hidden behind the gripper), there is no image signal to learn from. The paper uses a smoothness penalty that penalizes sudden, jerky changes in particle velocity and acceleration—enforcing that the particle dynamics stay smooth and physically plausible even in the dark zones.",
+      "This is estimated by comparing consecutive particle velocities and requiring that they do not spike unnaturally. The paper enforces physics consistency this way. Without it, the model overfits to pixel matches in visible zones and produces jittery, unrealistic motion in occluded regions, causing long-horizon simulations to diverge."
+    ],
+    "heat": {
+      "cells": [
+        ["Visible cloth, good pixels",4,true],
+        ["Occluded by gripper",1,false],
+        ["Visible edge of cloth",3,false],
+        ["Occluded by contact",1,false],
+        ["Particle with smooth acceleration",4,true],
+        ["Particle with jitter",1,false],
+        ["Visible, tracked well",3,true],
+        ["Occluded, needs smoothness rule",2,true],
+        ["Free cloth moving",2,false],
+        ["Contact zone (occluded)",1,false],
+        ["Learned force magnitude",4,false],
+        ["Diverged particle trajectory",1,false]
+      ],
+      "caption": "Darker means more supervision signal. Highlight shows where physics consistency saves occluded regions."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When the robot hand blocks the camera, we cannot see the cloth to check if the simulation is correct. We force the simulator to keep the cloth moving smoothly and naturally instead of letting it jitter or tear."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Occlusion-aware blended supervision: image reconstruction loss for visible regions, physics consistency regularization (smoothness + acceleration bounds) for occluded splats."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why coupling forces, pixels, and smoothness works",
+    "paras": [
+      "The paper solves three linked problems. First, it needs an actionable representation: raw pixels are too high-dimensional and lossy. Gaussian splats (learned point clouds) are a middle ground—compact enough to optimize but expressive enough to capture the cloth shape. Second, it needs to couple robot control to cloth motion: instead of learning an opaque black-box dynamics function, the paper makes robot joint angles drive explicit forces on particles, creating a causal link that the network can learn efficiently. Third, it needs to handle occlusion: pixel supervision fails when the gripper blocks the view, but physics does not care about visibility. By splitting the loss into visible-region pixel matching and occluded-region smoothness enforcement, the model learns coherent dynamics everywhere.",
+      "Here is the causal chain. Robot kinematics (joint angles to end-effector pose) get converted to forces on nearby particles via a learnable force predictor. Those forces, plus interactions between particles (gravity, collisions), get integrated to move the particles. The network renders the particles as images and compares to real video where visible; for occluded zones, it checks that velocity and acceleration stay smooth. This dual supervision keeps the model from drifting or oscillating. Multi-resolution training (first coarse, then fine time steps) adds stability: the model learns long-range dynamics when temporal gaps are forgiving, then tightens up when gaps shrink, avoiding local optima."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Robot joint angles + video frames from three cameras"
+        },
+        {
+          "t": "step",
+          "s": "Lift pixels to Gaussian splat particle positions and masses",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Convert joint angles to forces via learnable predictor",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Graph neural network integrates forces to move particles",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Render new particle positions as images",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Visible regions: match pixel loss; occluded: enforce smooth velocity",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Accurate, stable long-horizon cloth trajectory"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The two-part loss function",
+    "words": "Total loss = pixel reconstruction error on visible cloth + physics smoothness penalty on occluded cloth",
+    "equation": "L_total = L_img_visible + lambda * L_physics_occluded\nL_img_visible = sum_t ||M_t * (I_t - I_hat_t)||^2\nL_physics_occluded = sum_t sum_i (1 - M_t[i]) * (||v_t[i] - v_{t-1}[i]|| + alpha * ||a_t[i]||)",
+    "symbols": [
+      ["L_total","sum of two losses, weights the importance of pixels vs smoothness"],
+      ["L_img_visible","reconstruction error (how far simulated pixels are from real)"],
+      ["L_physics_occluded","smoothness penalty (penalizes jittery velocity or acceleration)"],
+      ["I_t","real video frame at time t"],
+      ["I_hat_t","rendered frame from predicted particle positions"],
+      ["M_t","binary mask: 1 where cloth is visible, 0 where occluded"],
+      ["M_t * (I_t - I_hat_t)","pixel error only in visible regions"],
+      ["lambda","how strong to weight the physics smoothness (tuned hyperparameter)"],
+      ["v_t[i]","velocity of particle i at time t"],
+      ["a_t[i]","acceleration of particle i"],
+      ["alpha","weight on acceleration penalty"]
+    ],
+    "worked": {
+      "title": "Tiny worked example with three particles",
+      "lines": [
+        "Step 1: Pixel loss on visible cloth.",
+        "  Frame t: visible particles at pixels (100,50), (105,52), (110,48). Simulated: (101,49), (105,53), (112,47).",
+        "  Per-pixel error: distance from (101,49) to (100,50) is sqrt(1 squared plus 1 squared) = 1.4 for particle 1.",
+        "  Visible loss = 1.4 times 1.4 plus 1.0 times 1.0 plus 2.2 times 2.2 = 1.96 plus 1.0 plus 4.84 = 7.8.",
+        "",
+        "Step 2: Smoothness loss on occluded particles.",
+        "  Particle 4 is occluded (hidden by gripper). Its velocity at previous time: 2.0 pixels per frame. Its velocity now: 8.5 pixels per frame. That is a sudden jump.",
+        "  Velocity jump = 8.5 minus 2.0 = 6.5. Penalty = 0.5 times 6.5 times 6.5 = 0.5 times 42.25 = 21.1.",
+        "  This large penalty discourages jitter. Model learns to interpolate smoothly through occlusion.",
+        "",
+        "Step 3: Combined loss.",
+        "  Total loss = 7.8 (pixels) plus 21.1 (smoothness) = 28.9. Training adjusts weights to reduce both."
+      ]
+    },
+    "note": "The visibility mask acts as a switch: where cloth is visible, pixel error guides learning; where hidden, smoothness regularization takes over. This dual supervision is the core of stable long-horizon simulation."
+  },
+  "bars": {
+    "h2": "How the method compares to baselines",
+    "charts": [
+      {
+        "title": "Naive video regression (no physics, no occlusion handling)",
+        "rows": [
+          ["Accuracy on short clips (1–3 seconds)",78,"good"],
+          ["Accuracy on long clips (10+ seconds)",24,"bad"],
+          ["Accuracy when gripper occludes cloth",15,"bad"]
+        ],
+        "note": "Drifts and diverges quickly because no smoothness constraint."
+      },
+      {
+        "title": "SoMA (force-driven + physics consistency)",
+        "rows": [
+          ["Accuracy on short clips (1–3 seconds)",82,"good"],
+          ["Accuracy on long clips (10+ seconds)",71,"good"],
+          ["Accuracy when gripper occludes cloth",68,"good"]
+        ],
+        "note": "Stays stable because forces and smoothness regularization keep dynamics coherent even out of view."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Occlusion-only training breaks down.",
+        "html": "If you train with only pixel losses and remove the smoothness penalty, long-horizon predictions diverge because occluded regions have no supervision. The paper shows in ablation that removing physics consistency regularization degrades generalization by 10–15%."
+      },
+      {
+        "warn": true,
+        "b": "Temporal scale mismatch causes instability.",
+        "html": "If you try to learn all time steps at once with small gaps, the model overfits to short-term pixel noise and fails to capture long-range coherence. Training with large temporal strides first, then fine-tuning with small gaps, avoids this."
+      },
+      {
+        "warn": true,
+        "b": "Robot kinematics coupling is essential.",
+        "html": "Naive approaches that decouple the cloth shape from robot control (e.g., aligning cloth motion independently of robot pose) miss the physical constraint that the robot cannot move through the cloth. Explicit force prediction from joint angles fixes this."
+      },
+      {
+        "b": "Done right: forces + pixels + smoothness.",
+        "html": "When all three components are present (actionable force model, pixel supervision in visible zones, smoothness in occluded), the simulator learns coherent dynamics and generalizes to new cloth types and longer sequences without retraining."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small demo on a 30-frame real robot video of cloth manipulation (a fold, a stretch, or a drag). Train the neural simulator (with force prediction, dual loss, and multi-resolution schedule) on the first 20 frames, then predict frames 21–30. Measure how close the predicted trajectory stays to the ground-truth video by rendering both and comparing pixel-level error. Then mask out the gripper region in frames 15–20 (simulating heavy occlusion) and retrain without the smoothness penalty; observe the trajectory diverge in frames 21–30. Retrain with smoothness penalty restored; observe that the trajectory stays coherent even through the occluded region."
+    ],
+    "metric_eq": "Resimulation error = sum_t ||I_t_real - I_t_pred|| / frame_count. Lower is better. Expected: with smoothness, stays <5% over 30 frames. Without, jumps to >25% after frame 20 (divergence in occluded zone).",
+    "closing": "The demo proves that without physics consistency in occluded regions, the simulator drifts off the rails—and that smoothness regularization is not a nice-to-have but the reason long-horizon cloth folding stays on track."
+  }
+}
