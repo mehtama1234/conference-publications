@@ -1,0 +1,454 @@
+{
+ "slug": "iclr-or-oodfyykhf5",
+ "title": "Glance for Context: Learning When to Leverage LLMs for Node-Aware GNN-LLM Fusion",
+ "family": "Graph & Geometric Learning",
+ "one_liner": "Instead of asking an LLM for help on every node, learn which nodes really need it by measuring how much the LLM improves the prediction at each node.",
+ "lead": "Modern graph models (which predict labels for nodes in a network) often combine two different tools: a fast local model that looks at each node's immediate neighbors, and a language model that can read text attached to nodes and reason about it more carefully. Most systems ask the language model to help on every node, which is expensive and often wastes its power, because language models run slowly on every single node and the cost adds up, yet many nodes already have enough signal from their neighbors so the text reasoning adds nothing. This paper proposes GLANCE, which uses a lightweight gatekeeper to decide per-node whether the language model will actually improve the prediction, and only calls it when it matters, reducing cost without losing accuracy, because the gatekeeper learns to identify the exact nodes where text reasoning beats neighbor signals.",
+ "nav": [
+  [
+   "theme-graph-geometric-learning.html",
+   "Graph & Geometric Learning"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Uniform LLM help wastes time and misses patterns",
+  "paras": [
+   "A graph is a network where each node (point) connects to neighbors via edges (links). Each node has text attached to it. To predict a label for a node, a local model looks at the text and the neighbors' labels. A language model can read the text more carefully and often predicts better, because it has seen patterns in diverse text during training and can reason about subtle word meanings and context that a simple local model misses.",
+   "The naive approach: ask the language model for every node's prediction. This is expensive\u2014language models are slow and costly to run\u2014and in practice, not every node benefits. Some nodes live in densely connected clusters where neighbors already give the answer; for those nodes, the language model adds nothing because the neighbors already provide a strong, reliable signal. Other nodes sit in sparse, tangled regions where neighbors point in conflicting directions; there the language model shines, because the text contains the key clues and neighbors are unreliable. But a single overall accuracy number hides this split. Aggregate metrics (one number for the whole graph) obscure which nodes benefit and which do not, making it impossible to build a strategy, because you cannot tell from the final accuracy score which nodes improved and which stayed the same or got worse."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "GLANCE learns a small router that measures per-node whether the LLM will help, and only calls the LLM when the predicted gain is worth the cost, because the router learns to detect which nodes are in dense agreement clusters (where LLM adds nothing) versus tangled regions (where LLM shines)."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. A graph with text on nodes",
+    "viz": "box",
+    "viz_args": "Nodes (circles) + text labels + edges (links between neighbors)",
+    "caption": "Each node has neighbors and text. Predict the node's label."
+   },
+   {
+    "title": "2. The problem: LLM helps some nodes, hurts others",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "homophily-cluster",
+      80
+     ],
+     [
+      "lllm-helps",
+      10
+     ],
+     [
+      "heterophily-sparse",
+      20
+     ],
+     [
+      "llm-helps",
+      75
+     ],
+     [
+      "uniform-strategy",
+      40
+     ],
+     [
+      "waste",
+      50
+     ]
+    ],
+    "caption": "Green: LLM improves prediction. Red: wastes time with no gain."
+   },
+   {
+    "title": "3. Router learns per-node signals",
+    "viz": "box",
+    "viz_args": "Cheap signals (node text, neighbor patterns) \u2192 Router \u2192 Call LLM? Yes or No",
+    "caption": "Router is tiny; it runs on cheap local information and makes a binary choice."
+   },
+   {
+    "title": "4. Advantage-based training",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "query-gain",
+      70
+     ],
+     [
+      "query-cost",
+      30
+     ],
+     [
+      "no-query-baseline",
+      50
+     ],
+     [
+      "advantage",
+      60
+     ],
+     [
+      "router-learns",
+      75
+     ],
+     [
+      "selective-calls",
+      80
+     ]
+    ],
+    "caption": "Training compares: LLM result minus local result, weighted by how much better it is."
+   },
+   {
+    "title": "5. LLM called only when it helps",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "cost-saved",
+      65
+     ],
+     [
+      "accuracy-up",
+      85
+     ],
+     [
+      "heterophily-nodes",
+      80
+     ],
+     [
+      "overall-top-tier",
+      75
+     ],
+     [
+      "balance-win",
+      78
+     ],
+     [
+      "efficiency",
+      82
+     ]
+    ],
+    "caption": "Fewer LLM calls, higher accuracy on hard nodes, best overall balance."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "1. Local model predicts for every node",
+    "text": "The fast graph model (which reads neighbors and text) makes an initial prediction for every node."
+   },
+   {
+    "b": "2. Router scores each node",
+    "text": "A tiny neural network reads cheap local signals (node text, neighbor agreement, local structure) and outputs a score: how likely the LLM will help, because the router learns what patterns (e.g. neighbors disagreeing) predict LLM utility from training data."
+   },
+   {
+    "b": "3. Threshold decision",
+    "text": "If the router score is above a learned threshold, query the LLM. If not, keep the local prediction."
+   },
+   {
+    "b": "4. Compare outcomes",
+    "text": "For training, measure the actual improvement: did the LLM beat the local model? Use this as a learning signal."
+   },
+   {
+    "b": "5. Advantage-based update",
+    "text": "Train the router to predict high scores for nodes where the LLM outperforms the local model, low scores where it does not, because this teaches the router which local signals actually predict LLM value."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "GLANCE adds a lightweight router (a small neural network) that sits between the local graph model and the LLM. The router reads cheap signals\u2014node text features, the local model's confidence, disagreement among neighbors\u2014and outputs a single number for each node: the predicted benefit of calling the LLM. The system then makes a binary choice per-node: query the LLM or rely on the local model. What makes this work is training the router using actual measured improvements on a per-node basis, not just aggregate accuracy."
+  ],
+  "object": "Per-node routing decisions via a learned advantage signal"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: per-node advantage",
+  "name": "Advantage of calling the LLM on this node versus the local model alone",
+  "paras": [
+   "Advantage is the difference between two predictions: how much better does the LLM do than the local model on this specific node? If the LLM is correct and the local model is wrong, advantage is positive, because the LLM added real value. If both are right, advantage is zero (no gain from paying for the LLM call), because the local model already had it. If the LLM is wrong but the local model is right, advantage is negative (calling the LLM actually hurt), because paying the cost got you a worse answer.",
+   "GLANCE estimates this per-node by actually comparing the two systems: run the local model, run the LLM, measure the gap in their confidences, and check which prediction is correct. This ground-truth advantage is used to train the router. At test time, the router predicts advantage for unseen nodes using only cheap signals (no access to the true labels), and the prediction guides the routing decision."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "llm-wins",
+     4,
+     true
+    ],
+    [
+     "local-wins",
+     1,
+     false
+    ],
+    [
+     "both-right",
+     2,
+     false
+    ],
+    [
+     "both-wrong",
+     1,
+     false
+    ],
+    [
+     "heterophily-signal",
+     4,
+     true
+    ],
+    [
+     "homophily-signal",
+     1,
+     false
+    ],
+    [
+     "confidence-gap",
+     3,
+     false
+    ],
+    [
+     "neighbor-agreement",
+     2,
+     false
+    ],
+    [
+     "text-length",
+     1,
+     false
+    ],
+    [
+     "text-coherence",
+     3,
+     true
+    ],
+    [
+     "degree-centrality",
+     2,
+     false
+    ],
+    [
+     "router-score",
+     4,
+     true
+    ]
+   ],
+   "caption": "Darker cells show signals the router learns to use. Highlighted: LLM advantage (lower-left) and router confidence (lower-right)."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The router is trained to predict a high score whenever the LLM gets the answer right and the local model gets it wrong, and a low score whenever the local model is already correct."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The router is optimized using an advantage-based objective: the score is regressed to the difference in prediction confidence (or loss) between the two systems on labeled data, and this difference is used as a training signal."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why selective routing works",
+  "paras": [
+   "The local graph model excels when nodes cluster densely\u2014when a node's neighbors all agree, the neighbors' labels are a reliable signal because the cluster is internally consistent. It fails when a node sits in a sparse, tangled region where neighbors disagree or point in wrong directions, because the conflicting signals cancel out. The LLM, which reads text and can reason about context, is best at the messy cases the local model struggles on, because text often contains the answer when structure does not.",
+   "GLANCE captures this by learning a router that watches for signals of struggle: neighbors that disagree with each other, high entropy (confusion) in the local model's prediction, or text patterns the LLM is strong on. When the router detects these signals, it scores high and allows the LLM call, because these are the exact cases where the LLM outperforms the local model during training. When it detects dense agreement and low entropy (local model is confident), it scores low and skips the LLM, because agreement signals mean the local model is right and the LLM will not improve it. The training uses actual measured advantage (the ground truth of whether the LLM beat the local model) so the router learns exactly which signals predict utility, by fitting the router to output high scores whenever advantage is high. This means each LLM call is targeted at a node where it will actually help, instead of wasted on nodes the local model already handles correctly, because the routing decision is based on signals that correlate with LLM utility."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Node text, neighbor labels, local model confidence, neighbor disagreement"
+    },
+    {
+     "t": "step",
+     "s": "Router reads cheap local signals",
+     "hl": false
+    },
+    {
+     "t": "step",
+     "s": "Router outputs a score (high means LLM helps, low means LLM does not), learned by training on cases where LLM beat local model",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "If score high: query LLM. If score low: use local prediction.",
+     "hl": false
+    },
+    {
+     "t": "output",
+     "s": "Final prediction (LLM or local, depending on score)"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The training objective for the router",
+  "words": "The router is trained to predict a score that matches the actual advantage (LLM performance minus local performance) on a per-node basis during training.",
+  "equation": "advantage_i = (LLM_correct_i - local_correct_i) * confidence_scale | router_loss = mean((router_score_i - advantage_i)^2)",
+  "symbols": [
+   [
+    "router_score_i",
+    "predicted advantage for node i, output by the router"
+   ],
+   [
+    "advantage_i",
+    "true advantage for node i: 1 if LLM is correct and local is wrong, 0 if both agree, -1 if local right and LLM wrong"
+   ],
+   [
+    "LLM_correct_i",
+    "1 if LLM predicted the correct label for node i"
+   ],
+   [
+    "local_correct_i",
+    "1 if local model predicted the correct label for node i"
+   ],
+   [
+    "confidence_scale",
+    "optional scaling by how confident each model is"
+   ],
+   [
+    "router_loss",
+    "mean squared error between predicted and true advantage across all nodes"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Node 1: LLM correct (1), local wrong (0) \u2192 advantage = 1. Router predicts 0.8 \u2192 loss = (0.8 - 1)^2 = 0.04.",
+    "Node 2: Both correct \u2192 advantage = 0. Router predicts 0.1 \u2192 loss = (0.1 - 0)^2 = 0.01.",
+    "Node 3: Local correct (1), LLM wrong (0) \u2192 advantage = -1. Router predicts 0.2 \u2192 loss = (0.2 - (-1))^2 = 1.44.",
+    "Mean loss = (0.04 + 0.01 + 1.44) / 3 = 0.50. Training nudges the router to predict 0.8, 0.0, -1.0 respectively to lower this loss."
+   ]
+  },
+  "note": "The router learns to output high scores on heterophilous nodes (where neighbors disagree and the LLM shines) and low scores on homophilous nodes (where the local model is already confident)."
+ },
+ "bars": {
+  "h2": "Where the gains come from",
+  "charts": [
+   {
+    "title": "Uniform LLM strategy (ask every node)",
+    "rows": [
+     [
+      "Homophilous nodes before",
+      88,
+      "good"
+     ],
+     [
+      "Homophilous nodes after",
+      87,
+      "bad"
+     ],
+     [
+      "Heterophilous nodes before",
+      62,
+      "bad"
+     ],
+     [
+      "Heterophilous nodes after",
+      68,
+      "good"
+     ],
+     [
+      "Overall accuracy",
+      82,
+      "good"
+     ]
+    ],
+    "note": "LLM helps heterophilous nodes but slightly hurts the homophilous ones because the LLM overfits to text when neighbors already give a clear, correct answer and the text is either absent or misleading. Overall gain is small because the cost of running LLM on every node outweighs the small heterophilous gains."
+   },
+   {
+    "title": "GLANCE (selective routing)",
+    "rows": [
+     [
+      "Homophilous nodes before",
+      88,
+      "good"
+     ],
+     [
+      "Homophilous nodes after",
+      89,
+      "good"
+     ],
+     [
+      "Heterophilous nodes before",
+      62,
+      "bad"
+     ],
+     [
+      "Heterophilous nodes after",
+      73,
+      "good"
+     ],
+     [
+      "Overall accuracy",
+      86,
+      "good"
+     ]
+    ],
+    "note": "GLANCE avoids LLM calls on homophilous nodes (no harm, big cost savings) and targets heterophilous nodes (big gains). Overall accuracy is higher and more balanced."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Router overfits to the training set.",
+    "html": "If the router sees the same nodes at both training and test time, it can memorize which nodes benefit from the LLM on the training set and make good decisions on those nodes, but fail to generalize to new nodes with similar patterns. The learned scores must capture real signals (neighbor agreement, text patterns) that transfer to unseen nodes."
+   },
+   {
+    "warn": true,
+    "b": "LLM makes systematic errors the router cannot predict.",
+    "html": "If the LLM is biased (e.g., always favors a particular label), the advantage signal will be noisy or misleading. The router trains on measured advantage, so it can only learn what actually helps on the training set. On new data, the LLM's biases may shift."
+   },
+   {
+    "warn": true,
+    "b": "Router scores drift at test time.",
+    "html": "If the test graph has different structure than training (e.g., lower homophily, different text patterns), the cheap local signals the router reads may no longer predict LLM utility. The router was trained on advantage signals from a specific graph structure, so new structures may confound it."
+   },
+   {
+    "b": "Done right: use domain-aware signals.",
+    "html": "Train the router on signals that stay consistent across the dataset (e.g., structural heterophily, text complexity, model confidence spread) and evaluate it on held-out nodes with the same graph structure to ensure the learned pattern generalizes."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "A demo should take a real graph (e.g., a citation network or product graph where nodes are papers or products, edges are citations or links, and node text is abstracts or descriptions) and split it into training and test. Train a local graph model (e.g., a standard GNN) and a language model on the training nodes. Then train the router on the training set by running both models, measuring actual advantage per-node, and fitting the router to predict that advantage. Finally, run the router on test nodes, use its scores to decide whether to call the LLM, and measure the final accuracy and the number of LLM calls saved."
+  ],
+  "metric_eq": "Overall accuracy on test set | LLM calls per node | Balance score (accuracy gain on heterophilous nodes vs. cost on homophilous nodes)",
+  "closing": "The demo must show that GLANCE achieves similar or better overall accuracy than querying the LLM for every node, while making far fewer LLM calls, because selective routing preserves the gains on hard nodes and avoids the cost and harm on easy nodes. The key visual is accuracy on heterophilous nodes (where the LLM shines) should rise sharply, while accuracy on homophilous nodes (where the local model is fine) should stay flat or rise slightly\u2014the router learns not to waste LLM calls on nodes that are already being handled well."
+ }
+}

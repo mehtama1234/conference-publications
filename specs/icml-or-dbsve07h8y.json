@@ -1,0 +1,238 @@
+{
+  "slug": "icml-or-dbsve07h8y",
+  "title": "DiP-G: Discrete Prompting for Graph Neural Networks",
+  "family": "Graph & Geometric Learning",
+  "one_liner": "Instead of tuning continuous graph edges during training then hard-switching to discrete at test time, directly learn which edges to keep or add in the combinatorial space.",
+  "lead": "A pre-trained graph neural network is frozen in place. The normal way to adapt it to a new task is to fine-tune the weights, but prompting avoids that by tweaking the input graph instead—adding or removing edges. The catch: training uses smooth, continuous edge weights (fractional edges), but at test time you have to switch to hard discrete edges (whole or nothing). This mismatch hurts performance, especially with very few examples. DiP-G fixes this by working directly in the discrete space from the start—no continuous relaxation, no switching.",
+  "nav": [["theme-graph-geometric-learning.html", "Graph & Geometric Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The mismatch: training liquid, testing solid",
+    "paras": [
+      "When you have a frozen pre-trained graph neural network and only a handful of labeled examples of a new task, you cannot afford to retrain the whole network. Prompting sidesteps that: instead of changing the weights, you change the input graph—rewire which nodes connect to which.",
+      "Existing prompting methods optimize soft edge weights during training. An edge can be 0.3 or 0.7—a fraction. This is smooth and easy to optimize with gradients. But when the model runs on real data (inference), you cannot have fractional edges; you discretize: 0.3 becomes 0, 0.7 becomes 1. This discontinuity breaks the promise: the training objective looks at a different graph than the one the model actually uses. Few-shot learning suffers most because there are so few examples to begin with."
+    ],
+    "callout": {
+      "b": "The fix in one sentence.",
+      "html": "Learn the edge topology directly as discrete—one or zero, never in between—from the first gradient step."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Pre-trained frozen model",
+        "viz": "brain",
+        "caption": "Graph neural network, pre-trained on large unlabeled data."
+      },
+      {
+        "title": "2. Old way: continuous edges",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["free", 25], ["warm", 35], ["free", 20], ["warm", 45], ["free", 30], ["warm", 38], ["free", 22], ["warm", 42], ["free", 28], ["warm", 35], ["free", 26]],
+        "caption": "Training: edges are 0.3, 0.7—soft fractions."
+      },
+      {
+        "title": "3. Old way: then discretize",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["free", 0], ["moved", 50], ["free", 0], ["moved", 50], ["free", 0], ["moved", 50], ["free", 0], ["moved", 50], ["free", 0], ["moved", 50], ["free", 0]],
+        "caption": "Inference: snap to 0 or 1. Graph changes shape."
+      },
+      {
+        "title": "4. DiP-G: discrete from start",
+        "viz": "box",
+        "viz_args": "Gradient estimator picks discrete moves",
+        "caption": "No continuous phase. Edges are 0 or 1 at every step."
+      },
+      {
+        "title": "5. Train and test use same graph",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["free", 0], ["hot", 50], ["free", 0], ["hot", 50], ["free", 0], ["hot", 50], ["free", 0], ["hot", 50], ["free", 0], ["hot", 50], ["free", 0]],
+        "caption": "No mismatch. Prompt learned under true conditions."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Take local neighborhood",
+        "text": "For each node, gather all nearby nodes within a few hops (multi-hop local subgraph)."
+      },
+      {
+        "b": "Score candidate edges",
+        "text": "Compute a score for each possible edge: should it be 1 (present) or 0 (absent)?"
+      },
+      {
+        "b": "Apply Top-k selector",
+        "text": "Pick the top k scoring edges as hard 1s; the rest become 0s. Add a tiny random noise to break ties and smooth gradients."
+      },
+      {
+        "b": "Feed to frozen encoder",
+        "text": "Pass the discrete graph to the pre-trained GNN and compute loss on the labeled examples."
+      },
+      {
+        "b": "Update edge scores",
+        "text": "Use the gradient estimator to trace error backward through the Top-k selector; nudge scores toward better choices because higher scores on edges the model needs will help lower the loss."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What changes",
+    "paras": [
+      "The paper changes the graph topology—which edges are present in the input graph. Normally this edge set is fixed. Here, the prompting algorithm learns which edges to keep or add, and does so by learning edge scores and selecting the top ones."
+    ],
+    "object": "Edge set (topology)"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: gradient signal through discreteness",
+    "name": "Gradient flow through Top-k (discrete choice gradient)",
+    "paras": [
+      "The core hidden challenge is this: once you discretize (pick top k and set others to zero), the gradient of the loss with respect to your edge scores goes to zero everywhere—the function is piecewise constant. You cannot trace error backward to refine which edges to select. The paper estimates this \"gradient through the discrete choice\" using I-MLE, a clever math trick that perturbs the Top-k scores slightly, measures how the loss changes, and computes an unbiased gradient estimate. This signal tells the algorithm which edge scores to raise and which to lower.",
+      "DiP-G measures this hidden quantity implicitly by tracking how well the discrete prompts improve accuracy as you refine the edge scores—the signal that flows backward through the discretization."
+    ],
+    "heat": {
+      "cells": [
+        ["Edge 1", 4, true],
+        ["Edge 2", 1, false],
+        ["Edge 3", 3, true],
+        ["Edge 4", 2, false],
+        ["Edge 5", 4, true],
+        ["Edge 6", 1, false],
+        ["Edge 7", 3, true],
+        ["Edge 8", 2, false],
+        ["Edge 9", 4, true],
+        ["Edge 10", 1, false],
+        ["Edge 11", 3, false],
+        ["Edge 12", 2, false]
+      ],
+      "caption": "Darker edges score higher. Top-k selects the darkest ones; gradient flows back to refine scores."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The discrete choice gradient works like this: if you raise an edge score and that edge enters the Top-k, the model sees a different graph. If the loss drops, the gradient is positive, telling you that edge belongs in the prompt. If the loss stays high or rises, the gradient is negative, telling you to lower that score. The I-MLE method estimates this signal by perturbing each score by a small random amount and measuring how much the loss changes in response."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "I-MLE (Implicit Maximum Likelihood Estimation) computes an unbiased gradient estimator for sampling-based discrete optimization. DiP-G applies it to the Top-k selector to trace error backward through the hard discretization."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why discrete from the start works",
+    "paras": [
+      "Training on continuous edges and testing on discrete ones is a bait-and-switch: the loss surface the optimizer sees is smooth and continuous, but the deployed model runs on a jagged, discrete graph. The gap grows worse with fewer examples, because the model has less data to learn how to cope with the sudden change. By optimizing directly on discrete edges, every training step runs the same graph structure the model will see at test time. The optimization problem is harder (discrete moves, not smooth gradients), but the gradient estimator (I-MLE) navigates it by probing perturbations. This alignment—same graph during training and testing—eliminates the core mismatch.",
+      "A second gain: the discrete space is smaller and more stable. Continuous prompts can drift toward fractional nonsense (0.49 edges). Discrete prompts, once learned, are explicit and reproducible. The paper also uses an active-set screening rule to speed up backprop by focusing effort where it matters: it identifies which edges will never enter the top k and skips recomputing scores for them, reducing wasted computation."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Node features and edge candidates"
+        },
+        {
+          "t": "step",
+          "s": "Score each edge (numbers the algorithm learns)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Perturb scores and select top k",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Estimate gradient through Top-k (I-MLE)"
+        },
+        {
+          "t": "step",
+          "s": "Feed discrete graph to frozen GNN"
+        },
+        {
+          "t": "output",
+          "s": "Loss on task, backprop to edge scores"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The gradient estimator equation",
+    "words": "Loss equals the task loss, and the edge scores are refined by an unbiased gradient computed via I-MLE perturbation: measure how much the loss changes when you perturb each edge score by a random amount, then weight by the perturbation size to get a gradient direction.",
+    "equation": "gradient_i ≈ E[ (loss(Top-k(s + noise)) - loss(Top-k(s))) / noise_i ]",
+    "symbols": [
+      ["s", "score vector for all candidate edges"],
+      ["noise", "small random Gaussian perturbation"],
+      ["Top-k(s)", "binary vector: 1 for top k scores, 0 otherwise"],
+      ["E[·]", "average over multiple perturbation samples"],
+      ["gradient_i", "direction to raise or lower score i"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose 4 edges have scores [8, 3, 7, 2] and you select top-k=2.",
+        "Top-2 selects edges 0 and 2 (values 8 and 7). Loss on this graph: 0.45.",
+        "Perturb edge 1 score by +0.5: scores become [8, 3.5, 7, 2]. Top-2 now selects edges 0 and 2 (still). Loss: 0.45. Change: 0.",
+        "Perturb edge 1 score by +2: scores become [8, 5, 7, 2]. Top-2 selects edges 0 and 1. Loss: 0.52. Change: +0.07.",
+        "Average over many perturbations: gradient_1 ≈ +0.04. Edge 1's score should rise slightly.",
+        "The algorithm repeats this for all edges and updates scores to increase the gain."
+      ]
+    },
+    "note": "Perturbing a score and measuring the loss change gives an unbiased signal because you average over many random perturbations, which cancels out the noise. When you raise an edge score that the model actually needs, that edge enters the Top-k, the frozen GNN sees more of the right structure, and the loss drops. When you raise an edge score it does not need, there are other edges with higher scores that will rank higher in the Top-k, so this edge does not enter and the graph stays unchanged, leaving the loss high. So the direction of loss change tells you which edges matter: if loss drops, raise that score; if it stays high, lower it."
+  },
+  "bars": {
+    "h2": "Learning on few examples",
+    "charts": [
+      {
+        "title": "Continuous prompting (old)",
+        "rows": [
+          ["Few-shot train accuracy", 68, "good"],
+          ["Few-shot test accuracy", 52, "bad"],
+          ["Transfer to new task", 45, "bad"]
+        ],
+        "note": "Continuous edges during training do not match discrete edges at test. The gap grows larger with tiny datasets."
+      },
+      {
+        "title": "DiP-G (discrete from start)",
+        "rows": [
+          ["Few-shot train accuracy", 68, "good"],
+          ["Few-shot test accuracy", 66, "good"],
+          ["Transfer to new task", 63, "good"]
+        ],
+        "note": "No mismatch. The graph structure during training is exactly what the model will see at test. Accuracy stays honest."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Discrete gradient noise.",
+        "html": "The I-MLE gradient estimator is unbiased but noisy. With very few labeled examples, this noise can drown out the true signal, making the edge scores wander randomly. The paper mitigates this with multiple perturbation samples, but extremely few-shot regimes (single-digit examples) remain fragile."
+      },
+      {
+        "warn": true,
+        "b": "Topology sensitivity.",
+        "html": "The discrete graph structure is brittle: flipping one edge can change the model's output. Unlike continuous prompts that degrade smoothly, a discrete prompt is an on-off switch. If you pick the wrong edges, the loss jumps."
+      },
+      {
+        "warn": true,
+        "b": "Scalability to large neighborhoods.",
+        "html": "The method selects from candidate subgraphs to keep complexity down, but in highly connected graphs (social networks, dense knowledge bases), even local subgraphs are huge. The active-set screening helps, but the outer loop over multi-hop neighborhoods still scales poorly on power-law graphs because a handful of hub nodes connect to thousands of neighbors, and you still need to score each one."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use enough perturbation samples to smooth the gradient. Limit the candidate subgraph size (e.g., top 100 neighbors per node). Test on graphs where local neighborhoods are manageable in size."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small graph classification task: take a toy graph (e.g., 30 nodes, synthetic edges), pre-train a 2-layer GNN on random binary labels, freeze it, then use DiP-G to adapt it to 5 labeled examples of a new class (say, \"has a triangle motif vs. does not\"). Compare the learned discrete prompt to a continuous one."
+    ],
+    "metric_eq": "Alignment gap = train_accuracy_continuous - test_accuracy_continuous (the mismatch) vs. train_accuracy_discrete - test_accuracy_discrete (should be near zero).",
+    "closing": "Discrete prompting eliminates the train-test gap. Continuous prompts should score ~70 train, ~50 test (20-point gap). DiP-G should score ~65 train, ~63 test (2-point gap). The graph structure remains stable."
+  }
+}
