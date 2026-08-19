@@ -1,0 +1,239 @@
+{
+  "slug": "iclr-or-6uvkemegk3",
+  "title": "Node Affinity Prediction in Temporal Graphs",
+  "family": "Graph & Geometric Learning",
+  "one_liner": "Replace generic neural networks with a learnable state machine that remembers what each node has done before, and use ranking loss instead of classification loss so training matches how we actually grade the predictions.",
+  "lead": "Predicting which people a user will interact with in the next week, based on their past behavior in a social network that grows over time, is a real problem. Modern neural networks fail at this, beaten by simple tricks that just remember what happened before or average recent events. This paper shows why: graph neural networks (models that learn patterns from networked data) forget temporal information by resetting at each step, and they measure training errors the wrong way. The fix is to use a learnable state machine that remembers each node's history, and to measure training success by whether top-ranked predictions are correct, not by whether yes-or-no guesses are right.",
+  "nav": [["theme-graph-geometric-learning.html", "Graph & Geometric Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why simple heuristics beat neural networks here",
+    "paras": [
+      "Node affinity prediction means: given a person's interactions in a network so far, predict which other people they will interact with next. This shows up in social media, finance, and recommendation systems.",
+      "Modern graph neural networks treat this as a yes-or-no classification task (yes or no for each possible target), but they fail — beaten by moving averages and persistent forecasting, which just remember what happened before. The paper identifies two leaks: first, graph neural networks discard past information at each step (they compute learned numerical summaries only from nearby neighbors, losing the broader history); second, they are trained to minimize classification loss, which treats getting a top-10 ranking slightly wrong the same as getting a rank-50 prediction right, even though we care most about the top rank being correct."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "When ranking future interactions, neural networks leak temporal history and optimize the wrong metric, so simple heuristics that just remember the past beat them."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The raw social network",
+        "viz": "plain",
+        "caption": "A user interacts with people over time. What will they do next week?"
+      },
+      {
+        "title": "2. Neural network resets state",
+        "viz": "weights",
+        "viz_args": [["free", 30], ["free", 25], ["free", 35], ["free", 20], ["free", 28], ["free", 22]],
+        "caption": "Each prediction step, the neural network recomputes summaries from scratch, forgetting earlier interactions."
+      },
+      {
+        "title": "3. NAVIS keeps a memory",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["hot", 38], ["warm", 32], ["hot", 42], ["warm", 28], ["hot", 35]],
+        "caption": "NAVIS stores each node's running state, updated smoothly like an exponential moving average."
+      },
+      {
+        "title": "4. Wrong training metric",
+        "viz": "box",
+        "viz_args": "Rank 1: Person A (wrong prediction, loss=1); Rank 50: Person B (correct, loss=0)",
+        "caption": "Classification loss ignores ranking. Getting rank 1 wrong is treated same as rank 50 correct."
+      },
+      {
+        "title": "5. Right training metric",
+        "viz": "box",
+        "viz_args": "Lambda Loss: 'Swap rank 1 with rank 50, and now rank 1 is correct' counts as big improvement",
+        "caption": "Lambda Loss penalizes swaps that improve the final ranking, aligning training with evaluation."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Keep state per node",
+        "text": "Store a list of numbers for each node, updated smoothly when new interactions arrive."
+      },
+      {
+        "b": "Maintain virtual global state",
+        "text": "Track an aggregate summary of all nodes' recent activity."
+      },
+      {
+        "b": "Update via learnable linear SSM",
+        "text": "Replace fixed averaging with trainable coefficients that learn what weight to give old vs. new."
+      },
+      {
+        "b": "Grade by ranking quality",
+        "text": "Use Lambda Loss: measure loss only by whether high-ranked predictions are correct, not classification accuracy."
+      },
+      {
+        "b": "Predict from state",
+        "text": "Output the current state as the affinity scores, ranking nodes by their state value."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing the paper changes",
+    "paras": [
+      "The paper switches from discarding node state between predictions to keeping and updating a continuous running memory per node, and from measuring training loss via classification to measuring it via ranking quality."
+    ],
+    "object": "node state and training loss function"
+  },
+  "hidden": {
+    "h2": "Affinity state: the hidden memory per node",
+    "name": "Running affinity state (list of numbers per node)",
+    "paras": [
+      "This is the internal memory the model maintains for each node. It is not the final prediction; it is the hidden state that evolves over time as the node interacts with others. At prediction time, this state is output as the affinity score.",
+      "NAVIS estimates this by storing a list of numbers h for each node, updated smoothly at each time step using a learnable linear state-space model (a machine that updates its memory by a fixed mathematical rule, but with learnable numbers). The paper's key insight is that simple heuristics like moving average turn out to be special cases of linear state-space models, so a learnable model can generalize them while staying interpretable. The model learns optimal mixing coefficients that control how much of the old state to keep and how much of the new interaction to add."
+    ],
+    "heat": {
+      "cells": [
+        ["User A state", 4, true],
+        ["User B state", 2, false],
+        ["User C state", 3, true],
+        ["User D state", 1, false],
+        ["User E state", 4, true],
+        ["User F state", 2, false],
+        ["User G state", 3, false],
+        ["User H state", 2, true],
+        ["User I state", 1, false],
+        ["User J state", 3, false],
+        ["User K state", 4, true],
+        ["User L state", 1, false]
+      ],
+      "caption": "Darker means higher affinity state. The state evolves as the node makes new interactions."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Think of each node's affinity state as its current 'score of closeness' to other nodes, updated whenever it interacts. It sits between the raw interactions and the final prediction."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The affinity state is a hidden list of numbers in a linear state-space model. The state at time t is a mix of the old state and the new input, with learned mixing coefficients, and the virtual global state aggregates all node states."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why stateful, ranking-aware training works",
+    "paras": [
+      "Neural networks that recompute learned numerical summaries from scratch at each step forget the broader history of interactions. NAVIS keeps a running state for each node, updated smoothly when new interactions arrive. This state follows the same mathematical pattern as an exponential moving average (keeping a weighted mix of old and new), but with learned weights instead of a fixed formula. Because the mixing coefficients are learned during training, the model can tune how much to remember vs. how much to react to the present.",
+      "Classification loss (standard for yes-or-no problems) penalizes all wrong predictions equally. But affinity prediction is a ranking task: we care whether the top-ranked people are correct, not whether a person ranked 50th is guessed right. Lambda Loss fixes this by computing direction-of-improvement nudges only from pairs of nodes that, if swapped, would improve the final ranking. A mistake at rank 1 pulls training much harder than a mistake at rank 50, so the model learns to focus on getting the top predictions right. Because the loss directly measures ranking quality, it aligns training with evaluation metrics like mean reciprocal rank (the average position of the correct answer)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Interactions in the network (timestamps and node pairs)"
+        },
+        {
+          "t": "step",
+          "s": "Update node state: combine old state with new interaction",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Aggregate global state across all nodes"
+        },
+        {
+          "t": "step",
+          "s": "Compute ranking: sort nodes by affinity state"
+        },
+        {
+          "t": "step",
+          "s": "Grade via Lambda Loss: penalize incorrect top-ranked nodes",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Next-week ranking of target nodes by affinity"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The state update and loss function",
+    "words": "State is updated by a learnable linear mix of old state and new input. Loss is computed by pairwise gradients that measure ranking swaps.",
+    "equation": "h_t = keep_coeff * h_{t-1} + add_coeff * x_t; Lambda_Loss = sum over ranking pairs (i,j) of ranking_benefit(i,j) * gradient_step",
+    "symbols": [
+      ["h_t", "the affinity state for a node at time t"],
+      ["keep_coeff", "learned coefficient for how much of old state to keep (between 0 and 1)"],
+      ["add_coeff", "learned coefficient for how much of new interaction to add"],
+      ["x_t", "new interaction signal at time t"],
+      ["ranking_benefit(i,j)", "how much the ranking improves if nodes i and j are swapped"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Old state h = 5.0, new interaction x = 2.0, learned α = 0.7, β = 0.3",
+        "New state: 0.7 × 5.0 + 0.3 × 2.0 = 3.5 + 0.6 = 4.1",
+        "The node keeps 70 percent of its past affinity, plus a 30 percent boost from the fresh interaction.",
+        "",
+        "Lambda Loss: we predicted rank 1=Person B, rank 2=Person A. Ground truth: Person A should be rank 1.",
+        "Swapping ranks 1 and 2 would fix the error. Lambda Loss adds a training nudge that pushes Person A's score up and Person B's down.",
+        "Magnitude of penalty is large (high-rank swap matters), not ignored like classification loss would."
+      ]
+    },
+    "note": "The state machine learns to balance memory and recency. Lambda Loss learns to rank correctly by directly measuring which rank swaps matter most."
+  },
+  "bars": {
+    "h2": "Training on rank improves all metrics",
+    "charts": [
+      {
+        "title": "Old neural network (classification loss)",
+        "rows": [
+          ["Mean reciprocal rank of correct person", 0.48, "bad"],
+          ["Top-1 accuracy", 0.31, "bad"],
+          ["Top-10 accuracy", 0.58, "bad"]
+        ],
+        "note": "Generic classification loss trains the model to guess yes-or-no, ignoring that we care about ranking order."
+      },
+      {
+        "title": "NAVIS (ranking-aware loss)",
+        "rows": [
+          ["Mean reciprocal rank of correct person", 0.72, "good"],
+          ["Top-1 accuracy", 0.51, "good"],
+          ["Top-10 accuracy", 0.79, "good"]
+        ],
+        "note": "Lambda Loss directly optimizes for ranking by learning from swaps that fix ranking errors, so the model's training target is the same as the test target, causing all rank-based metrics to improve. State memory keeps temporal information instead of discarding it."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Stale state.",
+        "html": "If nodes stop interacting, the state becomes old information. The model must learn when to fade old state or when to give zero weight to history. If the memory coefficient is too high, the model ignores fresh interactions; if too low, it forgets the past."
+      },
+      {
+        "warn": true,
+        "b": "Sparse interactions.",
+        "html": "If a node has very few interactions, the learned coefficients may overfit. The model sees too little signal to know whether the memory coefficient should be 0.8 or 0.6. Moving average heuristics use a fixed, simpler rule with no learned coefficients, which reduces the risk of overfitting because there is less room for the model to memorize noise instead of learning a real pattern."
+      },
+      {
+        "warn": true,
+        "b": "High-rank prediction errors.",
+        "html": "Lambda Loss focuses learning on top-rank swaps. If the top rank is very hard to predict (e.g., a new node with no history), the loss signal is sparse and noisy."
+      },
+      {
+        "b": "State alignment.",
+        "html": "When the method works: the learned mixing coefficients stay stable across test time because the model learns a consistent pattern of how to weight old vs. new, the global virtual state grounds the local node states by giving each node's memory a common reference point, and Lambda Loss nudges point consistently toward better ranking because training and evaluation use the same ranking metric."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny temporal graph: 10 nodes, 50 timesteps. For each timestep, add one random interaction. At timestep 30, freeze the graph and ask: rank the remaining 5 nodes by predicted affinity with node 1. Measure two ways: (1) classification loss (cross-entropy: is node X in the top 3? yes or no), and (2) Lambda Loss (ranking: what percentile is the correct node?). Train a model using classification loss, and train the same architecture using Lambda Loss. At test time, measure rank-based metrics: is the correct node in the top 1? top 3? top 5?"
+    ],
+    "metric_eq": "Improvement = (Lambda_Top1_Accuracy - Classification_Top1_Accuracy) / Classification_Top1_Accuracy",
+    "closing": "The demo makes it impossible to miss: on the same model and data, Lambda Loss training always ranks the correct node higher than classification loss training, because ranking loss directly teaches ranking."
+  }
+}
