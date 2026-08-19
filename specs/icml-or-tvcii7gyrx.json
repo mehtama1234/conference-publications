@@ -1,0 +1,226 @@
+{
+  "slug": "icml-or-tvcii7gyrx",
+  "title": "Scaling Continual Learning to 300+ Tasks with Bi-Level Routing Mixture-of-Experts",
+  "family": "Continual Learning",
+  "one_liner": "When learning a long sequence of tasks, use two-level expert selection to pick the most relevant routers and experts at each network layer, so every layer can make smart decisions about which past knowledge to reuse.",
+  "lead": "Imagine teaching someone to recognize hundreds of new object categories, one batch at a time. The brain needs to remember old categories while learning new ones, and it needs to do this smartly—not by storing every old answer, but by developing a flexible way to pick and combine knowledge at each thinking step. CaRE does exactly that: it gives every layer in a neural network (a computer vision model) a two-stage gating mechanism. First, that layer picks which task-specific routers (decision-makers) are relevant to the input. Then, those routers each activate which expert sub-networks to use. The result: the model learns to handle 100 to 300+ tasks in sequence without forgetting.",
+  "nav": [["theme-representation-self-supervised-learning.html","Representation & Self-Supervised Learning"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Learning many tasks in sequence is fragile",
+    "paras": [
+      "Continual learning means teaching a model to recognize new object categories over time, one batch at a time. Each new batch of categories (a new 'task') brings fresh examples the model has never seen. If you naively train the model on new task data, it learns the new category names quickly, but it forgets how to recognize the old categories—the knowledge for task 1 gets overwritten. A beginner might try storing all old examples and rehearsing them, but that becomes impossible with hundreds of tasks.",
+      "The core problem: the model needs to update its internal numbers (weights) to learn new categories, but those same updates erase the patterns that recognized old categories. The layers deep inside the network cannot distinguish which updates help the new task versus which hurt the old ones, because there is no labeling or compartmentalization—every weight belongs to one big shared pool, so nudging a weight for new-task examples also changes how that weight responds to old-task examples. There is no way for each layer to say: 'For this image, I should use knowledge from tasks 3 and 7, not tasks 1 and 2.'"
+    ],
+    "callout": {
+      "b": "The paper's solution in one sentence.",
+      "html": "At every layer, dynamically pick the relevant task routers, then let those routers each pick their best experts, so the layer can retrieve customized, mixed knowledge for each new input."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "brain",
+        "caption": "Train on tasks one after another. Weights shift. Old knowledge gets overwritten."
+      },
+      {
+        "title": "2. Each layer is stuck",
+        "viz": "weights",
+        "viz_args": [["hot",80],["hot",75],["hot",70],["warm",50],["free",20],["free",15],["hot",85],["hot",72],["free",18],["free",12],["warm",45],["warm",48]],
+        "caption": "All layers update the same way. No layer remembers: which task is this input from?"
+      },
+      {
+        "title": "3. Add routers and experts",
+        "viz": "box",
+        "viz_args": "Layer picks Top-2 routers by input → Each router picks Top-3 experts → Mix outputs.",
+        "caption": "Two-stage selection: task routers first, then expert selection. Local decision per layer."
+      },
+      {
+        "title": "4. Smart routing at work",
+        "viz": "weights",
+        "viz_args": [["moved",85],["moved",72],["warm",50],["free",20],["free",15],["hot",80],["hot",75],["moved",70],["free",18],["warm",48],["moved",45],["warm",52]],
+        "caption": "Different layers activate different expert sets. Reuse relevant knowledge, protect old patterns."
+      },
+      {
+        "title": "5. Scales to 300+ tasks",
+        "viz": "plain",
+        "caption": "Each new task: activate task-specific router, add new experts. Old routers stay stable, guide new learning."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Feed input to class perceptrons",
+        "text": "At each layer, a class perceptron reads the image features and produces task guidance (confidence scores for which task this likely belongs to)."
+      },
+      {
+        "b": "Step 2: Select Top-M task routers",
+        "text": "Based on those scores, pick the most relevant task-specific routers, usually 2 or 3 of them. The latest task router is always included; older routers are picked by how well their routing patterns match the current input."
+      },
+      {
+        "b": "Step 3: Each router scores its experts",
+        "text": "Each selected router applies a linear scoring function to the input, producing a score for every expert sub-network. A normalization step (turning raw scores into fractions that sum to 1) converts those scores into selection probabilities."
+      },
+      {
+        "b": "Step 4: Select and aggregate top experts",
+        "text": "From each selected router, pick the top 3 or 4 experts with highest scores. Combine all these expert outputs with a learned weighted average, plus a shared expert that holds consolidated knowledge across all tasks."
+      },
+      {
+        "b": "Step 5: Layer outputs the mixed representation",
+        "text": "The layer now outputs a representation built from task-aware routers and expert-chosen knowledge, ready for the next layer. Repeat at every layer."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the structure at every layer of the neural network, from single rigid updates to dynamic two-stage expert selection. Instead of one path through shared weights, every layer now routes information through a set of task-specific routers and experts, with routing decisions made locally at that layer based on the current input."
+    ],
+    "object": "Layer routing patterns"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: task affinity at each layer",
+    "name": "Per-layer task affinity (how relevant each historical task is to the current input, measured at each layer)",
+    "paras": [
+      "The paper measures an implicit quantity: how relevant each old task is to understanding the current input, at each layer of the network. This is not directly stored; instead, it is encoded in the router selection scores (entropy values). High entropy in a router's gating scores means 'this router is uncertain which expert to pick,' signaling that task might not be very relevant. Low entropy means 'this router has a clear favorite,' signaling that task's knowledge fits the current input well.",
+      "The paper infers task affinity by having each class perceptron produce a confidence score for which task the image belongs to. The router selection stage then uses these scores to pick the most relevant routers dynamically. During training, the latest task router is always used (to force learning the new task), and entropy values determine which historical routers join it. When the finished model answers a new question (inference), all router selections are driven purely by these learned affinities."
+    ],
+    "heat": {
+      "cells": [["Router-1",1,false],["Router-2",4,true],["Router-3",3,false],["Router-4",2,false],["Router-5",4,true],["Router-6",1,false],["Router-7",2,false],["Router-8",3,true],["Router-9",1,false],["Router-10",4,true],["Router-11",2,false],["Router-12",3,false]],
+      "caption": "Darker routers are more relevant to this input. CaRE picks the darkest (Top-M) at each layer."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "For a given image, some of the old tasks' knowledge is more useful than others. CaRE learns which. At each layer, it computes how much each historical task's knowledge-bank (its router) would help right now by feeding the image features through each router's scoring function and checking which router's scores are most confident, then activates only the top candidates so that the layer can re-use only the expertise that fits."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The class perceptron at each layer produces semantic guidance (confidence over which task the input belongs to) used for dynamic router selection. Routers are ranked by entropy of their gating distributions; lower entropy routers (more committed to their expert choices) are selected first. A shared expert with consolidated knowledge from all tasks further enriches representations."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: layered, local routing sidesteps forgetting",
+    "paras": [
+      "The core insight is simple: if every layer can independently decide which old knowledge to reuse, then new task training only adjusts the routers and experts that are actually active for that task. Layers that do not select a router for the new task do not update that router's weights. This builds a natural boundary: the weights of Router-Task-1 only move when processing images that actually belong to tasks where Router-Task-1 is relevant. New task data that is unrelated stays separate.",
+      "By having two levels of selection (first pick task routers, then pick experts within those routers), the paper achieves a hierarchical form of knowledge compartmentalization. The task perceptron at each layer is trained to distinguish which task the image belongs to, using a KL divergence loss that copies the confidence from the final layer down to every intermediate layer. This ensures that even shallow layers develop task awareness. With this local decision-making at every layer, shallow layers (which otherwise produce less discriminative features) now have explicit guidance on which tasks to prepare for, so they learn more useful, task-specific representations from the start. As a result, interference between tasks is minimized: updating Router-Task-5's expert weights does not clobber Router-Task-3's knowledge, because they are separate components.",
+      "Scaling to 300+ tasks works because new tasks only add new routers and experts; old routers remain frozen during training on new tasks. The model does not need to remember all past data, and it does not need to solve a complex optimization across 300 tasks at once. Each new task is learned locally, using only the current task data and the dynamic selection of compatible historical routers."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Image to classify"
+        },
+        {
+          "t": "step",
+          "s": "Class perceptron scores task relevance",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Select Top-M task routers by entropy"
+        },
+        {
+          "t": "step",
+          "s": "Each router scores its experts"
+        },
+        {
+          "t": "step",
+          "s": "Select Top-K experts per router, aggregate",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Mixed representation from selected experts"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The routing equation",
+    "words": "For each layer, the output is a weighted sum of expert outputs, where the weights depend on which routers and experts were selected based on learned routing scores.",
+    "equation": "output_ℓ = sum over selected routers r of (weight_r * sum over selected experts e in r of (gating_r_e * expert_r_e(input_ℓ))) + weight_shared * shared_expert(input_ℓ)",
+    "symbols": [
+      ["output_ℓ","the layer's output representation"],
+      ["selected routers r","the Top-M routers chosen by task affinity"],
+      ["selected experts e in r","the Top-K experts chosen by router r's scores"],
+      ["gating_r_e","the normalized score (0 to 1) for expert e under router r"],
+      ["expert_r_e(input_ℓ)","the output of expert e when processing the layer's input"],
+      ["shared_expert(input_ℓ)","the shared expert that sees all tasks, providing base knowledge"],
+      ["weight_r, weight_shared","learned coefficients combining router and shared outputs"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose Top-M=2 routers selected (Router-Task-3 and Router-Task-5), Top-K=2 experts per router, shared expert always active.",
+        "Router-Task-3 scores its experts: [0.8, 0.2, 0.0, ...] → select experts 1,2 with gating [0.8, 0.2].",
+        "Router-Task-5 scores its experts: [0.1, 0.7, 0.2, ...] → select experts 2,3 with gating [0.7, 0.2].",
+        "Layer output = 0.6 * (0.8 * expert3_1 + 0.2 * expert3_2) + 0.4 * (0.7 * expert5_2 + 0.2 * expert5_3) + 0.15 * shared_expert.",
+        "The large 0.8 gating on expert3_1 means that expert is heavily trusted; the 0.2 gating on expert3_2 means it adds refinement; expert5_1 was not selected (too low score) so it does not contribute at all."
+      ]
+    },
+    "note": "Each layer independently selects which routers and experts to use, based on what the image looks like at that layer, so different images take different paths through the mixture-of-experts."
+  },
+  "bars": {
+    "h2": "Performance comparison",
+    "charts": [
+      {
+        "title": "Baseline (single shared model)",
+        "rows": [
+          ["Task 1 accuracy before",95,"good"],
+          ["Task 1 accuracy after learning Task 100",42,"bad"],
+          ["Task 100 accuracy",88,"good"]
+        ],
+        "note": "Learning the newest task destroys accuracy on the oldest. The model forgot."
+      },
+      {
+        "title": "CaRE with bi-level routing",
+        "rows": [
+          ["Task 1 accuracy before",95,"good"],
+          ["Task 1 accuracy after learning Task 100",89,"good"],
+          ["Task 100 accuracy",92,"good"]
+        ],
+        "note": "Task 1 knowledge is preserved because its router updates are isolated from Task 100's training. Both old and new tasks stay accurate."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Task affinity is wrong at a layer.",
+        "html": "If the class perceptron at a shallow layer produces poor task confidence scores, it selects the wrong historical routers. Then that layer mixes knowledge from unrelated tasks, and representations become noisy. The paper mitigates this with KL divergence loss: every layer's perceptron is trained to match the final layer's task confidence, so even shallow layers learn good task discrimination."
+      },
+      {
+        "warn": true,
+        "b": "Too many routers selected (M too large).",
+        "html": "If the Top-M selection threshold is high, many old task routers are activated for every input, defeating the purpose of isolation. Interference between tasks rises. The paper sets M small (e.g., 2 or 3) to keep only the most relevant routers active."
+      },
+      {
+        "warn": true,
+        "b": "New task data is mixed with old task training.",
+        "html": "If the latest task router is not always forced active during training, the model might ignore new task data and reuse old routers. The paper hardcodes: during training, the current-task router is always selected, ensuring new knowledge is learned and added to the network."
+      },
+      {
+        "b": "Done right: isolated, adaptive routing.",
+        "html": "When task affinity is learned well at each layer, routers stay isolated, and new task training does not overwrite old knowledge. The model scales to 300+ tasks because each task's knowledge lives in its own router and expert sub-networks, independent of other tasks."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small continual learning sandbox: a pre-trained image model (a model trained beforehand on many images, like a vision transformer—a deep network that reads an image as a series of small patches), a stream of 20 to 50 object categories arriving one by one, and a test set from each category. Implement CaRE's bi-level routing: at each layer, place a class perceptron, a set of task-specific routers (one per task), and a pool of experts. Train each new task using only current-task data (no replay from old tasks). At the end, test how well the model remembers old categories and learns new ones."
+    ],
+    "metric_eq": "Forgetting = (accuracy on task 1 before learning task 20) - (accuracy on task 1 after learning task 20). Lower is better. Also measure: (accuracy on task 20) to check learning is not sacrificed.",
+    "closing": "The demo must show that with bi-level routing, forgetting stays low (e.g., task 1 drops from 95% to 85%, not 95% to 40%) even as you add more and more tasks, and new-task accuracy remains high. Without routing, forgetting is catastrophic."
+  }
+}

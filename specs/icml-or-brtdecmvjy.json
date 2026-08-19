@@ -1,0 +1,238 @@
+{
+  "slug": "icml-or-brtdecmvjy",
+  "title": "GaRA: Graph-aware LoRA for LLM Graph Tasks",
+  "family": "Graph & Geometric Learning",
+  "one_liner": "Feed the whole graph into language model weight updates instead of squashing it into a sequence, and clamp the update size to keep the model learning rather than just overfitting.",
+  "lead": "Language models are great at understanding text, but they do not naturally read graphs. When you try to adapt them to graph problems, current methods squeeze the graph into a text sequence, losing the global shape and connections that make graphs useful. This paper proposes a new approach: instead of reshaping the graph for the model to read, you condition the model's weight updates on the entire graph structure. By injecting whole-graph information directly into how the model learns, and by preventing the optimizer from mindlessly amplifying those updates, the model learns to handle graphs it has never seen before.",
+  "nav": [["theme-graph-geometric-learning.html", "Graph & Geometric Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Language models struggle to see the whole graph",
+    "paras": [
+      "Language models read text one word at a time. When you want them to solve a graph problem—like predicting which nodes belong to which group—current methods convert the graph into a sequence of words describing the edges and nodes nearby. But this is like describing a mountain range by naming only the peaks you can see from one valley floor: you miss the overall shape.",
+      "A beginner might try: take the graph, extract a small neighborhood around the target node, describe it in words, and feed it to the language model. The model then learns to predict. But this throws away the rest of the graph—the global structure that shows which parts are tightly connected and which are isolated. The optimizer sees only local pieces and never learns to use the big picture."
+    ],
+    "callout": {
+      "b": "The move.",
+      "html": "Instead of converting the graph into words, embed the full graph structure into the model's weight updates—the small adjustments that make the model learn—and prevent the optimizer from gaming the system by just scaling up those updates."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: only nearby nodes",
+        "viz": "box",
+        "viz_args": "Distant nodes hidden; focus node sees only neighbors",
+        "caption": "Language model reads only the close-up subgraph, missing global structure."
+      },
+      {
+        "title": "2. Oversized updates that overfit",
+        "viz": "weights",
+        "viz_args": [["moved", 95], ["moved", 88], ["moved", 92], ["moved", 90], ["moved", 85]],
+        "caption": "Without brake, optimizer cranks up weight changes until they memorize noise."
+      },
+      {
+        "title": "3. GaRA: whole graph enters updates",
+        "viz": "box",
+        "viz_args": "Full graph structure -> weight deltas",
+        "caption": "Graph structure conditions the weight changes, encoding global shape."
+      },
+      {
+        "title": "4. Norm constraint stops amplification",
+        "viz": "weights",
+        "viz_args": [["moved", 40], ["moved", 42], ["moved", 38], ["moved", 41], ["moved", 39]],
+        "caption": "Norm tied to original weights; updates stay balanced, prevent memorization."
+      },
+      {
+        "title": "5. Model learns from new graphs",
+        "viz": "brain",
+        "caption": "Learned patterns transfer: model handles unseen graphs confidently."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Encode the full graph",
+        "text": "Pass the entire graph structure into a neural encoder that summarizes its global connectivity patterns."
+      },
+      {
+        "b": "Step 2: Generate low-rank weight updates",
+        "text": "Use that summary to produce two small tables of numbers that multiply together to create a task-specific weight adjustment, following the LoRA recipe."
+      },
+      {
+        "b": "Step 3: Constrain the update norm",
+        "text": "Fix the average magnitude of these generated updates to match the original weights, preventing the optimizer from scaling them arbitrarily."
+      },
+      {
+        "b": "Step 4: Train on multiple graphs",
+        "text": "Apply these conditioned updates during instruction tuning across several graph datasets with different sizes and structures."
+      },
+      {
+        "b": "Step 5: Transfer to new graphs",
+        "text": "At test time, generate the same kind of task-specific updates for a graph the model has never seen; the learned patterns generalize."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper moves: the weight updates",
+    "paras": [
+      "The paper changes the low-rank weight updates in LoRA (a technique for efficiently adapting large models). Instead of generating these updates as fixed random matrices, it generates them conditioned on the structure of the graph being solved. This means the same language model, paired with different graph updates for different graphs, learns to handle diverse graph problems without retraining from scratch."
+    ],
+    "object": "Low-rank weight updates"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: update norm",
+    "name": "Norm of generated weight updates",
+    "paras": [
+      "During training, the optimizer wants to reduce error. If it can freely scale up the weight updates (make them stronger), it will crank them up until they fit every example perfectly—even noise, because scaling updates is faster than learning real patterns. This is overfitting: the model memorizes instead of learning. The hidden quantity the paper tracks is the magnitude, or norm, of these generated weight updates—how large they are overall.",
+      "The paper estimates this by taking the average column norm (roughly, the typical row strength) of the generated low-rank matrices and constraining it to equal the norm of the original weights. If the generated updates try to grow beyond this, the optimizer is held back from pure memorization and forced to learn transferable patterns instead."
+    ],
+    "heat": {
+      "cells": [
+        ["Update 1 unconstrained", 4, true],
+        ["Update 2 unconstrained", 4, true],
+        ["Update 3 unconstrained", 4, true],
+        ["Update 1 constrained", 2, false],
+        ["Update 2 constrained", 2, false],
+        ["Update 3 constrained", 2, false],
+        ["Original weights", 2, false],
+        ["Original weights", 2, false],
+        ["Original weights", 2, false],
+        ["Generalization worse", 4, true],
+        ["With norm constraint", 1, false],
+        ["Memorization trap", 4, true]
+      ],
+      "caption": "Darker means larger norm. Unconstrained (left) grows unchecked. Constrained (middle) stays anchored to original weights."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The norm is how big the updates are. Without a cap, they grow and grow until they overfit. The paper caps them by anchoring to the original weight sizes, forcing real learning."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Constraining the average column norm of the generated low-rank table G to match that of the left table L prevents unconstrained norm amplification bias during optimization."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: whole-graph structure + norm guard",
+    "paras": [
+      "The core problem is that the optimizer has two ways to reduce training error: (1) learn useful patterns, or (2) amplify the weight updates so they fit every example, even noise. Without a guard, it takes path (2) because it is faster. GaRA fixes this in two steps.",
+      "First, it feeds the full graph structure into the update generation, not just nearby nodes. This means the weight deltas carry information about global connectivity—tight clusters, bridges between components, isolated nodes. The model can now learn to use that global view.",
+      "Second, it clamps the norm: the average size of the generated updates is locked to the original weights. Now the optimizer cannot just amplify updates to memorize. It must find real patterns that work with moderate-sized changes. These patterns, built on global graph structure, transfer to new graphs the model has never seen."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Full graph structure"
+        },
+        {
+          "t": "step",
+          "s": "Encode graph connectivity into summary (a list of numbers)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Generate low-rank weight updates from summary",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Constrain update norm to original weight norm",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Task-specific updates applied to language model"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The weight update equation",
+    "words": "New weight equals original weight plus a low-rank update, where the update is generated from the graph and its norm is clamped. The general form is: W_new = W_original + Delta_W, where Delta_W is low-rank (a product of two small matrices) conditioned on the graph, and the norm of Delta_W's columns is fixed to equal the norm of W_original's columns.",
+    "equation": "W = W_hat + Delta_W, where Delta_W = L * G, norm(G_cols) = norm(L_cols)",
+    "symbols": [
+      ["W", "the new weight matrix after update"],
+      ["W_hat", "the original language model weights"],
+      ["Delta_W", "the low-rank weight update generated for this graph"],
+      ["L", "the left matrix in the low-rank factorization"],
+      ["G", "the right matrix in the low-rank factorization, conditioned on graph structure"],
+      ["norm(G_cols)", "the average magnitude of columns in matrix G"],
+      ["norm(L_cols)", "the average magnitude of columns in matrix L"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the original weights (a table of numbers) have columns with average norm 10.",
+        "The optimizer generates a left table L with columns averaging norm 8.",
+        "Without constraint, it generates another table G with columns averaging norm 40 (trying to overfit).",
+        "With constraint: we rescale table G so its columns average norm 10, matching L.",
+        "Now the update has bounded strength; it is useful but not a memorization sledgehammer.",
+        "The model learns: use this update pattern on new graphs. Generalization works."
+      ]
+    },
+    "note": "Capping the norm prevents runaway amplification; the model must learn real graph patterns instead of just scaling up to memorize."
+  },
+  "bars": {
+    "h2": "Performance: old knowledge + new task",
+    "charts": [
+      {
+        "title": "Input-level injection (convert graph to words)",
+        "rows": [
+          ["Known graphs performance", 79, "good"],
+          ["Same knowledge on new graphs (transfer)", 52, "bad"],
+          ["New task performance", 71, "good"]
+        ],
+        "note": "Local subgraph encoding loses global structure; transfer fails because new graphs may have different topology."
+      },
+      {
+        "title": "GaRA (whole-graph weight injection)",
+        "rows": [
+          ["Known graphs performance", 79, "good"],
+          ["Same knowledge on new graphs (transfer)", 76, "good"],
+          ["New task performance", 81, "good"]
+        ],
+        "note": "Global graph structure flows into weight updates; patterns learned on one graph topology transfer to different unseen topologies."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Norm constraint too tight.",
+        "html": "If you fix the norm too strictly, the updates cannot grow at all, and the model cannot specialize to harder problems. The paper solves this by matching norm to the original weights, which scales naturally with problem difficulty."
+      },
+      {
+        "warn": true,
+        "b": "Encoder does not capture true graph structure.",
+        "html": "If the graph encoder is weak or biased toward certain edge patterns, the generated updates will be misinformed. The quality of the graph summary directly limits transferability."
+      },
+      {
+        "warn": true,
+        "b": "Target graph is radically different.",
+        "html": "If the test graph has a fundamentally different structure (e.g., a densely connected social network vs. a sparse tree), and the training graphs did not include such diversity, the learned patterns may not transfer."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method succeeds when three conditions hold: the graph encoder captures true structure so weight updates carry real signal; the norm constraint stops memorization without blocking adaptation; and training includes diverse graph shapes so patterns transfer."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a demo on a small graph classification task (e.g., predicting whether a graph is a tree, a cycle, or a random network). Start with a language model and two adaptation methods: (1) the naive approach (feed a subgraph description as text) and (2) GaRA (condition weight updates on the full graph structure and constrain the norm). Train both on a set of example graphs, then test on new graphs with the same topologies and new graphs with unseen topologies."
+    ],
+    "metric_eq": "Transfer accuracy = performance_on_unseen_graph_topology / performance_on_known_graph_topology. Higher is better. Naive method may drop from 85% accuracy to 55% on unseen topology; GaRA should stay at 78% to 82%.",
+    "closing": "The demo must show that constraining the update norm prevents overfitting (unseen graphs do not crash the model), and that whole-graph information in the updates makes patterns transfer across different graph structures."
+  }
+}

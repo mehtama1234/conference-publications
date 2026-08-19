@@ -1,0 +1,235 @@
+{
+ "slug": "iclr-or-obmcxesk5u",
+ "title": "Embedding-Based Context-Aware Reranker",
+ "family": "Representation & Self-Supervised Learning",
+ "one_liner": "When documents are chopped into passages, a hybrid attention mechanism lets the model reason across passages while staying lightweight.",
+ "lead": "Retrieval-augmented generation splits long documents into bite-sized passages for easier lookup. But this causes a problem: the model cannot read across passages to connect mentions of the same person, resolve ambiguous names, or gather evidence scattered across the text. EBCAR solves this by letting passages peek at each other during ranking, using a method that tracks which other passages matter for each one, and it costs much less than asking a large language model.",
+ "nav": [["theme-representation-self-supervised-learning.html","Representation & Self-Supervised Learning"]],
+ "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+ "problem": {
+  "h2": "Passages hide cross-passage patterns",
+  "paras": [
+   "A retrieval system ranks passages by treating each one alone. Query comes in, system finds ten passages, scores each passage against the query independently, returns the top ones. This works for simple facts (what year was the movie made) but fails when the answer lives across passages.",
+   "Real problems: resolving coreference (the pronoun he appears three passages later referring back to a person introduced early), disambiguating entities (Is this Jones the author or the character), aggregating scattered evidence (three passages each mention one piece of the plan). Each passage gets a score, but the score ignores what other passages say."
+  ],
+  "callout": {
+   "b": "The method.",
+   "html": "Use dense numerical summaries of passages and a two-part ranking system to let passages see each other at ranking time."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Document split into passages",
+    "viz": "box",
+    "viz_args": "Doc: [Pass A] [Pass B] [Pass C]",
+    "caption": "Long text chopped into chunks for fast lookup"
+   },
+   {
+    "title": "2. Naive ranker scores each passage alone",
+    "viz": "weights",
+    "viz_args": [["isolated",30],["isolated",45],["isolated",25],["isolated",40],["free",15]],
+    "caption": "Passage B ranks high but misses that C has the other half"
+   },
+   {
+    "title": "3. Hybrid attention: each passage peeks sideways",
+    "viz": "weights",
+    "viz_args": [["moved",50],["moved",68],["moved",62],["moved",55],["free",15]],
+    "caption": "Now passage B sees passage C is relevant too, recalibrates upward"
+   },
+   {
+    "title": "4. Shared full attention: global view",
+    "viz": "box",
+    "viz_args": "All passages see all others + query",
+    "caption": "Captures what matters across the whole set"
+   },
+   {
+    "title": "5. Reranked order respects cross-passage ties",
+    "viz": "weights",
+    "viz_args": [["moved",68],["moved",62],["moved",55],["moved",50],["free",15]],
+    "caption": "Passages that work together rise; lonely facts drop"
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Input: passages + query",
+    "text": "Take pre-computed dense embeddings (numerical summaries) of each passage and the query."
+   },
+   {
+    "b": "Attach structural hints",
+    "text": "Tag each passage with its document ID and position so the model knows which passages belong together, because passages from the same document often share context that matters for answering the query."
+   },
+   {
+    "b": "Global lookup layer",
+    "text": "Let all passages and the query see each other. Finds global patterns like this query and passage C are both about elections."
+   },
+   {
+    "b": "Local lookup layer",
+    "text": "Separately, let passages see only passages from their own document. Finds local coherence like these two passages are part of the same story."
+   },
+   {
+    "b": "Output: reranked scores",
+    "text": "Produce a new ranking that values passages by how well they work together and with the query."
+   }
+  ]
+ },
+ "object": {
+  "h2": "The passage scores change",
+  "paras": [
+   "The reranker takes the initial ranking (from the retriever) and produces a new ranking. The object is the ranking itself: which passages sit at the top. Most rerankers use a big language model to re-score each passage, which is slow. EBCAR re-scores passages using numerical summaries and lightweight math, which is much faster because the model does not have to read the full text of every passage."
+  ],
+  "object": "passage ranking"
+ },
+ "hidden": {
+  "h2": "The inter- and intra-document lookup patterns",
+  "name": "lookup patterns across documents",
+  "paras": [
+   "The hidden quantity is where each passage looks when making its ranking decision. Does a passage rely mostly on the query, or does it peek at its sibling passages too? Does it heavily look at passages from the same document or ignore them? These patterns are not explicitly measured in a single number but emerge from the hybrid lookup mechanism.",
+   "The paper captures this using two separate attention modules: shared full attention fires up high when passages from the same topic appear in different documents, and dedicated masked attention fires when the passage needs local coherence. Together, they reveal which patterns each passage uses to predict if it is relevant."
+  ],
+  "heat": {
+   "cells": [
+    ["Query to Pass A", 4, true],
+    ["Pass A to Pass B (same doc)", 4, true],
+    ["Pass A to Pass C (diff doc)", 2, false],
+    ["Query to Pass B", 3, false],
+    ["Pass B to Pass C (same doc)", 3, false],
+    ["Pass B to Pass A (diff doc)", 1, false],
+    ["Query to Pass C", 4, true],
+    ["Pass C to Pass A (same doc)", 2, false],
+    ["Pass C to Pass B (diff doc)", 3, false],
+    ["Pass A to Query", 2, false],
+    ["Pass B to Query", 2, false],
+    ["Pass C to Query", 3, false]
+   ],
+   "caption": "Darker means stronger attention. Full attention fires across documents when relevant. Masked attention fires within documents."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The model splits its thinking into two streams. One stream looks at everything globally and finds when a passage in document A explains something that matters for the query and a passage in document B. The other stream zooms into each document and finds when two passages in the same document reinforce each other. Both streams score each passage, and those scores determine the rank."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The attention mechanism is a hybrid of shared full attention (unrestricted multi-head attention across query and all passage embeddings) and dedicated masked attention (multi-head attention restricted to query and passages from the same document by document ID). Structural information is encoded via positional embeddings that include document identity and passage position."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why cross-passage attention fixes the ranking",
+  "paras": [
+   "When the model scores a passage without seeing others, it has to guess if the passage is important. It only sees the passage text and the query. But if passage A says he and passage C says John is a soldier, the model has no way to join those dots. The score for passage A stays low because the isolated embedding does not scream relevance.",
+   "Once passages can see each other, passage A changes its behavior. When computing its score, passage A attends to passage C and learns that the he it mentions is tied to a soldier and the mission. That connection raises passage A's score. Similarly, passage C learns that passage A introduced the character it relies on. Now both passages score higher because they find each other.",
+   "The key is the hybrid design. Shared full attention finds these inter-document connections fast without looking at every pair of words. It operates on already-computed embeddings, so it is lightweight. Masked attention separately ensures that passages from the same document reinforce each other, capturing local coherence. Together, the two streams ask: does this passage connect to the query globally (full attention), AND does it cohere with its neighbors locally (masked attention)?"
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Query + passage embeddings with structural tags"
+    },
+    {
+     "t": "step",
+     "s": "Shared full attention: passages see all others globally",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Masked attention: passages see only same-document neighbors"
+    },
+    {
+     "t": "step",
+     "s": "Combine both attention streams into new scores"
+    },
+    {
+     "t": "output",
+     "s": "Reranked passage list, coherent and query-aligned"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The scoring formula",
+  "words": "For each passage, the full attention score is query times all passages; the masked score is query times passages from the same document. The final score blends both via transformer layers.",
+  "equation": "score_i = TransformerLayers([query_emb, pass_1_emb + doc_structure, ..., pass_N_emb + doc_structure])[i]",
+  "symbols": [
+   ["query_emb", "numerical summary of the query"],
+   ["pass_i_emb", "numerical summary of passage i"],
+   ["doc_structure", "encoding of document ID and passage position"],
+   ["TransformerLayers", "stack of encoder layers with hybrid attention"],
+   ["score_i", "final relevance score for passage i"]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose passage A has embedding [0.1, 0.5, 0.3] and passage B has embedding [0.2, 0.4, 0.1].",
+    "Query embedding is [0.3, 0.5, 0.2]. Both passages are from different documents.",
+    "Shared full attention compares A to the query and to B: overlap = 0.1*0.3 + 0.5*0.5 + 0.3*0.2 = 0.34 to query, 0.1*0.2 + 0.5*0.4 + 0.3*0.1 = 0.25 to B.",
+    "Masked attention prevents A from seeing B (different documents), so it only scores against query: 0.34.",
+    "Blending both: shared attention encourages A to attend to B (cross-passage link); masked attention keeps A focused on query.",
+    "Stacked transformer encoder layers (a sequence of mathematical operations) learn to weight both signals. Final score for A rises from 0.34 to 0.42 because the model learns that B is relevant and A makes more sense in that context."
+   ]
+  },
+  "note": "The transformer layers learn to combine full and masked attention in a way that surfaces passages that work together with the query, not just passages that match the query in isolation."
+ },
+ "bars": {
+  "h2": "Ranking accuracy on tasks needing cross-passage reasoning",
+  "charts": [
+   {
+    "title": "Naive reranker (scores passages alone)",
+    "rows": [
+     ["Coreference resolution task", 62, "mediocre"],
+     ["Entity disambiguation task", 58, "mediocre"],
+     ["Evidence aggregation task", 60, "mediocre"]
+    ],
+    "note": "Each passage scored independently; coreference across passages is invisible to the ranker."
+   },
+   {
+    "title": "EBCAR with hybrid attention",
+    "rows": [
+     ["Coreference resolution task", 81, "good"],
+     ["Entity disambiguation task", 79, "good"],
+     ["Evidence aggregation task", 82, "good"]
+    ],
+    "note": "Passages see each other during ranking; coreference and scattered evidence are now visible."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Passages from different sources hallucinate connections.",
+    "html": "If two passages accidentally mention the same name but mean different people (Smith the actor and Smith the senator), hybrid attention might incorrectly boost both because they seem to refer to the same entity. Requires fine-grained entity markers to disambiguate."
+   },
+   {
+    "warn": true,
+    "b": "Masked attention only helps if passages are correctly grouped by document.",
+    "html": "If passage boundaries cross document boundaries or the document ID is wrong, masked attention misses the true local coherence and the rank stays poor."
+   },
+   {
+    "warn": true,
+    "b": "Long sequences of passages exhaust the shared attention computation.",
+    "html": "If there are hundreds of passages, the shared attention (all-pairs attention) becomes expensive. The method stays lightweight versus LLMs but still costs more than single-passage rankers."
+   },
+   {
+    "b": "Done right: passages are properly chunked, entity markers are clear, and sequence length is manageable.",
+    "html": "EBCAR works best in systems where passage structure mirrors document structure and retrieved sets are moderate in size (a few dozen passages, not thousands)."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a mock retriever that returns ten passages from three documents. Inject a query that requires reading across documents to answer correctly, like a coreference question. Rank the passages using a naive method (embedding dot-product with query alone) and using EBCAR (embedding dot-product plus hybrid attention). Measure how often the correct passage set (the one that resolves the coreference) lands in the top three."
+  ],
+  "metric_eq": "accuracy = (rank of correct passage pair < 3) / number of test questions",
+  "closing": "The demo must make it impossible to miss: hybrid attention recovers passages that work together; naive ranking buries them."
+ }
+}

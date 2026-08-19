@@ -1,0 +1,240 @@
+{
+  "slug": "icml-or-410yetdda7",
+  "title": "NetDiff: Generating Mobile Networks with Directional Links",
+  "family": "Graph & Geometric Learning",
+  "one_liner": "A diffusion model that generates wireless network topologies where every link is directional and every node knows when to transmit versus receive, ensuring global consistency across interference and antenna constraints.",
+  "lead": "Imagine placing wireless nodes in the sky and asking: which pairs should talk to each other? Which way should each antenna point? And which time slot does each node transmit in? A naive approach would assign links and antenna directions locally, node-by-node, but this breaks because antennas interfere with each other globally and nodes cannot both transmit and receive at the same time. NetDiff solves this by learning from examples of valid topologies and using a diffusion model (a process that starts with pure noise and gradually denoises it into a real network diagram) with a special attention mechanism that repeatedly checks the global picture—total link count, sector usage, node pairs—to keep all constraints satisfied.",
+  "nav": [["theme-graph-geometric-learning.html", "Graph & Geometric Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why local decisions fail for wireless networks",
+    "paras": [
+      "Wireless networks with directional antennas can send data far but break easily under constraints. Each node can point its antenna in one of several directions (called a sector). Two nodes can only communicate if their antennas point at each other, they are within range, and their signals do not interfere with nearby transmissions. Also, a node cannot send and receive at the exact same time—it needs a turn. So you must split all nodes into two groups: one that transmits in time slot 1 and receives in slot 2, and vice versa.",
+      "If you assign links one node at a time (greedy, locally), you hit a wall: adding a link between two nodes in sector 3 might block a third node from using sector 3 because of interference. Or you assign transmit/receive duties without checking whether the final link pattern is even possible. Fixing this after the fact is expensive. A human planner with full knowledge of all constraints can find good topologies, but this planning is too slow for flying drones that move and need to reconfigure their network in real time."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Directional wireless links have global constraints (interference, range, antenna sectors, transmit-receive parity) that interact everywhere, so local decisions fail and full optimization is too slow."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The naive attempt",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["free", 15], ["hot", 25], ["free", 22], ["free", 18], ["warm", 12], ["free", 16], ["free", 19], ["free", 14], ["free", 21], ["free", 17], ["free", 23]],
+        "caption": "Assign transmit-receive slots and antenna directions locally per node. Seems simple."
+      },
+      {
+        "title": "2. Global constraints bite",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["free", 15], ["hot", 25], ["free", 22], ["moved", 18], ["warm", 12], ["moved", 16], ["free", 19], ["free", 14], ["moved", 21], ["free", 17], ["free", 23]],
+        "caption": "But interference and antenna conflicts cascade: three nodes collide in the same sector."
+      },
+      {
+        "title": "3. Diffusion starts noisy",
+        "viz": "box",
+        "viz_args": "Noise: random links everywhere",
+        "caption": "Start with a topology where every link is random noise. Nothing makes sense yet."
+      },
+      {
+        "title": "4. ACAM tokens check globally",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["hot", 35], ["warm", 28], ["hot", 33], ["warm", 31], ["hot", 36], ["warm", 29], ["hot", 34], ["warm", 32], ["hot", 37], ["warm", 30], ["warm", 31]],
+        "caption": "Special tokens compute: total link count, sectors used, parity assignments. Enforce all constraints at once."
+      },
+      {
+        "title": "5. Denoising converges to valid topology",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["free", 25], ["hot", 70], ["free", 18], ["hot", 68], ["warm", 40], ["hot", 72], ["warm", 38], ["hot", 66], ["free", 22], ["hot", 69], ["warm", 42]],
+        "caption": "After many steps, noise is replaced by a real topology where all constraints fit together."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Input: node positions",
+        "text": "You tell the model: here are five drones at these coordinates."
+      },
+      {
+        "b": "Start noisy",
+        "text": "The model generates a random edge list and random transmit/receive parity assignments (garbage)."
+      },
+      {
+        "b": "Denoise iteratively",
+        "text": "In each step, the model looks at the current noisy guess and outputs a slightly cleaner version."
+      },
+      {
+        "b": "Global tokens enforce constraints",
+        "text": "Special tokens recount: How many edges are active? How many nodes are in each antenna sector? Is parity satisfied? If not, nudge the edges toward valid assignments."
+      },
+      {
+        "b": "Output valid topology",
+        "text": "After 15 steps, the model has converged to a topology where all interference, range, and parity constraints are satisfied."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing the paper changes",
+    "paras": [
+      "Most diffusion models for graphs focus on local operations: Does node A connect to node B? Does edge X have color red or blue? NetDiff adds global attention tokens that look at the entire current topology and report aggregate counts: total edges, sector occupancy, parity balance. By making these counts explicit and then steering the denoising process to match target counts, the model learns to satisfy constraints that span the whole network."
+    ],
+    "object": "Global attention tokens (ACAM)"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Global cardinality signals",
+    "name": "Cardinality (edge counts, sector occupancy, parity balance)",
+    "paras": [
+      "Cardinality simply means: How many of something do we have right now? In a network, it is the total number of active links, the count of antennas pointing in each sector, and the balance of nodes assigned to transmit versus receive. A standard diffusion model denoises edges independently and asks only local questions: 'Is this one edge likely?' over and over, without tracking the total. NetDiff explicitly computes cardinality: 'We have 22 active links and 8 nodes in sector 3.' This aggregate signal is fed back to the model via special attention tokens (called Absolute Cross-Attentive Modulation or ACAM tokens).",
+      "These tokens bypass the normal softmax normalization (which would dilute the signal) and instead directly inject the cardinality counts into the model's decision-making. This way, when the model is asked 'Should this link exist?', it can reason: 'We already have 22 links and the target is 20, so I should say no more often than yes right now.' The paper measures cardinality by summing edge indicators and sector assignments."
+    ],
+    "heat": {
+      "cells": [
+        ["Total edges", 3, true],
+        ["Sector 1 count", 2, false],
+        ["Sector 2 count", 4, true],
+        ["Sector 3 count", 1, false],
+        ["Transmit nodes", 3, false],
+        ["Receive nodes", 4, true],
+        ["Active links", 3, false],
+        ["Interference risk", 2, true],
+        ["Parity valid", 4, false],
+        ["Density check", 2, false],
+        ["Range check", 3, true],
+        ["Coherence signal", 4, false]
+      ],
+      "caption": "Darker means more important cardinality being tracked. Highlights show which constraints are global (parity, density, interference affect the whole network)."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model keeps a running tally of 'How many links do we have now? How many nodes in each antenna sector?' and uses that tally to guide its denoising steps toward constraint satisfaction."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "ACAM tokens compute permutation-invariant aggregations of the current graph state and modulate the denoising network via FiLM layers to steer edge and parity decisions toward cardinality targets inferred from the training data."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why global cardinality works",
+    "paras": [
+      "The key is that constraints in a wireless network are not independent. Adding one link can reduce available sectors for other nodes or cause parity violations. A standard diffusion model, which decides each edge independently, cannot see these connections—it will generate topologies that violate constraints even if each edge decision looked reasonable in isolation.",
+      "NetDiff fixes this with a feedback loop: after proposing a noisy denoising step, it computes cardinality (totals and counts) and compares them to what the model learned is typical in valid topologies. If the model sees 'We have 25 active links but valid topologies have about 20,' it learns to output a denoising step that removes links. If it sees 'We have all 8 nodes in sector 1 but we need sector spread,' it learns to encourage moves to other sectors. The ACAM tokens deliver these counts directly to the model layers (via FiLM modulation) so the denoising network can incorporate constraint feedback on every step.",
+      "Partial diffusion (updating an existing topology) works similarly: start with the current topology as noise and denoise toward a new valid assignment, which is much faster than generating from scratch because you need fewer denoising steps (10 instead of 15) to go from a mostly-good topology to a slightly-better one than to go from pure randomness to a valid one."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Node positions, current topology (noisy or random)"
+        },
+        {
+          "t": "step",
+          "s": "Diffusion network predicts which edges to remove, where to move antennas",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "ACAM tokens count total edges, sector occupancy, parity balance",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "FiLM layers modulate predictions based on cardinality feedback",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Denoised topology with fewer constraint violations"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The diffusion equation and cardinality loss",
+    "words": "The standard diffusion step computes a noisy forecast for the next topology. NetDiff adds cardinality loss terms that penalize deviations from learned edge counts, sector occupancy, and parity balance.",
+    "equation": "loss = BCE_edges + BCE_parity + lambda_cosine * cosine_loss + lambda_sector * sector_loss + lambda_parity_constraint * parity_loss",
+    "symbols": [
+      ["BCE_edges", "binary cross-entropy: how wrong is each edge prediction"],
+      ["BCE_parity", "binary cross-entropy: how wrong is each transmit/receive assignment"],
+      ["cosine_loss", "penalizes antenna directions that violate sector constraints"],
+      ["sector_loss", "penalizes occupying more than allowed antennas in each sector"],
+      ["parity_loss", "penalizes parity assignments that create impossible link patterns"],
+      ["lambda_cosine, lambda_sector, lambda_parity_constraint", "weights controlling how much each constraint matters"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say we have 6 nodes. Valid topologies in the training data have 20 to 24 edges on average, 2-3 nodes per sector, and exactly 3 nodes transmitting.",
+        "Current denoising step predicts: 26 edges (too many), 4 nodes in sector 1 (too many), 2 nodes transmitting (too few).",
+        "Cardinality loss for edges: (26 - 22)^2 = 16 (penalty for overshooting edge count by 4).",
+        "Cardinality loss for sector 1: (4 - 3)^2 = 1 (penalty for one extra node in that sector).",
+        "Cardinality loss for parity: (2 - 3)^2 = 1 (penalty for one transmitter short).",
+        "Total cardinality loss: 16 + 1 + 1 = 18. The model learns: 'Don't predict so many edges; pull back a few; rebalance parity.' Next step is cleaner."
+      ]
+    },
+    "note": "By tracking aggregate counts instead of just local edge probabilities, the model can see when it is creating impossible global configurations and correct course."
+  },
+  "bars": {
+    "h2": "How constraint satisfaction improves",
+    "charts": [
+      {
+        "title": "Diffusion without cardinality (baseline)",
+        "rows": [
+          ["Nodes connected", 96, "good"],
+          ["Parity valid", 78, "bad"],
+          ["Sector constraints met", 62, "bad"],
+          ["Interference-free", 55, "bad"]
+        ],
+        "note": "Without explicit cardinality feedback, the model generates topologies that look locally plausible but violate global constraints."
+      },
+      {
+        "title": "NetDiff with ACAM tokens",
+        "rows": [
+          ["Nodes connected", 96, "good"],
+          ["Parity valid", 96, "good"],
+          ["Sector constraints met", 94, "good"],
+          ["Interference-free", 92, "good"]
+        ],
+        "note": "With ACAM tokens providing global cardinality signals, constraint satisfaction jumps because the model continuously corrects global imbalances during denoising."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Model ignores cardinality tokens if not weighted strongly enough.",
+        "html": "If lambda_parity_constraint or lambda_sector is too small, the model treats cardinality as a soft suggestion and violates parity or sector constraints anyway. The loss weights must be tuned to the specific problem."
+      },
+      {
+        "warn": true,
+        "b": "Cardinality targets inferred from training data are wrong.",
+        "html": "The model learns that valid topologies have, say, 20 edges on average. But if the training dataset is biased (e.g., always favors sparse networks), the model will learn to generate sparse topologies even when density would be better for a particular node layout because the cardinality loss steers it toward the learned average, not toward the optimal true answer."
+      },
+      {
+        "warn": true,
+        "b": "ACAM tokens do not scale well to very large networks.",
+        "html": "Counting all edges and sectors is cheap, but as the number of nodes grows, feeding those counts through attention layers becomes expensive. The paper does not test on networks with hundreds of nodes."
+      },
+      {
+        "b": "Partial diffusion works when topology changes are small.",
+        "html": "If you try to update a topology via 10 denoising steps and the optimal new topology is drastically different, you may converge to a local optimum. Partial diffusion works best for incremental reconfigurations (a few drones moving, a few links changing)."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "The demo should show: (1) Generate a random set of 10 node positions. (2) Run NetDiff for 15 denoising steps. (3) For each step, report the total edge count, sector occupancy histogram, and parity balance. (4) At the end, run a physical simulator: check that all links respect range and sector constraints, count interference events (simultaneous transmissions on overlapping frequencies), and measure achievable throughput. Compare against a greedy baseline (add links locally without global awareness) and a random topology."
+    ],
+    "metric_eq": "Constraint satisfaction score = (nodes_connected ∩ parity_valid ∩ sector_ok ∩ interference_free) / total_nodes. Throughput in Mbps from simulation.",
+    "closing": "The demo must make it impossible to miss: when global cardinality is tracked, topologies satisfy all constraints; when it is ignored, constraints fail silently and silently persist across iterations."
+  }
+}

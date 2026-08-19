@@ -1,0 +1,237 @@
+{
+  "slug": "icml-or-uaxqw194wt",
+  "title": "De-Linearizing Agent Traces: Inferring Task Dependencies",
+  "family": "Agents & Tool Use",
+  "one_liner": "When AI agents complete procedural tasks step by step, most steps are actually independent and could run together — a method infers which steps truly need to happen in order, then prunes out needless reasoning about the independent ones.",
+  "lead": "AI agents that execute workflows by selecting one step at a time waste effort: they reason about each step separately, even when many steps have no dependencies on earlier ones. This paper introduces BPOP, which looks at historical execution traces (records of completed workflows) and infers the hidden structure of which steps actually depend on which others. Once you know the real dependencies, you can compile them into a fast executor that tells the agent only about the steps it can legally take next, eliminating wasted reasoning.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Agents reason about every step, even irrelevant ones",
+    "paras": [
+      "When an AI agent runs a multi-step task like provisioning cloud infrastructure, it reasons through each action one at a time: pick action one, reason about it, run it, then pick action two, reason about it, run it. This feels natural and sequential.",
+      "But many actions are actually independent. For example, in a cloud setup: creating a VPC network, creating a security group, and setting up a database can all be done together if there are no dependencies. Yet if the agent reasons about them sequentially, it wastes compute and tokens (the numerical outputs the model produces as it works) reasoning about which action to pick next, even though the dependencies never change.",
+      "A naive approach tries to impose rigid procedural rules by hand (standard operating procedures), but these either become so detailed they break on real variation, or so loose they don't actually prune the search space."
+    ],
+    "callout": {
+      "b": "The insight:",
+      "html": "Look at traces of completed tasks, and infer which action orderings were forced by true dependencies versus which were random serialization. Use those dependencies to compile a fast executor."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Sequential execution wastes reasoning",
+        "viz": "brain",
+        "caption": "Agent reasons about one action, executes it, then reasons again."
+      },
+      {
+        "title": "2. Same task executed two different ways",
+        "viz": "box",
+        "viz_args": "Trace A: VPC → SG → DB. Trace B: SG → VPC → DB. Same task, different order.",
+        "caption": "Independent actions appear in different orders across runs."
+      },
+      {
+        "title": "3. Infer which orderings are forced",
+        "viz": "weights",
+        "viz_args": [["moved", 8], ["moved", 6], ["free", 2], ["moved", 7], ["free", 3], ["moved", 5], ["free", 1], ["moved", 4], ["free", 2], ["moved", 6], ["free", 3], ["moved", 5]],
+        "caption": "Graph learning shows VPC must precede DB; SG can come anytime."
+      },
+      {
+        "title": "4. Compile into frontier executor",
+        "viz": "box",
+        "viz_args": "From inferred DAG, agent gets: start → {VPC, SG} → DB.",
+        "caption": "One parse call, then deterministic frontier scheduling."
+      },
+      {
+        "title": "5. Prune steps outside the current frontier",
+        "viz": "weights",
+        "viz_args": [["hot", 10], ["hot", 9], ["warm", 4], ["free", 1], ["free", 2], ["free", 3], ["warm", 5], ["hot", 8], ["warm", 6], ["free", 1], ["free", 2], ["warm", 3]],
+        "caption": "Agent only reasons about executable steps, reducing tokens by 90%."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Collect traces",
+        "text": "Gather historical records of completed workflow executions, each a linear sequence of actions."
+      },
+      {
+        "b": "Model as partial order",
+        "text": "Assume each trace is a random shuffling of an underlying dependency graph (partial order), where some orderings are forced by logic, others are random."
+      },
+      {
+        "b": "Infer via Bayesian sampling",
+        "text": "Use a frontier-based scoring method (which considers only actions available at each step, then converts their scores into probabilities) to infer which orderings are mandatory versus incidental, without the intractable calculation of all possible orderings."
+      },
+      {
+        "b": "Extract dependency graph",
+        "text": "From the posterior, extract a best-estimate DAG (directed acyclic graph) showing which steps must precede which."
+      },
+      {
+        "b": "Compile to fast executor",
+        "text": "Convert the graph into a frontier scheduler that tells the agent which actions it can legally execute now, eliminating wasted step-by-step planning."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the representation of a task from a flat sequence of steps to an explicit dependency graph, inferred from data."
+    ],
+    "object": "task representation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: True dependencies versus random order",
+    "name": "dependency necessity",
+    "paras": [
+      "Every time an action appears before another in a trace, it could be because the second action depends on the first (a true dependency), or it could be just because the agent happened to pick it first while both were available (random order). The paper measures the likelihood that a pair ordering is forced rather than incidental.",
+      "Formally, this is inferred via Bayesian posterior over partial orders. The paper does this without computing the exact sum over all valid orderings (which is computationally intractable — #P-complete), instead using a clever likelihood that only considers the frontier of available actions at each step."
+    ],
+    "heat": {
+      "cells": [
+        ["dep1", 4, true],
+        ["dep2", 4, true],
+        ["dep3", 1, false],
+        ["dep4", 1, false],
+        ["dep5", 3, false],
+        ["dep6", 2, false],
+        ["dep7", 1, false],
+        ["dep8", 4, true],
+        ["dep9", 2, false],
+        ["dep10", 3, false],
+        ["dep11", 4, true],
+        ["dep12", 1, false]
+      ],
+      "caption": "Darker means stronger evidence this action must happen before that action."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "If you see two actions always in the same order across many traces, and they appear that way even when nothing else is waiting, it is probably a true dependency. If they swap in different traces, it is probably random."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "A partial order is a set of actions and pairwise comparison relationships (action X must come before Y, or they are unordered). The paper infers a posterior (the updated belief after seeing data) over partial orders by modeling each observed trace as a random total ordering of the true partial order, constrained by the frontier of available actions at each step via a Plackett-Luce likelihood (a scoring rule that assigns higher probability to choices from smaller frontiers)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: Separating true order from accident",
+    "paras": [
+      "When you observe a completed workflow, the order of actions in that trace mixes two signals: actual dependencies (A must come before B because B needs A's output) and random choice (A and B are both ready, the agent happened to pick A first).",
+      "By looking at many different traces of the same task, you can separate these signals. If A always comes before B, they probably have a dependency. If sometimes A comes before B and sometimes B comes before A, they are probably independent and the order was an accident. The paper formalizes this using Bayesian inference: assume each observed trace is a random shuffling of an underlying partial order, then ask which partial order best explains all the data.",
+      "The frontier-softmax likelihood is the clever part: at each step of a trace, the next action is drawn from the currently available actions (the frontier — all actions whose dependencies have been satisfied). This avoids the intractable problem of summing over all possible orderings; instead, the paper only tracks what was possible at each step."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "historical traces (linear sequences)"
+        },
+        {
+          "t": "step",
+          "s": "model each trace as random linear extension of a hidden partial order",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "estimate frontier at each step to avoid #P-hard marginalization"
+        },
+        {
+          "t": "step",
+          "s": "run MCMC to sample partial orders from posterior"
+        },
+        {
+          "t": "step",
+          "s": "extract best-estimate DAG from posterior",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "compiled frontier executor"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The likelihood equation",
+    "words": "For each observed trace, compute the product over all steps of the probability that the next action was chosen from the frontier. If more traces fit a partial order, that partial order is more likely posterior.",
+    "equation": "P(trace | partial_order) = product_t { 1 / |frontier_t| }",
+    "symbols": [
+      ["trace", "an observed sequence of actions"],
+      ["partial_order", "the latent DAG over actions"],
+      ["frontier_t", "set of actions whose dependencies are satisfied after step t"],
+      ["|frontier_t|", "size of the frontier at step t"]
+    ],
+    "worked": {
+      "title": "Tiny worked example",
+      "lines": [
+        "Suppose a task has actions A, B, C, D with true dependencies: A→C, B→D (meaning C depends on A, D depends on B; A and B are independent, C and D are independent).",
+        "Observed trace: [A, B, C, D]. Frontier at each step: {A,B} (both ready) → |F1|=2. After A, frontier is {B,C} → |F2|=2. After B, frontier is {C,D} → |F3|=2. After C, frontier is {D} → |F4|=1. Likelihood: 1/2 × 1/2 × 1/2 × 1/1 = 0.125.",
+        "Alternate trace: [B, A, D, C]. Same frontier sizes, same likelihood 0.125.",
+        "But a trace [A, C, B, D] would have frontier {A,B} at step 1, then after A we pick C (frontier={B,C}), but B has not been executed yet so it is still in the frontier. This trace fits the same partial order equally well (1/2 × 1/2 × 1/2 × 1 = 0.125), confirming A and B are unordered."
+      ]
+    },
+    "note": "The product of frontier sizes is tractable because we never enumerate all orderings; we only check what was possible at each observed step."
+  },
+  "bars": {
+    "h2": "Effect on execution efficiency",
+    "charts": [
+      {
+        "title": "Step-by-step agent (baseline)",
+        "rows": [
+          ["Tokens per workflow", 13234, "bad"],
+          ["Reasoning calls", 47, "bad"],
+          ["Total latency", 68, "bad"]
+        ],
+        "note": "Every step triggers a separate LLM reasoning call."
+      },
+      {
+        "title": "BPOP frontier executor",
+        "rows": [
+          ["Tokens per workflow", 583, "good"],
+          ["Reasoning calls", 1, "good"],
+          ["Total latency", 12, "good"]
+        ],
+        "note": "One parse call to infer intent, then deterministic frontier scheduling with fallback to step-by-step only on errors. Numbers are illustrative but show 95% token reduction."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Traces are too short or noisy.",
+        "html": "If the training data contains only one or two executions, or the agent makes random choice mistakes, the inferred dependencies will be unreliable. The Bayesian posterior becomes too uncertain."
+      },
+      {
+        "warn": true,
+        "b": "Hidden dependencies from external state.",
+        "html": "If action A appears before B in all traces only because they usually run on a server that is slow on Monday mornings, the inference might falsely believe A depends on B. The method assumes ordering variations reflect true concurrency, not external factors."
+      },
+      {
+        "warn": true,
+        "b": "Fallback overuse on unpredictable tasks.",
+        "html": "If the task has high variance or the agent makes frequent off-frontier errors, the hybrid executor falls back to step-by-step reasoning, negating the efficiency gain."
+      },
+      {
+        "b": "Done right: reuse on similar tasks.",
+        "html": "If tasks are stable and sufficiently similar to the training set, the inferred graph is reliable, and the frontier executor can prune reasoning by 90%+ while remaining sound."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple cloud provisioning simulator with 5 or 6 actions (e.g., create network, create subnet, create security group, start database, set firewall rule, deploy app). For each action, specify which other actions must finish first. Generate 10 synthetic traces by randomly shuffling actions subject to the dependencies. Feed these traces to BPOP inference. Extract the inferred graph. Then run an agent using the frontier executor and count reasoning calls and token usage."
+    ],
+    "metric_eq": "efficiency_gain = (baseline_tokens - frontier_tokens) / baseline_tokens",
+    "closing": "The demo should show that BPOP correctly recovers the dependencies from shuffled traces, and that the frontier executor reduces token usage by at least 70% while maintaining correctness."
+  }
+}

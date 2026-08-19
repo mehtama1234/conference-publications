@@ -1,0 +1,238 @@
+{
+  "slug": "iclr-or-pxo0gtt7al",
+  "title": "Efficient Probing: Lightweight Attention for Testing Pre-Trained Models",
+  "family": "Representation & Self-Supervised Learning",
+  "one_liner": "When models learn patch-by-patch features rather than one global summary, use cheap shared cross-attention queries to pick out exactly what each query needs instead of training separate attention heads.",
+  "lead": "A pre-trained model is just frozen weights—you test it by bolting on a tiny probe and checking if it answers your question. Old-school probes use the model's global summary token ([CLS]); new ones use a selection mechanism (choosing weighted combinations of image patches) to collect the right pieces from many local regions. But those selection-based probes are bloated with redundant learned weights. This paper shows that a single shared query per selection head can do the same job with 90% fewer trainable parameters, across all kinds of pre-training: vision-language, masked image modeling, diffusion, and one-word-at-a-time generation.",
+  "nav": [["theme-representation-self-supervised-learning.html", "Representation & Self-Supervised Learning"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The [CLS] token misses local features",
+    "paras": [
+      "Pre-trained models learn two kinds of knowledge: a global summary (stored in one special token called [CLS]) and local patch-level details spread across many small regions of the image. A model trained to rebuild missing patches learns mostly local knowledge—the [CLS] token says very little. The naive probe grabs [CLS], feeds it to a linear classifier, and scores poorly because it is missing the local detail.",
+      "Someone then thought: why not use attention (a mechanism that picks weighted combinations of patches) to collect the useful local patches into one representation? This is attentive probing. It works much better because it can adaptively pick the most informative patches for each task instead of using all patches equally or collapsing to one summary. But the existing approaches learn a separate complete attention head for each task, with full learned weight matrices to project patches and queries. This creates redundancy—many learnable parameters doing nearly identical work."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Attention-based probes work well but train too many redundant weight matrices; we can achieve the same accuracy with shared queries that are 90% smaller."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Local features spread across patches",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["warm", 35], ["moved", 50], ["warm", 30], ["free", 15]],
+        "caption": "Pre-trained model holds knowledge in many patch tokens, not one [CLS]."
+      },
+      {
+        "title": "2. Old approach: separate heads with redundant projection matrices",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["hot", 75], ["hot", 78], ["hot", 70], ["hot", 72]],
+        "caption": "Each selection head trains its own full projection layer; wasteful copying."
+      },
+      {
+        "title": "3. New move: share one query per head, eliminate redundant projections",
+        "viz": "weights",
+        "viz_args": [["warm", 25], ["warm", 28], ["warm", 26], ["warm", 24], ["warm", 27]],
+        "caption": "One query per head; patches project themselves once; 90% fewer parameters."
+      },
+      {
+        "title": "4. Attention picks best patches for this query",
+        "viz": "box",
+        "viz_args": "Query picks patches",
+        "caption": "Each query learns what patches matter; different queries specialize."
+      },
+      {
+        "title": "5. Tiny pooled vector feeds classifier; works as well as before",
+        "viz": "weights",
+        "viz_args": [["free", 8], ["free", 9], ["free", 7]],
+        "caption": "Lightweight final representation; full accuracy on probe task."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Freeze the pre-trained model",
+        "text": "Keep all original weights; you are only testing, not retraining."
+      },
+      {
+        "b": "Create M learnable query vectors (lists of numbers)",
+        "text": "One query per selection head; each is a short list of numbers learned from scratch."
+      },
+      {
+        "b": "Each query computes a selection score over all patches",
+        "text": "Compare query to each patch (dot product), then turn raw scores into weights that sum to 1 (softmax), to get a weighting for each patch."
+      },
+      {
+        "b": "Collect patch-weighted sum (pool)",
+        "text": "Each query collects its top patches into one vector; M queries give M vectors."
+      },
+      {
+        "b": "Feed pooled vectors to task-specific classifier",
+        "text": "Linear layer on top ranks/classifies; train only queries and classifier."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper removes redundant learned weight matrices that project queries and patches into a subspace. Instead of learning W_K (project patches to dimension D) and W_Q (project queries to dimension D) per head, it learns only M learnable queries directly in the original patch space and reuses the patch features as-is."
+    ],
+    "object": "learned weight matrices"
+  },
+  "hidden": {
+    "h2": "Parameter count: how much training load each variant carries",
+    "name": "Trainable parameters in the probe",
+    "paras": [
+      "The paper measures not just accuracy but parameter count—how many numbers must be trained. Standard multi-head cross-attention (MHCA) trains separate weight matrices (W_K, W_Q, W_V) per head; efficient probing (EP) trains only one query vector per head and reuses the same patch features. This directly cuts trainable parameters from thousands to hundreds.",
+      "The paper estimates this by counting arithmetic operations, memory footprint, and actual parameter counts across six different probing variants. Lower is better, because a smaller probe can be run on cheap hardware and responds faster to new tasks."
+    ],
+    "heat": {
+      "cells": [
+        ["MHCA-head1", 4, true],
+        ["MHCA-head2", 4, false],
+        ["MHCA-head3", 4, false],
+        ["EP-query1", 1, true],
+        ["EP-query2", 1, false],
+        ["EP-query3", 1, false],
+        ["DELF-MLP", 3, false],
+        ["V-JEPA", 3, false],
+        ["AbMILP", 1, false],
+        ["GAP", 1, false],
+        ["[CLS]", 1, false],
+        ["unused", 1, false]
+      ],
+      "caption": "Darker means more trainable parameters. MHCA is expensive; EP is lean; [CLS] and GAP are minimal but less accurate."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper counted how many weights each probe variant must train. Efficient probing uses 10 times fewer weights than the previous best attention method, with no loss of accuracy."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Table 1 aligns MHCA, EP, DELF, V-JEPA, AbMILP as algorithmic variants within one framework. Figure 4 plots parameter count vs. accuracy across pre-training methods."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why shared queries with reused patches work",
+    "paras": [
+      "In a standard selection head, each head learns its own query and projection matrices. For M patches, the projection matrices must reshape every patch and every query; this burns compute and memory. But the paper realized: the patch features do not change per head. Each head is just picking a different weighted sum of the same patches.",
+      "The trick is to learn M independent query vectors, one per head, and let each query score the raw patch features directly without projecting them first. This is mathematically equivalent to the old way (each query learns what patches to weight), but the patch projection layer vanishes, cutting the parameter count to only the M queries. Same information—which patches matter—flows through, same accuracy results, but 90% fewer trainable numbers."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Frozen patch features (one per image region)"},
+        {"t": "step", "s": "Learnable query computes a score for each patch", "hl": true},
+        {"t": "step", "s": "Turn scores into weights; collect weighted sum"},
+        {"t": "step", "s": "Repeat for second, third query (each independent)"},
+        {"t": "output", "s": "Multiple pooled vectors feed to classifier"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The attention pooling equation",
+    "words": "For each query head j, the pooled output is the sum over all patches of (attention weight for patch i) times (feature vector of patch i). The attention weight is computed by dot product between the learnable query and the patch feature, then softmax to normalize.",
+    "equation": "y_j = sum_i softmax(q_j^T x_i) * x_i",
+    "symbols": [
+      ["y_j", "pooled representation from query j (output)"],
+      ["q_j", "learnable query vector for head j"],
+      ["x_i", "feature vector of patch i (from frozen pre-trained model)"],
+      ["softmax(...)", "turns dot-product scores into weights that sum to 1"],
+      ["sum_i", "weighted sum over all N patches"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with 3 patches and query dim=2",
+      "lines": [
+        "Patch 1 features: x_1 = [0.5, 0.3]",
+        "Patch 2 features: x_2 = [0.1, 0.8]",
+        "Patch 3 features: x_3 = [0.7, 0.2]",
+        "Query vector: q_1 = [0.4, 0.6]",
+        "",
+        "Dot products: q_1^T * x_1 = 0.4*0.5 + 0.6*0.3 = 0.38",
+        "             q_1^T * x_2 = 0.4*0.1 + 0.6*0.8 = 0.52",
+        "             q_1^T * x_3 = 0.4*0.7 + 0.6*0.2 = 0.40",
+        "",
+        "Softmax: exp(0.38)=1.46, exp(0.52)=1.68, exp(0.40)=1.49, sum=4.63",
+        "         w_1 = 1.46/4.63 = 0.315",
+        "         w_2 = 1.68/4.63 = 0.363",
+        "         w_3 = 1.49/4.63 = 0.322",
+        "",
+        "Pooled: y_1 = 0.315*[0.5,0.3] + 0.363*[0.1,0.8] + 0.322*[0.7,0.2]",
+        "        y_1 = [0.157,0.095] + [0.036,0.290] + [0.225,0.064]",
+        "        y_1 = [0.418, 0.449]"
+      ]
+    },
+    "note": "Query q learns which patches matter; low-importance patches get tiny weights; high-importance patches pull the pooled vector toward them."
+  },
+  "bars": {
+    "h2": "Accuracy vs. parameter efficiency across pre-training methods",
+    "charts": [
+      {
+        "title": "Linear probing ([CLS] baseline)",
+        "rows": [
+          ["ImageNet accuracy", 68, "bad"],
+          ["Parameters (thousands)", 10, "good"],
+          ["Compute (MFLOPs)", 5, "good"]
+        ],
+        "note": "Simple but misses local features; works only when global summary is strong."
+      },
+      {
+        "title": "Efficient Probing (EP)",
+        "rows": [
+          ["ImageNet accuracy", 82, "good"],
+          ["Parameters (thousands)", 50, "good"],
+          ["Compute (MFLOPs)", 120, "good"]
+        ],
+        "note": "Balances accuracy, trainable parameters, and compute; sits on the Pareto frontier."
+      },
+      {
+        "title": "Previous attention probing (MHCA)",
+        "rows": [
+          ["ImageNet accuracy", 81, "good"],
+          ["Parameters (thousands)", 520, "bad"],
+          ["Compute (MFLOPs)", 180, "bad"]
+        ],
+        "note": "High accuracy but 10x more trainable parameters and redundant projections."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Frozen model must have learned good local features.",
+        "html": "If the pre-trained model learned only a global summary (like old supervised ImageNet models), attentive probing including EP will gain little over [CLS]. The paper works well on self-supervised, vision-language, and masked-image models because they retain local knowledge; EP cannot create features the model never learned."
+      },
+      {
+        "warn": true,
+        "b": "Queries can overfit to small probe datasets.",
+        "html": "If the downstream task has very few labels, M learnable queries might memorize noise rather than learn true patch importance. Gently steering training away from overfitting (via weight decay or early stopping) is needed."
+      },
+      {
+        "warn": true,
+        "b": "Complementary attention maps assume tasks need diverse patch strategies.",
+        "html": "If a task is fully solvable from one region (e.g., reading a single label in a corner), multiple independent queries may learn redundant patterns; efficiency gains are smaller."
+      },
+      {
+        "b": "Done right: use EP on frozen models trained with local-feature preservation.",
+        "html": "Pair it with models that retain local knowledge, steer training away from overfitting on small datasets via weight decay, and accept that some tasks may not benefit from multiple selection heads."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a tiny experiment: take a pre-trained ViT model frozen on ImageNet, attach an EP probe with 4 learnable queries, train it on CIFAR-10 (a simpler dataset). Measure final accuracy, parameter count, and the diversity of the four attention maps (do different queries attend to different image regions, or are they redundant?). Run the same experiment with standard MHCA and [CLS] baselines. The demo should show that EP matches MHCA accuracy while using 10 times fewer trainable parameters, and that the attention maps are actually complementary (different queries pick different patches)."
+    ],
+    "metric_eq": "accuracy = (correct predictions) / (total test samples); parameter_efficiency = accuracy / (number of trainable parameters in thousands)",
+    "closing": "The demo makes it impossible to miss: EP does the job with one order of magnitude fewer weights, because different queries naturally specialize in different image regions without redundant projection matrices."
+  }
+}
