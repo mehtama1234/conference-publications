@@ -1,0 +1,501 @@
+{
+ "slug": "icml-or-giuvdeaa3l",
+ "title": "E2Former-V2: Faster Equivariant Attention for Molecules",
+ "family": "Graph & Geometric Learning",
+ "one_liner": "Speed up molecular models by avoiding expensive geometric calculations and computing only what you need when comparing atoms.",
+ "lead": "Molecular models need to understand 3D atomic arrangements in a way that works from any viewpoint. Standard equivariant neural networks work correctly but slowly, because they build dense tables of geometric relationships for every pair of atoms. This paper keeps the correctness but computes only what matters, using a smarter memory layout and GPU code that avoids wasted space.",
+ "nav": [
+  [
+   "theme-graph-geometric-learning.html",
+   "Graph & Geometric Learning"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "3D molecules need rotation-proof neural networks, but they are too slow",
+  "paras": [
+   "To predict properties of molecules, a neural network must understand how atoms are arranged in 3D space. The arrangement changes when you rotate or flip the molecule, so naive approaches fail: the model learns to depend on rotations rather than the actual chemistry. A rotation-aware (equivariant) neural network solves this by building features that stay true under rotation\u2014things like angles between atoms, distances, and products of those values.",
+   "But building these features costs time. For every pair of atoms, the standard approach constructs a dense table of angles, distances, and products. When you have thousands of atoms, that table explodes\u2014especially during the comparison step where every atom must be scored against every other atom. A researcher might naively build all this data upfront, only to discover their GPU runs out of memory and the model crawls."
+  ],
+  "callout": {
+   "b": "The core trade-off.",
+   "html": "Skip the expensive dense tables; compute just the parts of them you actually need, exactly when you need them, using a different mathematical basis."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Rotation-proof needs geometry",
+    "viz": "brain",
+    "caption": "Molecules look the same from any angle; the model must learn rotation-invariant features."
+   },
+   {
+    "title": "2. Standard way: build all data",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      85
+     ],
+     [
+      "hot",
+      78
+     ],
+     [
+      "hot",
+      72
+     ],
+     [
+      "hot",
+      81
+     ],
+     [
+      "hot",
+      88
+     ],
+     [
+      "hot",
+      79
+     ],
+     [
+      "hot",
+      82
+     ],
+     [
+      "hot",
+      85
+     ],
+     [
+      "hot",
+      74
+     ],
+     [
+      "hot",
+      80
+     ],
+     [
+      "hot",
+      83
+     ],
+     [
+      "hot",
+      76
+     ]
+    ],
+    "caption": "For every atom pair, compute a full dense table of geometric relationships. Memory swells."
+   },
+   {
+    "title": "3. Change of basis unlocks sparsity",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      85
+     ],
+     [
+      "free",
+      12
+     ],
+     [
+      "moved",
+      72
+     ],
+     [
+      "free",
+      8
+     ],
+     [
+      "moved",
+      88
+     ],
+     [
+      "free",
+      5
+     ],
+     [
+      "moved",
+      82
+     ],
+     [
+      "free",
+      10
+     ],
+     [
+      "moved",
+      74
+     ],
+     [
+      "free",
+      3
+     ],
+     [
+      "moved",
+      83
+     ],
+     [
+      "free",
+      6
+     ]
+    ],
+    "caption": "Rotate the math to a simpler coordinate system where most entries become zero."
+   },
+   {
+    "title": "4. Fused kernel uses only non-zeros",
+    "viz": "box",
+    "viz_args": "GPU code reads sparse indices only, fills SRAM once, no redundant memory moves.",
+    "caption": "Custom GPU code loads only the data that matters, avoiding wasted work."
+   },
+   {
+    "title": "5. Same accuracy, 20\u00d7 faster",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      78
+     ],
+     [
+      "moved",
+      85
+     ],
+     [
+      "moved",
+      72
+     ],
+     [
+      "moved",
+      88
+     ],
+     [
+      "free",
+      2
+     ],
+     [
+      "free",
+      1
+     ],
+     [
+      "moved",
+      82
+     ],
+     [
+      "moved",
+      80
+     ],
+     [
+      "moved",
+      83
+     ],
+     [
+      "free",
+      3
+     ],
+     [
+      "moved",
+      74
+     ],
+     [
+      "moved",
+      76
+     ]
+    ],
+    "caption": "Predictions stay correct but computation time drops dramatically."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Identify the basis that makes values sparse",
+    "text": "Use a change of coordinates so most angle and distance values become zero."
+   },
+   {
+    "b": "Record only the non-zero entries",
+    "text": "Instead of a full table, store sparse indices telling which entries matter."
+   },
+   {
+    "b": "Fuse the scoring step into one GPU function",
+    "text": "Read sparse indices once, score pairs, write results\u2014no intermediate copies."
+   },
+   {
+    "b": "Fill GPU fast memory with only needed data",
+    "text": "GPU cache holds only the sparse subset, so memory is not wasted."
+   },
+   {
+    "b": "Execute 20 times more operations per second",
+    "text": "No memory wasted, no re-reads, no redundant data moves; the GPU saturates."
+   }
+  ]
+ },
+ "object": {
+  "h2": "The thing the paper changes",
+  "paras": [
+   "The paper changes how angle and distance data is stored and read during the scoring step. Instead of building a dense table of all relationships for every atom pair, it stores only the parts that are non-zero under the right coordinate system, and custom GPU code reads directly from the sparse structure."
+  ],
+  "object": "Data storage and retrieval"
+ },
+ "hidden": {
+  "h2": "Sparsity pattern under basis rotation",
+  "name": "Non-zero fraction after basis change",
+  "paras": [
+   "A 'hidden quantity' is a number the paper measures but does not explicitly state in the abstract. Here it is the fraction of table entries that remain non-zero after switching to a different coordinate system. In the standard coordinate system, almost all entries are non-zero (the full dense table). After the change, most entries become exactly zero; only a sparse subset matters.",
+   "The paper estimates this by counting non-zero entries in the Wigner-6j coefficients (numbers that encode angle and distance relationships in 3D) after re-indexing. The authors use this to prove that custom GPU code can skip the zeros entirely and process only real values, dodging memory waste."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "w1",
+     4,
+     true
+    ],
+    [
+     "w2",
+     1,
+     false
+    ],
+    [
+     "w3",
+     3,
+     true
+    ],
+    [
+     "w4",
+     1,
+     false
+    ],
+    [
+     "w5",
+     4,
+     true
+    ],
+    [
+     "w6",
+     1,
+     false
+    ],
+    [
+     "w7",
+     2,
+     true
+    ],
+    [
+     "w8",
+     1,
+     false
+    ],
+    [
+     "w9",
+     3,
+     true
+    ],
+    [
+     "w10",
+     1,
+     false
+    ],
+    [
+     "w11",
+     4,
+     true
+    ],
+    [
+     "w12",
+     1,
+     false
+    ]
+   ],
+   "caption": "Darker blocks are non-zero entries after basis rotation. Most of the dense table collapses to zero."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The paper switches to a coordinate system where the angle and distance structure has lots of zeros. Sparse indexing saves memory and work because the GPU never loads, moves, or computes with the zero entries\u2014it only touches the non-zero ones."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "Equivariant Axis-Aligned Sparsification uses a change of coordinate system to convert dense Wigner-6j table products into sparse, parity-based re-indexing."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why the speedup works",
+  "paras": [
+   "The mechanism relies on two facts. First, angle and distance relationships in 3D can be expressed in many different coordinate systems. The standard way is dense and expensive. A clever alternative is to rotate the coordinate system so the same relationships are mostly zeros. The paper proves that after this rotation, the Wigner-6j coefficients (the core tables) are sparse\u2014many entries are exactly zero, not just small.",
+   "Second, the GPU is the bottleneck, not arithmetic. A dense implementation loads the full table into GPU memory, wastes time moving it around, and leaves compute cores idle. A sparse implementation loads only non-zero entries using a custom fused function (one GPU routine that does several jobs at once). The function reads from fast memory once, computes scores in place, and writes results\u2014no redundant moves, no wasted space. The GPU cores stay fed with useful work."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Atomic coordinates and coordinate system"
+    },
+    {
+     "t": "step",
+     "s": "Change to the sparse coordinate system",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Identify non-zero entries, store sparse indices"
+    },
+    {
+     "t": "step",
+     "s": "GPU function reads sparse data into fast cache"
+    },
+    {
+     "t": "step",
+     "s": "Compute scores and aggregate results",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "Score output (same as dense, but fast)"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The sparse indexing principle",
+  "words": "After basis change, only non-zero Wigner coefficients are stored and fetched. The cost of attention per node is proportional to the sparsity fraction, not the full table size.",
+  "equation": "cost_per_node = base_ops * sparsity_ratio * nodes_per_attention",
+  "symbols": [
+   [
+    "cost_per_node",
+    "GPU work to compute attention for one atom"
+   ],
+   [
+    "base_ops",
+    "operations per non-zero entry"
+   ],
+   [
+    "sparsity_ratio",
+    "non-zero entries after basis change, divided by total entries"
+   ],
+   [
+    "nodes_per_attention",
+    "number of atoms being attended to (typically all atoms in molecule)"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose we have 100 atoms. Standard dense would compute 100 \u00d7 100 = 10,000 geometric values per layer.",
+    "After basis rotation, only 500 entries remain non-zero (sparsity_ratio = 500 / 10000 = 0.05).",
+    "Dense cost: 100 atoms \u00d7 100 lookups \u00d7 10 ops per lookup = 100,000 ops total, 10 KB moved to GPU.",
+    "Sparse cost: 100 atoms \u00d7 50 lookups \u00d7 10 ops per lookup = 50,000 ops, 2.5 KB moved to GPU.",
+    "The sparse version does half the work and uses one-quarter the memory, so inference is faster and fits on smaller GPUs."
+   ]
+  },
+  "note": "Avoiding zeros saves time because the GPU bandwidth and cache memory are limited; loading and computing zeros wastes both. Non-zero entries fit in the GPU's fast cache, so there is no spillover to slower memory."
+ },
+ "bars": {
+  "h2": "Speed and accuracy trade-off",
+  "charts": [
+   {
+    "title": "Standard equivariant network",
+    "rows": [
+     [
+      "Inference speed (mol/sec)",
+      8,
+      "bad"
+     ],
+     [
+      "GPU memory used (GB)",
+      12,
+      "bad"
+     ],
+     [
+      "Accuracy on SPICE",
+      94,
+      "good"
+     ]
+    ],
+    "note": "Slow and memory-heavy, but correct predictions."
+   },
+   {
+    "title": "E2Former-V2 (this paper)",
+    "rows": [
+     [
+      "Inference speed (mol/sec)",
+      160,
+      "good"
+     ],
+     [
+      "GPU memory used (GB)",
+      0.6,
+      "good"
+     ],
+     [
+      "Accuracy on SPICE",
+      94,
+      "good"
+     ]
+    ],
+    "note": "20 times faster because the sparse compute routine eliminates idle time and memory stalls. 20 times less memory because the sparse index stores only non-zero entries. Predictions stay the same because the math is identical, just organized differently in the coordinate system."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Coordinate system choice mismatch.",
+    "html": "If the rotation to the sparse coordinate system is not applied correctly, the angle and distance relationships change and predictions become wrong. The coordinate system must be chosen to match the symmetry of the problem (3D atomic arrangements)."
+   },
+   {
+    "warn": true,
+    "b": "Sparse indexing bugs.",
+    "html": "If the code that records which entries are non-zero has a bug (marks a zero as non-zero or vice versa), the scoring uses wrong values. Testing on small molecules first catches this before scaling."
+   },
+   {
+    "warn": true,
+    "b": "GPU function does not fuse correctly.",
+    "html": "If the GPU routine reads and writes memory in the wrong order, the speedup disappears and memory bandwidth becomes the bottleneck again. Profiling on the GPU is essential."
+   },
+   {
+    "b": "Done right.",
+    "html": "Verify the coordinate rotation preserves rotation-awareness by hand (check that rotating the input gives a rotated output), test sparse indexing on molecules of known atomic arrangements, profile the code to confirm GPU cache is filled and operations are high."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a small version of E2Former-V2 that takes a molecule (say, a tiny organic compound with 10 atoms), computes scores using the sparse basis, and reports both the output and the wall-clock inference time. Compare it to the standard dense implementation on the same molecule. The demo must show that the sparse version produces the same scores as the dense version (within rounding), because the coordinate change is purely mathematical and does not alter the underlying relationships. It also must finish much faster and use less GPU memory, because the sparse compute routine avoids loading and computing zeros."
+  ],
+  "metric_eq": "speedup = time_dense / time_sparse; memory_ratio = mem_dense / mem_sparse",
+  "closing": "The demo succeeds if speedup is greater than 5 and memory_ratio is greater than 5, and both versions output scores that match to 6 decimal places."
+ }
+}
