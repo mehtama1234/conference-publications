@@ -1,0 +1,225 @@
+{
+  "slug": "iclr-or-tjod11fk1a",
+  "title": "Tactic: Adaptive Sparse Attention for Long-Context LLMs",
+  "family": "Efficiency & Systems",
+  "one_liner": "Instead of keeping a fixed number of tokens in memory, Tactic picks tokens until their attention scores add up to a target fraction, adapting naturally to how sparse each layer really is.",
+  "lead": "When a large language model answers a question based on a long document, it needs to hold many past words (called tokens—the individual pieces the model reads) in graphics-card memory while computing answers. Most systems cut corners by keeping a fixed number of tokens from the past (maybe 512, or 1024) regardless of whether the model actually cares about that many. Tactic replaces this rigid limit with a flexible one: it keeps tokens until their attention scores (the weights the model assigns to each past token) add up to a target fraction of the total. This works because when you capture 90 percent of the attention weight, you automatically capture 90 percent of the actual information flowing through the model, so the approximation error stays small—and memory access becomes faster because you load fewer tokens into memory.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Fixed budgets pick too many or too few",
+    "paras": [
+      "When a language model reads a long document and generates an answer one token at a time, it must compute how much each past token matters (its attention score). This requires holding all past tokens in graphics-card memory. For a million-token document, this explodes the memory bill.",
+      "Today's trick: cut tokens to a fixed budget (e.g., keep only the 512 most important tokens from the past). But this misses a real problem. In some layers of the model, the attentional focus is sharp—a few tokens carry almost all the weight. In other layers, it is broad—many tokens matter roughly equally. A fixed budget wastes space in the sharp layers and starves the broad ones."
+    ],
+    "callout": {
+      "b": "The fix.",
+      "html": "Tactic replaces the fixed token budget with a flexible goal: keep selecting tokens in order of importance until their attention scores sum to a target fraction (e.g., 90 percent of the total attention)."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "brain",
+        "caption": "Long context means many tokens to hold in memory."
+      },
+      {
+        "title": "2. Fixed budget fails",
+        "viz": "weights",
+        "viz_args": [["free", 1], ["free", 1], ["hot", 8], ["free", 1], ["warm", 4], ["free", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1]],
+        "caption": "Top tokens get pruned; low-attention layer starves for tokens."
+      },
+      {
+        "title": "3. Tactic's move",
+        "viz": "weights",
+        "viz_args": [["free", 1], ["free", 1], ["hot", 8], ["free", 1], ["warm", 4], ["warm", 3], ["warm", 2], ["free", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1]],
+        "caption": "Rank by attention score; pick until cumulative sum hits target."
+      },
+      {
+        "title": "4. What changes",
+        "viz": "box",
+        "viz_args": "Token count grows/shrinks per layer based on natural sparsity.",
+        "caption": "No fixed budget; selection adapts to actual layer sparsity."
+      },
+      {
+        "title": "5. Result",
+        "viz": "weights",
+        "viz_args": [["hot", 8], ["warm", 4], ["warm", 3], ["warm", 2], ["moved", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1], ["free", 1]],
+        "caption": "Faster memory access; exact approximation to full attention."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Compute raw attention scores",
+        "text": "For each new token the model is generating, compute a raw score for every past token (the dot product between the new token and each past token)."
+      },
+      {
+        "b": "Sort by score (approximately)",
+        "text": "Rank the past tokens by their scores using a fast clustering method instead of a full sort."
+      },
+      {
+        "b": "Accumulate until reaching target",
+        "text": "Pick tokens from highest score downward until the sum of their normalized scores reaches a target fraction (e.g., 90 percent)."
+      },
+      {
+        "b": "Estimate boundary tokens efficiently",
+        "text": "Use a smooth curve fitted to score samples to estimate scores near the cutoff line, avoiding expensive computation."
+      },
+      {
+        "b": "Fetch and compute",
+        "text": "Load the selected tokens into memory and run the full value computation on just those tokens."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Tactic changes the token selection rule. Instead of: 'keep a fixed number of tokens,' the rule is: 'keep tokens until their cumulative attention score reaches a target.'"
+    ],
+    "object": "Token selection rule"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: cumulative attention score",
+    "name": "Cumulative attention score",
+    "paras": [
+      "For a given query (a new token the model is generating), the attention scores tell us how much each past token contributed. The cumulative attention score is simply the sum of these scores as we go down the ranked list. A target of 0.9 means: keep adding tokens until their scores sum to 90 percent of all attention scores put together.",
+      "Tactic estimates this quantity efficiently by observing that attention scores follow a smooth curve (most fall near the middle; scores are not clustered at the extremes), so a fitted curve can predict how many tokens we need to hit our target without looking at every single score."
+    ],
+    "heat": {
+      "cells": [["Past token 1", 4, true], ["Past token 2", 4, false], ["Past token 3", 4, false], ["Past token 4", 3, true], ["Past token 5", 2, false], ["Past token 6", 2, false], ["Past token 7", 1, false], ["Past token 8", 1, false], ["Past token 9", 1, false], ["Past token 10", 0, false], ["Past token 11", 0, false], ["Past token 12", 0, false]],
+      "caption": "Darker means higher attention score. Tactic picks the darker ones until their sum hits 90%."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Cumulative attention score is the total weight assigned to a batch of tokens as we walk down the ranking from highest to lowest."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "See the math section for the formal equation and symbol table."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this works: bounded error by design",
+    "paras": [
+      "Old sparse attention picked a fixed number of tokens and hoped they covered most of the attention load. If a layer had sparsity (only a few tokens mattered), it wasted memory keeping irrelevant tokens. If a layer had low sparsity (many tokens mattered equally), it discarded important ones.",
+      "Tactic instead says: 'I will keep tokens until I have captured 90 percent of the total attention weight.' Why does this work? Because attention scores are multiplied by value vectors (the actual information), and value vectors have similar norms (sizes), the cumulative attention score directly bounds the error in the output. Capture 90 percent of the attention weight, and you automatically bound your approximation error. No per-layer tuning, no fixed budgets—the mechanism is automatic.",
+      "To make this efficient, Tactic observes that attention scores follow a smooth curve. Instead of examining every score, it fits a curve to a small sample, uses that curve to estimate how many tokens are needed to hit 90 percent, and stops early once it reaches the target. This turns a potentially expensive sort into a cheap calculation."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Query and all past key-value pairs from memory"
+        },
+        {
+          "t": "step",
+          "s": "Compute attention scores via clustering-based sketch",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Fit smooth curve to score samples"
+        },
+        {
+          "t": "step",
+          "s": "Select tokens until cumulative score reaches target",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Sparse attention output from selected tokens only"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation and worked example",
+    "words": "attention_output = sum over selected tokens i of (attention_score_i times value_i), where attention_score_i is renormalized by the sum of selected scores to keep them as fractions.",
+    "equation": "o_sparse(I) = sum_i_in_I (softmax(q·k_i / sqrt(d))_i * v_i), with constraint: sum_i_in_I softmax_score_i >= P (target fraction)",
+    "symbols": [
+      ["q", "the query vector (representing the new token being generated)"],
+      ["k_i", "the key vector of the i-th past token"],
+      ["v_i", "the value vector of the i-th past token"],
+      ["d", "the dimension (the size of each vector; typically around 128)"],
+      ["softmax_score_i", "the normalized importance weight for token i, a number between 0 and 1"],
+      ["P", "the target fraction (e.g., 0.9 to keep 90 percent of attention)"],
+      ["I", "the index set of selected tokens"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose we have 10 past tokens with attention scores [4.0, 3.5, 3.0, 2.0, 1.5, 1.0, 0.8, 0.6, 0.4, 0.2].",
+        "Total score sum = 4.0 + 3.5 + 3.0 + 2.0 + 1.5 + 1.0 + 0.8 + 0.6 + 0.4 + 0.2 = 17.0.",
+        "Target P = 0.9 (keep 90% of total).",
+        "Target cumulative = 0.9 × 17.0 = 15.3.",
+        "Pick tokens in order: 4.0 (running total = 4.0) + 3.5 (7.5) + 3.0 (10.5) + 2.0 (12.5) + 1.5 (14.0) + 1.0 (15.0) ≥ 15.3? No, 15.0 < 15.3.",
+        "Add token 6: 15.0 + 0.8 = 15.8 ≥ 15.3. Stop.",
+        "Selected: 6 tokens (not 9). Fixed-budget method (if set to 6) happens to work here; but if sparsity differed, it could pick 6 irrelevant tokens or only 3 important ones. Tactic adapts automatically."
+      ]
+    },
+    "note": "The constraint ensures that the selected tokens carry at least a target fraction of the full attention load, which bounds the error in the output approximation."
+  },
+  "bars": {
+    "h2": "Comparison: fixed budget vs. adaptive target",
+    "charts": [
+      {
+        "title": "Fixed budget (e.g., 256 tokens)",
+        "rows": [
+          ["High-sparsity layer accuracy", 87, "good"],
+          ["Low-sparsity layer accuracy", 42, "bad"],
+          ["Average decoding time (ms)", 128, "bad"]
+        ],
+        "note": "Same budget kills performance in low-sparsity layers; wastes memory in high-sparsity layers."
+      },
+      {
+        "title": "Tactic (target = 90% attention score)",
+        "rows": [
+          ["High-sparsity layer accuracy", 89, "good"],
+          ["Low-sparsity layer accuracy", 86, "good"],
+          ["Average decoding time (ms)", 87, "good"]
+        ],
+        "note": "Adaptive selection matches each layer's natural sparsity; uniform error bound across all layers."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Target too high.",
+        "html": "If the target fraction is set to 0.99, you keep almost all tokens, defeating the speedup."
+      },
+      {
+        "warn": true,
+        "b": "Curve fit is inaccurate.",
+        "html": "If attention scores do not follow a smooth curve (e.g., a sharp spike in importance), the fitted curve mispredicts the cutoff, selecting too many or too few tokens."
+      },
+      {
+        "warn": true,
+        "b": "Outlier scores break the curve.",
+        "html": "If one query has a single very high attention score and the rest are tiny, the curve fit may place the boundary in the wrong region."
+      },
+      {
+        "b": "Done right.",
+        "html": "In practice, attention scores follow a smooth curve for most queries in most layers; Tactic's curve fitting works well, and the 0.9 target (or 0.8 to 0.95 range) balances speed and accuracy."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Run Tactic on a real language model (e.g., Llama3.1-8B) over a long-context benchmark (e.g., LongBench). For each generated token, record: (1) how many tokens were kept by a fixed-budget method at budget 512, (2) how many tokens Tactic kept at target 0.9, (3) the attention approximation error for each, and (4) the output token's next-token prediction accuracy."
+    ],
+    "metric_eq": "speedup = (time to compute full attention) / (time to compute sparse attention); approximation_error = max_over_heads_and_layers of (full_attention_output - sparse_attention_output); end_to_end_speedup = (time for full-attention model) / (time for Tactic model)",
+    "closing": "The demo should make clear that Tactic picks fewer tokens than a high fixed budget and roughly as many as a well-tuned low budget, while keeping approximation error uniformly small across all layers."
+  }
+}

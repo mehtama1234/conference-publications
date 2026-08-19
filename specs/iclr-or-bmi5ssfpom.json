@@ -1,0 +1,230 @@
+{
+  "slug": "iclr-or-bmi5ssfpom",
+  "title": "DASH: Deterministic Attention Scheduling for High-Throughput LLM Training",
+  "family": "Efficiency & Systems",
+  "one_liner": "By rescheduling the backward computation of attention into a smarter order, DASH keeps reproducibility without sacrificing speed.",
+  "lead": "Training large language models requires that every run produces identical results so researchers can diagnose problems and test changes reliably. But the attention mechanism (the part of the model that focuses on important tokens) has a reproducibility problem: computing the learning updates deterministically is about 37.9% slower than normal. DASH solves this by reordering the computation steps like a smart assembly line, getting back nearly all the speed without breaking reproducibility.",
+  "nav": [["theme-efficiency-systems.html", "Efficiency & Systems"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Reproducibility breaks the assembly line",
+    "paras": [
+      "When training large models on many GPUs simultaneously, it is critical that every run produces the exact same numerical results. This determinism lets researchers pinpoint bugs because if the numbers differ between runs, the researcher cannot tell whether a change actually worked or whether randomness is just adding noise, test whether a code change actually helps because only identical starting points reveal whether something improved, and verify that expensive training runs are not corrupted because random changes between runs would hide bit-flips or other silent errors. The attention mechanism is a circuit in the model that learns which tokens to focus on.",
+      "The naive approach to determinism is to serialize all the reductions (a reduction is when you combine partial results from many GPUs into one final answer). But serialization means the GPU sits idle waiting for one step to finish before starting the next. In FlashAttention-3, the fastest attention implementation today, turning on determinism causes the backward pass (the step that computes the learning updates for each weight) to lose up to 37.9% of its speed, because reduce operations cannot run in parallel."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "Deterministic learning updates require serial reductions, leaving GPU cores idle and wasting speed."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Normal attention: all cores active",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["hot", 60], ["hot", 58], ["hot", 62], ["hot", 64], ["hot", 59], ["hot", 61], ["hot", 63], ["hot", 66], ["hot", 60], ["hot", 58], ["hot", 62]],
+        "caption": "GPU cores compute learning updates in parallel at full speed."
+      },
+      {
+        "title": "2. Deterministic mode: cores wait idle",
+        "viz": "weights",
+        "viz_args": [["hot", 8], ["free", 0], ["free", 0], ["free", 0], ["free", 0], ["free", 0], ["hot", 7], ["free", 0], ["free", 0], ["free", 0], ["free", 0], ["free", 0]],
+        "caption": "Cores must serialize reductions. Most sit idle, wasting compute."
+      },
+      {
+        "title": "3. DASH rethinks the order",
+        "viz": "box",
+        "viz_args": "Reorder: process queries backward, merge reductions smartly",
+        "caption": "Instead of waiting, reschedule work so reductions overlap with computation."
+      },
+      {
+        "title": "4. Pipeline keeps moving",
+        "viz": "weights",
+        "viz_args": [["moved", 48], ["moved", 45], ["moved", 52], ["moved", 50], ["moved", 46], ["moved", 49], ["moved", 51], ["moved", 47], ["moved", 50], ["moved", 48], ["moved", 52], ["moved", 49]],
+        "caption": "More cores active longer. Still deterministic, but faster."
+      },
+      {
+        "title": "5. Throughput gain: 28 percent speedup",
+        "viz": "plain",
+        "caption": "Deterministic training runs nearly as fast as non-deterministic."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Treat backward pass as a task graph.",
+        "text": "Each attention learning-update computation is a node with dependencies; reduction steps must happen in order."
+      },
+      {
+        "b": "Step 2: Find the bottleneck (critical path).",
+        "text": "Trace the longest chain of tasks that cannot overlap; this sets the minimum time."
+      },
+      {
+        "b": "Step 3: Descending query iteration.",
+        "text": "Process query blocks in reverse order so dependency resolution happens earlier, shrinking idle time."
+      },
+      {
+        "b": "Step 4: Shift scheduling.",
+        "text": "Reorder reduce tasks to let compute cores start work on the next step before the previous reduce finishes."
+      },
+      {
+        "b": "Step 5: Measure throughput on real GPUs.",
+        "text": "On H800 GPUs, DASH achieves up to 28 percent speedup while maintaining bitwise determinism."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": [
+      "The paper reorders the computation steps (compute vs. reduce operations) in the attention backward pass. It does not change what is computed, only when each operation runs relative to others. The GPU still serializes reductions for determinism, but by scheduling them smarter, the paper reduces idle time."
+    ],
+    "object": "Computation scheduling order"
+  },
+  "hidden": {
+    "h2": "Critical path length: the invisible bottleneck",
+    "name": "Critical path length in the DAG",
+    "paras": [
+      "The hidden quantity is the critical path length: the longest chain of dependent tasks that must run one after the other. Because these tasks block each other, the overall time is the sum of their durations, and idle cores cannot help. If you can find a different schedule that shrinks this chain, you speed up the whole computation because the total time is now determined by a shorter sequence.",
+      "The paper estimates critical path length by modeling the deterministic attention backward pass as a directed acyclic graph (a task dependency graph). Each node is a compute or reduce operation, and edges show which operations must finish before the next one starts. The paper then searches for schedules that minimize this critical path, testing two strategies: Descending Q-Tile Iteration and Shift Scheduling."
+    ],
+    "heat": {
+      "cells": [
+        ["Compute phase 1", 4, true],
+        ["Reduce phase 1", 3, false],
+        ["Compute phase 2", 4, true],
+        ["Idle (serial wait)", 1, false],
+        ["Reduce phase 2", 3, false],
+        ["Compute phase 3", 4, true],
+        ["Alt: reduce overlaps", 3, true],
+        ["Alt: reduced idle", 1, false],
+        ["Compute phase 4", 4, false],
+        ["Critical path sum", 4, true],
+        ["Time saved", 2, true],
+        ["Speedup result", 3, false]
+      ],
+      "caption": "Darker means task is on the critical path (blocks others). Light means it can overlap or run in parallel."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The critical path is the longest waiting line: if you reduce the waiting line, everything runs faster because the total time was set by that line."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper formalizes backward pass execution as a task DAG under FlashAttention semantics and derives optimal schedules by minimizing critical path length."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why rescheduling fixes the slowdown",
+    "paras": [
+      "In deterministic mode, accumulating learning updates forces reductions to wait for each other. This creates gaps where GPU cores sit idle. The paper identifies two sources of this idle time: pipeline stalls (when the compute pipeline empties while waiting for a reduce to finish) and suboptimal ordering of reductions.",
+      "By reversing the order in which query blocks are processed (Descending Q-Tile Iteration), the paper ensures that dependency resolution happens earlier. This advances the point at which downstream tasks can start, shrinking the pipeline stall. For causal attention (where future tokens cannot see past context), this is especially effective because the reversed order aligns naturally with how learning updates flow backwards.",
+      "For full attention, Shift Scheduling reorders the reduce tasks themselves so that while the GPU is reducing one block of results, another block of compute can proceed without waiting. Because the critical path is now shorter, total time decreases even though the same work runs serially. The two strategies together recover nearly all the speed that determinism lost."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Attention gradients queued (standard order)"
+        },
+        {
+          "t": "step",
+          "s": "Reschedule by reversing query block order",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Interleave reduces and computes"
+        },
+        {
+          "t": "step",
+          "s": "Shrink the critical path"
+        },
+        {
+          "t": "output",
+          "s": "Learning updates output"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The scheduling equation",
+    "words": "Critical path length equals the sum of sequential compute durations plus reduce durations that cannot overlap. By reordering, we minimize this sum.",
+    "equation": "CriticalPath = sum of durations of tasks on the longest dependency chain",
+    "symbols": [
+      ["CriticalPath", "Minimum time needed to run all sequential tasks (cannot be reduced by adding cores)"],
+      ["Compute phase C(i,j)", "Gradient computation for tile (i,j) on one GPU core"],
+      ["Reduce phase R(i,j)", "Deterministic reduction combining gradients across cores for tile (i,j)"],
+      ["Baseline order", "Process query tiles 0,1,2,... in sequence"],
+      ["Descending order", "Process query tiles ...,2,1,0 in reverse"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with 3 query blocks",
+      "lines": [
+        "Baseline order: C(0) 10ms, R(0) 5ms, C(1) 10ms, R(1) 5ms, C(2) 10ms, R(2) 5ms. Critical path = 10+5+10+5+10+5 = 45ms.",
+        "Descending order: Reverse to C(2), C(1), C(0). Scheduler moves R(2) to overlap with C(1). C(2) 10ms in parallel with R(3) from earlier 5ms, then R(2) 5ms overlaps with C(1) 10ms (R finishes at 5ms, C finishes at 10ms). Total: 10 + max(5,10) + max(5,10) + 5 = 10 + 10 + 10 + 5 = 35ms. Speedup: 45/35 = 1.28×."
+      ]
+    },
+    "note": "The key is reordering so that waiting for a reduce step overlaps with the next compute step, eliminating gaps."
+  },
+  "bars": {
+    "h2": "Backward pass throughput: baseline vs. DASH",
+    "charts": [
+      {
+        "title": "FlashAttention-3 deterministic (baseline)",
+        "rows": [
+          ["Non-deterministic speed", 100, "good"],
+          ["Deterministic mode", 62, "bad"],
+          ["Loss vs. non-deterministic", 38, "bad"]
+        ],
+        "note": "Turning on reproducibility costs 37.9 percent of throughput due to serial reductions."
+      },
+      {
+        "title": "DASH (with smart scheduling)",
+        "rows": [
+          ["Deterministic baseline", 62, "bad"],
+          ["After Descending Q-Tile", 72, "good"],
+          ["After Shift Scheduling", 79, "good"]
+        ],
+        "note": "Rescheduling recovers throughput without breaking determinism. Speedup 62 to 79 equals 27 percent gain."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Limited by memory bandwidth.",
+        "html": "If the GPU is memory-bound (waiting for data, not compute), rescheduling does not help because the problem is fetching data from memory, not the order of operations. DASH works best when the bottleneck is scheduling, not data movement."
+      },
+      {
+        "warn": true,
+        "b": "GPU architecture matters.",
+        "html": "Shift Scheduling is theoretically optimal but only realizes its full gain on GPUs with large register files or on-chip memory (like Blackwell). On current H800s, gains are partial because the low-level implementation is constrained by available registers."
+      },
+      {
+        "warn": true,
+        "b": "Works only for attention.",
+        "html": "Other operations (matrix multiplies, normalization) do not pay the same determinism cost because their reductions parallelize better. DASH is specific to attention."
+      },
+      {
+        "b": "Done right.",
+        "html": "Descending Q-Tile Iteration and Shift Scheduling together recover 28 percent speedup on current hardware while maintaining bitwise determinism, advancing reproducible training at scale."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "The demo should implement both strategies (Descending Q-Tile Iteration and Shift Scheduling) as a modified attention implementation or scheduler. Run the backward pass on a GPU with determinism enabled, measure the throughput in tokens-per-second, and compare against FlashAttention-3's deterministic baseline. Vary sequence length (512, 1024, 4096, 16384 tokens) and batch size to show that DASH maintains speedup across settings. Verify bitwise reproducibility by running the same backward pass twice and checking that learning updates are identical. Plot throughput on the y-axis, sequence length on the x-axis, with one line for baseline and one for DASH. The key metric is: how much of the 37.9% loss can DASH recover?"
+    ],
+    "metric_eq": "Throughput speedup = (DASH tokens per second) / (deterministic baseline tokens per second)",
+    "closing": "The demo makes clear that reproducible training does not require sacrificing speed; smart scheduling recovers most of it."
+  }
+}

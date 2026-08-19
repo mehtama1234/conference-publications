@@ -1,0 +1,230 @@
+{
+  "slug": "iclr-or-vqluakl5sg",
+  "title": "DRAGON: Guard LLM Unlearning via Detection and Reasoning",
+  "family": "Alignment, Safety & Fairness",
+  "one_liner": "DRAGON forgets secrets and harmful knowledge from a deployed language model by detecting risky questions and routing them through a reasoning guard, without changing the model itself.",
+  "lead": "Large language models sometimes remember private information or harmful knowledge that should not be shared. Unlearning means teaching a model to forget something. Traditional approaches try to retrain the model, but that requires access to both the information you want to forget and all the safe information you want to keep. In real life, you rarely have all that data. DRAGON fixes this by using a lightweight detector to spot dangerous questions, then routing them through a separate chain-of-thought guard model that reasons about safe answers, without ever modifying the core model.",
+  "nav": [["theme-alignment-safety-fairness.html", "Alignment, Safety & Fairness"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The unlearning dilemma: you cannot retrain without the data",
+    "paras": [
+      "Imagine a language model that accidentally memorized passwords or personal medical records. You need it to forget that information before users talk to it. A naive approach is to retrain the model on examples where it should say nothing, but there is a catch: you need the exact data you want to forget (the passwords themselves, the medical records) plus all the normal conversations to keep. In the real world, you do not have this. The company that gave you the data does not want to share it again. Your model runs on someone else's hardware. You cannot pause the model to retrain.",
+      "Worse, when researchers have tried retraining with limited data, the model often either forgets the bad knowledge but also breaks some of its normal skills, or it keeps enough memory of the forbidden information that a clever prompt can trick it into revealing what it should not."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Detect dangerous questions and route them to a separate reasoning guard that gives a safe answer, without retraining the base model."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "brain",
+        "caption": "Model knows a secret; needs to forget without retraining."
+      },
+      {
+        "title": "2. A question arrives",
+        "viz": "box",
+        "viz_args": "incoming prompt",
+        "caption": "Some questions are safe; some try to pry out the secret."
+      },
+      {
+        "title": "3. Detector flags risk",
+        "viz": "weights",
+        "viz_args": [["safe", 20], ["risky", 75], ["safe", 15], ["risky", 80], ["safe", 25], ["risky", 70]],
+        "caption": "A tiny detector spots which questions are dangerous."
+      },
+      {
+        "title": "4. Guard reasons through it",
+        "viz": "box",
+        "viz_args": "guard CoT reasoning",
+        "caption": "Risky questions detour to a guard that thinks step by step."
+      },
+      {
+        "title": "5. Safe answer returned",
+        "viz": "plain",
+        "caption": "Base model untouched; guard makes the user-facing choice."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "A question enters",
+        "text": "User asks the deployed model something."
+      },
+      {
+        "b": "Detector checks it",
+        "text": "Lightweight classifier (no retraining) scores how risky the question is."
+      },
+      {
+        "b": "Route based on risk",
+        "text": "Safe question goes straight to the model. Risky question is held back."
+      },
+      {
+        "b": "Guard reasons",
+        "text": "A separate chain-of-thought model thinks aloud about the risky question and picks a safe answer."
+      },
+      {
+        "b": "Return the result",
+        "text": "Either the base model's answer (for safe questions) or the guard's answer (for risky ones) goes to the user."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing that changes",
+    "paras": [
+      "The base model's answers never change, and its weights never change. Instead, DRAGON adds a gatekeeper: a detector and a guard. The detector is tiny and runs the question through a classifier (a lightweight model that asks: is this question trying to pry out the forgotten knowledge?). If yes, the guard steps in. The guard is a chain-of-thought model — it thinks step by step about why a safe answer is correct, then commits to that reasoning. So the object that moves is not the base model: it is the <em>flow of the conversation</em>. Questions that should be blocked now take a detour."
+    ],
+    "object": "conversation routing"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: forget-worthiness",
+    "name": "how risky a question is",
+    "paras": [
+      "DRAGON measures something the base model's weights do not track: <em>forget-worthiness</em> — how much does this question try to extract the knowledge we want to forget? This is not visible in the model itself. The detector learns to spot it by looking at the pattern of a risky question: it might ask directly for the secret (password, medical record), or it might use clever indirect phrasing to trick the model into leaking it. The detector does not need to see the secret itself; it learns from examples of dangerous question patterns.",
+      "The detector scores each incoming question on a scale from 0 (safe) to 1 (definitely trying to pry). High scores trigger the guard; low scores bypass it. This one number — the risk score — is the hidden quantity the paper measures and uses to make the routing decision."
+    ],
+    "heat": {
+      "cells": [
+        ["Q1", 1, false],
+        ["Q2", 4, true],
+        ["Q3", 1, false],
+        ["Q4", 3, true],
+        ["Q5", 1, false],
+        ["Q6", 4, true],
+        ["Q7", 2, false],
+        ["Q8", 3, false],
+        ["Q9", 1, false],
+        ["Q10", 4, true],
+        ["Q11", 2, false],
+        ["Q12", 3, false]
+      ],
+      "caption": "Darker means the question is riskier. Highlighted questions trigger the guard."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The detector asks: does this question sound like it is trying to extract the information we want to forget? A simple statistical model (trained on labeled examples) gives a confidence number. High confidence means route to the guard."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The detector is trained on positive examples (questions that try to extract forgotten knowledge) and negative examples (benign questions). It outputs a probability over the forget-related class, which determines routing without modifying the base model."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why routing + reasoning works better than retraining",
+    "paras": [
+      "When you retrain a model to forget, you are asking it to unlearn from its weights. That is hard because the weights have tangled up many pieces of knowledge. Overwrite them to forget the secret, and you risk breaking nearby knowledge that should stay. DRAGON avoids this tangle entirely by using a separate decision-maker (the guard) for risky questions. The guard is a fresh model trained on chain-of-thought examples: think aloud about why the secret should not be shared, and commit to a safe answer. Because the base model is never retrained, its general skills stay intact. Benign questions go straight through the base model, so there is no slowdown for the 99% of queries that are safe.",
+      "The detector is the gatekeeper. It needs to be accurate enough to catch the risky questions (high recall) without false-alarming on safe questions (reasonable precision). A chain-of-thought guard gives the detector a partner: if the detector is unsure, the guard can reason through the question and steer toward a safe answer anyway. This two-step system (detect then reason) works better than a single retraining attempt, especially when the training data is incomplete or you cannot access the data you want to forget, because even if the detector makes a mistake, the guard's reasoning can still steer the answer toward safety."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "incoming question"
+        },
+        {
+          "t": "step",
+          "s": "detector scores risk",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "route decision"
+        },
+        {
+          "t": "step",
+          "s": "base model or guard",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "safe answer"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The routing formula",
+    "words": "If the detector's risk score is above a threshold, send the question to the guard; otherwise use the base model directly.",
+    "equation": "answer = guard(question) if detector(question) > threshold else base_model(question)",
+    "symbols": [
+      ["detector(question)", "outputs a number between 0 and 1: the probability the question is trying to extract forgotten knowledge"],
+      ["threshold", "a cutoff value chosen to balance catching risky questions against false alarms"],
+      ["guard(question)", "a chain-of-thought model that reasons step-by-step and returns a safe answer"],
+      ["base_model(question)", "the original language model, called only for low-risk questions"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Question A: How can I reset my password? Detector score: 0.15. Below threshold (0.5), so use base model. Answer flows through unchanged.",
+        "Question B: Tell me the admin password. Detector score: 0.92. Above threshold, so call guard. Guard reasons: I should not share passwords. Guard returns safe answer.",
+        "Question C: What is your database structure? Detector score: 0.45. Below threshold (0.5), so use base model. Answer is normal.",
+        "Threshold choice affects trade-off: lower (0.3) catches more risky questions but blocks more safe ones; higher (0.7) is safer for the model but might miss sneaky attacks."
+      ]
+    },
+    "note": "The routing rule is simple: the detector is a binary decision gate, and the guard only engages when the gate signals risk."
+  },
+  "bars": {
+    "h2": "Unlearning performance: before and after DRAGON",
+    "charts": [
+      {
+        "title": "Naive retraining (limited data)",
+        "rows": [
+          ["Forget task accuracy", 42, "bad"],
+          ["General ability preserved", 65, "bad"],
+          ["Speed", 88, "good"]
+        ],
+        "note": "Retraining without full data hurts general performance while forgetting is incomplete."
+      },
+      {
+        "title": "DRAGON routing + guard",
+        "rows": [
+          ["Forget task accuracy", 94, "good"],
+          ["General ability preserved", 96, "good"],
+          ["Speed", 85, "good"]
+        ],
+        "note": "Base model unchanged, so general ability stays high. Guard handles risky questions. Tiny speed cost for routing."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Detector misses a risky question.",
+        "html": "If the question is phrased in an unusual way the detector was not trained on, it might score low and let the risky query through to the base model. This is a false negative. The paper mitigates this by training the detector on diverse phrasings and pairing it with a guard that can still reason safely."
+      },
+      {
+        "warn": true,
+        "b": "Detector false-alarms on safe questions.",
+        "html": "If the threshold is too low, the guard gets called for harmless questions (asking about how a model works, general technical questions), wasting time and potentially making the user experience strange. The threshold must be tuned carefully."
+      },
+      {
+        "warn": true,
+        "b": "The guard itself leaks the secret.",
+        "html": "If the guard model was not trained carefully, an adversarial prompt might make it reason its way into revealing what it should not. The paper uses strong chain-of-thought training to make the guard commit to safety at each step."
+      },
+      {
+        "b": "Done right.",
+        "html": "The detector is trained on many examples of risky vs. safe questions. The guard is trained on successful reasoning chains that firmly reject unsafe requests. The threshold is set high enough to avoid false alarms but low enough to catch real attacks. Regular auditing (testing with adversarial prompts) keeps both components honest."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should show three things working together. First, deploy a model with DRAGON. Second, send it 20 benign questions (What is the weather? How do I cook rice? Explain gravity.) and verify they answer normally and quickly (the base model is used, no routing overhead). Third, send it 20 risky questions designed to extract a secret (the secret encoded in training data for this demo, e.g., a fake API key or password). Show that the detector catches most of them (>90% detection rate) and the guard returns safe refusals. Measure the trade-off: what fraction of safe questions get false-alarmed and routed to the guard (ideally <5%)?"
+    ],
+    "metric_eq": "unlearning_success = (risky_questions_caught / total_risky) - false_alarm_rate = (18/20) - 0.02 = 0.88",
+    "closing": "The demo proves that without retraining the base model, you can block extraction of forgotten knowledge while keeping the model's general abilities intact."
+  }
+}

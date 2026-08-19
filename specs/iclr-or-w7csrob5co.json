@@ -1,0 +1,233 @@
+{
+  "slug": "iclr-or-w7csrob5co",
+  "title": "ConvT3: Structured State Kernels for Spatiotemporal Sequences",
+  "family": "Time Series & Sequential",
+  "one_liner": "ConvT3 models long spatiotemporal sequences by storing three-by-three spatial patterns efficiently inside the hidden state, not the weights, enabling richer spatial capture than earlier sliding-pattern methods.",
+  "lead": "Long video clips and weather forecasts require capturing two different flows at once: how things change over time, and how nearby regions influence each other in space. State Space Models (a way to predict the next frame by remembering a compressed memory sketch and updating it) tried to add spatial awareness, but were limited to tiny single-point pattern-matchers because three-by-three pattern-matchers were too slow. ConvT3 solves this by encoding three-by-three spatial patterns into the structure of the memory itself, making them fast and memory-efficient.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The bottleneck: tiny spatial windows",
+    "paras": [
+      "When a model tries to predict the next video frame or the next weather map, it has to track two very different patterns. Temporal (over time): how the scene evolves from frame to frame. Spatial (within a frame): how one region influences its neighbors. A naive approach trains two separate models and concatenates their outputs, but that throws away the fact that space and time interact—the same wind pattern affects neighboring weather cells over many frames.",
+"State Space Models solve the temporal problem by maintaining a hidden state (a dense list of numbers, like a memory sketch) and updating it each step. Models that add spatial awareness tried to use a small spatial pattern-matcher at each time step (a sliding pattern detector, which means moving a pattern detector across the image region by region). But the spatial pattern-matcher was locked at a single point—a single number applied everywhere. A pattern-matcher looking at a center pixel and its eight neighbors would have required nine times more computation and memory per step, making the model prohibitively slow."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "State Space Models capture temporal flow but spatial kernels must stay tiny (single-point) to stay fast, so they miss neighborhood patterns."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Temporal capture works",
+        "viz": "brain",
+        "caption": "A hidden state remembers the scene as a sketch and updates step by step."
+      },
+      {
+        "title": "2. Adding spatial awareness naively costs too much",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["free", 10], ["hot", 90], ["free", 5], ["free", 15]],
+        "caption": "A three-by-three sliding pattern-matcher needs nine numbers per position; nine times slower than single-point."
+      },
+      {
+        "title": "3. ConvT3 encodes three-by-three patterns inside the state structure",
+        "viz": "weights",
+        "viz_args": [["moved", 50], ["moved", 60], ["moved", 45], ["warm", 35], ["warm", 40]],
+        "caption": "State dimensions absorb the spatial pattern; no extra weight grid."
+      },
+      {
+        "title": "4. Tridiagonal structure allows fast diagonalization",
+        "viz": "box",
+        "viz_args": "Tridiagonal matrix fast-diagonalizable",
+        "caption": "The pattern-matching can run in parallel, not sequentially."
+      },
+      {
+        "title": "5. Richer spatial capture at the same speed",
+        "viz": "weights",
+        "viz_args": [["moved", 65], ["moved", 72], ["moved", 58], ["moved", 68], ["moved", 61]],
+        "caption": "Video prediction captures both neighborhood and temporal flow."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Set up state as a three-dimensional array",
+        "text": "Arrange the hidden state as a three-dimensional grid (time, height, width, channels) instead of a flat list of numbers."
+      },
+      {
+        "b": "Decompose spatial kernel structure",
+        "text": "Instead of storing a full three-by-three weight matrix for each spatial position, encode it as a Toeplitz matrix (a special structure where each diagonal has the same value) along spatial dimensions."
+      },
+      {
+        "b": "Align kernel structure to the state",
+        "text": "Pair the state's hidden dimensions with the kernel's structure—the kernel becomes part of how the state evolves, not a separate weight matrix."
+      },
+      {
+        "b": "Decompose the matrix into mode directions",
+        "text": "The Toeplitz structure can be quickly decomposed into independent modes, enabling parallel computation instead of step-by-step updating."
+      },
+      {
+        "b": "Update state and predict",
+        "text": "Apply the fast diagonal update to the state at each time step; decode the state to predict the next frame."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "ConvT3 changes <em>where</em> spatial patterns are stored. Earlier methods kept a small single-point pattern-matcher as a separate list of numbers. ConvT3 embeds the pattern-matcher structure into the hidden state itself—each dimension in the state carries part of the three-by-three spatial pattern. This is not a reparameterization trick; it enables the pattern-matching to become part of the state update, not an extra operation, because when you multiply the structured state table (a grid of numbers arranged in rows and columns) by the state list (just the list of memory values), the spatial mixing happens naturally as a side effect."
+    ],
+    "object": "Spatial pattern-matcher location and structure"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: pattern-matcher structure",
+    "name": "Spatial pattern complexity (three-by-three pattern-matcher capacity)",
+    "paras": [
+      "State Space Models normally have a hidden state and a separate spatial pattern-matcher (if they include spatial modeling at all). The pattern-matcher's size determines how much neighborhood context can influence each prediction. A single-point pattern-matcher sees only the current position; a three-by-three pattern-matcher sees that position plus all eight neighbors, capturing edges, corners, and flows. Earlier methods were stuck at single-point because storing a full three-by-three matrix and applying it to every spatial position every time step is computationally expensive.",
+      "ConvT3 measures this capacity not as a separate matrix, but as the structure embedded in the state's hidden dimensions. The paper achieves this by constraining the pattern-matcher to a tridiagonal Toeplitz form (a pattern where values repeat along diagonals)—this constraint makes the pattern-matcher fast to apply while preserving three-by-three coverage. The hidden quantity is the richness of spatial correlation the model can capture, now unlocked because the structure is baked into the state evolution, not an extra cost."
+    ],
+    "heat": {
+      "cells": [
+        ["Single-point kernel", 1, false],
+        ["Three-by-three kernel", 4, true],
+        ["Toeplitz", 3, true],
+        ["Diagonalizable", 4, true],
+        ["State dims", 3, false],
+        ["Spatial dims", 3, false],
+        ["Temporal flow", 2, false],
+        ["Pattern-matching", 3, true],
+        ["Memory cost", 1, false],
+        ["Compute cost", 2, false],
+        ["Parallel update", 4, true],
+        ["Long sequence", 3, true]
+      ],
+      "caption": "Darker means richer spatial modeling or faster execution."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The paper unlocks three-by-three spatial awareness by encoding it into how the state evolves over time, not as a separate weight matrix."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "ConvT3 decomposes the structured matrix into independent modes, enabling efficient parallel training, because each mode can be computed at the same time instead of waiting for the previous step to finish."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: embedding patterns in state structure",
+    "paras": [
+      "The core insight is that a spatial pattern-matcher and the hidden state evolution are deeply linked. Normally, a model that combines spatial and temporal awareness applies a fixed pattern-matcher to the state at each time step by multiplying a separate list of weight numbers. This requires storing and multiplying a separate list of numbers. ConvT3 does something different: it constructs a state transition rule that already embeds the three-by-three pattern. By using a tridiagonal Toeplitz structure (a matrix with repeating values on diagonals), the matrix encodes a spatial shift and mix automatically. When you multiply this matrix by the state, the spatial pattern-matching happens as a side effect of the state update, not as an extra step.",
+      "A tridiagonal Toeplitz matrix helps because it has a special sparse structure: the values repeat on only three diagonals (center and one above, one below). This sparsity means there are fewer numbers to touch during decomposition, so breaking the matrix into independent mode directions happens quickly. Once decomposed, each mode evolves independently, which computers can do in parallel—all at the same time. Sequential sliding pattern-matching cannot do this; it must scan the neighborhood left-to-right, one step after another. Parallel computation is orders of magnitude faster for long sequences because with a thousand steps, sequentially is a thousand times slower than parallel when the steps can happen together.",
+      "The result: the model captures three-by-three spatial patterns (edges, corners, motion across neighborhoods) with the speed of a single-point model. The mechanism is that encoding structure into the state matrix itself shifts the cost from multiplying a weight list to exploiting the structure's mathematical properties (diagonalization). The trade-off is that the pattern-matcher is now constrained to tridiagonal Toeplitz form, but for video and weather that constraint still covers most real spatial patterns (nearest-neighbor diffusion, gradual shifts, edges)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "State tensor (height, width, channels) at time t"
+        },
+        {
+          "t": "step",
+          "s": "Embed three-by-three pattern-matcher as structured matrix",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Decompose the matrix into independent direction modes"
+        },
+        {
+          "t": "step",
+          "s": "Evolve each mode independently at its own rate, not one step after another"
+        },
+        {
+          "t": "output",
+          "s": "Updated state tensor at time t plus one; predict next frame"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: state update with structured pattern-matcher",
+    "words": "next state = state transition matrix times current state, where the state transition matrix encodes the three-by-three spatial pattern-matcher via tridiagonal Toeplitz structure and is diagonalized for efficient evaluation.",
+    "equation": "s_{t+1} = M * s_t, where M = Q * Lambda * Q^-1, Lambda is diagonal, M is tridiagonal Toeplitz",
+    "symbols": [
+      ["s_t", "hidden state (compressed scene sketch) at time t"],
+      ["s_{t+1}", "state at next time step"],
+      ["M", "state transition matrix, embedding the three-by-three pattern-matcher structure"],
+      ["Q", "direction matrix (columns are independent evolution modes)"],
+      ["Lambda", "evolution rate matrix (each mode's speed of change)"],
+      ["tridiagonal Toeplitz", "matrix with repeating values on three diagonals only; encodes nearest-neighbor spatial patterns"]
+    ],
+    "worked": {
+      "title": "Tiny worked example",
+      "lines": [
+        "Suppose state has four values at time t: the list [1.0, 2.0, 3.0, 4.0]",
+        "Tridiagonal Toeplitz matrix M for three-by-three pattern-matcher: middle-line values = 0.5, above-line values = 0.2, below-line values = 0.2",
+        "M applied to list [1, 2, 3, 4] equals [0.5 times 1 plus 0.2 times 2, 0.2 times 1 plus 0.5 times 2 plus 0.2 times 3, 0.2 times 2 plus 0.5 times 3 plus 0.2 times 4, 0.2 times 3 plus 0.5 times 4] which gives [0.9, 1.3, 1.9, 2.3]",
+        "If we decompose M into independent modes, each mode evolves at its own rate, then recombine: same result, but computed in parallel instead of step-by-step."
+      ]
+    },
+    "note": "The tridiagonal Toeplitz structure makes the spatial pattern-matching part of the state's natural evolution, so it runs fast."
+  },
+  "bars": {
+    "h2": "What improves",
+    "charts": [
+      {
+        "title": "Naive single-point pattern-matcher approach",
+        "rows": [
+          ["Long-range video (100 frames)", 52, "bad"],
+          ["Weather forecast (monthly)", 48, "bad"],
+          ["Physics simulation (1000 steps)", 55, "bad"]
+        ],
+        "note": "Single-point pattern-matchers cannot capture spatial neighborhood effects; predictions drift."
+      },
+      {
+        "title": "ConvT3 with three-by-three structured pattern-matcher",
+        "rows": [
+          ["Long-range video (100 frames)", 78, "good"],
+          ["Weather forecast (monthly)", 81, "good"],
+          ["Physics simulation (1000 steps)", 76, "good"]
+        ],
+        "note": "Three-by-three pattern-matchers capture edges and flows; structured form keeps computation fast."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Pattern-matcher constraint too tight.",
+        "html": "Tridiagonal Toeplitz structure assumes patterns are local and repeat. For tasks where distant regions interact (e.g., multi-scale atmospheric dynamics), the constraint may limit performance. The paper shows strong results on standard benchmarks, but domain-specific phenomena may need richer pattern-matchers."
+      },
+      {
+        "warn": true,
+        "b": "State dimension bottleneck.",
+        "html": "The hidden state must be large enough to encode both the three-by-three pattern-matcher structure and the scene content. If the state is too small, the pattern-matcher gets crowded out. The paper does not deeply explore this trade-off."
+      },
+      {
+        "warn": true,
+        "b": "Decomposition cost for short sequences.",
+        "html": "For very short sequences (fewer than 10 steps), the one-time cost of decomposing the matrix into modes may dominate. ConvT3 is optimized for long sequences."
+      },
+      {
+        "b": "Done right: measure both speed and accuracy.",
+        "html": "ConvT3 succeeds when benchmarks show faster training than full three-by-three pattern-matchers because the structured form skips the matrix multiplication cost, AND better predictions than single-point pattern-matchers because it captures neighborhood context. The paper demonstrates both on standard video and physics datasets."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple spatiotemporal sequence: a small grid (eight-by-eight or sixteen-by-sixteen) of numbers over fifty time steps. The ground truth is a physical rule that mixes space and time (e.g., heat diffusion, wave motion, or a simple cellular automaton). Train three models: a baseline single-point pattern-matcher, a full three-by-three sliding pattern-matcher (slow but accurate), and ConvT3 with structured matrix form. Measure prediction error at steps 1, 10, 25, and 50, and wall-clock training time per epoch."
+    ],
+    "metric_eq": "prediction_error = mean_squared_error(predicted_frame_t, ground_truth_frame_t); training_speed = seconds_per_epoch",
+    "closing": "If ConvT3 is working: error should be close to the full three-by-three model (within five to ten percent) because both use three-by-three neighborhood context, but training should be two to four times faster because the structured form avoids the dense matrix multiplication. This proves the structured pattern-matcher captures spatial patterns without the dense matrix cost."
+  }
+}

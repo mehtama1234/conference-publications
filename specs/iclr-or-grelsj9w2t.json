@@ -1,0 +1,434 @@
+{
+ "slug": "iclr-or-grelsj9w2t",
+ "title": "Motion Prior Distillation in Generative Inbetweening",
+ "family": "Generative Models & Diffusion",
+ "one_liner": "When a diffusion model fills frames between two keyframes, it generates forward and backward motion paths that conflict\u2014this paper copies motion cues from the forward path into the backward path to make them agree.",
+ "lead": "Imagine asking one artist to draw a video starting from the first frame and another to draw backward from the last frame, then merging their work into the middle. Each artist follows different motion cues, and their pictures clash. This paper proposes a simple trick: in early denoising steps (when the rough motion is being decided), steal motion direction from the forward artist and feed it to the backward one, so both pull the same way.",
+ "nav": [
+  [
+   "theme-generative-models-diffusion.html",
+   "Generative Models & Diffusion"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Two paths, two different motion cues, temporal breakups",
+  "paras": [
+   "A diffusion model trained on videos learns to paint, step by step, by first sketching noise and then refining it into a real frame. To fill frames between two keyframes\u2014the first and last in a sequence\u2014modern systems run this denoising process twice in parallel: one branch starts from the first frame and denoises forward through time; the other starts from the last frame and denoises backward. After each denoising step, the two branches merge their results into the middle by blending them.",
+   "The problem: each branch is trained to follow motion cues from a different anchor. The forward branch is conditioned to see motion patterns implied by the start frame; the backward branch follows motion from the end frame. These patterns often disagree. Early denoising steps, when the diffusion model is laying down broad strokes of motion direction, amplify this disagreement. The result is jerky, inconsistent motion\u2014the generated video feels like two separate artists working against each other."
+  ],
+  "callout": {
+   "b": "The fix in one sentence.",
+   "html": "Copy the motion direction that the forward path discovered and inject it into the backward path during early steps, so both branches move the same way."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Two keyframes",
+    "viz": "box",
+    "viz_args": "Start \u2192 [?] \u2192 End",
+    "caption": "A diffusion model fills the unknown middle frames between two keyframes."
+   },
+   {
+    "title": "2. Forward path chases start frame motion",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "forward-motion",
+      70
+     ],
+     [
+      "start-cue",
+      65
+     ],
+     [
+      "end-cue",
+      20
+     ],
+     [
+      "blur",
+      30
+     ],
+     [
+      "clear",
+      40
+     ]
+    ],
+    "caption": "Forward denoiser follows motion implied by the start frame\u2014pulls leftward."
+   },
+   {
+    "title": "3. Backward path chases end frame motion",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "backward-motion",
+      68
+     ],
+     [
+      "start-cue",
+      18
+     ],
+     [
+      "end-cue",
+      72
+     ],
+     [
+      "blur",
+      35
+     ],
+     [
+      "clear",
+      38
+     ]
+    ],
+    "caption": "Backward denoiser follows motion from end frame\u2014pulls rightward. They clash."
+   },
+   {
+    "title": "4. Distill forward motion into backward",
+    "viz": "box",
+    "viz_args": "Backward \u2190 copy forward move",
+    "caption": "Early in denoising, steal the forward motion residual and feed it to backward path."
+   },
+   {
+    "title": "5. Aligned motion, smooth transitions",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "forward-motion",
+      70
+     ],
+     [
+      "backward-motion",
+      68
+     ],
+     [
+      "aligned",
+      72
+     ],
+     [
+      "jerk",
+      15
+     ],
+     [
+      "smooth",
+      78
+     ]
+    ],
+    "caption": "Both paths now pull the same way. Intermediate frames blend coherently."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Encode both frames",
+    "text": "Turn the start and end keyframes into compressed lists of numbers (codes)."
+   },
+   {
+    "b": "Denoise the forward path",
+    "text": "Start with noise and gradually refine it, conditioned on start-frame motion patterns."
+   },
+   {
+    "b": "Extract motion residual",
+    "text": "Capture what the forward path added at each early step\u2014the motion direction it discovered."
+   },
+   {
+    "b": "Re-noise and re-guide the backward path",
+    "text": "Add noise back to the backward estimate, then denoise again, but this time incorporate the forward motion cue."
+   },
+   {
+    "b": "Merge aligned paths",
+    "text": "Blend the two refined paths into the final smooth sequence."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper modifies how the backward denoising path is conditioned during early steps. Instead of letting it independently follow motion cues from the end frame, the method injects motion information from the forward path\u2014specifically, the motion residual (the change the forward path made at each step). This one change is applied only in the early denoising phase, when global motion direction is being laid down."
+  ],
+  "object": "conditioning signal in backward path"
+ },
+ "hidden": {
+  "h2": "The motion residual\u2014what the method measures",
+  "name": "motion residual",
+  "paras": [
+   "A motion residual is the difference between what the denoiser predicted and what it sees at each step. When the forward path denoises from step T down to step 0, at early steps (high noise, roughly 80% through) it makes big predictions about what the overall motion should be. The residual is how much that prediction changes the frame from pure noise toward a realistic video. It is a motion fingerprint\u2014the forward path's answer to where the objects should move.",
+   "The paper estimates this residual by running the forward denoising path and recording its output at each early step. Then it feeds that residual into the backward path by adding it as an extra nudge during re-noising steps, pulling the backward path toward agreement with the forward motion cues."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "forward-early",
+     4,
+     true
+    ],
+    [
+     "forward-mid",
+     2,
+     false
+    ],
+    [
+     "backward-early",
+     4,
+     true
+    ],
+    [
+     "backward-mid",
+     2,
+     false
+    ],
+    [
+     "residual-copied",
+     4,
+     true
+    ],
+    [
+     "backward-after",
+     3,
+     false
+    ],
+    [
+     "motion-conflict-before",
+     4,
+     true
+    ],
+    [
+     "motion-aligned-after",
+     1,
+     false
+    ],
+    [
+     "jerk-level-before",
+     4,
+     true
+    ],
+    [
+     "smooth-score-after",
+     1,
+     false
+    ],
+    [
+     "temporal-gap-before",
+     4,
+     true
+    ],
+    [
+     "coherence-after",
+     2,
+     false
+    ]
+   ],
+   "caption": "Darker means stronger effect. Forward early and backward early conflict until residual is copied into backward path."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The forward path figures out how objects should move to get from the start frame to something plausible. That decision, the motion residual, is like a magnetic field. The method applies that field to the backward path so it follows the same direction."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The forward and backward paths each minimize their own loss. Early denoising steps are where motion is decided. The residual (the change the forward path made) is fed into backward via re-noising, steering it toward forward motion agreement."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why steering one path with the other's motion fixes the conflict",
+  "paras": [
+   "A diffusion model works by predicting cleaner versions of an image as noise is gradually removed. Early steps have high noise and make broad-brush guesses about structure and motion. Later steps add fine details. In parallel time-reversal sampling, forward and backward paths both operate independently, each minimizing its own loss. The forward path, conditioned on the start frame, learns motion patterns that make sense starting from that anchor. The backward path, conditioned on the end frame, learns different motion patterns. At step T (high noise), both predictions are uncertain but different.",
+   "Motion Prior Distillation (MPD) intervenes in early denoising steps. It captures the forward path's motion residual\u2014the change it made\u2014and feeds it into the backward path via re-noising. Re-noising means adding noise back in, then denoising again with the extra guidance. This forces the backward path to rethink its motion trajectory in light of what the forward path discovered. The key is timing: only in early steps, when motion is still plastic and not yet locked in. Late steps refine details and should keep independent control.",
+   "Why this works: the forward path has already seen the start frame's constraints and worked out a motion that is consistent with it. By copying that motion into the backward path, the method enforces a single motion grammar across the entire sequence. Conflicts dissolve because both branches now pull in the same direction. The merged intermediate frames flow smoothly because the two sources are no longer at odds."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "Start and end frames"
+    },
+    {
+     "t": "step",
+     "s": "Forward denoising (early)",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Extract motion residual (difference forward made)",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Re-noise backward, guided by residual",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Backward denoising (steered)",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "Merge aligned paths"
+    },
+    {
+     "t": "output",
+     "s": "Smooth inbetweening"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The residual copy and re-noising formula",
+  "words": "motion_residual = (forward_denoised - prior_estimate); backward_renoised = backward_noised + lambda * motion_residual; then backward_redednoised = backward_redednoised + guidance_strength * backward_renoised",
+  "equation": "x'_t = x'_t + lambda * (x_fwd,t - x_prior,t); then backward_refined = denoise(x'_t + k * re_noise_scale) with early_stage_flag gamma",
+  "symbols": [
+   [
+    "x_fwd,t",
+    "forward path's output at noise step t"
+   ],
+   [
+    "x_prior,t",
+    "what the prior (start-conditioned) model predicts without backward guidance"
+   ],
+   [
+    "lambda",
+    "blending scale for how much forward residual to copy (tuned to 0.5\u20131.0)"
+   ],
+   [
+    "x'_t",
+    "backward path's estimate, updated by the residual"
+   ],
+   [
+    "k",
+    "number of re-noising steps (typically 2\u20133)"
+   ],
+   [
+    "gamma",
+    "the stage ratio (only apply in first 30% of denoising, where motion is set)"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Step t=80 (high noise, rough motion phase): Forward denoising predicts x_fwd equals [0.3, 0.5, 0.2] (a rough motion list of numbers).",
+    "Prior alone predicts x_prior = [0.1, 0.2, 0.1] (bland, no strong direction).",
+    "Residual = [0.3 - 0.1, 0.5 - 0.2, 0.2 - 0.1] = [0.2, 0.3, 0.1] (forward's motion insight).",
+    "Backward path initially predicts x'_80 = [0.1, 0.1, 0.4] (opposite motion).",
+    "Apply lambda=1.0: x'_80 := [0.1, 0.1, 0.4] + 1.0 * [0.2, 0.3, 0.1] = [0.3, 0.4, 0.5] (backward now agrees with forward).",
+    "Later re-denoising steps refine these values toward realistic pixels. Both paths are now aligned in motion direction."
+   ]
+  },
+  "note": "The residual is the motion fingerprint the forward path left behind; copying it forces alignment without retraining."
+ },
+ "bars": {
+  "h2": "Temporal coherence and visual quality comparison",
+  "charts": [
+   {
+    "title": "Without distillation (baseline time reversal)",
+    "rows": [
+     [
+      "FID score (lower means generated images look more like real ones)",
+      18,
+      "bad"
+     ],
+     [
+      "Temporal smoothness (user rating)",
+      62,
+      "bad"
+     ],
+     [
+      "Jerk-free motion percentage",
+      54,
+      "bad"
+     ]
+    ],
+    "note": "Independent paths create motion conflicts; users notice flickering and jumpy transitions."
+   },
+   {
+    "title": "With Motion Prior Distillation",
+    "rows": [
+     [
+      "FID score (lower means generated images look more like real ones)",
+      12,
+      "good"
+     ],
+     [
+      "Temporal smoothness (user rating)",
+      88,
+      "good"
+     ],
+     [
+      "Jerk-free motion percentage",
+      91,
+      "good"
+     ]
+    ],
+    "note": "Aligned paths produce smooth, coherent motion; users rank it highest for realism."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Applying distillation too late in denoising.",
+    "html": "If you copy the forward residual deep into the denoising process (when gamma exceeds 0.3), the backward path has already committed to its own detail patterns. Injecting the residual late creates pixel-level mismatch and flicker. The paper shows gamma at most 0.3 is necessary."
+   },
+   {
+    "warn": true,
+    "b": "Too many re-noising steps without calibration.",
+    "html": "Re-noising adds computational cost. If k (re-noising steps) is too high and not paired with correct lambda, the model over-corrects, smearing details and losing fine temporal structure. Ablation shows k=2\u20133 is the sweet spot."
+   },
+   {
+    "warn": true,
+    "b": "Large motion between keyframes overwhelms the fix.",
+    "html": "If the start and end frames show very different scenes (big camera movement, object entrance/exit), a single motion residual cannot bridge both ends. The method works best when motion is moderate and continuous."
+   },
+   {
+    "b": "Done right: early-stage, calibrated distillation.",
+    "html": "Applied in the first 30% of denoising (gamma=0.2\u20130.3), with 2\u20133 re-noising steps and moderate lambda (0.5\u20131.0), the method produces temporally smooth inbetweening without sacrificing detail."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Take two real keyframes from a video (start and end), hide the middle frames, and run the paper's method. Generate inbetweened video with and without Motion Prior Distillation. Show side-by-side output, focusing on a moving object (a hand, a rolling ball, a panning camera). The demo must make it obvious that with distillation, the motion path is smooth and unbroken, whereas without it, the object jitters or changes direction as the two denoising paths merge."
+  ],
+  "metric_eq": "temporal_smoothness = mean_frame_to_frame_optical_flow_variance; jerk_free_frames = count(flow_acceleration < threshold) / total_frames; coherence_rank = user_preference_vote_for_our_method",
+  "closing": "The demo makes impossible to ignore: distilled inbetweening has motion that flows like a real video, while baseline time reversal has visible jerk where the two paths collide."
+ }
+}

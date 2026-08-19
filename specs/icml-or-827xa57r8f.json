@@ -1,0 +1,257 @@
+{
+  "slug": "icml-or-827xa57r8f",
+  "title": "Decentralized Instruction Tuning: MERIT",
+  "family": "LLMs & Foundation Models",
+  "one_liner": "Train different instruction tasks on separate machines, then merge the learned weights once, cutting communication in half and avoiding conflicting gradient signals.",
+  "lead": "A large language model learns to follow instructions by being trained on many different tasks at once. But when tasks conflict—one asks the model to be helpful, another asks it to be cautious—the model's weight adjustments tug in opposite directions, wasting effort. MERIT solves this by splitting the task mixture into independent groups along conflict patterns, training each group separately, and merging the results.",
+  "nav": [["theme-llms-foundation-models.html", "LLMs & Foundation Models"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Instruction tuning at scale hits a wall",
+    "paras": [
+      "When a language model trains on many different instruction tasks together, something goes wrong. Some tasks pull the model's weights one direction, other tasks pull the opposite way. The model ends up doing worse at all of them—a problem called gradient interference. A gradient is a direction: which way to nudge a weight to shrink the error on one task.",
+      "The naive approach is to train all tasks at once and let the model figure it out. It cannot. The weights get pulled in opposite directions constantly, so learning slows down and the model ends up confused. Worse, coordinating this training across many machines requires constant back-and-forth communication, which is expensive and slow."
+    ],
+    "callout": {
+      "b": "The problem.",
+      "html": "Train many tasks together and gradients conflict; split training across machines and communication explodes."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Many tasks, conflicting signals",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["moved", 50], ["hot", 35], ["moved", 55], ["free", 20]],
+        "caption": "Task A wants weights up, Task B wants them down."
+      },
+      {
+        "title": "2. Model tries both at once",
+        "viz": "weights",
+        "viz_args": [["warm", 42], ["warm", 48], ["warm", 37], ["warm", 52], ["free", 20]],
+        "caption": "Conflicting updates average out; model learns slowly."
+      },
+      {
+        "title": "3. MERIT detects conflict patterns",
+        "viz": "box",
+        "viz_args": "Conflict map: A,C,D vs B,E",
+        "caption": "Which tasks fight? Group them by conflict."
+      },
+      {
+        "title": "4. Train groups independently",
+        "viz": "weights",
+        "viz_args": [["hot", 70], ["moved", 20], ["hot", 65], ["moved", 25], ["free", 15]],
+        "caption": "Group A trains hard on A,C,D. Group B trains B,E separately."
+      },
+      {
+        "title": "5. Merge once at the end",
+        "viz": "weights",
+        "viz_args": [["hot", 68], ["moved", 48], ["hot", 62], ["moved", 51], ["free", 18]],
+        "caption": "Combine learned weights; conflicts vanish."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Measure conflict",
+        "text": "Scan all task gradients; measure which tasks push against each other most."
+      },
+      {
+        "b": "Find conflict axes",
+        "text": "Use PCA (principal component analysis, a way to find the most important directions) to find the top directions where tasks conflict."
+      },
+      {
+        "b": "Split by conflict",
+        "text": "Partition tasks into groups that do not conflict, aligned to those high-conflict directions."
+      },
+      {
+        "b": "Train independently",
+        "text": "Each group fine-tunes the model on its tasks with zero communication to other groups."
+      },
+      {
+        "b": "Merge once",
+        "text": "Average the trained weights from each group, weighted by how many words each group saw during training."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how and when weights are updated. Instead of all tasks updating the same weights all the time, MERIT splits the task set, trains each subset independently, and merges the final weights once. The key move is separating tasks that conflict, so each group can learn cleanly."
+    ],
+    "object": "task partitioning and merge strategy"
+  },
+  "hidden": {
+    "h2": "Gradient conflict: the hidden quantity",
+    "name": "gradient conflict direction",
+    "paras": [
+      "Gradient conflict is a simple idea: when two tasks train the same model, their gradients (the directions to nudge weights) often point in opposite directions. This means the tasks are fighting for control of the same weights.",
+      "MERIT estimates this by measuring the dot product between task gradients—how aligned or opposed they are. High-conflict tasks get opposite dots; aligned tasks get positive dots. The paper then uses PCA to find the top dimensions along which conflict is strongest, and splits tasks along those axes."
+    ],
+    "heat": {
+      "cells": [
+        ["Conflict Task A vs B", 4, true],
+        ["Conflict Task A vs C", 1, false],
+        ["Conflict Task A vs D", 2, false],
+        ["Conflict Task B vs C", 4, true],
+        ["Conflict Task B vs D", 3, false],
+        ["Conflict Task C vs D", 1, false],
+        ["Task set size", 3, false],
+        ["Partitions found", 2, false],
+        ["Communication rounds", 1, true],
+        ["Final merge overhead", 1, false],
+        ["Accuracy gain (train)", 4, true],
+        ["Accuracy gain (transfer)", 3, false]
+      ],
+      "caption": "Darker means more conflict or higher gain. Borders mark the key quantities: inter-task conflict and merging speedup."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "When tasks disagree on which weights to change, the model wastes time. MERIT finds where this happens and separates those tasks."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Gradient conflict is estimated via task-pairwise inner products of gradient samples. High conflict scores are used to construct a conflict graph, which is partitioned via PCA-aligned cuts."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why independent training then merging works",
+    "paras": [
+      "The core insight is a local quadratic theory: when many tasks are being trained together, they all sit in the same flat valley (a region in weight space where many directions are nearly equally good for all tasks). Within that flat valley, training can be split into independent pieces because the curvature (how steeply the valley slopes) is roughly the same everywhere.",
+      "When you split tasks into non-conflicting groups and train each group independently, each group learns a different update to the weights within that shared flat space. When you average those updates—weighted by how many training examples each group saw—you are blending two learning paths through the same flat region. This weighted averaging acts as a form of implicit regularization (gentle steering toward a middle ground), smoothing out task-specific overfits and reducing the total variance in the final weights.",
+      "The practical result: each task group trains cleanly without being pulled against by other tasks, so learning is faster and more direct, because each group's weight updates can point in a single coherent direction instead of being yanked by contradictory gradient signals. Merging once at the end, weighted by how many words (tokens are the pieces a language model sees, like words or word fragments) each group trained on, ensures no single task dominates and conflicting updates cancel out fairly, because a group that saw more examples has learned stronger, more reliable patterns."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Task mixture with conflicts"
+        },
+        {
+          "t": "step",
+          "s": "Estimate task gradients; measure conflict",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "PCA find top conflict directions"
+        },
+        {
+          "t": "step",
+          "s": "Partition tasks along those axes",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Train each group independently"
+        },
+        {
+          "t": "step",
+          "s": "Merge via token-weighted averaging",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Final merged weights; conflicts resolved"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The weight-merging formula",
+    "words": "Final weight equals the sum over all groups of that group's trained weights times its fraction of total training tokens",
+    "equation": "w_final = sum_g (n_g / N_total) * w_g",
+    "symbols": [
+      ["w_final", "the merged weight"],
+      ["w_g", "the trained weight from group g"],
+      ["n_g", "total tokens seen by group g"],
+      ["N_total", "sum of all tokens across all groups"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose three groups train the same model on different subsets.",
+        "Group A: 50 tasks, 500 tokens total. Final weight after training: 2.0.",
+        "Group B: 40 tasks, 400 tokens total. Final weight after training: 1.5.",
+        "Group C: 46 tasks, 460 tokens total. Final weight after training: 2.2.",
+        "Total tokens: 500 + 400 + 460 = 1360.",
+        "Group A fraction: 500 / 1360 = 0.368. Contribution: 0.368 * 2.0 = 0.736.",
+        "Group B fraction: 400 / 1360 = 0.294. Contribution: 0.294 * 1.5 = 0.441.",
+        "Group C fraction: 460 / 1360 = 0.338. Contribution: 0.338 * 2.2 = 0.744.",
+        "Final merged weight: 0.736 + 0.441 + 0.744 = 1.92. Groups with more data pull the final result more."
+      ]
+    },
+    "note": "Token-weighted averaging ensures that groups with more training data have more say in the final merged weights, preventing small groups from corrupting the result."
+  },
+  "bars": {
+    "h2": "MERIT vs joint training",
+    "charts": [
+      {
+        "title": "Joint training (all tasks at once)",
+        "rows": [
+          ["Benchmark 1", 52, "ok"],
+          ["Benchmark 2", 54, "ok"],
+          ["Benchmark 3", 56, "ok"],
+          ["Benchmark 4", 55, "ok"],
+          ["Benchmark 5", 53, "ok"],
+          ["Benchmark 6", 57, "ok"],
+          ["Benchmark 7", 54, "ok"],
+          ["Benchmark 8", 54, "ok"]
+        ],
+        "note": "Average: 54.3. All tasks pull on the weights; no task learns cleanly."
+      },
+      {
+        "title": "MERIT (split & merge)",
+        "rows": [
+          ["Benchmark 1", 56, "good"],
+          ["Benchmark 2", 57, "good"],
+          ["Benchmark 3", 58, "good"],
+          ["Benchmark 4", 57, "good"],
+          ["Benchmark 5", 56, "good"],
+          ["Benchmark 6", 58, "good"],
+          ["Benchmark 7", 57, "good"],
+          ["Benchmark 8", 58, "good"]
+        ],
+        "note": "Average: 57.0. Fewer conflicts; each group learns faster because gradient signals within a group point in similar directions, making updates aligned and efficient. On Qwen2.5-VL-3B, real numbers from the paper."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Conflict detection is wrong.",
+        "html": "If the method underestimates which tasks actually conflict, groups may still fight internally. The paper addresses this by using gradient samples and PCA, which captures large-scale conflict patterns but may miss task-specific edge cases."
+      },
+      {
+        "warn": true,
+        "b": "Merging weights from very different training paths.",
+        "html": "If groups learn in very different directions (not in the same flat valley), averaging them loses information. The theory assumes a shared flat region; this fails if tasks have very incompatible loss paths."
+      },
+      {
+        "warn": true,
+        "b": "Unbalanced group sizes.",
+        "html": "If one group is much larger than others, it dominates the merge because that group's learned weights pull the final average harder. Token-weighted averaging helps suppress small groups, but very imbalanced splits can still lead to weaker performance on minority tasks, because a small group's carefully tuned weights get overridden by the large group's preferences."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use task-level gradient sampling to estimate conflict. Align partitions to high-conflict PCA axes. Ensure training is long enough that each group reaches a stable region. Use token counts from the actual training data to weight the merge."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a small mixture of instruction-tuning tasks—say, 20 tasks with conflicting gradients measured beforehand. Train half using standard joint training on all 20, and half using MERIT: split the 20 into two non-conflicting groups of 10, train each independently, and merge. Compare final accuracy on a held-out benchmark set. MERIT should show better accuracy because each group's gradient updates point in a single coherent direction, and lower communication cost (no synchronization between groups during training), because each group runs independently without needing to coordinate updates."
+    ],
+    "metric_eq": "improvement = accuracy_merit - accuracy_joint; communication_cost = (joint_messages) - (merit_messages); should be positive for both",
+    "closing": "The demo must make impossible to miss: independent training of non-conflicting task groups converges faster because each group's updates reinforce each other rather than cancel, and produces better final weights because merging avoids the averaging-down that happens when conflicting updates compete in a single synchronized model."
+  }
+}

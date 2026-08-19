@@ -1,0 +1,242 @@
+{
+  "slug": "iclr-or-iayzxjbfwo",
+  "title": "Rolling Forcing: Streaming Long Video Without Error Creep",
+  "family": "Generative Models & Diffusion",
+  "one_liner": "Instead of cleaning frames one at a time in sequence, clean a short stack of them together so mistakes do not pile up over minutes of video.",
+  "lead": "Video diffusion models generate movies by starting with pure noise and gradually cleaning it frame by frame. But when you ask the model to generate long videos in a streaming way—frame after frame, relying on the previous output—small mistakes compound like sand building a dune. Rolling Forcing fixes this by cleaning multiple frames at once as a unit, with a memory anchor to keep the whole video consistent, all trained to bridge the gap between how it learns and how it runs.",
+  "nav": [["theme-generative-models-diffusion.html", "Generative Models & Diffusion"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Frame-by-frame generation breaks over long sequences",
+    "paras": [
+      "Video diffusion models work by taking pure noise and cleaning it iteratively to form a video. At each step, the model looks at partially-cleaned frames and decides what they should look like next.",
+      "When making short 5-second clips, this works fine. But for streaming—generating minute-long videos frame after frame—each mistake gets baked in. The model's next prediction depends on its own previous output, not the ground truth. A small blur here, a tiny color shift there, and after 30 seconds the video is completely off the rails.",
+      "Predicting far into the future this way is called the exposure bias problem: during training the model sees perfect frames, but at runtime it sees its own imperfect attempts."
+    ],
+    "callout": {
+      "b": "The naive approach:",
+      "html": "Clean one frame at a time, in sequence, each depending on the last. Mistakes accumulate exponentially."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The Old Way",
+        "viz": "weights",
+        "viz_args": [["free", 15], ["warm", 28], ["free", 12], ["warm", 22], ["free", 18], ["warm", 25], ["free", 14], ["free", 16], ["free", 19], ["warm", 20], ["free", 17], ["warm", 24]],
+        "caption": "Frame 1, then frame 2, then frame 3. Each depends on the last."
+      },
+      {
+        "title": "2. Mistakes pile up",
+        "viz": "weights",
+        "viz_args": [["moved", 18], ["moved", 35], ["moved", 14], ["moved", 28], ["moved", 22], ["moved", 30], ["moved", 20], ["moved", 24], ["moved", 26], ["moved", 25], ["moved", 23], ["moved", 29]],
+        "caption": "Red shows accumulated error. By minute 5, the video is wrong."
+      },
+      {
+        "title": "3. Rolling Forcing solution",
+        "viz": "box",
+        "viz_args": "Clean frames 1-8 together, then 8-16, then 16-24. Overlap = memory.",
+        "caption": "Group frames and denoise them jointly with noise gradually increasing."
+      },
+      {
+        "title": "4. Attention sink anchors the start",
+        "viz": "weights",
+        "viz_args": [["hot", 42], ["warm", 20], ["warm", 18], ["warm", 15], ["free", 8], ["free", 6], ["free", 5], ["free", 4], ["free", 3], ["free", 2], ["free", 1], ["free", 0]],
+        "caption": "First frames stay vivid, are remembered globally, guide the whole video."
+      },
+      {
+        "title": "5. Result: coherent minutes",
+        "viz": "plain",
+        "caption": "Multi-minute video generated in real time with stable color, motion, and identity."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Bundle the next N frames",
+        "text": "Group 8-27 consecutive frames into one processing window."
+      },
+      {
+        "b": "Assign noise levels",
+        "text": "First frame starts almost clean; last frame starts more noisy. Noise level increases."
+      },
+      {
+        "b": "Denoise jointly",
+        "text": "The model cleans them all at once, letting frames influence each other's decisions."
+      },
+      {
+        "b": "Keep history anchor",
+        "text": "First frames from all previous windows are stored and kept as global context."
+      },
+      {
+        "b": "Slide forward",
+        "text": "Move to the next window, using the cleaned frames as the new anchor."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Traditional video diffusion asks the model to predict one frame conditioned on the previous clean frame. Rolling Forcing changes that: it asks the model to predict 8-27 frames simultaneously, where each frame has a different level of noise baked in—the first is nearly clean, the last is quite noisy."
+    ],
+    "object": "Frame generation order: one at a time to jointly in windows"
+  },
+  "hidden": {
+    "h2": "Quality drift: how far the video wanders",
+    "name": "Quality drift over time",
+    "paras": [
+      "As the video plays, each error cascades forward. Quality drift is a single number measuring how much the picture quality changes from the start (the first 5 seconds) to far into the video (the last 5 seconds). It is calculated by measuring the sharpness, color accuracy, and consistency of the images at the beginning versus the end—computing the absolute difference.",
+      "Rolling Forcing measures this by comparing the first 5 seconds of generated video (which the model sees during training) to the final 5 seconds (deep in the streaming process where mistakes have piled up). The attention sink mechanism specifically protects this: by keeping the early frames as a permanent memory anchor, the model can steer corrections all the way through minute-long videos."
+    ],
+    "heat": {
+      "cells": [
+        ["Frame 0s", 4, true],
+        ["Frame 3s", 2, false],
+        ["Frame 6s", 2, false],
+        ["Frame 10s", 1, false],
+        ["Frame 15s", 1, false],
+        ["Frame 20s", 1, false],
+        ["Frame 30s", 1, false],
+        ["Frame 45s", 1, false],
+        ["Frame 60s", 1, false],
+        ["Frame 90s", 1, false],
+        ["Frame 120s", 1, false],
+        ["Frame 150s", 1, false]
+      ],
+      "caption": "Brightness shows image quality. Starts high, drifts low in naive approach. Rolling Forcing keeps it anchored."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "As the model generates, each mistake is fed back in, like copying a photocopy of a photocopy. Quality drift measures how bad the final copy is."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Quality drift is the absolute difference in imaging quality between the first and last 5 seconds of the video, measured as pixel-wise perceptual distance."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why rolling windows stop error from growing",
+    "paras": [
+      "If you denoise 27 frames together instead of one-by-one, the model has 27 chances to fix small drifts instead of only 1. Here is the causal chain:",
+      "First, denoising multiple frames jointly relaxes the strict causality. Instead of frame i+1 depending only on frame i's final output, all 27 frames influence each other during cleaning. This spreads correction work across the entire group, so no one frame shoulders the full weight of a previous mistake.",
+      "Second, the attention sink (an anchor memory mechanism) keeps the first frames of every earlier window in a shared cache. When the model is generating frame 100, it can still see and attend to frames 1-8, which were verified during training. This is like keeping a reliable reference photo in view while painting the rest of the mural. The model can steer toward this anchor.",
+      "Third, the training strategy addresses the exposure bias directly. During training, the model learns on self-generated histories (previous predictions from the model itself, not ground truth). This means at training time it is already seeing the compounding errors it will face at test time, so it learns to correct them proactively."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Window of 8-27 partially noisy frames"
+        },
+        {
+          "t": "step",
+          "s": "Assign noise levels: frame 1 almost clean, frame 27 more noisy",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Denoise jointly with bidirectional attention within window",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Retrieve and attend to global anchor frames (frames 1-8 from all previous windows)",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Output cleaned window, keep first frames as next window's anchor",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "N clean frames ready for the next window"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The joint denoising equation",
+    "words": "For each frame in the window, we add noise incrementally and denoise jointly, conditioned on prior clean frames.",
+    "equation": "x_i^{t_j} = (1 - sqrt(alpha_j)) * x_i^{0} + sqrt(alpha_j) * epsilon,    i = 1..N,   alpha_0 < alpha_1 < ... < alpha_N",
+    "symbols": [
+      ["x_i^{0}", "the final clean prediction for frame i"],
+      ["x_i^{t_j}", "the noisy version of frame i at denoising step j"],
+      ["alpha_j", "the noise level at step j (higher alpha = more noise)"],
+      ["N", "the window size (8 to 27 frames)"],
+      ["epsilon", "added Gaussian noise"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose window size = 3 frames, denoising step = 1.",
+        "Frame 1: alpha_1 = 0.1 (mostly clean). Noise added = 0.1 * 0.3 = 0.03. Result is 97% clean.",
+        "Frame 2: alpha_2 = 0.5 (halfway). Noise added = 0.5 * 0.3 = 0.15. Result is 70% clean.",
+        "Frame 3: alpha_3 = 0.9 (mostly noisy). Noise added = 0.9 * 0.3 = 0.27. Result is 27% clean, 73% noise.",
+        "The model then denoises all three frames jointly, seeing all three as context, so it can spread corrections across them."
+      ]
+    },
+    "note": "Progressive noise creates increasing difficulty across the window; bidirectional attention within the window lets the model use all frames to fix each one."
+  },
+  "bars": {
+    "h2": "Quality drift: before and after",
+    "charts": [
+      {
+        "title": "Frame-by-frame (status quo)",
+        "rows": [
+          ["First 5 seconds", 96, "good"],
+          ["Middle 30 seconds", 68, "bad"],
+          ["Last 5 seconds", 42, "bad"]
+        ],
+        "note": "Quality decays sharply as errors compound. Each frame introduces a new mistake."
+      },
+      {
+        "title": "Rolling Forcing",
+        "rows": [
+          ["First 5 seconds", 96, "good"],
+          ["Middle 30 seconds", 88, "good"],
+          ["Last 5 seconds", 84, "good"]
+        ],
+        "note": "Quality stays stable. The anchor memory and joint denoising spread error correction across the entire video."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Window size mismatch at training vs. test time.",
+        "html": "If the model trains on 8-frame windows but you try to generate 27-frame windows, the patterns for how frames influence each other are wrong and quality degrades. The model must be trained on the exact window size you plan to run."
+      },
+      {
+        "warn": true,
+        "b": "Anchor frames forgotten.",
+        "html": "If the key-value cache storing the early frames is not properly maintained across windows (or too many frames are dropped), the global context signal fades and drift returns."
+      },
+      {
+        "warn": true,
+        "b": "Exposure bias still present if training data is clean.",
+        "html": "If the model is trained with ground-truth histories instead of self-generated ones, the train-test gap persists. The mixed training strategy (alternating self-forced and ground-truth conditioning) is essential."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train on non-overlapping windows with self-generated histories, keep the first frames of every window cached as global context, and run generation (test time) with the exact same window size and progressive noise schedule. Quality stays flat across multi-minute videos."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Start with a pretrained video diffusion model (e.g., Wan 2.1, a public open-source baseline). Implement Rolling Forcing inference: define a window size (16 frames is reasonable), set up the progressive noise schedule, and cache the key-value states of the first frame globally. Generate a 2-minute video by sliding the window multiple times. At each window, measure the perceptual quality (using LPIPS or SSIM comparing to a reference) of the frames. Plot quality over time."
+    ],
+    "metric_eq": "quality_drift is abs(mean_LPIPS_frames_0_to_5s minus mean_LPIPS_frames_115s_to_120s)",
+    "closing": "The demo must show that quality stays within 5 points across the entire 2-minute span, whereas frame-by-frame diffusion would drop by 40+ points. The absence of a visible fade, color shift, or identity collapse is the real win."
+  }
+}
