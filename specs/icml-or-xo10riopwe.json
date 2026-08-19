@@ -1,0 +1,238 @@
+{
+  "slug": "icml-or-xo10riopwe",
+  "title": "Baguan-TS: dual in-context learning for time series forecasting",
+  "family": "Time Series & Sequential",
+  "one_liner": "A model that learns to forecast future values by using both raw data patterns and contextual examples at prediction time, without retraining.",
+  "lead": "Time series forecasting asks: given the past numbers in a stream, what comes next? Most models either learn from raw data but cannot adjust to new situations at prediction time, or use hand-picked features but lose important patterns. Baguan-TS bridges this by combining raw data learning with in-context learning, a technique that lets the model adapt to new forecasting tasks just by looking at recent examples, without retraining.",
+  "nav": [["theme-time-series-sequential.html", "Time Series & Sequential"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why time series forecasting is stuck",
+    "paras": [
+      "Consider tracking electricity demand hour by hour. You have the past 168 hours of demand, plus side information like temperature and day-of-week. The naive approach is to train a model once on historical data and then use that same model to predict forever. But here is the problem: real-world streams drift. Summer demand patterns are different from winter; an unexpected heat wave changes everything. A model trained last month may be permanently out of sync with today's reality.",
+      "Most existing models use one of two bad choices. Hand-crafted feature models (those that explicitly engineer inputs like 'rolling average of the past 7 days') can adapt if you retrain them, but they ignore raw signal patterns that are too complex to write down by hand. End-to-end deep models (a type of neural network that processes sequences, which reads the raw data as a list of tokens—individual data points) can learn raw patterns but have no built-in way to adjust at prediction time. You must retrain the entire model, which is slow and often impractical."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "The model learns raw data patterns while also being able to instantly adapt to new conditions by examining recent examples at prediction time."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The stream arrives",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["warm", 35], ["warm", 32], ["warm", 38], ["warm", 36]],
+        "caption": "Past demand values: temperature and day signal mixed together."
+      },
+      {
+        "title": "2. Old models stop adapting",
+        "viz": "weights",
+        "viz_args": [["warm", 30], ["warm", 35], ["warm", 32], ["free", 38], ["free", 36]],
+        "caption": "Trained model ignores new summer pattern; predictions drift."
+      },
+      {
+        "title": "3. Model reads recent examples",
+        "viz": "box",
+        "viz_args": "Last 8 hours + their true values",
+        "caption": "Before predicting, scan what just happened in this context."
+      },
+      {
+        "title": "4. Context reweights the patterns",
+        "viz": "weights",
+        "viz_args": [["hot", 40], ["moved", 35], ["moved", 32], ["hot", 38], ["hot", 36]],
+        "caption": "Model shifts focus; summer patterns now weighted more."
+      },
+      {
+        "title": "5. Prediction adapts on the fly",
+        "viz": "plain",
+        "caption": "Next hour forecast matches today's conditions without retraining."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode raw sequence",
+        "text": "The neural network model reads the raw time series values and side information."
+      },
+      {
+        "b": "Attend across three axes",
+        "text": "Model looks at patterns in time, relationships between variables, and context examples together."
+      },
+      {
+        "b": "Retrieve nearby examples",
+        "text": "Find recent hours whose patterns match the current situation."
+      },
+      {
+        "b": "Calibrate with retrieved context",
+        "text": "Use those examples to adjust predictions before outputting."
+      },
+      {
+        "b": "Output forecast",
+        "text": "Return next hour's forecast, already adapted to current conditions."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The single thing the paper changes",
+    "paras": [
+      "Most forecasting models learn once, then predict the same way forever. Baguan-TS changes the prediction path itself: it inserts a retrieval step that pulls recent examples mid-inference (during prediction), then uses those examples to recalibrate the forecast before outputting it. This happens at prediction time, not at training time."
+    ],
+    "object": "prediction path: retrieval + recalibration"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: local calibration drift",
+    "name": "per-step drift from data pattern",
+    "paras": [
+      "As time passes, the pattern of time series values shifts. Yesterday's patterns do not perfectly match today's conditions. The paper measures how far the current values have drifted from the patterns the model saw during training. This is the drift: the mismatch between what the model expects and what the stream actually contains.",
+      "The paper estimates this drift by looking at recent examples that are most similar to the current time step (this is called retrieval-based local calibration). Instead of using one global offset for all time, it computes a small local offset just for the current context window, then applies that offset to the raw prediction."
+    ],
+    "heat": {
+      "cells": [
+        ["past-train", 4, false],
+        ["past-val", 3, false],
+        ["current-hour", 1, true],
+        ["drift-amount", 2, true],
+        ["calibrate-pred", 3, false],
+        ["output", 4, false],
+        ["retrieve-similar", 2, true],
+        ["measure-gap", 2, true],
+        ["apply-offset", 3, false],
+        ["check-stability", 1, false],
+        ["smooth-context", 2, false],
+        ["final-forecast", 4, false]
+      ],
+      "caption": "Darker means more direct contribution to handling pattern shift. Highlighted cells show where the drift is measured and applied."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model measures how much the recent data has changed compared to what it learned, then nudges the forecast slightly to match today instead of yesterday."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Target-space retrieval-based local calibration: retrieve neighbors in the output space, measure the mean offset between their training predictions and true values, apply that offset to the current prediction."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the dual learning path",
+    "paras": [
+      "The paper solves two problems at once. First, the raw-sequence representation learning: a transformer with 3D attention (time, variables, context) learns complex patterns from all the data together—temperature interacting with demand, seasonal cycles, weekly rhythms. This is the foundational knowledge, learned during training and never updated.",
+      "Second, the in-context adaptation: at prediction time, before outputting, the model looks at the last few hours of actual data and finds the most similar historical moments. It computes the gap between what it would have predicted for those moments (during training) and what actually happened. This measured gap is the drift. By applying that measured drift as a correction to today's forecast, the logic is: if my patterns were this far off back then under these conditions, they are probably this far off right now too.",
+      "Why does this work? Because the underlying patterns (learned from training data) are actually stable—demand follows temperature and seasons. What changes is a slow shift in the level or scale. By locally measuring that shift from recent neighbors and applying it as a small correction, the model keeps the learned patterns intact while adapting to the current regime. The context-overfitting strategy (deliberate overfitting to the current context window) lets the model weight these recent examples very heavily without corrupting the foundational patterns."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Raw sequence plus covariates"
+        },
+        {
+          "t": "step",
+          "s": "3D Transformer learns time, variable, context patterns",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "At prediction time, retrieve similar recent hours"
+        },
+        {
+          "t": "step",
+          "s": "Measure gap between predicted and true values for neighbors",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply measured offset to current forecast"
+        },
+        {
+          "t": "output",
+          "s": "Adapted forecast for next hour"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: offset-corrected forecast",
+    "words": "final forecast equals the model prediction plus a calibration offset, where the offset is the average gap between predictions and true values from the most similar recent hours.",
+    "equation": "forecast_t = model(x_t) + mean( y_retrieved - model(x_retrieved) )",
+    "symbols": [
+      ["forecast_t", "the final forecast for time t"],
+      ["model(x_t)", "the model's raw prediction at time t"],
+      ["y_retrieved", "true values from the k most similar past hours"],
+      ["model(x_retrieved", "what the model predicted for those same past hours"],
+      ["mean( ... )", "the average offset across the similar hours"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the model predicts demand at 3pm = 85 MW.",
+        "We find the 3 most similar past hours: 2pm yesterday (pred 80, true 82), 3pm last week (pred 88, true 91), 4pm five days ago (pred 86, true 89).",
+        "Gaps: yesterday was +2 (82−80), last week +3 (91−88), five days ago +3 (89−86).",
+        "Average gap = (2+3+3)/3 = 2.67 MW.",
+        "Final forecast = 85 + 2.67 = 87.67 MW."
+      ]
+    },
+    "note": "The offset adapts each hour, using only the most similar neighbors, so it captures local drift without retraining."
+  },
+  "bars": {
+    "h2": "Forecast error: before and after adaptation",
+    "charts": [
+      {
+        "title": "Standard model (no in-context update)",
+        "rows": [
+          ["Training period error", 4, "good"],
+          ["Early test period (familiar)", 5, "good"],
+          ["Late test period (drift)", 18, "bad"]
+        ],
+        "note": "Error grows as the stream drifts from training conditions."
+      },
+      {
+        "title": "Baguan-TS (with retrieval-based calibration)",
+        "rows": [
+          ["Training period error", 4, "good"],
+          ["Early test period (familiar)", 5, "good"],
+          ["Late test period (drift)", 8, "good"]
+        ],
+        "note": "Local recalibration keeps error stable even as conditions drift."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Insufficient context history.",
+        "html": "If the lookback window is too short, there are no good neighbors to retrieve, and the offset is based on random noise instead of real drift. Predictions revert to the uncalibrated model."
+      },
+      {
+        "warn": true,
+        "b": "Sharp regime change.",
+        "html": "If the stream suddenly shifts (a power grid outage, a holiday that changes all patterns), the recent neighbors no longer resemble the current hour. The retrieved offset is from yesterday's conditions, which no longer apply today, so adding that old offset to today's forecast pushes the prediction further from reality."
+      },
+      {
+        "warn": true,
+        "b": "Overfitting to context.",
+        "html": "The context-overfitting strategy deliberately fits the model to recent examples to make recalibration strong. If this is too aggressive, the model may memorize noise and forget its foundational patterns."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the stream drifts slowly and recent history is representative, the model adapts smoothly. The learned patterns remain valid, and the local offset captures the drift, improving forecast accuracy."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Implement a simple time series with three regimes: a training regime, an early test regime (similar to training), and a late test regime (drifted from training—say, demand is 15% higher at all hours). Compare three methods: (1) a standard transformer trained once, (2) a transformer retrained at the drift point (expensive but oracle), and (3) Baguan-TS with retrieval-based local calibration. Measure root-mean-square error (a measure of how far predictions are from truth, computed by taking the square of each error, averaging, and taking the square root). Plot error over time for all three."
+    ],
+    "metric_eq": "RMSE = sqrt( mean( (forecast - true)^2 ) )",
+    "closing": "Baguan-TS should match retraining without the retraining cost, and beat the standard model in the drifted regime."
+  }
+}
