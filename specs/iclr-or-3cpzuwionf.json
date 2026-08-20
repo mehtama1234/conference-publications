@@ -1,0 +1,236 @@
+{
+  "slug": "iclr-or-3cpzuwionf",
+  "title": "A$^2$Search: Ambiguity-Aware Question Answering with Reinforcement Learning",
+  "family": "Other",
+  "one_liner": "A2Search trains a question-answering agent to return multiple evidence-supported answers when a question is genuinely ambiguous instead of forcing one answer to imitate a single reference string.",
+  "lead": "Open-domain question answering is usually trained as if every question has one correct answer. Many real questions do not. They permit several valid answers, especially in multi-hop settings where different evidence chains can support different conclusions. If training rewards only one reference answer, the model gets penalized for being correct in the wrong way. A2Search fixes that mismatch. It automatically collects alternative answers, checks them against evidence, groups equivalent ones, and then trains the model with a reward based on answer overlap rather than single-answer exact match. The point is not to make the model hedge. The point is to reward it for surfacing all evidence-supported answers when ambiguity is real.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why single-answer training gives the wrong signal",
+    "paras": [
+      "A standard QA benchmark stores one reference answer. During training, the model is rewarded for matching that answer and penalized for other outputs. That rule is fine when the question is unambiguous. It is wrong when several answers are valid. The model can retrieve correct evidence, follow a valid reasoning path, and still be marked wrong because its answer string differs from the reference.",
+      "This hurts twice. It understates model capability at evaluation time, and it teaches the policy to collapse toward one answer even when the evidence says several answers should be returned. Multi-hop datasets amplify the problem because they create more places where several evidence chains can branch into several acceptable outputs."
+    ],
+    "callout": {
+      "b": "The mismatch is in the reward.",
+      "html": "If the environment rewards only one reference answer, the agent learns to suppress valid alternatives rather than represent ambiguity."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Ambiguous question",
+        "viz": "box",
+        "viz_args": "One question, several evidence-supported answers",
+        "caption": "The benchmark may store only one of them."
+      },
+      {
+        "title": "2. Single-answer reward",
+        "viz": "weights",
+        "viz_args": [["reference answer", 4], ["alternative answer", 1], ["alternative answer", 1]],
+        "caption": "Only one answer is rewarded."
+      },
+      {
+        "title": "3. Alternative answer generation",
+        "viz": "box",
+        "viz_args": "Sample -> filter -> verify -> group",
+        "caption": "A2Search builds multi-answer supervision without manual annotation."
+      },
+      {
+        "title": "4. RL with AnsF1 reward",
+        "viz": "weights",
+        "viz_args": [["answer A", 4], ["answer B", 4], ["unsupported answer", 1]],
+        "caption": "Evidence-supported alternatives receive credit."
+      },
+      {
+        "title": "5. One rollout returns several answers",
+        "viz": "plain",
+        "caption": "The trained agent learns to surface ambiguity in a single run."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Sample multiple trajectories",
+        "text": "Use search-capable language models to produce many reasoning and retrieval paths for the same question."
+      },
+      {
+        "b": "Filter candidate answers",
+        "text": "Drop low-quality or clearly irrelevant outputs before treating them as supervision."
+      },
+      {
+        "b": "Verify with evidence",
+        "text": "Check whether each candidate answer is independently supported by retrieved evidence."
+      },
+      {
+        "b": "Group semantically identical answers",
+        "text": "Merge duplicates so the target set contains distinct valid answers rather than many wording variants."
+      },
+      {
+        "b": "Train with ambiguity-aware RL",
+        "text": "Use GRPO with an answer-level F1 reward so the policy gets credit for retrieving one or more supported answers."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper actually changes",
+    "paras": [
+      "A2Search changes the supervision target and the RL reward. The target is no longer one reference answer. It is a verified set of distinct valid answers for ambiguous questions. The reward then measures overlap with that set, so the agent is trained to expose ambiguity instead of hiding it."
+    ],
+    "object": "answer supervision: from single reference to verified answer set"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: ambiguity ratio",
+    "name": "How often a benchmark question has more than one valid answer",
+    "paras": [
+      "A dataset can look single-answer on paper while behaving multi-answer in practice. The relevant hidden quantity is the ambiguity ratio: how often a question admits several evidence-supported answers. If that ratio is large, single-answer training creates a systematic reward error rather than a rare corner case.",
+      "The paper estimates this ratio by generating candidate trajectories, verifying answers against evidence, and counting questions that retain more than one distinct valid answer after grouping. The introduction reports that 27.6 percent of MuSiQue training examples show this property."
+    ],
+    "heat": {
+      "cells": [
+        ["single-hop factual", 1, false],
+        ["multi-hop entity link", 3, true],
+        ["alias variation", 2, false],
+        ["multiple supporting entities", 4, true],
+        ["date wording only", 1, false],
+        ["parallel reasoning chain", 4, true],
+        ["underspecified scope", 3, true],
+        ["one gold, many valid", 4, true],
+        ["evidence conflict", 2, false],
+        ["set-valued answer", 3, true],
+        ["ranking question", 2, false],
+        ["bridge question", 3, true]
+      ],
+      "caption": "Darker cells mark question types where ambiguity is more likely to create several valid answers."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Ambiguity ratio asks how often the benchmark itself is underspecified. When that ratio is high, training on one answer per question teaches the wrong behavior."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Alternative answer generation turns hidden ambiguity into an explicit answer set, so RL can optimize against the real structure of the task rather than a single annotated string."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why automatic answer-set construction changes the policy",
+    "paras": [
+      "Sampling multiple trajectories matters because ambiguity often reveals itself through diverse valid reasoning paths. If the system sees only one rollout, it may never encounter the alternative answer even when the evidence supports it. Multiple trajectories widen the search over both retrieval choices and reasoning chains.",
+      "Verification matters because multiple outputs alone do not imply real ambiguity. Some are simply wrong. Evidence-based filtering separates alternative answers that can be supported independently from answers that are unsupported noise. Grouping then removes wording duplicates, so the supervision set captures distinct semantics rather than paraphrase volume.",
+      "The AnsF1 reward matters because it aligns the policy objective with the answer-set objective. Under exact match, the safest policy is to guess one reference answer. Under answer-level F1, the agent gets graded on overlap with the verified answer set. That changes behavior because returning one supported answer no longer blocks credit for another supported answer, and unsupported extras still hurt precision."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Question that may admit several valid answers"
+        },
+        {
+          "t": "step",
+          "s": "Sample many search trajectories",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Filter and verify candidate answers"
+        },
+        {
+          "t": "step",
+          "s": "Group distinct valid answers into a set",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Train policy with answer-set reward"
+        },
+        {
+          "t": "output",
+          "s": "Single rollout that can return multiple supported answers"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The reward signal",
+    "words": "AnsF1 balances precision and recall over the set of predicted answers against the verified set of valid answers.",
+    "equation": "AnsF1 = 2 * precision * recall / (precision + recall)",
+    "symbols": [
+      ["precision", "of the answers the model returned, the fraction that are valid"],
+      ["recall", "of the valid answers in the verified set, the fraction the model returned"],
+      ["AnsF1", "a single score that rewards covering valid alternatives without adding unsupported ones"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the verified answer set is {A, B}.",
+        "A baseline model returns only A. Precision is 1/1 = 1.0 and recall is 1/2 = 0.5, so AnsF1 is 0.67.",
+        "A2Search returns A and B. Precision is 2/2 = 1.0 and recall is 2/2 = 1.0, so AnsF1 is 1.0.",
+        "If the model returns A, B, and an unsupported C, precision drops to 2/3 while recall stays 1.0, so AnsF1 falls.",
+        "The reward therefore pushes the policy toward complete but evidence-grounded answer sets."
+      ]
+    },
+    "note": "This reward differs from exact match because partial coverage of a valid answer set receives partial credit instead of total failure."
+  },
+  "bars": {
+    "h2": "What ambiguity-aware training changes",
+    "charts": [
+      {
+        "title": "Single-answer training",
+        "rows": [
+          ["AnsF1@1 on multi-hop benchmarks", 43, "bad"],
+          ["Rollouts needed", 3, "bad"],
+          ["Ambiguity resolution in one rollout", 22, "bad"]
+        ],
+        "note": "The policy tends to commit early because the reward structure favors one answer string."
+      },
+      {
+        "title": "A2Search",
+        "rows": [
+          ["AnsF1@1 on multi-hop benchmarks", 48.4, "good"],
+          ["Rollouts needed", 1, "good"],
+          ["Ambiguity resolution in one rollout", 39, "good"]
+        ],
+        "note": "The paper reports 48.4 percent AnsF1@1 for A2Search-7B across four multi-hop benchmarks with a single rollout."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Verification misses a valid answer.",
+        "html": "If the evidence checker fails to approve a real alternative, the reward set is incomplete, because the model is still being trained against a partial target for correctness."
+      },
+      {
+        "warn": true,
+        "b": "Grouping merges distinct answers.",
+        "html": "If two genuinely different answers are treated as the same group, recall is overstated and the policy loses pressure to surface the full answer set."
+      },
+      {
+        "warn": true,
+        "b": "Ambiguity can be mimicked by hallucination.",
+        "html": "A model may learn to output several answers whenever it is uncertain. That behavior is still wrong unless each answer is evidence-supported, which is why the verification stage and precision term matter."
+      },
+      {
+        "b": "Done right.",
+        "html": "The framework is strongest when trajectory diversity is high and evidence verification is strict, because then the answer set reflects genuine ambiguity rather than output noise."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a multi-hop QA subset with known ambiguous cases. Run a search-based model to sample several trajectories per question, verify alternative answers against retrieved evidence, and build answer sets. Then compare exact-match RL against AnsF1-based RL. The demo should inspect a few questions by hand to show that multi-answer outputs are supported rather than speculative."
+    ],
+    "metric_eq": "ambiguity_coverage = valid_answers_returned / valid_answers_available",
+    "closing": "The demo succeeds when the ambiguity-aware agent returns more of the valid answer set in one rollout without adding many unsupported answers."
+  }
+}
