@@ -1,0 +1,236 @@
+{
+  "slug": "iclr-or-e3xlwhfrnr",
+  "title": "From Text to Talk: Audio-Language Model Needs Non-Autoregressive Joint Training",
+  "family": "Multimodal",
+  "one_liner": "Train one model to write text step by step while generating speech in parallel blocks, so each output type uses the generation pattern that matches its structure.",
+  "lead": "Speech-to-speech assistants often need to do two different jobs at once: decide the words of the reply and produce the waveform of the reply. Existing systems usually force both jobs into one left-to-right process, where the model predicts one next unit at a time. This paper argues that this is the wrong fit for audio. Text depends heavily on previous output words because grammar and meaning unfold in sequence, but many audio details depend more on the source utterance and less on previously generated audio samples. Text-to-Talk, or TtT, keeps text generation left-to-right and makes audio generation non-autoregressive, meaning the model can fill many audio positions in parallel. The paper then builds one shared training rule so both modes can live inside one model without fighting each other.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why one left-to-right decoder is a bad fit for speech output",
+    "paras": [
+      "A standard multimodal decoder is autoregressive, meaning it predicts the next output unit from all earlier output units. That matches text well because the next word often depends on the exact earlier words. But speech audio is different. Once the system already knows the sentence content, many local acoustic details such as pitch contour, duration, and pronunciation can be generated for many positions at once. Forcing audio through the same next-step loop slows generation and adds a dependency structure that audio does not fully need.",
+      "There is a second problem. If text and audio are trained with separate objectives, the shared model can learn inconsistent internal states: the text side learns causal decoding, while the audio side wants broader within-span context. That mismatch makes joint training unstable because the model has no clear rule for which positions may look backward, forward, or both."
+    ],
+    "callout": {
+      "b": "The paper's move.",
+      "html": "Use left-to-right decoding for text, parallel diffusion-style filling for audio, and a modality-aware attention rule, which is the visibility pattern that decides which positions may read which other positions, so one model can support both."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. User speaks",
+        "viz": "plain",
+        "caption": "Input audio and any text context enter one shared model."
+      },
+      {
+        "title": "2. Text path stays sequential",
+        "viz": "box",
+        "viz_args": "word 1 -> word 2 -> word 3",
+        "caption": "Reply words are generated in order because later words depend on earlier wording."
+      },
+      {
+        "title": "3. Audio path fills blocks",
+        "viz": "box",
+        "viz_args": "block A, block B, block C in parallel",
+        "caption": "Speech units are refined across many positions at once because the sentence content is already known."
+      },
+      {
+        "title": "4. Attention rule separates the two",
+        "viz": "weights",
+        "viz_args": [["text-causal", 84], ["audio-bidir", 79], ["cross-modal", 63], ["masking", 72], ["parallel-fill", 77], ["shared-state", 68]],
+        "caption": "Text positions only see the past, while audio spans can use both directions inside the span."
+      },
+      {
+        "title": "5. One reply, both coherent and fast",
+        "viz": "plain",
+        "caption": "The model keeps correct wording and produces speech without a long sample-by-sample loop."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode the spoken input",
+        "text": "Turn the user's speech and any text prompt into shared hidden states that store content and dialogue context."
+      },
+      {
+        "b": "Train text with causal decoding",
+        "text": "Predict reply text left to right because wording and grammar depend on earlier chosen words."
+      },
+      {
+        "b": "Train audio with absorbing diffusion",
+        "text": "Mask some audio positions and learn to fill them from surrounding context, so many positions can be predicted together."
+      },
+      {
+        "b": "Use modality-aware attention",
+        "text": "Apply one mask for text positions and a different mask for audio positions, because the two output types need different visibility rules."
+      },
+      {
+        "b": "Decode speech block by block",
+        "text": "At generation time, produce the text first, then refine audio blocks in parallel until the full spoken reply is complete."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the training objective and decoding mask of a joint audio-language model. It does not treat audio as just another text-like stream. Instead, it assigns a sequential rule to text and a parallel reconstruction rule to audio, then builds one transformer, which is a stacked attention model for sequence processing, that can apply both rules at once."
+    ],
+    "object": "Joint text-audio training rule with different decoding structure per modality"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: dependency shape",
+    "name": "How much each output position truly depends on earlier outputs",
+    "paras": [
+      "The key hidden quantity is the dependency shape of each modality. For text, the next position often needs the exact earlier wording because changing one earlier word can change grammar or meaning later in the sentence. For audio, once the target words are known, many positions mainly need source cues and nearby acoustic context rather than the entire earlier generated prefix.",
+      "TtT makes that hidden quantity explicit through masking. Text positions are forced to read only earlier positions. Audio positions inside a span may read both left and right neighbors. That matters because the model is no longer asked to invent false left-to-right dependencies for audio, so it can spend its capacity on pronunciation, timing, and speaker traits instead."
+    ],
+    "heat": {
+      "cells": [
+        ["text-history", 4, true],
+        ["text-future", 1, false],
+        ["audio-left", 3, false],
+        ["audio-right", 3, true],
+        ["cross-audio", 4, true],
+        ["cross-text", 2, false],
+        ["word-order", 4, true],
+        ["prosody", 3, false],
+        ["speaker-style", 3, false],
+        ["block-fill", 4, true],
+        ["causal-only", 1, false],
+        ["joint-mask", 4, true]
+      ],
+      "caption": "Darker means that source of information matters more for the position being predicted."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Text mostly depends on what was already said. Audio often depends on the full local speech pattern, not only the earlier part."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The method separates target-target dependence for text from mainly source-target and local-span dependence for audio, then encodes that split in the attention mask and training objective."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this works: match the generation rule to the signal you are generating",
+    "paras": [
+      "The method works because it stops treating all output units as if they obey the same dependence pattern. Text generation needs a sequential rule because a wrong early word can force later words to change. Audio generation is closer to constrained reconstruction once the linguistic content is fixed: the model must realize pronunciation, timing, and voice quality, and those can be inferred from source speech plus neighboring acoustic context. Allowing bidirectional context inside audio spans gives the model the information it actually needs.",
+      "The absorbing diffusion part matters because it provides a single training view that can still be expressed inside a shared decoder. During training, some audio positions are replaced with a mask symbol and the model learns to recover them. Since masked positions can be filled in any order, the model learns to restore many positions in parallel. The text side keeps its left-to-right rule, so wording remains stable. This combination reduces train-test mismatch because the model is trained with the same broad kind of parallel audio filling that it will use when producing speech at generation time.",
+      "The modality-aware attention mask is the glue. Without it, audio positions could be forced into a text-style causal view or text positions could leak future words. With it, each position sees exactly the context that matches its job. That improves quality because the shared hidden states no longer mix incompatible dependence assumptions."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "User speech, optional text context"
+        },
+        {
+          "t": "step",
+          "s": "Shared transformer builds dialogue state",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Text branch decodes left to right"
+        },
+        {
+          "t": "step",
+          "s": "Audio branch fills masked positions in parallel",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Block-wise refinement turns coarse audio units into a full reply"
+        },
+        {
+          "t": "output",
+          "s": "Speech response with coherent wording and faster synthesis because text keeps its sequential rule while audio blocks are refined in parallel"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "One objective for two decoding styles",
+    "words": "The total training objective adds the text loss and the audio reconstruction loss. Text loss rewards correct next-word prediction. Audio loss rewards correct recovery of masked audio positions.",
+    "equation": "L_total = L_text + lambda * L_audio",
+    "symbols": [
+      ["L_total", "overall training loss"],
+      ["L_text", "left-to-right text prediction loss"],
+      ["L_audio", "masked audio reconstruction loss under the diffusion-style training rule"],
+      ["lambda", "weight that balances the two terms"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the reply text is three words long and the model gets two words right but assigns low probability to the third. That contributes text loss.",
+        "Suppose an audio block has ten masked positions and the model restores eight of them correctly from surrounding context. That contributes audio loss.",
+        "If text loss is 0.6, audio loss is 0.4, and lambda is 1.5, then total loss is 0.6 + 1.5 times 0.4 = 1.2.",
+        "Training lowers that number by improving both wording and audio reconstruction, rather than by forcing both outputs through one identical rule."
+      ]
+    },
+    "note": "The exact paper objective is more detailed, but this captures the core split: one loss for sequential text prediction and one loss for parallel audio filling."
+  },
+  "bars": {
+    "h2": "What changes relative to a text-style speech decoder",
+    "charts": [
+      {
+        "title": "Single autoregressive decoder for both text and audio",
+        "rows": [
+          ["Text coherence", 78, "good"],
+          ["Speech naturalness", 61, "bad"],
+          ["Decoding speed", 32, "bad"]
+        ],
+        "note": "Text stays workable because the model follows the right dependency pattern for words, but speech quality and speed suffer because audio is forced through a long left-to-right loop."
+      },
+      {
+        "title": "TtT joint training with parallel audio filling",
+        "rows": [
+          ["Text coherence", 80, "good"],
+          ["Speech naturalness", 76, "good"],
+          ["Decoding speed", 79, "good"]
+        ],
+        "note": "Audio improves because the model can use both directions inside an audio span, and speed improves because many positions are generated together. Text does not collapse because its causal rule is preserved."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The audio span size can be wrong.",
+        "html": "If blocks are too large, the model may miss fine timing details because each refinement step has to solve too much at once. If blocks are too small, decoding loses much of the speed advantage because parallel work becomes fragmented."
+      },
+      {
+        "warn": true,
+        "b": "The text-audio balance can drift.",
+        "html": "If the audio loss dominates, wording quality can drop because shared layers spend too much capacity on acoustics. If the text loss dominates, the model falls back toward a text-first system with weak speech realization."
+      },
+      {
+        "warn": true,
+        "b": "Attention masks can leak or over-restrict context.",
+        "html": "If text positions can see future text, training becomes inconsistent with generation time. If audio positions are restricted too hard, the model loses the bidirectional context that the whole method depends on."
+      },
+      {
+        "b": "Done right.",
+        "html": "Choose block sizes and loss weights from held-out validation, then verify that text remains causal while audio reconstruction still uses both left and right context."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a speech assistant on a paired audio-text benchmark. Train one baseline that generates both text and audio left to right. Train a second model with the paper's split rule: causal text plus masked audio reconstruction. Use the same base architecture and data so the comparison isolates the training rule.",
+      "Measure three things: text quality of the generated reply, speech quality of the synthesized audio, and latency from user speech to spoken response. The demo proves the paper's point if the split-rule model keeps or improves text quality while cutting response time and making speech sound more natural, because that would show the output structure matters as much as model scale."
+    ],
+    "metric_eq": "speedup = latency_baseline / latency_ttt; quality_gain = score_ttt - score_baseline",
+    "closing": "The central claim is not just that one more multimodal model works. It is that text and speech need different decoding structure inside the same model."
+  }
+}

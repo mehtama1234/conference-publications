@@ -1,0 +1,232 @@
+{
+  "slug": "iclr-or-nrzi64gtvc",
+  "title": "OmniCT: Towards a Unified Slice-Volume LVLM for Comprehensive CT Analysis",
+  "family": "Multimodal",
+  "one_liner": "Build one CT model that can read both single slices and full volumes, so it can answer local detail questions and 3D spatial questions without switching architectures.",
+  "lead": "CT interpretation needs two levels of understanding at the same time. A radiologist may need to inspect a tiny lesion boundary on one slice, but also reason about how that lesion spreads across many slices and how it sits relative to nearby organs. Existing large vision-language models usually choose one side. Slice-based systems are sharp on local detail but weak on cross-slice consistency. Volume-based systems preserve 3D structure but often blur away fine detail and do not accept ordinary slice inputs gracefully. OmniCT tries to unify both modes in one model by making slice inputs carry volume cues and by injecting explicit organ-level alignment signals.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why CT understanding breaks when slice detail and 3D structure are split apart",
+    "paras": [
+      "A single CT slice can show very small findings, but that slice alone does not reveal where the finding sits in the full body structure. A full CT volume preserves those body-wide relations, but direct volume models often downsample heavily because 3D data is large. That reduces sensitivity to small lesions, vessel edges, and other subtle boundaries.",
+      "The result is a false choice. If you train for slice questions only, the model may answer a local detection question but contradict itself across adjacent slices because it lacks volumetric consistency. If you train for volume inputs only, the model may understand gross anatomy while missing the exact local evidence that supports a diagnosis."
+    ],
+    "callout": {
+      "b": "The paper's move.",
+      "html": "Encode slices so they retain where they sit inside the volume, add organ and region alignment signals, and use one projection module that can adapt between slice and volume inputs."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. One slice shows a tiny finding",
+        "viz": "plain",
+        "caption": "Local evidence can be small enough to live in only a few slices."
+      },
+      {
+        "title": "2. The full scan shows body structure",
+        "viz": "box",
+        "viz_args": "slice index + axial, coronal, sagittal position",
+        "caption": "Volume context tells the model where the finding sits relative to nearby organs."
+      },
+      {
+        "title": "3. OmniCT composes slices into a volume-aware view",
+        "viz": "weights",
+        "viz_args": [["slice-detail", 82], ["z-position", 78], ["x-position", 72], ["y-position", 73], ["hybrid-proj", 76], ["cross-slice", 69]],
+        "caption": "Each slice carries both image detail and explicit 3D position signals."
+      },
+      {
+        "title": "4. Organ cues anchor the features",
+        "viz": "box",
+        "viz_args": "organ mask + region of interest + image features",
+        "caption": "Segmentation and region localization tell the model which tissue the evidence belongs to."
+      },
+      {
+        "title": "5. One model answers both kinds of questions",
+        "viz": "plain",
+        "caption": "The same system can reason about a small lesion edge and a spread pattern across organs."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Compose neighboring slices",
+        "text": "Group slices so the model sees a slice together with nearby slices, because local findings often extend across adjacent positions and isolated slices lose that continuity."
+      },
+      {
+        "b": "Add tri-axial position encoding",
+        "text": "Attach explicit coordinates for all three scan axes so each feature knows where it lies in the volume."
+      },
+      {
+        "b": "Project with a hybrid module",
+        "text": "Use a mixture-of-experts projection, which is a routing layer that sends inputs through specialized submodules, to adapt slice and volume features into a shared language-model space."
+      },
+      {
+        "b": "Inject organ-level supervision",
+        "text": "Use segmentation masks and region-of-interest labels so the model learns which anatomical structure each visual pattern belongs to, because similar intensities can come from different organs."
+      },
+      {
+        "b": "Evaluate on unified tasks",
+        "text": "Test one model on slice-driven detail tasks and volume-driven spatial reasoning tasks with the same evaluation framework."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the visual input pipeline of a CT vision-language model. Instead of treating slices and volumes as incompatible input types, it builds a shared representation where slice features carry explicit volumetric position and organ identity. The language model then reads those enriched features through one adaptation layer."
+    ],
+    "object": "Unified slice-volume representation with organ-aware supervision"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: spatial consistency across dimensions",
+    "name": "Whether local evidence and 3D location tell the same story",
+    "paras": [
+      "The hidden quantity is cross-dimensional consistency. A model may correctly notice a lesion boundary on one slice, but if it cannot place that boundary at the right depth and relative organ position, its answer is only half correct. Likewise, a model may know the rough organ layout of the volume, but if its local evidence comes from the wrong slice, the reasoning chain breaks.",
+      "OmniCT estimates this consistency by carrying slice composition and tri-axial position into the features themselves, then reinforcing them with organ masks and region labels. That matters because the model can no longer treat similar-looking patches from different body regions as interchangeable. Their coordinates and organ context separate them."
+    ],
+    "heat": {
+      "cells": [
+        ["local-edge", 4, true],
+        ["slice-index", 4, true],
+        ["axial-pos", 3, false],
+        ["coronal-pos", 3, false],
+        ["sagittal-pos", 3, false],
+        ["organ-id", 4, true],
+        ["roi-focus", 4, true],
+        ["cross-slice", 3, false],
+        ["coarse-volume", 2, false],
+        ["small-lesion", 4, true],
+        ["wrong-organ", 1, false],
+        ["shared-proj", 3, false]
+      ],
+      "caption": "Darker means that cue is more important for keeping slice evidence aligned with full-volume structure."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A CT answer is trustworthy only if the small visual clue and its 3D body position match each other."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Spatial Consistency Enhancement combines volumetric slice composition and tri-axial positional encoding, then Organ-level Semantic Enhancement aligns those features with segmentation and region signals."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this works: preserve detail while preventing location drift",
+    "paras": [
+      "The method works because it does not let detail and structure be learned in isolation. Slice-based models are often accurate on what appears in a frame but weak on where that frame sits in the scan. OmniCT fixes that by attaching explicit three-axis position to slice-derived features. Now when the model sees a texture pattern, it also sees whether that pattern lies high or low in the scan and which lateral region it occupies.",
+      "The organ-level supervision matters because anatomical semantics are not obvious from raw intensity values alone. A bright region could belong to different tissues depending on location. Segmentation masks and region-of-interest labels tell the model which organ or lesion region a feature belongs to, so the model can tie visual evidence to anatomy rather than only to appearance. That reduces cross-organ confusion because two similar patches in different organs no longer share identical context.",
+      "The hybrid projection layer matters because slice inputs and volume-aware inputs do not need exactly the same transformation before they enter the language model. A mixture-of-experts projection lets the model route different input styles through specialized submodules, then map them into a shared space. That avoids forcing one compromise mapping for all cases, which would either blur local detail or discard volume structure."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "CT slices, neighboring slices, organ masks, region labels"
+        },
+        {
+          "t": "step",
+          "s": "Compose slices and attach tri-axial positions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Route through hybrid projection for slice-volume adaptation"
+        },
+        {
+          "t": "step",
+          "s": "Align features with organ and lesion regions",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Unified features for local and global CT reasoning"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "A simple view of the training objective",
+    "words": "The full objective combines task loss, spatial consistency loss, and organ alignment loss. One term teaches the final answer. One keeps features consistent across slices and volume coordinates. One aligns those features with anatomy.",
+    "equation": "L_total = L_task + alpha * L_spatial + beta * L_organ",
+    "symbols": [
+      ["L_total", "overall training loss"],
+      ["L_task", "loss for question answering or report-style task targets"],
+      ["L_spatial", "penalty when slice features disagree with their volumetric positions"],
+      ["L_organ", "penalty when features fail to align with organ or region labels"],
+      ["alpha, beta", "weights that balance the auxiliary terms"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the model correctly detects a liver lesion on one slice, but places it near the lung region in its internal representation. Task loss may stay low because the label is right, but spatial and organ losses rise because the location story is wrong.",
+        "If task loss is 0.5, spatial loss is 0.3, organ loss is 0.2, alpha is 2, and beta is 1.5, then total loss is 0.5 + 2 times 0.3 + 1.5 times 0.2 = 1.4.",
+        "Training lowers that total by keeping the lesion evidence sharp while moving it into the correct organ and volume position."
+      ]
+    },
+    "note": "The paper uses concrete module-level losses, but this captures the design logic: answer the task while preserving 3D consistency and anatomy alignment."
+  },
+  "bars": {
+    "h2": "What changes relative to split slice and volume systems",
+    "charts": [
+      {
+        "title": "Slice-only CT LVLM",
+        "rows": [
+          ["Local detail sensitivity", 84, "good"],
+          ["Cross-slice consistency", 46, "bad"],
+          ["Organ-level spatial reasoning", 49, "bad"]
+        ],
+        "note": "The model finds small details because the input stays high resolution, but it struggles to keep those details consistent across the full scan."
+      },
+      {
+        "title": "OmniCT unified slice-volume model",
+        "rows": [
+          ["Local detail sensitivity", 82, "good"],
+          ["Cross-slice consistency", 78, "good"],
+          ["Organ-level spatial reasoning", 81, "good"]
+        ],
+        "note": "The local score stays high because the slice pathway is preserved, while consistency and spatial reasoning improve because every slice feature carries position and anatomy cues."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Segmentation labels can be noisy.",
+        "html": "If organ masks are wrong or inconsistent across scanners, the model may learn false anatomical anchors because its supervision says a feature belongs to the wrong structure."
+      },
+      {
+        "warn": true,
+        "b": "Position encoding can be mismatched across preprocessing pipelines.",
+        "html": "If slice ordering or orientation changes are not normalized correctly, tri-axial coordinates can point to the wrong body location, which breaks the spatial consistency signal."
+      },
+      {
+        "warn": true,
+        "b": "Expert routing can collapse.",
+        "html": "A mixture-of-experts layer only helps if different experts actually specialize, because the layer is meant to give different input types different transformations. If one expert handles nearly all inputs, the adaptation layer turns back into a single bottleneck."
+      },
+      {
+        "b": "Done right.",
+        "html": "Standardize scan orientation, validate segmentation quality, and monitor expert usage so slice detail, 3D position, and anatomy labels remain mutually consistent."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a benchmark with paired slice questions and volume questions on the same CT studies. Train a slice-only baseline, a volume-only baseline, and OmniCT. Keep the language model backbone fixed so the comparison isolates the representation change.",
+      "The demo should include questions that require tiny local evidence, such as boundary or small lesion identification, and questions that require 3D relations, such as whether a mass crosses organ boundaries. The paper's claim holds if one model handles both sets well without a large drop on either side, because that would show slice detail and volume structure can be unified instead of traded off."
+    ],
+    "metric_eq": "unified_score = local_task_score + global_task_score - inconsistency_penalty",
+    "closing": "The important result is not only a higher average benchmark score. It is the removal of the old split between seeing small evidence and understanding full-scan anatomy."
+  }
+}
