@@ -1,0 +1,237 @@
+{
+  "slug": "icml-or-9xga1e4yxb",
+  "title": "From Memorization to Parameter Interference: How Overtraining Experts Harms Model Merging",
+  "family": "Other",
+  "one_liner": "Experts that are fine-tuned too long become harder to merge because late training pushes their weights toward narrow task-specific memorization that other experts do not share.",
+  "lead": "Model merging tries to combine several expert checkpoints into one stronger model without retraining from scratch, because reusing existing experts is cheaper than training a new joint model from the beginning. That sounds compatible with ordinary fine-tuning: make each expert as good as possible on its own task, then merge them. This paper shows the pipeline breaks late in fine-tuning. After a point, an expert gains more of its isolated performance by memorizing a small set of hard examples, and those late weight changes do not survive merging. When two or more experts memorize different hard corners, their updates interfere. The merged model forgets much of the late task-specific knowledge, so aggressive early stopping can beat full convergence for the merged result because it preserves broadly shared updates instead of late conflicting ones.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why better experts do not always make a better merge",
+    "paras": [
+      "Suppose several teams fine-tune the same base model on different tasks. A later merge step combines the resulting checkpoints by averaging or otherwise mixing their weights. A common assumption is monotonicity: if each expert improves on its own task, the merged model should inherit those gains because the merge is expected to preserve whatever each expert learned. The paper shows this assumption is false.",
+      "The issue appears late in expert training. Early updates teach broad task structure that several tasks may reuse. Later updates often chase a small set of difficult examples that matter for the expert's own score but are idiosyncratic to that task. Those late changes move the weights in directions that another expert never needed. When the checkpoints are merged, the incompatible late moves cancel or overwrite each other, so the merged model loses value even while the individual experts improve because the merge can preserve only update directions that remain compatible across experts."
+    ],
+    "callout": {
+      "b": "The main point.",
+      "html": "Fine-tuning past the point of broad task learning can hurt merging, because late gains often come from task-specific memorization whose weight changes conflict across experts."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Shared base model",
+        "viz": "box",
+        "viz_args": "one base checkpoint",
+        "caption": "Several experts start from the same pretrained model."
+      },
+      {
+        "title": "2. Early fine-tuning",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["warm", 38], ["free", 12], ["warm", 33], ["free", 10]],
+        "caption": "Early updates capture broad task structure that often transfers."
+      },
+      {
+        "title": "3. Late overtraining",
+        "viz": "weights",
+        "viz_args": [["hot", 61], ["free", 9], ["hot", 58], ["free", 8], ["hot", 55]],
+        "caption": "Late updates focus on a few hard examples and move weights in narrow directions."
+      },
+      {
+        "title": "4. Merge the experts",
+        "viz": "box",
+        "viz_args": "average incompatible late updates",
+        "caption": "The merge keeps shared structure but washes out conflicting memorized details."
+      },
+      {
+        "title": "5. Stop earlier, merge better",
+        "viz": "plain",
+        "caption": "Early stopping preserves the part of training that survives combination."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Fine-tune experts over time",
+        "text": "Track checkpoints throughout expert training rather than keeping only the final one, because merge quality depends on when the expert is captured."
+      },
+      {
+        "b": "Measure stand-alone and merged scores",
+        "text": "Evaluate each checkpoint alone and after merging, because the two curves separate late in training."
+      },
+      {
+        "b": "Trace late updates to hard examples",
+        "text": "Identify the small subset of examples that dominate late expert improvements, because those examples reveal when memorization starts."
+      },
+      {
+        "b": "Link memorization to interference",
+        "text": "Compare the late weight changes across experts, because incompatible updates are the mechanism that harms the merged model."
+      },
+      {
+        "b": "Early-stop for merge quality",
+        "text": "Pick task-dependent stopping points before harmful late memorization dominates."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the training target for expert checkpoints used in merging. Instead of optimizing each expert all the way to its best isolated score, it chooses the checkpoint that yields the best downstream merge."
+    ],
+    "object": "the expert selection rule before merging"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "merge-compatible weight change",
+    "paras": [
+      "Not every improvement in an expert checkpoint is equally mergeable. The useful hidden quantity is the fraction of the expert's weight update that remains aligned with updates from other experts. If an update captures broad structure, several experts may move in compatible directions and the merge can keep it. If an update encodes a narrow fix for a few hard examples, another expert often moves differently and the combination loses that information.",
+      "The paper ties harmful late training to memorization because the final gain is concentrated on a small set of difficult examples. That concentration matters: when only a few examples drive the update, the weight change becomes specialized, and specialized changes are more likely to interfere during merging."
+    ],
+    "heat": {
+      "cells": [
+        ["early shared update", 4, true],
+        ["late task-specific update", 1, false],
+        ["compatible expert pair", 4, true],
+        ["conflicting expert pair", 1, false],
+        ["broad pattern retained", 3, true],
+        ["memorized hard case", 1, false],
+        ["merge-stable checkpoint", 4, true],
+        ["overtrained checkpoint", 1, false],
+        ["aligned adapter direction", 3, true],
+        ["cancelled late direction", 1, false],
+        ["general task signal", 4, true],
+        ["single-example fix", 1, false]
+      ],
+      "caption": "Darker cells mark updates that multiple experts can share without canceling each other during merging."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The best checkpoint for merging is the point where an expert has learned reusable task structure but has not yet spent many updates on idiosyncratic corrections."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Late expert gains concentrate on hard examples, and the resulting weight changes show negative parameter interference, which means the directions added by one expert conflict with those added by another during merge."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why overtraining hurts the merged model",
+    "paras": [
+      "Merging works only for information that multiple checkpoints encode compatibly. During early fine-tuning, an expert mainly adapts the base model to its task distribution, meaning the pattern of examples it sees often. Those early changes can overlap with what other tasks also need, such as better representations of domain vocabulary or task format. Averaging or combining experts can preserve that shared movement because the checkpoints point in similar directions.",
+      "Late in training, the optimization process focuses on the remaining hard examples. Those examples are few, so the resulting weight changes are narrow and often high magnitude in a small part of the model. Another expert has its own hard examples and therefore its own narrow changes. When the checkpoints are merged, the narrow directions do not reinforce each other. They cancel, dilute, or overwrite each other, so the merged model keeps less of the late improvement than the expert itself.",
+      "Early stopping works because it accepts a slightly weaker expert checkpoint in exchange for a much more compatible update. That trade is favorable when the downstream goal is one merged model, not a collection of isolated experts. The paper reports this pattern across vision and language models, across several sizes, and for both full fine-tuning and LoRA adapters, which indicates the mechanism is about where late training signal goes rather than about one specific architecture."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "shared base model plus several tasks"
+        },
+        {
+          "t": "step",
+          "s": "capture checkpoints throughout expert fine-tuning",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "measure isolated expert gain versus merged gain"
+        },
+        {
+          "t": "step",
+          "s": "identify late memorization on hard examples",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "stop before incompatible late updates dominate"
+        },
+        {
+          "t": "output",
+          "s": "merge-friendly expert checkpoints"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "A simple merge view",
+    "words": "A merged checkpoint starts from the base model and adds the average expert update, so any update direction that experts do not share is weakened or canceled.",
+    "equation": "merged = base + (1 / K) * sum_k delta_k",
+    "symbols": [
+      ["base", "the shared pretrained checkpoint before expert fine-tuning"],
+      ["K", "the number of experts being merged"],
+      ["delta_k", "the weight change learned by expert k relative to the base checkpoint"],
+      ["merged", "the final combined checkpoint"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose two experts share an early useful update of +0.4 on one weight. Averaging keeps +0.4 because both experts agree.",
+        "Now suppose one expert later adds +0.6 for a hard example while the other adds -0.5 for its own hard example.",
+        "The merge keeps only (+0.6 - 0.5) / 2 = +0.05 from those late changes.",
+        "Most of the late expert-specific gain disappears, even though each expert improved on its own task."
+      ]
+    },
+    "note": "This equation is simplified, but it captures why alignment across expert updates matters more than isolated expert score."
+  },
+  "bars": {
+    "h2": "What the training curves imply",
+    "charts": [
+      {
+        "title": "Train experts to convergence",
+        "rows": [
+          ["isolated expert score", 94, "good"],
+          ["merged model score", 57, "bad"],
+          ["late-update compatibility", 23, "bad"]
+        ],
+        "note": "Full convergence keeps pushing isolated score up, but much of the late gain does not survive the combination step."
+      },
+      {
+        "title": "Early-stop for merging",
+        "rows": [
+          ["isolated expert score", 89, "good"],
+          ["merged model score", 76, "good"],
+          ["late-update compatibility", 68, "good"]
+        ],
+        "note": "Stopping earlier sacrifices some stand-alone accuracy while preserving the broader update directions that several experts can keep after merging."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Stopping too early can leave obvious gains unused.",
+        "html": "If the checkpoint is captured before the expert has learned the task's broad structure, the merge also loses that missing knowledge because there is nothing useful to combine."
+      },
+      {
+        "warn": true,
+        "b": "Not every late update is harmful.",
+        "html": "Some tasks may still learn broadly useful structure late in training, so a fixed stopping rule can cut off recoverable merge gains because the harmful phase begins at different times on different tasks."
+      },
+      {
+        "warn": true,
+        "b": "The merge rule itself still matters.",
+        "html": "A stronger merge algorithm can preserve more compatible information than plain averaging, so early stopping is not a full substitute for good checkpoint-combination methods because the final result still depends on how the checkpoints are combined."
+      },
+      {
+        "b": "Done right.",
+        "html": "Track merge quality throughout fine-tuning, watch when improvement concentrates on a small hard-example subset, and stop experts at task-specific checkpoints chosen for downstream combination rather than isolated accuracy."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Fine-tune two small experts from the same base model on related tasks. Save checkpoints every few epochs. For each pair of checkpoints, merge them by averaging the weight difference from the base model and evaluate both the stand-alone experts and the merged model.",
+      "Then inspect which training examples drive the last few expert improvements. The demo should show a late phase where isolated expert score still rises while merged score falls, because the additional gain is concentrated on a small hard-example subset whose updates are not shared across experts."
+    ],
+    "metric_eq": "merge_retention = merged_gain_from_checkpoint / isolated_expert_gain_from_checkpoint",
+    "closing": "A convincing demo should show merge_retention dropping as training enters the memorization-heavy phase."
+  }
+}

@@ -1,0 +1,235 @@
+{
+  "slug": "icml-or-jrsjlpr85w",
+  "title": "SURGE: Approximation and Training Free Particle Filter for Diffusion Surrogate",
+  "family": "Other",
+  "one_liner": "To assimilate noisy observations into a pretrained diffusion forecaster, run sequential Monte Carlo over whole diffusion trajectories so particles are reweighted and resampled toward the true posterior instead of only being nudged by guidance.",
+  "lead": "Data assimilation continuously combines a dynamics model with incoming observations to estimate a system's hidden state, meaning the unobserved system variables we want to recover. Weather forecasting, fluid prediction, and many scientific simulators use this loop. Recent work replaces expensive simulators with pretrained diffusion models that can generate plausible future states. But simple observation guidance only nudges samples toward the data; it does not guarantee that the resulting samples are drawn from the correct posterior, meaning the weighted set of hidden states consistent with both model dynamics and observations. SURGE fixes that gap by placing particle filtering directly over diffusion trajectories. Each trajectory becomes a particle, observations define importance weights, and resampling keeps computation focused on the trajectories that remain plausible. Because this is done on the path measure, meaning the probability law over entire diffusion paths, the method fuses the diffusion surrogate with observations without an extra learned corrector.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Guiding a diffusion forecaster is not the same as sampling the right posterior",
+    "paras": [
+      "A diffusion surrogate can forecast a dynamical system by repeatedly denoising from noise toward a plausible next state. If an observation arrives, a common trick is to add a guidance term from the observation likelihood, meaning the score that tells you how compatible a candidate state is with the measurement.",
+      "That guidance can improve samples, but it does not by itself produce the exact posterior weighted set of states needed for sequential state estimation, because it changes particle motion without correcting particle probabilities. The generated trajectories may still be biased, especially when observations are sparse or noisy. Data assimilation needs a principled update rule that keeps track of the probability mass over many possible trajectories, not only a single guided rollout."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Treat full diffusion trajectories as particles, weight them by observational consistency, and resample over time so the ensemble approximates the correct posterior."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Diffusion surrogate forecasts",
+        "viz": "brain",
+        "caption": "A pretrained diffusion model proposes possible future system states."
+      },
+      {
+        "title": "2. Observation arrives",
+        "viz": "box",
+        "viz_args": "Noisy partial measurement at current time",
+        "caption": "The real system reveals only a noisy slice of the hidden state."
+      },
+      {
+        "title": "3. Guidance alone nudges",
+        "viz": "weights",
+        "viz_args": [["nudge", 20], ["nudge", 28], ["nudge", 19], ["nudge", 33], ["nudge", 22], ["nudge", 31], ["nudge", 18], ["nudge", 27], ["nudge", 16], ["nudge", 30], ["nudge", 21], ["nudge", 29]],
+        "caption": "Simple guidance pushes trajectories toward observations, but it does not maintain correct posterior weights."
+      },
+      {
+        "title": "4. Weight and resample",
+        "viz": "weights",
+        "viz_args": [["keep", 42], ["drop", 12], ["keep", 38], ["drop", 10], ["keep", 40], ["drop", 14], ["keep", 37], ["drop", 11], ["keep", 39], ["drop", 9], ["keep", 41], ["drop", 13]],
+        "caption": "SURGE scores every particle by observation likelihood and resamples the better trajectories."
+      },
+      {
+        "title": "5. Posterior tracked over time",
+        "viz": "plain",
+        "caption": "The particle set stays aligned with both the diffusion model's built-in forecast spread over future states and the incoming data."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Sample diffusion trajectories",
+        "text": "Generate an ensemble of candidate state trajectories from the pretrained diffusion surrogate."
+      },
+      {
+        "b": "Score with observations",
+        "text": "For each particle, evaluate how likely the new observation is under that trajectory."
+      },
+      {
+        "b": "Compute importance weights",
+        "text": "Turn those observation scores into normalized particle weights so better-matching trajectories carry more posterior mass, because the filter must assign more probability to trajectories that explain the measurement better."
+      },
+      {
+        "b": "Resample particles",
+        "text": "Duplicate high-weight trajectories and discard low-weight ones, because posterior approximation improves when mass is concentrated on plausible paths."
+      },
+      {
+        "b": "Advance sequentially",
+        "text": "Repeat at the next time step so the trajectory estimate is continuously corrected as new data arrive."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the role of the diffusion model in data assimilation. Instead of using the surrogate only as a guided sampler, it uses the surrogate as the proposal mechanism inside a sequential Monte Carlo filter, so observations affect particle probabilities and ancestry, not only particle drift."
+    ],
+    "object": "the posterior update for diffusion-based data assimilation"
+  },
+  "hidden": {
+    "h2": "Path-level posterior mass",
+    "name": "path-level posterior mass (how much probability belongs to an entire candidate diffusion trajectory after seeing observations)",
+    "paras": [
+      "The key quantity is not the denoised state at one instant. It is the probability of the whole trajectory under both the surrogate dynamics and the observation model. A trajectory that looks plausible for one frame can still be poor overall if earlier denoising choices made the observation unlikely.",
+      "SURGE tracks this quantity with particle weights. Sequential Monte Carlo means representing a weighted set of possibilities by many weighted particles that are repeatedly reweighted and resampled over time. Working on the path measure matters because resampling depends on the entire trajectory history that produced the current state, not only the current frame."
+    ],
+    "heat": {
+      "cells": [
+        ["p1", 4, true],
+        ["p2", 1, false],
+        ["p3", 4, true],
+        ["p4", 1, false],
+        ["p5", 3, true],
+        ["p6", 2, false],
+        ["p7", 4, true],
+        ["p8", 1, false],
+        ["p9", 3, true],
+        ["p10", 1, false],
+        ["p11", 4, true],
+        ["p12", 2, false]
+      ],
+      "caption": "Darker means a trajectory carries more posterior mass after the latest observation."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The filter should keep many possible futures alive, but only in proportion to how well each full trajectory still matches the observed data."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "SURGE defines importance weights on diffusion trajectories under the path measure, then resamples so the sample-based particle set converges toward the desired posterior."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why particle filtering repairs guided diffusion sampling",
+    "paras": [
+      "Guidance changes where a diffusion sampler moves, but it does not keep an explicit correction for how probable each trajectory should be after the move. That omission matters because data assimilation is a probability-tracking problem, not only a trajectory-denoising problem.",
+      "Particle filtering provides that correction. The diffusion surrogate proposes candidate trajectories, and the observation likelihood scores them. Importance weights then say how much posterior mass each proposal deserves. Resampling sharpens the approximation because it allocates finite particle budget to the trajectories that still explain the data, instead of wasting particles on low-likelihood paths.",
+      "The method is approximation-free in the sense emphasized by the paper because it does not need a separately trained correction network or an extra analytical approximation to the posterior update. The only approximation is the standard particle approximation itself, which becomes tighter as particle count grows. That is why the approach preserves the statistical logic of sequential Monte Carlo while still using a pretrained diffusion model as the dynamics engine."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "pretrained diffusion surrogate plus noisy observations"
+        },
+        {
+          "t": "step",
+          "s": "generate candidate diffusion trajectories",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "weight trajectories by observation likelihood",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "resample and continue sequentially"
+        },
+        {
+          "t": "output",
+          "s": "posterior particle ensemble"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The particle weight update",
+    "words": "new particle weight equals old weight times the likelihood of the latest observation under that particle's trajectory, then all weights are normalized before resampling",
+    "equation": "w_t^(i) proportional to w_(t-1)^(i) * p(y_t | x_t^(i))",
+    "symbols": [
+      ["w_t^(i)", "the weight of particle i after observing time t"],
+      ["w_(t-1)^(i)", "the weight of particle i before the new observation"],
+      ["y_t", "the observation received at time t"],
+      ["x_t^(i)", "the state of particle i at time t"],
+      ["p(y_t | x_t^(i))", "the observation likelihood for that particle"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose three particles start with equal weight 1/3.",
+        "After a new observation, their likelihoods are 0.9, 0.2, and 0.4.",
+        "Unnormalized new weights are 0.3, 0.0667, and 0.1333.",
+        "Their sum is 0.5, so normalized weights are 0.6, 0.133, and 0.267.",
+        "Resampling will copy the first particle most often because it explains the observation best.",
+        "That concentration matters because it turns the ensemble toward the posterior instead of merely nudging every particle equally."
+      ]
+    },
+    "note": "The update is simple, but it is the missing statistical correction that ordinary guidance does not provide."
+  },
+  "bars": {
+    "h2": "Assimilation quality over time",
+    "charts": [
+      {
+        "title": "Guided diffusion only",
+        "rows": [
+          ["Posterior calibration", 49, "bad"],
+          ["State error after updates", 61, "bad"],
+          ["Particle diversity", 77, "good"]
+        ],
+        "note": "Guidance keeps trajectories diverse, but calibration is weak because no importance reweighting enforces the correct posterior mass."
+      },
+      {
+        "title": "SURGE",
+        "rows": [
+          ["Posterior calibration", 81, "good"],
+          ["State error after updates", 34, "good"],
+          ["Particle diversity", 68, "good"]
+        ],
+        "note": "SURGE reduces state error because weight updates and resampling move probability mass toward observation-consistent trajectories."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Particle degeneracy appears.",
+        "html": "If one or two particles absorb nearly all the weight, the ensemble collapses. Future uncertainty is then underestimated because too few distinct trajectories survive."
+      },
+      {
+        "warn": true,
+        "b": "The diffusion surrogate is biased.",
+        "html": "Particle filtering can only reweight and resample the proposals it receives. If the surrogate almost never proposes trajectories near the true system, the posterior approximation remains poor."
+      },
+      {
+        "warn": true,
+        "b": "Observation likelihood is misspecified.",
+        "html": "If the noise model for observations is wrong, weight updates reward the wrong particles. The filter can then drift even when the diffusion proposals are good."
+      },
+      {
+        "b": "Done right.",
+        "html": "Use enough particles to limit collapse, monitor effective sample size to trigger resampling sensibly, and validate both the surrogate forecast quality and the observation model."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Create a low-dimensional dynamical system with partial noisy observations, such as a reaction-diffusion toy system or a chaotic oscillator observed through a few coordinates. Train a diffusion surrogate on simulated rollouts. Then compare three assimilators: surrogate alone, observation-guided surrogate, and SURGE.",
+      "Track posterior calibration, state estimation error, and particle diversity over a sequence of observations. Visualize how weights move after each measurement and how resampling changes the ancestry of surviving trajectories."
+    ],
+    "metric_eq": "state_error = average squared distance between posterior mean state and true hidden state",
+    "closing": "The demo should make clear that SURGE wins because it corrects trajectory probabilities, not only trajectory positions."
+  }
+}
