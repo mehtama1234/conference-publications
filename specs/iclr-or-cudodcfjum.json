@@ -1,0 +1,233 @@
+{
+  "slug": "iclr-or-cudodcfjum",
+  "title": "A Dense Subset Index for Collective Query Coverage",
+  "family": "Other",
+  "one_liner": "Retrieve a small set of documents that jointly cover all parts of a complex query, instead of ranking documents one by one as if any single item were enough.",
+  "lead": "Many retrieval systems assume one document should answer one query. That assumption breaks for multi-hop question answering and text-to-SQL support, where the answer is spread across several records or passages. The right retrieval target is then not the single best item but a small subset whose contents cover the whole query. DISCo builds an index for that setting. It treats query coverage as the objective, edits the query after each retrieval step to focus on what remains uncovered, and uses a dense index built in a lifted space so each probe can still be fast. The important point is that the system optimizes collaboration among retrieved items rather than competition between them.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why top-k ranking is the wrong target for collaborative retrieval",
+    "paras": [
+      "Standard dense retrieval embeds, meaning converts into a learned list of numbers, the query and each corpus item, then returns the highest-scoring items. That setup treats corpus items as rivals for the top ranks.",
+      "In a collective retrieval task, one item rarely contains the whole answer. One passage might define a person, another passage might state a date, and a table row might provide the missing condition. Ranking by individual score can miss this structure because the system keeps rewarding redundancy. Several top items may all cover the same part of the query while leaving another part untouched."
+    ],
+    "callout": {
+      "b": "The paper's move.",
+      "html": "Choose items by how much uncovered query content they add, because a useful result set should cover the query jointly rather than produce several near-duplicates."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A query has multiple required facts",
+        "viz": "box",
+        "viz_args": "person name, event date, database condition",
+        "caption": "The query is answerable only after several pieces are combined."
+      },
+      {
+        "title": "2. Standard ranking returns overlaps",
+        "viz": "weights",
+        "viz_args": [["doc covers fact A", 5], ["doc covers fact A again", 4], ["doc covers fact B", 2]],
+        "caption": "High individual scores can still leave part of the query uncovered."
+      },
+      {
+        "title": "3. Measure uncovered query content",
+        "viz": "plain",
+        "caption": "After one document is chosen, the system marks which query pieces are still missing."
+      },
+      {
+        "title": "4. Probe the index again",
+        "viz": "box",
+        "viz_args": "edited query seeks fact B and fact C",
+        "caption": "Each new probe targets the remaining gap instead of repeating what was already found."
+      },
+      {
+        "title": "5. Stop with a covering subset",
+        "viz": "box",
+        "viz_args": "small set with broad coverage",
+        "caption": "The output is a compact collaborative set rather than a redundant ranked list."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Represent the query and corpus items densely.",
+        "text": "Map each token, meaning one text unit such as a word or subword, or contextual word feature into a learned numeric space, so similarity can be searched quickly."
+      },
+      {
+        "b": "Define coverage as the goal.",
+        "text": "Score a candidate subset by how much of the query's content is matched by at least one chosen item, because one item may cover only one part."
+      },
+      {
+        "b": "Probe the dense index for one useful item.",
+        "text": "Retrieve an item that covers a large uncovered portion of the query."
+      },
+      {
+        "b": "Edit the query after selection.",
+        "text": "Reduce emphasis on already covered query parts, so the next probe looks for missing content rather than repeats the first result."
+      },
+      {
+        "b": "Repeat until coverage stops increasing.",
+        "text": "Build a small subset whose combined coverage is close to the best possible, while keeping query time sublinear in corpus size."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the retrieval target from one ranked item list into a subset-construction problem driven by marginal coverage."
+    ],
+    "object": "the objective used by dense retrieval at query time"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "remaining uncovered query content after each retrieval step",
+    "paras": [
+      "The hidden quantity is the part of the query that the chosen subset still does not explain. After each item is added, some words or contextual features are already supported by the subset and should no longer dominate the next search.",
+      "This quantity matters because a retrieval system wastes probes when it keeps chasing already covered material. DISCo tracks the uncovered remainder implicitly through query editing, then asks the index for items that contribute new coverage. That is the link between the optimization view and the indexing view: the objective says to maximize additional coverage, and the edited query steers each probe toward that goal."
+    ],
+    "heat": {
+      "cells": [
+        ["covered fact A", 1, false],
+        ["covered fact B", 1, false],
+        ["uncovered fact C", 5, true],
+        ["uncovered join condition", 5, true],
+        ["duplicate passage", 1, false],
+        ["new supporting row", 4, true],
+        ["marginal gain", 5, true],
+        ["redundant gain", 1, false],
+        ["edited query focus", 4, true],
+        ["subset size budget", 3, false],
+        ["sublinear probe", 4, true],
+        ["full-corpus scan", 1, false]
+      ],
+      "caption": "Darker cells mark the uncovered parts that should drive the next retrieval step."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "At each round the system should care most about what the current subset still has not covered."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The successive dense probes are guided by a residual query signal because the submodular coverage objective rewards marginal additions rather than repeated evidence."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why successive probes can approximate the best subset",
+    "paras": [
+      "Coverage is a submodular objective, meaning each extra item usually adds less once similar items are already selected. That property matters because greedy selection then has a provable path to a near-best subset. The first item can add a lot, but later duplicates add little, so the method has a built-in reason to diversify.",
+      "The query-editing step is the operational form of that theory. After one item covers part of the query, the system reduces that part's influence in the next probe. The next dense search is therefore pulled toward missing facts rather than repeated ones.",
+      "The lifted dense space matters because the index must answer each successive probe quickly. The paper uses random projections of a transformed feature space so the coverage-oriented objective can still be searched with dense-index machinery instead of a slow exact subset search over the whole corpus."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "complex query with several required facts"
+        },
+        {
+          "t": "step",
+          "s": "retrieve one high-coverage item"
+        },
+        {
+          "t": "step",
+          "s": "edit the query to remove covered parts",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "probe the dense index again for the remainder",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "small subset with strong collective coverage"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Coverage with diminishing returns",
+    "words": "Each newly selected item earns credit only for the query content it covers that earlier items did not already cover.",
+    "equation": "marginal_gain = coverage(selected_set plus candidate) - coverage(selected_set)",
+    "symbols": [
+      ["selected_set", "the items already chosen for the subset"],
+      ["candidate", "one new corpus item being considered"],
+      ["coverage( )", "how much of the query is matched by at least one item in the set"],
+      ["marginal_gain", "the extra uncovered query content supplied by the new item"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the query needs three facts: A, B, and C.",
+        "The current subset already covers A and B.",
+        "A new candidate also covers A and B, so its marginal gain is near zero.",
+        "Another candidate covers C, so its marginal gain is large because C is still missing.",
+        "A greedy method that keeps choosing the larger marginal gain will move toward a covering subset instead of piling up duplicates."
+      ]
+    },
+    "note": "This is the core change from ranking: the candidate is judged relative to what is already in the subset."
+  },
+  "bars": {
+    "h2": "What the reported gains mean",
+    "charts": [
+      {
+        "title": "Standard top-k dense retrieval",
+        "rows": [
+          ["coverage of multi-part queries", 43, "bad"],
+          ["redundancy in returned set", 76, "bad"],
+          ["latency at higher recall", 39, "bad"]
+        ],
+        "note": "The system wastes ranks on repeated evidence because each item is scored mostly on its own."
+      },
+      {
+        "title": "DISCo subset retrieval",
+        "rows": [
+          ["coverage of multi-part queries", 79, "good"],
+          ["redundancy in returned set", 28, "good"],
+          ["latency at higher recall", 71, "good"]
+        ],
+        "note": "The subset covers more of the query with fewer repeats because every new item is selected for what it adds."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Coverage surrogates can miss true reasoning needs.",
+        "html": "If the feature-level coverage score says a query part is covered when the underlying evidence is actually incomplete, the method can stop too early."
+      },
+      {
+        "warn": true,
+        "b": "Query editing can erase too much.",
+        "html": "If the residual query suppresses already covered parts too aggressively, the next probe may miss documents that are needed to connect earlier evidence with the missing part."
+      },
+      {
+        "warn": true,
+        "b": "Random projections can lose detail.",
+        "html": "The lifted space keeps search fast, but too much compression can blur distinctions between candidates whose marginal gains are close."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method is strongest when the coverage score tracks true query needs, the residual query preserves the unresolved parts clearly, and the dense index retains enough detail to separate useful candidates from duplicates."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small corpus where each document covers a different subset of facts for multi-hop questions. Add intentional duplicates so standard ranking will repeat itself. Then compare ordinary top-k retrieval against successive subset retrieval with query editing. The demo should track how much of the query is covered after each step, how many redundant items are chosen, and how much search time grows as the corpus grows."
+    ],
+    "metric_eq": "demo_score = (final_coverage + nonredundancy + scaled_latency_score) / 3",
+    "closing": "The demo is convincing only if the subset method reaches broader coverage with fewer duplicates while keeping query time well below a full corpus scan."
+  }
+}

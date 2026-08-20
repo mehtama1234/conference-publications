@@ -1,0 +1,251 @@
+{
+  "slug": "iclr-or-ezo38vanpm",
+  "title": "IMSE: Intrinsic Mixture of Spectral Experts Fine-tuning for Test-Time Adaptation",
+  "family": "Test-Time Adaptation",
+  "one_liner": "IMSE adapts a vision transformer at test time by changing only each layer's singular values, then adds a diversity objective and a domain-retrieval module so the model keeps class information instead of collapsing onto domain shortcuts.",
+  "lead": "Test-time adaptation updates a pretrained model after deployment, using only incoming unlabeled test data. The difficulty is not just avoiding overfitting. The update must be small enough to preserve the pretrained model's knowledge, but expressive enough to correct for blur, corruption, style shift, or other domain changes. IMSE argues that vision transformers, which are image models built from repeated feature-mixing operations and linear layers, already contain many useful directions inside each linear layer. Instead of changing the full weight table that maps one feature set to another, it decomposes each layer with singular value decomposition, freezes the singular vectors, which are the fixed input and output directions of the decomposition, and only changes the singular values. That turns each rank-1 component into a small expert whose strength can be reweighted at test time. The paper then addresses two practical failure modes of entropy-minimization adaptation: confidence can rise for the wrong reasons, and continual adaptation can forget earlier domains. IMSE adds a diversity-maximization loss based on singular-vector response patterns and a domain-aware retrieval system that reloads previously adapted singular values when a known domain reappears.",
+  "nav": [["theme-test-time-adaptation.html", "Test-Time Adaptation"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why full test-time updates are wasteful and unstable",
+    "paras": [
+      "A pretrained vision transformer stores its behavior in large linear maps. Standard test-time adaptation methods usually update all weights, or add small adapter blocks, while minimizing prediction entropy on unlabeled test images. That can work when the shift is mild, but it uses many adjustable numbers and can distort features that were already useful before deployment.",
+      "There is a second problem inside entropy minimization itself. Lower entropy only says the model became more certain. It does not say the model became more class-sensitive. Under domain shift, the model can become certain by locking onto domain-specific texture, lighting, compression artifacts, or other cues that are stable within the current batch but not tied to the label. The result is reduced feature variation and worse transfer.",
+      "In continual test-time adaptation, the system also needs memory. If the stream moves from domain A to domain B and later returns to domain A, adapting from scratch each time wastes compute and can erase useful domain-specific corrections."
+    ],
+    "callout": {
+      "b": "The core move.",
+      "html": "Do not update the whole layer. Decompose each layer into rank-1 pieces, keep the directions fixed, and adapt only how strongly each piece contributes. Then explicitly reward diverse response patterns and retrieve old adaptations when the domain returns."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Pretrained layer is decomposed",
+        "viz": "box",
+        "viz_args": "W = U diag(s) V^T",
+        "caption": "Each linear layer is split into fixed left and right singular vectors plus adaptable singular values."
+      },
+      {
+        "title": "2. Each rank-1 piece becomes an expert",
+        "viz": "weights",
+        "viz_args": [["hot", 80], ["warm", 60], ["warm", 55], ["free", 25], ["free", 20]],
+        "caption": "Changing one singular value strengthens or weakens one spectral component without rotating the whole representation."
+      },
+      {
+        "title": "3. Entropy minimization alone is not enough",
+        "viz": "weights",
+        "viz_args": [["hot", 90], ["hot", 88], ["free", 10], ["free", 8], ["free", 7]],
+        "caption": "Confidence can rise while responses become less varied, which means the model may rely on domain-specific cues."
+      },
+      {
+        "title": "4. Diversity loss spreads responses",
+        "viz": "weights",
+        "viz_args": [["moved", 75], ["moved", 68], ["moved", 62], ["moved", 55], ["free", 18]],
+        "caption": "The adaptation is pushed toward using multiple singular directions instead of collapsing onto a narrow response pattern."
+      },
+      {
+        "title": "5. Continual stream can reuse past codes",
+        "viz": "box",
+        "viz_args": "domain stats -> retrieve stored singular values",
+        "caption": "When a known domain reappears, the model reloads the matching spectral code and adapts quickly."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Factor each linear layer",
+        "text": "Apply singular value decomposition to a pretrained layer W and write it as fixed left vectors, a diagonal matrix of singular values, and fixed right vectors."
+      },
+      {
+        "b": "Adapt only singular values",
+        "text": "During test-time adaptation, freeze the singular vectors and update only the singular values, which are far fewer adjustable values than the full matrix."
+      },
+      {
+        "b": "Minimize prediction entropy",
+        "text": "Use unlabeled test images to push the model toward confident predictions on the current domain."
+      },
+      {
+        "b": "Maximize response diversity",
+        "text": "Measure how the input aligns with singular vectors and add a loss that discourages many samples from activating the same narrow subset of spectral experts."
+      },
+      {
+        "b": "Retrieve domain-aware codes in CTTA",
+        "text": "Estimate the current input statistics, detect whether they match a previously seen domain, and load the stored adapted singular values before continuing adaptation."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the adaptable object from a full weight matrix to a spectral code: the vector of singular values attached to each decomposed layer. The directions that define the layer's feature basis stay fixed; only the strength of each direction moves."
+    ],
+    "object": "layer values updated at test time"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Response diversity across spectral experts",
+    "name": "singular vector-input alignment pattern",
+    "paras": [
+      "Once a layer is decomposed, each singular-vector pair defines one rank-1 transformation. For a given input feature, some of these components respond strongly and others weakly. The paper treats this response pattern as a useful signal about whether the model is using a broad class-discriminative basis or collapsing onto a small set of domain-specific directions.",
+      "Entropy minimization can make predictions sharp while shrinking this diversity. IMSE therefore measures alignment between inputs and singular vectors and rewards diverse response patterns. The point is not to make every expert equally active. The point is to stop the update from concentrating too much mass on a few components whose behavior may only fit the current corruption pattern."
+    ],
+    "heat": {
+      "cells": [
+        ["sv_1_alignment", 4, true],
+        ["sv_2_alignment", 3, true],
+        ["sv_3_alignment", 2, false],
+        ["sv_4_alignment", 1, false],
+        ["sv_5_alignment", 4, true],
+        ["entropy_term", 3, true],
+        ["diversity_term", 4, true],
+        ["domain_stat_buffer", 3, false],
+        ["retrieved_code", 4, true],
+        ["class_logit_margin", 2, false],
+        ["feature_variance", 3, true],
+        ["shortcut_cue", 1, false]
+      ],
+      "caption": "Darker means more influence on whether the model uses multiple spectral directions. Highlights mark the terms IMSE directly manipulates."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The adaptation should not make every test image trigger the same few singular components. If that happens, the model is becoming confident in a narrow and fragile way."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "IMSE adds a diversity-maximization objective based on singular vector-input alignment so that spectral experts keep differentiated response patterns even while entropy is reduced."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this setup helps",
+    "paras": [
+      "A linear layer can be written as a sum of rank-1 components. Singular value decomposition orders those components by importance and separates two kinds of information: directions and magnitudes. The singular vectors determine which input-output directions exist. The singular values determine how strongly those directions contribute. By freezing the vectors, IMSE preserves the pretrained arrangement of feature directions. By changing only the singular values, it still has a direct way to amplify, suppress, or rebalance existing behavior under the new domain.",
+      "This makes adaptation efficient because the number of trainable values drops sharply. It also makes the update more conservative. Rotating the singular vectors would create entirely new directions and can disrupt class structure. Reweighting existing directions is a smaller intervention that still reaches many parts of the network, because every forward pass depends on those values.",
+      "The diversity objective addresses the main weakness of entropy minimization. If confidence rises because the model keeps exploiting the same domain-specific cue, the alignment pattern across spectral experts becomes less varied. Rewarding diversity pushes the model to preserve a broader set of active components, which is more consistent with class-sensitive features. In continual adaptation, storing adapted singular values per detected domain makes sense because the spectral code is compact. Retrieval reuses previous work instead of relearning the same correction."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Unlabeled shifted test images"
+        },
+        {
+          "t": "step",
+          "s": "Decompose each transformer layer into fixed singular vectors plus adaptable singular values",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Update singular values with entropy loss on current test data"
+        },
+        {
+          "t": "step",
+          "s": "Add diversity loss from singular-vector alignment patterns"
+        },
+        {
+          "t": "step",
+          "s": "In a stream, retrieve stored spectral code for matching domains"
+        },
+        {
+          "t": "output",
+          "s": "Adapted model whose small spectral code can be stored and reloaded for repeated domains"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The spectral adaptation objective",
+    "words": "Write each layer as fixed singular vectors times adaptable singular values. Update only the singular values by combining entropy minimization with a diversity reward.",
+    "equation": "W = U diag(s) V^T,   L_IMSE = L_ent(x_t; s) + lambda L_div(x_t; U, V, s)",
+    "symbols": [
+      ["W", "a pretrained linear layer in the vision transformer"],
+      ["U, V", "left and right singular vectors, kept fixed during adaptation"],
+      ["s", "the singular values, which IMSE updates at test time"],
+      ["x_t", "current unlabeled test-domain inputs"],
+      ["L_ent", "entropy minimization loss that encourages confident predictions"],
+      ["L_div", "diversity term based on singular vector-input alignment patterns"],
+      ["lambda", "weight controlling how strongly diversity is enforced"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose one layer has singular values s = [3.0, 1.5, 0.4].",
+        "On the new domain, entropy minimization alone keeps increasing the first value because the first component reacts strongly to a domain-specific texture cue.",
+        "After one step, entropy-only adaptation proposes s = [3.6, 1.4, 0.2]. Predictions become more confident, but the response pattern narrows.",
+        "IMSE adds a diversity penalty, so the update instead becomes s = [3.3, 1.7, 0.5].",
+        "The first component still grows because it is useful, but the second and third components are not suppressed as aggressively.",
+        "The layer stays close to the pretrained basis while spreading responsibility across more spectral experts."
+      ]
+    },
+    "note": "The exact diversity formula uses alignment statistics, but the essential structure is simple: entropy pulls toward confidence and the diversity term pushes against response collapse."
+  },
+  "bars": {
+    "h2": "What improves relative to typical TTA baselines",
+    "charts": [
+      {
+        "title": "Full or adapter-style test-time tuning",
+        "rows": [
+          ["Trainable values updated during adaptation", 85, "bad"],
+          ["Retention of pretrained directions", 35, "bad"],
+          ["Ability to reuse domain-specific adaptation", 20, "bad"]
+        ],
+        "note": "These methods can adapt, but they update a broader set of adjustable values and do not naturally produce a compact domain code."
+      },
+      {
+        "title": "Entropy-only compact adaptation",
+        "rows": [
+          ["Trainable values updated during adaptation", 20, "good"],
+          ["Confidence on current batch", 80, "good"],
+          ["Protection against feature collapse", 30, "bad"]
+        ],
+        "note": "Small updates help efficiency, but entropy alone can still concentrate on narrow domain cues because it rewards confidence even when confidence comes from a few domain-specific components."
+      },
+      {
+        "title": "IMSE",
+        "rows": [
+          ["Trainable values updated during adaptation", 15, "good"],
+          ["Retention of pretrained directions", 88, "good"],
+          ["Ability to reuse domain-specific adaptation", 90, "good"]
+        ],
+        "note": "The paper reports top benchmark results in single-domain TTA and a 3.4-point gain in continual TTA with about 2,000 times fewer trainable values. That comparison supports the claim that singular-value updates plus retrieval keep adaptation compact without giving up accuracy because it compares accuracy and trainable values directly."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Useful new directions cannot be created.",
+        "html": "Freezing singular vectors is conservative, but it also limits adaptation. If the new domain truly requires directions absent from the pretrained basis, reweighting singular values may not be enough."
+      },
+      {
+        "warn": true,
+        "b": "Domain detection can misfire in CTTA.",
+        "html": "The retrieval system depends on estimating whether the current input statistics match a stored domain. If that estimate is noisy, the method can reload the wrong spectral code and start from a poor state."
+      },
+      {
+        "warn": true,
+        "b": "Too much diversity can slow useful specialization.",
+        "html": "The diversity term is meant to prevent collapse, not force uniform response. If its weight is too large, the model may resist real domain-specific corrections."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works best when the pretrained basis already contains the relevant class structure and the main need is to rebalance how strongly existing directions respond under shift."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Take a pretrained vision transformer on a small image classification task, create a shifted test stream with corruptions or style changes, and compare three settings: no adaptation, entropy-only adaptation of singular values, and IMSE. Log the singular values over time, track feature variance, and store one spectral code per domain in a continual stream. Then replay a previously seen domain and measure how much faster retrieval plus light readaptation recovers accuracy, because the model starts from a stored domain-specific code instead of relearning that code from the base model."
+    ],
+    "metric_eq": "reuse_gain = accuracy_with_retrieval - accuracy_from_restarting_adaptation, parameter_ratio = full_layer_params / adapted_singular_values",
+    "closing": "The demo should show two things at once: compact spectral updates are enough to repair the model on shifted data, and the diversity plus retrieval pieces prevent the common failure modes of entropy-only adaptation."
+  }
+}
