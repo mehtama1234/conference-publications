@@ -1,0 +1,238 @@
+{
+  "slug": "icml-or-7niatkcx1b",
+  "title": "Agent JIT Compilation for Latency-Optimizing Web Agent Planning and Scheduling",
+  "family": "Agents & Tool Use",
+  "one_liner": "Turn a browser task into an executable program that can validate tool calls, overlap independent steps, and finish much sooner than a screenshot-by-screenshot control loop.",
+  "lead": "Browser agents are often slow because they stop after every action, ask the model what to do next, wait for a fresh screen image, and repeat. This paper replaces that loop with compilation: write a task-specific program once, check that every tool call satisfies the tool contract, and schedule independent actions together when the page state permits it.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why browser agents waste time and make avoidable tool mistakes",
+    "paras": [
+      "A standard browser agent runs one long control loop: read the current screen, ask a language model for the next action, execute one browser tool, then repeat. That structure is simple, but it creates delay because every tiny step waits for a full model round trip. Long tasks can need dozens of rounds, so the waiting time dominates the total runtime.",
+      "The same loop also invites action mistakes. If the model issues a click before the target exists, or types into the wrong field, the error happens at execution time. A beginner might try to fix this with better prompting alone, but that still leaves the same step-by-step loop and the same missing checks. The paper's claim is that web-agent planning should look more like program compilation than repeated chatting, because a compiled plan can be checked and scheduled before most of the waiting happens."
+    ],
+    "callout": {
+      "b": "The move.",
+      "html": "Compile the task into executable code, reject plans that violate tool preconditions or postconditions, and arrange independent operations to run together so that idle waiting disappears."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Slow control loop",
+        "viz": "box",
+        "viz_args": "screen -> model -> one tool -> screen -> model",
+        "caption": "The usual agent waits after every small action."
+      },
+      {
+        "title": "2. Compile the task once",
+        "viz": "box",
+        "viz_args": "task description -> executable plan",
+        "caption": "The planner writes code for the whole job instead of one next step."
+      },
+      {
+        "title": "3. Check tool contracts",
+        "viz": "weights",
+        "viz_args": [["precheck", 82], ["postcheck", 78], ["bad call", 12], ["good call", 91], ["retry", 55], ["reject", 67]],
+        "caption": "Plans that misuse tools are filtered out before execution."
+      },
+      {
+        "title": "4. Overlap independent work",
+        "viz": "box",
+        "viz_args": "search prices || open menu || fetch details",
+        "caption": "Independent branches run together when page state allows it."
+      },
+      {
+        "title": "5. Faster browser task",
+        "viz": "weights",
+        "viz_args": [["wait", 18], ["execute", 86], ["parallel", 79], ["correct", 88]],
+        "caption": "Less waiting and fewer bad actions cut total task time."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Write several candidate programs.",
+        "text": "The planner asks the model for multiple executable plans so that it can compare different task decompositions instead of trusting the first answer."
+      },
+      {
+        "b": "Validate each tool call.",
+        "text": "Each candidate is checked against tool requirements such as what must already be true before a click, type, or read action can run."
+      },
+      {
+        "b": "Estimate runtime cost.",
+        "text": "The system predicts how long each candidate will take by combining expected model time, tool time, and page waiting time."
+      },
+      {
+        "b": "Search for a schedule.",
+        "text": "Independent code blocks are rearranged to overlap when they do not depend on each other's results, because overlapping them removes idle time."
+      },
+      {
+        "b": "Execute with runtime checks.",
+        "text": "The chosen program runs with precondition and postcondition checks so that a failed action is caught at the exact step that broke."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Most browser agents decide one action at a time. This paper changes the planning object from a next-action policy to a whole executable program. That program can contain tool calls, model calls, branches, and parallel sections. Once the task is represented this way, the system can reason about cost and correctness before execution starts."
+    ],
+    "object": "The task representation: from next action to executable program"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: expected task latency",
+    "name": "Expected task latency",
+    "paras": [
+      "The paper is really optimizing a hidden quantity: how much total wall-clock time the entire task will consume. That total is not just one model call. It includes model waiting time, browser tool time, network delay, page loading delay, and the cost of extra repair steps after an action mistake. A plan that uses fewer rounds can still be slower if it creates long serial waits, so the system needs a full task-level latency estimate.",
+      "The scheduler estimates this quantity from learned runtime patterns for each operation. It repeatedly samples possible runtimes, then scores different schedules by their expected completion time. That matters because parallel sections only help when the overlapped branches are truly independent and long enough to hide each other's waits."
+    ],
+    "heat": {
+      "cells": [
+        ["model wait", 4, true],
+        ["tool time", 3, false],
+        ["page load", 4, true],
+        ["repair step", 4, true],
+        ["serial plan", 1, false],
+        ["parallel branch", 4, true],
+        ["bad contract", 2, false],
+        ["runtime sample", 3, false],
+        ["total delay", 4, true],
+        ["chosen plan", 3, false],
+        ["idle gap", 1, true],
+        ["finish time", 4, true]
+      ],
+      "caption": "Darker cells matter more to total task time; highlighted cells are the paper's main control points."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The hidden quantity is the total clock time for the whole task, including waiting and recovery after mistakes."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The scheduler searches over execution orders using sampled latency estimates so that it picks the plan with the lowest expected completion time under tool and page-state constraints."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works",
+    "paras": [
+      "The gain comes from three linked changes. First, whole-program planning removes repeated model round trips because one compilation step can cover many future actions. Second, tool-contract checks remove candidates that would fail at runtime, which raises task success because the chosen program already satisfies the tool interface rules. Third, scheduling overlaps independent waits, which shortens the critical path because the browser no longer sits idle while unrelated work could have progressed.",
+      "These pieces reinforce each other. Scheduling alone would not help if the plan still contained unsafe actions, because parallel failure would only waste more work. Validation alone would not help enough if the program still ran fully in series, because most time would remain trapped in waiting. The system improves both speed and accuracy by combining validation with cost-aware scheduling in the compiled representation."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Natural-language browser task"
+        },
+        {
+          "t": "step",
+          "s": "Generate several executable plans",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Reject plans whose tool contracts fail",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Estimate total task time for each valid plan"
+        },
+        {
+          "t": "step",
+          "s": "Overlap independent branches to shrink the critical path",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Fast executable browser program"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The scheduling equation",
+    "words": "Expected task time equals the average sampled finish time of the compiled program under a proposed schedule.",
+    "equation": "E[T(schedule)] = average over sampled runs of final_finish_time(schedule, sampled_operation_times)",
+    "symbols": [
+      ["T(schedule)", "total completion time for one proposed execution order"],
+      ["sampled_operation_times", "sampled runtimes for model calls, tool calls, and page waits"],
+      ["final_finish_time", "the time when the last required action completes"],
+      ["E[...]", "average across many sampled runs"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Serial plan: search prices takes 4 seconds, open store page takes 5 seconds, checkout takes 3 seconds.",
+        "If run fully in order, total time is 4 + 5 + 3 = 12 seconds.",
+        "Suppose the first two steps are independent and can overlap.",
+        "Parallel schedule: max(4, 5) + 3 = 8 seconds.",
+        "If the system samples several realistic runtimes and this schedule keeps winning on average, it chooses the overlapped version because it lowers expected finish time by 4 seconds."
+      ]
+    },
+    "note": "The scheduler cares about the longest dependent chain, because overlapping shortens total time only when it shortens that chain."
+  },
+  "bars": {
+    "h2": "What the improvement means",
+    "charts": [
+      {
+        "title": "Sequential browser agent",
+        "rows": [
+          ["Time spent waiting", 82, "bad"],
+          ["Task success", 54, "bad"],
+          ["Parallel work used", 6, "bad"]
+        ],
+        "note": "The serial control loop spends most of its runtime waiting because every action blocks the next one."
+      },
+      {
+        "title": "Compiled and scheduled agent",
+        "rows": [
+          ["Time spent waiting", 29, "good"],
+          ["Task success", 82, "good"],
+          ["Parallel work used", 74, "good"]
+        ],
+        "note": "Waiting drops and success rises because invalid plans are filtered out and independent branches run together."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Wrong independence assumption.",
+        "html": "If two branches are scheduled together even though one quietly depends on the other's page change, the run can fail. The scheduler must respect data and page-state dependencies because overlap only helps when the branches are truly independent."
+      },
+      {
+        "warn": true,
+        "b": "Poor latency estimates.",
+        "html": "If the learned runtime patterns are far from reality, the chosen schedule can be slower than a simple serial plan because the system is optimizing the wrong cost surface."
+      },
+      {
+        "warn": true,
+        "b": "Weak tool contracts.",
+        "html": "If a tool contract omits an important precondition or postcondition, a bad plan can still pass validation. Accuracy then falls because the program looked safe on paper but was underspecified."
+      },
+      {
+        "b": "Done right.",
+        "html": "Model the true dependencies, keep the latency estimator updated with fresh measurements, and write strict tool contracts so that validation removes unsafe candidates before execution."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a browser task with several partly independent branches, such as comparing prices across three tabs and then purchasing the cheapest option. Implement two agents: one serial screenshot-action loop and one compiled program runner with contract checks and a small scheduler. Measure total wall-clock time, the number of model calls, and task success on repeated runs with changing page delays."
+    ],
+    "metric_eq": "speedup = average_time_serial / average_time_compiled; success_rate = successful_runs / total_runs",
+    "closing": "The demo should show that the compiled agent finishes sooner because it removes repeated planning waits and overlaps independent work, while also succeeding more often because invalid tool usage is rejected before execution."
+  }
+}
