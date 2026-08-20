@@ -1,0 +1,223 @@
+{
+  "slug": "icml-or-tppukh8fuq",
+  "title": "Flowers: A Warp Drive for Neural PDE Solvers",
+  "family": "PDE operator learning",
+  "one_liner": "To predict evolving physical fields, Flower replaces convolutions, Fourier mixing, and attention with repeated learned displacements plus resampling at the displaced coordinates.",
+  "lead": "This paper studies operator learning for partial differential equations: given the current state of a field, predict the next state or the full solution map. Existing neural operators usually get long-range interaction from Fourier layers, attention (a learned way to choose which positions should exchange information), or wide convolution layers (spatial filters that mix nearby grid points). Those designs can be expensive, and they often bake in one specific way to move information across space. Flower takes a narrower position. Each head predicts where to read from, samples one source coordinate per location, and repeats that step across scales. The result is a model whose nonlocal behavior comes from explicit movement of coordinates rather than from dense spatial mixing.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why PDE operators are hard to learn",
+    "paras": [
+      "A partial differential equation describes how a field changes across space and time. The next value at one location can depend on events far away, because waves travel, material flows carry mass, and boundaries reflect energy. A learning system therefore needs local detail and long-range communication at the same time.",
+      "Many current neural operators get that communication by mixing every location with many others. Fourier layers mix through global frequency coefficients. Attention compares many pairs of positions. Convolutions spread information by stacking local spatial filters again and again. These methods work, but they pay for nonlocal interaction by doing broad spatial aggregation or by committing to one mixing basis everywhere.",
+      "The paper asks whether long-range interaction can come from a simpler primitive: move each location to a learned source coordinate, read the feature value there, and combine several such reads. That would keep the cost close to linear in the number of grid points, because each head reads one source point instead of blending a large neighborhood."
+    ],
+    "callout": {
+      "b": "The paper in one sentence.",
+      "html": "Instead of mixing many spatial positions directly, Flower learns where each position should read from, then builds global interaction by stacking those learned reads across heads and scales."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Start with a field on a grid",
+        "viz": "plain",
+        "caption": "Each cell holds the current state of the PDE solution."
+      },
+      {
+        "title": "2. Mix channels at each cell",
+        "viz": "weights",
+        "viz_args": [["warm", 35], ["hot", 55], ["warm", 40], ["free", 30], ["moved", 0], ["warm", 0], ["free", 0], ["hot", 0], ["free", 0], ["free", 0], ["free", 0], ["free", 0]],
+        "caption": "A pointwise layer combines the feature channels without moving information across space yet."
+      },
+      {
+        "title": "3. Each head predicts a displacement",
+        "viz": "box",
+        "viz_args": "Head 1: read left; Head 2: read upstream; Head 3: read from boundary",
+        "caption": "For every location, each head outputs an offset that says where to sample from."
+      },
+      {
+        "title": "4. Sample at displaced coordinates",
+        "viz": "weights",
+        "viz_args": [["moved", 60], ["warm", 45], ["moved", 55], ["warm", 35], ["moved", 50], ["warm", 30], ["moved", 52], ["warm", 32], ["moved", 58], ["warm", 36], ["moved", 54], ["warm", 34]],
+        "caption": "The model reads one source coordinate per head, which injects nonlocal information into the target location."
+      },
+      {
+        "title": "5. Repeat across scales",
+        "viz": "box",
+        "viz_args": "coarse block -> medium block -> fine block",
+        "caption": "Residual multiscale blocks compound many learned transports into a full operator."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode the field locally",
+        "text": "At each grid point, mix the channel values with a pointwise layer, which means a small learned rule acts independently at each location."
+      },
+      {
+        "b": "Predict one displacement per head",
+        "text": "Each head outputs an offset field that tells every target point which source coordinate to read from."
+      },
+      {
+        "b": "Warp the features",
+        "text": "Use interpolation to sample the mixed features at those source coordinates, so each target point imports information from a learned remote location."
+      },
+      {
+        "b": "Combine heads in a residual block",
+        "text": "Merge the warped outputs with the block input, because keeping the original signal stabilizes training and lets each block make a controlled update."
+      },
+      {
+        "b": "Stack blocks at multiple scales",
+        "text": "Run the same idea on coarse and fine grids, because large structures and sharp local changes usually live at different spatial scales."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces general spatial mixing layers with learned displacement-and-sample operations. A location no longer receives a weighted blend from many neighbors by default. Instead, each head chooses one source coordinate and reads from it directly."
+    ],
+    "object": "the spatial interaction rule"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: source coordinates",
+    "name": "where each location should read from",
+    "paras": [
+      "The model's central hidden choice is the source coordinate attached to each target location and each head. That coordinate is not given by the grid. It is predicted from the local features, which means the model decides which remote information matters for the current state.",
+      "This matters because many PDEs move information along structured paths. In advection, mass follows a flow direction. In wave motion, useful information often lies on fronts or reflected paths. If the model can jump directly to the relevant source point, it does not need to approximate that transport by repeated local averaging."
+    ],
+    "heat": {
+      "cells": [["left boundary read", 4, true], ["upstream read", 4, true], ["nearby read", 2, false], ["downstream read", 1, false], ["coarse-scale read", 3, true], ["fine-scale read", 3, false], ["stationary point", 1, false], ["moving front", 4, true], ["reflection point", 3, true], ["vortex core", 3, false], ["wake region", 2, false], ["target cell", 4, true]],
+      "caption": "Darker cells mark source positions that the model may choose because they carry the signal that determines the next update."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "For each target point, the model decides where to look. That chosen source point is the hidden quantity that controls how information moves."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "A head predicts a displacement field, and interpolation evaluates the feature map at the displaced coordinates. Stacking these warps yields a learned transport operator rather than a fixed averaging rule."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why learned warps are enough",
+    "paras": [
+      "The method works because a warp does two jobs at once. First, it chooses the dependency pattern: which source location influences the target. Second, it moves that information without averaging over a broad region, so sharp structures are less likely to be washed out.",
+      "Pointwise displacement prediction is also a strong restriction. A head cannot inspect a full neighborhood before deciding where to look. It can only use the features already present at that location. This keeps the block cheap, because displacement prediction does not require spatial aggregation. The nonlocal step enters only when the model samples the source coordinate.",
+      "One warp is limited, because each head reads one place. The paper therefore stacks many heads and many residual blocks. Composing several simple transports creates long chains of dependency, which means the model can build detailed global behavior from repeated single-source reads.",
+      "The multiscale scaffold matters because transport distances vary. Coarse blocks can move information across large regions in a few steps, while fine blocks preserve local detail. The full model combines both, so it can represent broad flow structure and local corrections in the same forward pass."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "current PDE field on a grid"
+        },
+        {
+          "t": "step",
+          "s": "pointwise channel mixing per location",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "predict one displacement field per head"
+        },
+        {
+          "t": "step",
+          "s": "sample the features at displaced coordinates",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "merge heads inside residual multiscale blocks"
+        },
+        {
+          "t": "output",
+          "s": "next-state or solution-operator prediction"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The core update",
+    "words": "For one block, each head samples the mixed feature map at a learned displaced coordinate, then all head outputs are combined with a residual connection.",
+    "equation": "y(p) = x(p) + sum_{h=1}^{H} a_h * sample(m(x), p + d_h(p))",
+    "symbols": [
+      ["p", "target grid location"],
+      ["x(p)", "input features at location p"],
+      ["m(x)", "pointwise mixed feature map"],
+      ["H", "number of warp heads"],
+      ["d_h(p)", "displacement predicted by head h at location p"],
+      ["sample(., .)", "interpolation at a possibly non-grid coordinate"],
+      ["a_h", "learned weight for head h"],
+      ["y(p)", "output features after the block"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Take one target cell p in a 2D fluid snapshot.",
+        "Head 1 predicts an offset toward the upstream direction, so it reads the feature value from a cell that feeds mass into p.",
+        "Head 2 predicts an offset toward a nearby boundary, so it reads a value carrying reflection information.",
+        "Head 3 stays local and reads a nearby coordinate to keep fine detail.",
+        "The block sums those three sampled values and adds the original feature at p, so the update contains transport information without averaging an entire neighborhood."
+      ]
+    },
+    "note": "The model gets global reach from the displaced source read, while the cost stays close to linear because each head samples one source coordinate per target point."
+  },
+  "bars": {
+    "h2": "What the abstract claims it achieves",
+    "charts": [
+      {
+        "title": "Compact Flower",
+        "rows": [["Stored weight size (millions)", 17, "good"], ["Beats Fourier baselines", 1, "good"], ["Beats convolution baselines", 1, "good"]],
+        "note": "The abstract says the 17M model consistently outperforms comparable Fourier, convolution, and attention baselines on 2D and 3D time-dependent PDE tasks because the learned warps give global communication without dense spatial mixing."
+      },
+      {
+        "title": "Large Flower",
+        "rows": [["Stored weight size (millions)", 150, "good"], ["Beats larger foundation models", 1, "good"], ["Uses less training compute than those models", 1, "good"]],
+        "note": "The abstract says the 150M model improves over recent sequence-mixing PDE foundation models because repeated learned transports can express long-range dependencies without the heavier global mixing used in those baselines."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "One-source reads may be too sparse.",
+        "html": "If a target point truly depends on a broad region at the same step, one sampled coordinate per head may be insufficient, because the block can miss part of the needed signal unless enough heads or layers are available."
+      },
+      {
+        "warn": true,
+        "b": "Bad displacements create bad physics.",
+        "html": "When the predicted offsets point to irrelevant regions, the model imports the wrong information directly, which means errors can travel quickly through later blocks."
+      },
+      {
+        "warn": true,
+        "b": "Interpolation can blur very sharp structures.",
+        "html": "Sampling at off-grid coordinates requires interpolation, and that interpolation may smooth abrupt jumps unless the grid is fine enough or the features already encode the discontinuity well."
+      },
+      {
+        "b": "Where the design is strongest.",
+        "html": "The method is strongest when the PDE has structured transport or wave propagation, because learned displacements can align the sampled reads with the real paths along which information moves."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a 2D PDE playground with at least two tasks: one transport-heavy flow problem and one wave problem. Show the current field, then let the user toggle three operator blocks: a local convolution baseline, a Fourier baseline, and Flower. For Flower, draw the predicted displacement arrows for a few heads so the user can see where each target point reads from.",
+      "The demo should measure rollout error over time, cost per forward pass, and how often the model chooses short or long displacements. It should also let the user disable multiscale blocks or reduce the number of heads. That ablation matters because it shows which part of the method carries the long-range dependency: direct learned source selection, repeated residual composition, or the coarse-to-fine scaffold."
+    ],
+    "metric_eq": "score = rollout_error + latency + memory_use",
+    "closing": "The demo must show that Flower succeeds when its learned source coordinates line up with the true transport paths, because that is the mechanism that replaces dense spatial mixing."
+  }
+}

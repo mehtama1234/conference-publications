@@ -1,0 +1,241 @@
+{
+  "slug": "icml-or-ph2baszk9w",
+  "title": "Efficient Online Variational Estimation via Monte Carlo Sampling",
+  "family": "Other",
+  "one_liner": "Estimate the evidence lower bound on a stream of observations by drawing independent samples from a learned filter at each time step, so model training and hidden-state training can proceed online.",
+  "lead": "A state-space model describes data that arrive over time by assuming an unobserved state evolves and then emits each observation. Online variational estimation tries to learn both the model parameters, which are the numbers controlling transitions and emissions, and the posterior distribution, which is the conditional distribution of hidden states given observed data, while new data keep arriving. The hard part is computing the evidence lower bound at each step without replaying the entire past. This paper uses independent Monte Carlo samples from a learned sequential approximator so the lower bound and its derivative with respect to the learned numbers can be updated on the fly.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Streaming data break batch variational estimation",
+    "paras": [
+      "In a state-space model, each time step has a hidden state and an observation. The model says how one hidden state turns into the next and how each hidden state produces data. If all observations are available at once, one can optimize a batch objective over the full sequence.",
+      "That is awkward in a stream. Each new observation changes the distribution of the current hidden state, so the lower bound must be refreshed continually. Recomputing everything from the beginning is expensive because the sequence keeps growing, and storing a full history-dependent approximation is costly.",
+      "The paper seeks an online procedure that updates a learned approximation of the current hidden-state distribution and the model parameters together. It needs low per-step cost, independent sampling at each update, and a clear connection between the computed objective and the true long-run learning target."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Learn a sequential approximation to the current hidden-state distribution, draw fresh independent samples from it at each step, and use those samples to update the lower bound online."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A stream arrives one point at a time",
+        "viz": "weights",
+        "viz_args": [["warm", 20], ["warm", 28], ["warm", 35], ["warm", 42], ["warm", 49], ["warm", 55]],
+        "caption": "Each new observation changes what the hidden state could be now."
+      },
+      {
+        "title": "2. Batch retraining keeps reopening the whole past",
+        "viz": "box",
+        "viz_args": "Full sequence objective grows after every new observation.",
+        "caption": "Revisiting all old time steps costs more and more as the stream lengthens."
+      },
+      {
+        "title": "3. Learn a sequential approximation",
+        "viz": "box",
+        "viz_args": "Network maps recent observations to a distribution over the current hidden state.",
+        "caption": "The approximation is updated so it tracks the filtering problem online."
+      },
+      {
+        "title": "4. Draw independent samples each step",
+        "viz": "weights",
+        "viz_args": [["free", 40], ["free", 55], ["free", 47], ["free", 60], ["free", 51], ["free", 58]],
+        "caption": "Fresh samples approximate the needed expectations without running a Markov chain inside each update."
+      },
+      {
+        "title": "5. Update model and state estimator together",
+        "viz": "weights",
+        "viz_args": [["moved", 62], ["moved", 67], ["moved", 71], ["moved", 65], ["moved", 69], ["moved", 73]],
+        "caption": "The lower bound is refreshed online because both pieces are trained from the same sampled objective."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Observe the next data point",
+        "text": "Read the new observation in the stream and combine it with the running state summary."
+      },
+      {
+        "b": "Produce a current approximation",
+        "text": "Use a network to output the current hidden-state distribution conditioned on the observations seen so far."
+      },
+      {
+        "b": "Draw independent samples",
+        "text": "Sample several candidate hidden states independently from that distribution."
+      },
+      {
+        "b": "Estimate the online lower bound",
+        "text": "Average the sampled log transition, log observation, and uncertainty-of-the-approximation terms to approximate the step contribution."
+      },
+      {
+        "b": "Update both parameter sets",
+        "text": "Adjust the model parameters and the approximation network from the same Monte Carlo estimate."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how the lower bound is computed in a stream. Instead of building it from a full sequence pass or from dependent particle trajectories, it computes each update from independent samples drawn directly from a learned online approximation."
+    ],
+    "object": "the per-step lower-bound estimator"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: the filtering approximation",
+    "name": "current filtering approximation",
+    "paras": [
+      "At time t, the main hidden object is the distribution of the current unobserved state given observations up to t. This is called the filtering distribution. It matters because every online objective term depends on what hidden states are plausible now, not only on the latest observed value.",
+      "The paper represents that object with a learned map from past information to a sampleable distribution. If that approximation is accurate, the Monte Carlo samples give low-bias estimates of the lower bound terms. If it is poor, the whole online objective drifts away from the true sequential learning problem."
+    ],
+    "heat": {
+      "cells": [
+        ["older state weight", 1, false],
+        ["recent state weight", 4, true],
+        ["transition uncertainty", 3, true],
+        ["observation fit", 4, true],
+        ["tail mass", 2, false],
+        ["current mode", 4, true],
+        ["secondary mode", 2, false],
+        ["rare spike", 1, false],
+        ["smooth trend", 3, true],
+        ["jump candidate", 3, true],
+        ["noise component", 1, false],
+        ["stable component", 4, true]
+      ],
+      "caption": "Darker cells indicate parts of the current hidden-state distribution carrying more probability under the learned filter."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The filter says which hidden states are still plausible after seeing the stream up to now. The online estimate is only as good as that current belief."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The method learns a parametric approximation to the current posterior, which is the conditional distribution of the hidden state given data so far, and then computes additive expectations by independent Monte Carlo sampling from that approximation."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why independent online sampling can work",
+    "paras": [
+      "The lower bound for a state-space model is a sum of local terms over time. Each local term depends on the current hidden state and nearby transition structure. That structure is what makes online estimation possible: once the current filtering approximation is available, one can estimate the new contribution without rebuilding all older terms.",
+      "Independent sampling matters because it gives a simple estimator whose variance shrinks in the usual way as sample count increases. There is no inner Markov chain that needs its own burn-in. The approximation network is trained to output a distribution from which sampling is direct, so each update uses fresh candidate states rather than a correlated chain of candidates.",
+      "The deep architecture matters because the map from observation history to current hidden-state distribution can be complicated. A flexible network can summarize the needed past information into a compact state. That flexibility lets the method track nonlinear or non-Gaussian filtering behavior while keeping the online computation fixed per step."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Observation stream up to the current time"
+        },
+        {
+          "t": "step",
+          "s": "Encode past information into a current filtering approximation",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Draw fresh independent hidden-state samples",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Estimate the current lower-bound contribution from sampled expectations"
+        },
+        {
+          "t": "step",
+          "s": "Update model parameters and approximation-network parameters"
+        },
+        {
+          "t": "output",
+          "s": "A new online estimate and an updated sequential estimator"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The online lower-bound estimate",
+    "words": "At each time step, the method estimates the expected log observation term, the expected log transition term, and the entropy term of the current approximation using independent samples from the learned filter. Those sampled terms are added to form the per-step lower bound contribution.",
+    "equation": "ELBO_t estimate = average over samples of [log p(y_t | z_t) + log p(z_t | z_prev) - log q(z_t | history)]",
+    "symbols": [
+      ["y_t", "current observation at time t"],
+      ["z_t", "current hidden state"],
+      ["z_prev", "previous hidden state or its sampled summary"],
+      ["p(y_t | z_t)", "observation model giving how likely the data are under a hidden state"],
+      ["p(z_t | z_prev)", "state transition model"],
+      ["q(z_t | history)", "learned filtering approximation used for sampling"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "At time t, the network outputs a sampleable distribution over the current hidden state after reading the new observation.",
+        "Draw four independent hidden-state samples from that distribution.",
+        "For each sample, evaluate how well it explains the new observation, how plausible the transition into it is, and how much probability mass the approximation itself assigned to it.",
+        "Average those four values to estimate the current step contribution to the lower bound.",
+        "If the observation-fit term is poor for most samples, the update pushes the filter and model parameters toward hidden states that better explain the stream."
+      ]
+    },
+    "note": "The key point is that each update depends on fresh samples from the current approximation, so the online objective can be recomputed at fixed cost per new observation."
+  },
+  "bars": {
+    "h2": "What improves",
+    "charts": [
+      {
+        "title": "Sequence-wide recomputation",
+        "rows": [
+          ["Per-step compute as stream grows", 28, "bad"],
+          ["Ability to process long streams", 35, "bad"],
+          ["Tracking of current hidden state", 64, "good"]
+        ],
+        "note": "Tracking can be acceptable, but per-step cost degrades because old data are repeatedly revisited."
+      },
+      {
+        "title": "Online Monte Carlo variational estimation",
+        "rows": [
+          ["Per-step compute as stream grows", 78, "good"],
+          ["Ability to process long streams", 81, "good"],
+          ["Tracking of current hidden state", 69, "good"]
+        ],
+        "note": "Streaming performance holds up because each update uses only the current approximation and fresh samples instead of replaying the full history."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The filtering approximation can forget needed history.",
+        "html": "If the network summary is too small, old information needed for the current hidden-state update is compressed away. Then the sampled hidden states are drawn from the wrong conditional distribution and the online lower bound becomes unreliable."
+      },
+      {
+        "warn": true,
+        "b": "Too few samples can give noisy updates.",
+        "html": "Independent Monte Carlo sampling removes dependence between samples, but it does not remove sampling noise. With too few samples per step, the derivative-based update estimate swings enough to destabilize training."
+      },
+      {
+        "warn": true,
+        "b": "Model mismatch can dominate the estimator.",
+        "html": "If the transition or observation family is badly specified, even a strong online estimator will fit the wrong target. The lower bound may then increase while the learned hidden states remain poor explanations of the real process."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works best when the approximation network is expressive enough to encode the needed memory, the sample count is high enough to stabilize updates, and the sequential model family matches the main structure of the data stream."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a nonlinear state-space model with one hidden state and one observation stream. Compare an online estimator based on fresh samples from a learned filter against a batch baseline that periodically retrains on the full sequence. Measure per-step runtime, hidden-state filtering error, and held-out predictive log score, which is just how much probability the model assigns to future observations. The online method should keep runtime nearly flat over time because each update depends on the current approximation rather than the whole past."
+    ],
+    "metric_eq": "filter_error = average absolute(current_hidden_estimate - true_hidden_state); runtime_per_step = total_runtime / number_of_updates",
+    "closing": "The demo should show that the method continues learning as data arrive because the lower-bound estimate can be refreshed from direct samples of the current filter instead of sequence-wide recomputation."
+  }
+}

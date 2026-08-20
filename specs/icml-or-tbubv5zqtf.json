@@ -1,0 +1,222 @@
+{
+  "slug": "icml-or-tbubv5zqtf",
+  "title": "SALAAD: Sparse And Low-Rank Adaptation via ADMM for Large Language Model Inference",
+  "family": "Capacity-controlled model adaptation",
+  "one_liner": "SALAAD trains one model so its weights can be thinned into sparse and low-rank forms across many memory budgets, without retraining for each budget.",
+  "lead": "Large language models often need several deployment versions: a fuller version for roomy hardware and a thinner version for tight memory limits. Standard practice handles that with separate pruning rules, separate low-rank adapters, or repeated retraining. SALAAD tries to make the structure itself trainable. During learning, it pushes weights toward two forms that save memory at use time: many zeros and low-rank factorizations, which means a large table is approximated by the product of two smaller tables. The paper frames that push as a constrained optimization problem and uses ADMM to keep task loss and structure pressure in balance.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why one deployment budget is not enough",
+    "paras": [
+      "A large model weight table may be too expensive for some devices even if the model is accurate. Two common ways to shrink it are sparsity, which means many entries are forced to zero, and low-rank structure, which means a large table is replaced by two smaller tables whose product approximates the original.",
+      "The problem is that different layers tolerate different amounts of shrinking. One layer may handle aggressive sparsity well, while another may lose quality immediately. A fixed manual recipe therefore wastes capacity in some places and damages performance in others.",
+      "The deployment problem is harder because teams usually need many model sizes. If every memory target needs its own training run, the engineering and compute cost grows quickly. The paper wants one training run that already contains a whole range of usable capacities."
+    ],
+    "callout": {
+      "b": "The paper in one sentence.",
+      "html": "SALAAD learns the task while simultaneously pushing each weight table toward sparse and low-rank forms, then adapts the strength of that push so one run yields many deployment sizes."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Start with a dense model",
+        "viz": "weights",
+        "viz_args": [["hot", 75], ["hot", 70], ["warm", 65], ["hot", 80], ["warm", 60], ["hot", 68], ["warm", 62], ["hot", 74], ["warm", 58], ["hot", 72], ["warm", 64], ["hot", 76]],
+        "caption": "Every layer uses its full weight tables, so memory use is high."
+      },
+      {
+        "title": "2. Add structure targets",
+        "viz": "box",
+        "viz_args": "target A: many zeros; target B: low-rank factors",
+        "caption": "Training introduces two compressed views of the same weight table."
+      },
+      {
+        "title": "3. ADMM keeps them aligned",
+        "viz": "box",
+        "viz_args": "task loss <-> dense weights <-> structured copies",
+        "caption": "The optimization alternates between fitting the task and matching the structured versions."
+      },
+      {
+        "title": "4. Controller adjusts pressure",
+        "viz": "weights",
+        "viz_args": [["moved", 20], ["warm", 35], ["hot", 55], ["moved", 25], ["warm", 40], ["hot", 60], ["moved", 30], ["warm", 38], ["hot", 58], ["moved", 28], ["warm", 42], ["hot", 62]],
+        "caption": "If the structure penalty is too weak or too strong, the controller changes it during training."
+      },
+      {
+        "title": "5. Slice to the needed budget",
+        "viz": "box",
+        "viz_args": "8 GB -> 12 GB -> 16 GB",
+        "caption": "After one run, pick the version whose memory use fits the hardware."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Keep the original task objective",
+        "text": "Train the model on its normal prediction loss so the base behavior stays tied to the real task."
+      },
+      {
+        "b": "Create structured copies of each weight table",
+        "text": "For the same table, maintain a sparse version and a low-rank version, which means the method tracks compressed candidates during training instead of after training."
+      },
+      {
+        "b": "Use ADMM to tie them together",
+        "text": "ADMM alternates updates so the dense weights can fit the task while the structured copies enforce the compression targets."
+      },
+      {
+        "b": "Adapt the penalty strength",
+        "text": "A controller changes how hard the optimization pushes toward the sparse and low-rank forms, because different training phases and layers need different pressure."
+      },
+      {
+        "b": "Export a whole capacity curve",
+        "text": "After training, choose the operating point whose memory use fits the target device, because the run already produced a continuum of structured models."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes compression from a hand-written postprocessing step into a training-time constrained learning problem. Model size is not decided only after the model is finished; it is shaped throughout training."
+    ],
+    "object": "how model capacity is controlled"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: effective capacity",
+    "name": "how much useful freedom each layer still has",
+    "paras": [
+      "The quantity that matters is not just the raw number of stored weights. It is the effective capacity of each layer: how many independent degrees of freedom remain after zeros and low-rank structure are imposed.",
+      "SALAAD does not set one global capacity level and leave it fixed. It lets different layers settle at different points, because the optimization keeps checking whether more structure saves memory without hurting the task too much."
+    ],
+    "heat": {
+      "cells": [["input lookup table", 3, false], ["context-mixing projection", 4, true], ["feedforward in", 4, true], ["feedforward out", 3, false], ["early layer", 2, false], ["middle layer", 4, true], ["late layer", 3, false], ["many zeros", 4, true], ["small factor tables", 4, true], ["capacity held back", 1, false], ["capacity preserved", 4, true], ["budget target", 3, true]],
+      "caption": "Darker cells mark places where the optimization preserves more useful degrees of freedom or saves more memory by adding structure."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Effective capacity is the amount of adjustment room a layer still has after compression. Two layers with the same stored size can behave very differently if one is heavily constrained and the other is not."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Sparsity removes entries entirely, while low-rank structure restricts a weight table to combinations of a smaller set of directions. SALAAD learns both constraints jointly and monitors how strongly to enforce them."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why ADMM plus adaptive control helps",
+    "paras": [
+      "The tension in this problem is direct. Task learning wants whatever weight pattern reduces prediction loss. Compression wants those same weights to live inside restrictive sets: sparse tables and low-rank tables. If the compression pressure is applied crudely, training can become unstable or can damage layers that are still learning basic task structure.",
+      "ADMM helps because it separates the roles. One set of variables can focus on fitting the task, while companion variables represent the structured targets. The optimization then penalizes disagreement between them. That split matters because projection onto the structured sets can be handled explicitly, rather than forcing ordinary update steps from the loss slope to satisfy every requirement at once.",
+      "The adaptive controller matters because the right penalty is not constant. Early in training, the model may need more freedom to learn the task at all. Later, stronger structure pressure may be affordable because the model has already learned a usable task solution and can give up extra capacity with less damage. Layer heterogeneity matters for the same reason: one table may absorb sparsity easily, while another may need rank reduction instead of zeros.",
+      "A single run can therefore trace out many deployment points. As the structured pressure changes, the effective capacity changes smoothly, which means the trained model family can be sliced to different memory budgets without rerunning training from scratch."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "dense model weights and task batches"
+        },
+        {
+          "t": "step",
+          "s": "update task-facing weights"
+        },
+        {
+          "t": "step",
+          "s": "project companion weights to sparse and low-rank forms",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "penalize disagreement between dense and structured copies"
+        },
+        {
+          "t": "step",
+          "s": "adapt penalty strength from training signals",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "capacity-controlled model family for many memory budgets"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The optimization view",
+    "words": "Learn task-facing weights while forcing them to stay close to sparse and low-rank copies, with penalty strengths that are adjusted during training.",
+    "equation": "min_W task_loss(W) + rho_s * ||W - S||^2 + rho_r * ||W - R||^2   subject to   S sparse, R low-rank",
+    "symbols": [
+      ["W", "task-facing weight table"],
+      ["task_loss(W)", "ordinary training objective on the language task"],
+      ["S", "sparse copy of W"],
+      ["R", "low-rank copy of W"],
+      ["rho_s", "strength of the sparse agreement penalty"],
+      ["rho_r", "strength of the low-rank agreement penalty"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose one layer starts as a dense 4096 by 4096 table.",
+        "The sparse copy keeps only the largest entries and sets the rest to zero.",
+        "The low-rank copy stores two smaller tables whose product approximates the dense one.",
+        "If task loss rises too sharply, the controller relaxes the penalties so W can recover useful structure.",
+        "If task loss stays stable, the controller can raise the penalties and push W closer to the cheaper forms."
+      ]
+    },
+    "note": "The paper uses ADMM to solve this split problem in alternating updates, because the structured projections and the task update are easier to handle separately than all at once."
+  },
+  "bars": {
+    "h2": "What the abstract claims it achieves",
+    "charts": [
+      {
+        "title": "Standard ad-hoc compression workflow",
+        "rows": [["Needs retraining for new budget", 1, "bad"], ["Architecture-specific tuning", 1, "bad"], ["Flexible capacity curve", 0, "bad"]],
+        "note": "The abstract positions earlier work as heuristic and tied to particular model designs."
+      },
+      {
+        "title": "SALAAD",
+        "rows": [["Single training run", 1, "good"], ["Continuous spectrum of capacities", 1, "good"], ["Lower deployment memory", 1, "good"]],
+        "note": "The abstract claims comparable performance to ad-hoc methods while reducing memory use and exposing many deployment points from one run."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The penalties may fight the task too early.",
+        "html": "If structure pressure rises before the model has learned a reasonable task solution, useful weights can be removed or factorized too aggressively, which means later recovery may be difficult."
+      },
+      {
+        "warn": true,
+        "b": "Sparse and low-rank targets can disagree.",
+        "html": "Some layers may prefer one form of compression strongly. Forcing both at once can waste capacity if the joint constraint is tighter than needed for that layer."
+      },
+      {
+        "warn": true,
+        "b": "Exporting a smooth capacity curve may depend on the controller.",
+        "html": "If the adaptive schedule changes penalties in large jumps, neighboring deployment points may not behave smoothly, because the learned family can skip useful intermediate structures."
+      },
+      {
+        "b": "Where the design is strongest.",
+        "html": "The method is strongest when deployment must cover several hardware limits, because the main benefit is avoiding repeated retraining for each memory budget."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a training dashboard for a medium-sized language model block rather than a full frontier model. Show one dense baseline run and one SALAAD run. Track task loss, nonzero fraction, estimated rank, and use-time memory after each checkpoint.",
+      "The demo should let the user move a memory-budget slider after training and instantly load the corresponding structured checkpoint. Also expose separate toggles for sparse-only, low-rank-only, and joint SALAAD training. That comparison matters because the paper's main claim is that joint structured learning plus adaptive penalties gives a broader and more usable capacity curve than hand-picked single-form compression."
+    ],
+    "metric_eq": "deployment_score = task_quality - memory_cost - retraining_runs",
+    "closing": "The demo must show that the same training trajectory can serve several memory budgets, because SALAAD keeps the weights near compressed forms throughout learning rather than compressing only at the end."
+  }
+}

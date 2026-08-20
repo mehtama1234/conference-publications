@@ -1,0 +1,223 @@
+{
+  "slug": "icml-or-sxoqlx0t6x",
+  "title": "Model Fusion via Retrofitting",
+  "family": "Other",
+  "one_liner": "Instead of averaging model weights directly, the paper first groups neurons that compute similar features, builds target features from those groups, and then trains a fused model to reproduce those targets one level at a time.",
+  "lead": "Suppose two or more neural networks solve related tasks, and you want one network that combines what they learned without running a full retraining job. Direct weight averaging usually fails because the same function can be stored under different neuron orderings and different internal feature choices. This paper treats fusion as a representation-matching problem. At each level of the network, it looks at what the parent neurons actually output on data, groups parent neurons that behave similarly, turns each group into a target feature, and then retrofits the fused model so its own neurons reproduce those targets. The result is a bottom-up procedure that handles more than two models, non-identical training data, and several architectures more cleanly than plain weight averaging.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why direct model fusion breaks",
+    "paras": [
+      "A neural network is not identified by its weight values alone. Two networks can implement nearly the same function even if one stores an edge detector in neuron 17 and the other stores the same detector in neuron 43. If you average those weights position by position, you combine unrelated computations and destroy useful structure.",
+      "The problem gets worse when the parent models saw different data. In that case, one model may devote many neurons to features that matter only for its local data, while another model spends capacity elsewhere. A good fused model should preserve the important features from each parent, discard duplication, and avoid giving equal weight to neurons that barely matter."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Weight coordinates do not line up across independently trained models, so good fusion has to align what neurons do, not where they sit in the weight table."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Parent models learned different internal features",
+        "viz": "weights",
+        "viz_args": [["model A", 40], ["model B", 40], ["shared", 18], ["private", 22], ["shared", 20], ["private", 24]],
+        "caption": "Both parents solve the task, but the useful features are stored in different neurons."
+      },
+      {
+        "title": "2. Direct averaging mixes unrelated neurons",
+        "viz": "box",
+        "viz_args": "weight 17 from A averaged with weight 17 from B",
+        "caption": "Matching by index confuses feature identity with storage location."
+      },
+      {
+        "title": "3. Group neurons by actual outputs",
+        "viz": "weights",
+        "viz_args": [["group 1", 70], ["group 2", 52], ["group 3", 61], ["left alone", 18], ["group 4", 49], ["left alone", 14]],
+        "caption": "The paper compares neuron outputs on data and clusters neurons that produce similar features."
+      },
+      {
+        "title": "4. Build target features from each group",
+        "viz": "box",
+        "viz_args": "importance-weighted group centroids",
+        "caption": "Each group becomes one target feature that the fused model should reproduce."
+      },
+      {
+        "title": "5. Retrofit the fused level to match those targets",
+        "viz": "plain",
+        "caption": "The fused model is trained level by level so its own neurons imitate the target features."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Choose one network level",
+        "text": "Take the outputs from the corresponding level in all parent models on a shared fusion dataset."
+      },
+      {
+        "b": "Score neuron importance",
+        "text": "Estimate which neurons matter most for prediction, so high-impact neurons count more during matching."
+      },
+      {
+        "b": "Group similar neurons",
+        "text": "Cluster parent neurons whose outputs are close, or solve a one-to-one matching problem when the architecture calls for it."
+      },
+      {
+        "b": "Create target features",
+        "text": "Compute one target output for each group by taking the importance-weighted average of the grouped parent outputs."
+      },
+      {
+        "b": "Retrofit the fused subnetwork",
+        "text": "Optimize the fused level so its outputs match the target features, then move upward to the next level because later levels should build on already fused earlier levels."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "Older fusion methods mostly try to permute or transport neurons and then average aligned weights. This paper changes the objective. Instead of asking which parent neuron should be paired with which slot in the fused model, it asks which parent neurons should be represented by the same fused feature. That move separates two jobs that were tangled before: first group parent features, then fit the fused model to those grouped targets."
+    ],
+    "object": "the fusion objective"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: representation cost",
+    "name": "how badly the fused features misrepresent the parent features",
+    "paras": [
+      "For one network level, the paper measures error in output space, not weight space. Each parent neuron produces a list of numbers on the fusion data. The fused model also produces a list of numbers for each of its neurons. The representation cost asks: for every parent neuron, how far is the closest fused neuron output, and how important was that parent neuron?",
+      "This quantity matters because fusion should preserve behavior. If a parent neuron carries a feature that strongly affects the model's answer, a fused model should either reproduce that feature directly or reproduce another feature that is extremely close to it. The paper also shows that this cost can be split into two parts: grouping error, which comes from choosing groups badly, and approximation error, which comes from failing to train the fused level to hit the chosen target outputs."
+    ],
+    "heat": {
+      "cells": [["salient feature", 4, true], ["salient feature", 4, true], ["duplicate feature", 3, true], ["weak feature", 1, false], ["salient feature", 4, true], ["target centroid", 4, false], ["target centroid", 3, false], ["target centroid", 4, false], ["unmatched weak", 1, false], ["approximation miss", 2, false], ["clean match", 4, false], ["clean match", 4, false]],
+      "caption": "Darker cells mean more representation value. Important parent features should end up close to a fused target."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A fusion is good when every important parent feature still exists in almost the same form inside the fused model."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The loss sums the importance-weighted squared distance from each parent neuron output to its nearest fused neuron output, then decomposes that loss into grouping error plus approximation error."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: separate grouping from fitting",
+    "paras": [
+      "Direct fusion fails partly because it tries to decide alignment and fused weights at the same time. That is unstable: changing the fused weights changes which parent neurons appear closest, and changing the grouping changes what the fused weights should be. The paper stabilizes the problem by inserting target features in the middle. First it decides how parent neurons should be grouped. Then it computes one target output per group. Only after that does it train the fused level to match those fixed targets.",
+      "The bottom-up order also matters. Earlier levels define the inputs seen by later levels. If you fused an upper layer while lower layers were still inconsistent, the upper layer would learn against a moving target. By freezing earlier fused levels and moving upward, the method keeps the representation each new level sees reasonably stable.",
+      "Importance scores matter most in non-identical data settings because some parent neurons react to patterns that are common and decision-relevant, while others mostly fire on local quirks. Weighting the grouping by importance reduces the chance that a weak but noisy feature pulls the centroid away from a feature that the final prediction really uses."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Parent neuron outputs at one level on fusion data"
+        },
+        {
+          "t": "step",
+          "s": "Compute neuron importance and pairwise similarity",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Group parent neurons into target representations",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Train fused level to match target outputs"
+        },
+        {
+          "t": "output",
+          "s": "Move to the next level with a consistent fused prefix"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The equation: one target per neuron group",
+    "words": "For each target group, the target output is the weighted average of the parent neuron outputs assigned to that group.",
+    "equation": "T_k(x) = (sum over j in R_k of s_j z_j(x)) / (sum over j in R_k of s_j)",
+    "symbols": [
+      ["T_k(x)", "target output for fused neuron k on input x"],
+      ["R_k", "the set of parent neurons assigned to fused neuron k"],
+      ["s_j", "importance score of parent neuron j"],
+      ["z_j(x)", "output of parent neuron j on input x"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose one group contains three parent neurons with outputs 2, 3, and 7 on the same input.",
+        "Their importance scores are 5, 1, and 4.",
+        "Weighted sum = 5 times 2 plus 1 times 3 plus 4 times 7 = 10 + 3 + 28 = 41.",
+        "Total importance = 5 + 1 + 4 = 10.",
+        "Target output = 41 divided by 10 = 4.1.",
+        "The fused neuron for this group is then trained so its own output on that input moves toward 4.1."
+      ]
+    },
+    "note": "This target keeps the group centered near the most important parent outputs instead of treating every grouped neuron as equally valuable."
+  },
+  "bars": {
+    "h2": "What representation matching fixes",
+    "charts": [
+      {
+        "title": "Direct weight averaging",
+        "rows": [
+          ["Keeps neuron identity", 20, "bad"],
+          ["Handles non-identical data", 25, "bad"],
+          ["Works without extra fine-tuning", 30, "bad"],
+          ["Supports more than two parents", 45, "bad"]
+        ],
+        "note": "Plain averaging is cheap, but it throws together weights whose underlying features do not line up."
+      },
+      {
+        "title": "Retrofitting fusion",
+        "rows": [
+          ["Keeps neuron identity", 82, "good"],
+          ["Handles non-identical data", 76, "good"],
+          ["Works without extra fine-tuning", 71, "good"],
+          ["Supports more than two parents", 80, "good"]
+        ],
+        "note": "Representation matching is slower because it uses data and local optimization, but it preserves useful features much more reliably."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The fusion dataset is too small.",
+        "html": "If the grouping is computed from only a few examples, two neurons may appear similar simply because the sample missed the cases where they differ. Then the method groups the wrong features and trains the fused level toward a misleading target."
+      },
+      {
+        "warn": true,
+        "b": "The parent models are functionally too far apart.",
+        "html": "If one parent learned features the others never use, or if the architectures share little modular structure, the grouped targets may become internally inconsistent. A single fused neuron cannot faithfully represent several genuinely different computations."
+      },
+      {
+        "warn": true,
+        "b": "Importance scores are poor.",
+        "html": "If the importance estimator gives large weight to noisy neurons, the target centroids shift toward features that do not matter for prediction. The fused model then preserves the wrong parts of the parents."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the parents solve related tasks, share a usable level structure, and are evaluated on a representative fusion dataset, retrofitting preserves behavior far more faithfully than raw weight averaging because it aligns features before fitting weights."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Train two small image classifiers on different class subsets or different data partitions. Implement two fusion baselines: direct averaging and representation retrofitting. For one hidden level, save each parent neuron output on a shared dataset, cluster the outputs, build target centroids, and train the fused layer to reproduce them. Then continue upward through the network. Measure: accuracy on each parent's data region, accuracy on the union, and how often one fused neuron ends up representing multiple similar parent neurons rather than random ones."
+    ],
+    "metric_eq": "fusion_gain = fused_accuracy - direct_average_accuracy",
+    "closing": "The demo should make one point visible: fusion quality depends on preserving internal features, not on averaging coordinates that happen to share the same index."
+  }
+}
