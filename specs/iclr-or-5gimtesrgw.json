@@ -1,0 +1,451 @@
+{
+ "slug": "iclr-or-5gimtesrgw",
+ "title": "CAR-LoRA: Training Compression-Aware and Robust LoRA Adapters for Evolving LLMs",
+ "family": "Model adaptation",
+ "one_liner": "Train one small adapter under many compression settings at once so it still works after deployment choices change and after the base model is updated.",
+ "lead": "A LoRA adapter is a small set of trainable weight changes added to a much larger language model so that task-specific tuning is cheap. The problem is portability. An adapter tuned for one compressed version of the model often fails on another compressed version, and it can also fail after the provider refreshes the base model. This paper trains one adapter against many such shifts during one run so the same adapter transfers across devices and model updates.",
+ "nav": [
+  [
+   "theme-other.html",
+   "Other"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "A tuned adapter breaks when the deployed model is not the one it saw in training",
+  "paras": [
+   "A small adapter can personalize a large language model without rewriting all of the model weights. That is useful on edge devices because only a small patch must be stored and updated. But the adapter usually learns against one exact base model under one exact deployment format.",
+   "That coupling is brittle. If the device uses a more aggressive compressed model, or if the provider releases a refreshed base model, the old adapter can lose accuracy because the layer output patterns it expects are no longer the ones it receives. Then teams must retrain again for each device and each model refresh."
+  ],
+  "callout": {
+   "b": "The problem.",
+   "html": "A LoRA patch trained for one exact model state often fails after compression or base-model drift because the internal layer outputs it was tuned against have shifted."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. One adapter, one model copy",
+    "viz": "box",
+    "viz_args": "adapter + one base model version",
+    "caption": "Standard tuning assumes training and deployment match exactly."
+   },
+   {
+    "title": "2. Deployment changes the base",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      58
+     ],
+     [
+      "warm",
+      36
+     ],
+     [
+      "free",
+      16
+     ],
+     [
+      "hot",
+      60
+     ],
+     [
+      "warm",
+      34
+     ],
+     [
+      "free",
+      18
+     ],
+     [
+      "hot",
+      56
+     ],
+     [
+      "warm",
+      35
+     ],
+     [
+      "free",
+      15
+     ],
+     [
+      "hot",
+      59
+     ],
+     [
+      "warm",
+      33
+     ],
+     [
+      "free",
+      17
+     ]
+    ],
+    "caption": "Compression and model refresh change the internal signals the adapter sees."
+   },
+   {
+    "title": "3. Train under many shifts",
+    "viz": "box",
+    "viz_args": "same adapter, many compressed variants",
+    "caption": "The adapter is exposed to several deployment states during one training run."
+   },
+   {
+    "title": "4. Keep updates stable",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      30
+     ],
+     [
+      "moved",
+      29
+     ],
+     [
+      "moved",
+      31
+     ],
+     [
+      "warm",
+      36
+     ],
+     [
+      "warm",
+      35
+     ],
+     [
+      "warm",
+      34
+     ],
+     [
+      "moved",
+      28
+     ],
+     [
+      "moved",
+      30
+     ],
+     [
+      "moved",
+      29
+     ],
+     [
+      "warm",
+      35
+     ],
+     [
+      "warm",
+      34
+     ],
+     [
+      "warm",
+      36
+     ]
+    ],
+    "caption": "Backward updates stay in full precision so the small patch does not become unstable."
+   },
+   {
+    "title": "5. Reuse one adapter",
+    "viz": "box",
+    "viz_args": "one patch across devices and model refreshes",
+    "caption": "The same adapter stays useful across several deployment conditions."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Step 1: Start from one full-precision base model.",
+    "text": "Keep a clean reference model so the training process knows what the uncompressed system should do."
+   },
+   {
+    "b": "Step 2: Simulate several deployment variants.",
+    "text": "Apply different compression schemes during the forward pass so the adapter sees the kinds of distortions that appear on real devices."
+   },
+   {
+    "b": "Step 3: Share one LoRA adapter across those variants.",
+    "text": "Update the same small patch while it serves all sampled variants, so the patch learns changes that survive across them."
+   },
+   {
+    "b": "Step 4: Keep backward updates in full precision.",
+    "text": "Use full-precision backpropagation, which means the training nudge calculations use the clean numerical form, so the adapter update itself stays stable."
+   },
+   {
+    "b": "Step 5: Test on compressed and refreshed models.",
+    "text": "Reuse the trained patch on multiple device formats and on later base-model versions."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper changes the training environment for the adapter. Instead of fitting the patch to one frozen deployment state, it fits the patch to a small family of states that represent compression and model evolution."
+  ],
+  "object": "the set of model states the adapter is trained against"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: layer output drift",
+  "name": "layer output mismatch across deployments",
+  "paras": [
+   "The adapter succeeds only if the internal signals reaching it stay close to the signals it saw while training. Compression and model refresh both shift those signals. Even if the final model output still looks similar on easy examples, the adapter may receive a different internal pattern and apply the wrong correction.",
+   "This paper reduces that mismatch by training on many such shifts in advance. The adapter learns corrections that remain useful after those internal signals move, because the patch has already seen several versions of that movement during training."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "clean base",
+     1,
+     false
+    ],
+    [
+     "light compression",
+     2,
+     false
+    ],
+    [
+     "heavy compression",
+     4,
+     true
+    ],
+    [
+     "model refresh",
+     3,
+     true
+    ],
+    [
+     "clean base",
+     1,
+     false
+    ],
+    [
+     "light compression",
+     2,
+     false
+    ],
+    [
+     "heavy compression",
+     4,
+     true
+    ],
+    [
+     "model refresh",
+     3,
+     true
+    ],
+    [
+     "shared adapter",
+     2,
+     false
+    ],
+    [
+     "shared adapter",
+     2,
+     false
+    ],
+    [
+     "shared adapter",
+     2,
+     false
+    ],
+    [
+     "shared adapter",
+     2,
+     false
+    ]
+   ],
+   "caption": "Darker cells mark larger shifts away from the internal signals seen by a single-condition adapter."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The patch fails when the internal signals it receives have drifted away from the signals seen during tuning. The method reduces that drift problem by training through many deployment states."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "Compression-aware training improves transfer because the adapter is trained on deployment-induced layer output shifts instead of on one fixed state, and repeated exposure to refreshed base models helps later reuse for the same reason."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why one adapter can cover many deployments",
+  "paras": [
+   "If an adapter sees only one deployment state, it can overfit to quirks of that state. Then a small numerical change in the base model causes a large quality drop because the patch learned a narrow correction rule.",
+   "CAR-LoRA widens that training view. During the forward pass, the adapter is exercised on multiple compressed states, so any update that helps only one state but hurts the others is less likely to survive because the average training loss would rise on the other states. The backward pass remains full precision so the shared patch is updated from a stable signal rather than from heavily distorted arithmetic. Together, those choices steer the adapter toward corrections that still help after deployment changes because only cross-state updates keep winning during training."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "base model and task data"
+    },
+    {
+     "t": "step",
+     "s": "sample several compressed forward passes",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "share one LoRA patch across all samples"
+    },
+    {
+     "t": "step",
+     "s": "update patch with full-precision backward pass",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "portable adapter"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The equation: average loss across deployment states",
+  "words": "Training loss equals the average task loss over several sampled deployment states, all using the same adapter update.",
+  "equation": "train_loss = average over sampled states of task_loss(base_state, shared_adapter)",
+  "symbols": [
+   [
+    "sampled states",
+    "the compressed or refreshed base-model variants used during the forward pass"
+   ],
+   [
+    "task_loss(base_state, shared_adapter)",
+    "how well the shared adapter performs on one sampled state"
+   ],
+   [
+    "shared_adapter",
+    "the one LoRA patch trained across all sampled states"
+   ],
+   [
+    "train_loss",
+    "the loss used to update the adapter"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose one batch is evaluated on 3 deployment states.",
+    "State 1 loss is 0.40, state 2 loss is 0.55, and state 3 loss is 0.50.",
+    "Average loss is (0.40 + 0.55 + 0.50) divided by 3, which is 0.48.",
+    "An update that lowers only state 1 to 0.20 but raises states 2 and 3 to 0.80 and 0.75 would give average loss 0.58.",
+    "That update is rejected because it hurts portability across states.",
+    "The shared objective keeps only updates that help the adapter across the sampled deployment family."
+   ]
+  },
+  "note": "The exact task loss depends on the benchmark, but the paper's central change is to optimize the same patch over many deployment states instead of one."
+ },
+ "bars": {
+  "h2": "What changes in deployment",
+  "charts": [
+   {
+    "title": "Single-condition adapter",
+    "rows": [
+     [
+      "works on training compression",
+      82,
+      "good"
+     ],
+     [
+      "works on new compression",
+      41,
+      "bad"
+     ],
+     [
+      "works after base refresh",
+      37,
+      "bad"
+     ]
+    ],
+    "note": "A narrow adapter performs well only where it was tuned."
+   },
+   {
+    "title": "Compression-aware shared adapter",
+    "rows": [
+     [
+      "works on training compression",
+      80,
+      "good"
+     ],
+     [
+      "works on new compression",
+      71,
+      "good"
+     ],
+     [
+      "works after base refresh",
+      68,
+      "good"
+     ]
+    ],
+    "note": "The shared patch transfers better because training already included the kinds of shifts seen after deployment."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Training variants that miss the real device range.",
+    "html": "If the sampled compression states do not resemble the actual device settings, the adapter can still fail at deployment because it never learned that kind of distortion."
+   },
+   {
+    "warn": true,
+    "b": "Too much spread across states.",
+    "html": "If the training states are extremely different, one small patch may not be expressive enough to serve all of them, so average training can wash out task-specific gains."
+   },
+   {
+    "warn": true,
+    "b": "Base-model refresh that changes behavior, not just numerics.",
+    "html": "A large upstream model revision may alter the task behavior itself, so an old adapter cannot fully recover with invariance alone."
+   },
+   {
+    "b": "Done right.",
+    "html": "Sample the compression settings actually used in deployment and refresh the training family when the provider makes a major base-model change."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Take one instruction-tuned small language model and one downstream task. Train one LoRA adapter only on the uncompressed model. Train a second adapter with compression-aware sampling across several device-style formats. Then test both adapters on those formats and on a slightly refreshed base model.",
+   "The demo should report both average task score and the worst deployment score, because a portable adapter is valuable only if it avoids collapse on the hardest supported state."
+  ],
+  "metric_eq": "portable_score = minimum task score across all supported deployment states",
+  "closing": "A convincing result shows that the compression-aware adapter keeps portable score high because the same patch was optimized across multiple deployment states during training."
+ }
+}

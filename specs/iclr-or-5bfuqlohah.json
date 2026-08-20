@@ -1,0 +1,451 @@
+{
+ "slug": "iclr-or-5bfuqlohah",
+ "title": "Efficient Autoregressive Inference for Transformer Probabilistic Models",
+ "family": "Probabilistic modeling",
+ "one_liner": "Produce coherent joint predictions without re-encoding the whole context at every step by caching the fixed context once and growing a small causal buffer for the targets.",
+ "lead": "Many set-based probabilistic models are good at answering one target at a time, but many applications need a full joint data pattern over several targets so that the predictions agree with each other. The usual way to get that agreement is costly because the model must repeatedly re-encode the conditioning set after each newly generated target. This paper keeps the context encoding fixed and adds a causal target buffer, which lets the model generate target values one by one while still respecting earlier target choices.",
+ "nav": [
+  [
+   "theme-other.html",
+   "Other"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Joint prediction is expensive when the model keeps rereading the same context",
+  "paras": [
+   "Suppose you observe some context points from an unknown function and want predictions at several new inputs. A marginal predictor can answer each new input separately. But a joint predictor must also preserve the dependencies among those answers, because the values at nearby inputs should move together rather than independently.",
+   "Set-based models handle context well because they can condition on an unordered set. The cost appears when you generate targets one at a time. After choosing the first target value, the standard method adds that target back into the conditioning set and re-encodes the whole set before choosing the second target. Doing this at every step repeats almost the same work many times."
+  ],
+  "callout": {
+   "b": "The problem.",
+   "html": "Joint generation is slow because each new target usually forces a full re-encoding of the context set even though the original context has not changed."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. Fixed context, many targets",
+    "viz": "box",
+    "viz_args": "context set + target positions",
+    "caption": "The context is stable, but the target list grows one step at a time."
+   },
+   {
+    "title": "2. Standard method rereads all context",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "hot",
+      58
+     ],
+     [
+      "hot",
+      60
+     ],
+     [
+      "hot",
+      57
+     ],
+     [
+      "free",
+      18
+     ],
+     [
+      "free",
+      17
+     ],
+     [
+      "free",
+      16
+     ],
+     [
+      "hot",
+      59
+     ],
+     [
+      "hot",
+      56
+     ],
+     [
+      "hot",
+      61
+     ],
+     [
+      "free",
+      15
+     ],
+     [
+      "free",
+      18
+     ],
+     [
+      "free",
+      17
+     ]
+    ],
+    "caption": "The same context processing is repeated after every new target value."
+   },
+   {
+    "title": "3. Cache the context once",
+    "viz": "box",
+    "viz_args": "encode context one time",
+    "caption": "The stable part is stored and reused because it does not change."
+   },
+   {
+    "title": "4. Grow a target buffer",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      20
+     ],
+     [
+      "moved",
+      26
+     ],
+     [
+      "moved",
+      31
+     ],
+     [
+      "warm",
+      34
+     ],
+     [
+      "warm",
+      36
+     ],
+     [
+      "warm",
+      38
+     ],
+     [
+      "moved",
+      23
+     ],
+     [
+      "moved",
+      28
+     ],
+     [
+      "moved",
+      33
+     ],
+     [
+      "warm",
+      35
+     ],
+     [
+      "warm",
+      37
+     ],
+     [
+      "warm",
+      39
+     ]
+    ],
+    "caption": "Only the growing target side is updated from step to step."
+   },
+   {
+    "title": "5. Joint samples arrive faster",
+    "viz": "box",
+    "viz_args": "same context reuse, coherent targets",
+    "caption": "The model keeps target dependence while avoiding repeated context work."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Step 1: Encode the context set once.",
+    "text": "Read the observed context inputs and outputs into a cached state that stays fixed for the entire target-generation run."
+   },
+   {
+    "b": "Step 2: Create an empty target buffer.",
+    "text": "Start a causal buffer, which means a left-to-right memory where each target can read only earlier targets."
+   },
+   {
+    "b": "Step 3: Generate the next target value.",
+    "text": "Each target position reads the cached context and the earlier target states stored in the buffer."
+   },
+   {
+    "b": "Step 4: Append that target to the buffer.",
+    "text": "Store the new target state so later targets can depend on it without forcing the model to rebuild the context state."
+   },
+   {
+    "b": "Step 5: Repeat until all target values are produced.",
+    "text": "The context cache is reused each time, so cost grows mainly with the new target work rather than with repeated context passes."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper changes where step-by-step prediction state lives. Instead of treating the full conditioning set as something that must be rebuilt after every target value, it keeps the old context fixed and lets only the target side grow."
+  ],
+  "object": "the state updated during joint generation"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: repeated context work",
+  "name": "context re-encoding count",
+  "paras": [
+   "The main hidden cost is how many times the model rereads the same context points during one joint sample. That number can be large even when the context itself never changes.",
+   "The causal buffer lowers that count to one context encoding per run. Later steps still depend on earlier targets, but they get that dependence from the buffer rather than from a full rebuild of the whole conditioning set."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "step 1 context",
+     4,
+     true
+    ],
+    [
+     "step 2 context",
+     4,
+     true
+    ],
+    [
+     "step 3 context",
+     4,
+     true
+    ],
+    [
+     "cached context",
+     1,
+     false
+    ],
+    [
+     "step 1 target",
+     2,
+     false
+    ],
+    [
+     "step 2 target",
+     2,
+     false
+    ],
+    [
+     "step 3 target",
+     2,
+     false
+    ],
+    [
+     "buffer growth",
+     3,
+     false
+    ],
+    [
+     "step 1 context",
+     4,
+     true
+    ],
+    [
+     "step 2 context",
+     4,
+     true
+    ],
+    [
+     "step 3 context",
+     4,
+     true
+    ],
+    [
+     "one cached pass",
+     1,
+     false
+    ]
+   ],
+   "caption": "Darker cells show the repeated context passes that the buffer removes."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "The hidden waste is rereading the same context over and over. The paper removes that waste by caching the context once and updating only the target-side memory."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "The causal step-by-step prediction buffer decouples context encoding from target-set growth, so target dependence is modeled without repeated full context recomputation."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why the buffer keeps coherence without repeated full passes",
+  "paras": [
+   "Joint prediction needs two information sources: the fixed context and the already generated targets. The context does not change, so caching it is safe. The targets do change, so they need an updating memory.",
+   "The causal buffer provides that updating memory. Each new target reads the cached context for global conditioning and the earlier buffer entries for target-to-target dependence. This works because the model separates what is fixed from what is growing. The fixed part is reused, and the changing part is updated in a small structure whose size tracks only the targets."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "context set and target positions"
+    },
+    {
+     "t": "step",
+     "s": "encode context once and cache it",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "read cache plus earlier target states"
+    },
+    {
+     "t": "step",
+     "s": "append new target to causal buffer",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "joint target sample"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "The equation: one context cache plus growing target buffer",
+  "words": "Joint target probability is factorized into a product of one-step probabilities, where each step conditions on the fixed context cache and the earlier generated targets.",
+  "equation": "joint_probability = product over t of p(target_t | cached_context, earlier_targets)",
+  "symbols": [
+   [
+    "target_t",
+    "the target value generated at step t"
+   ],
+   [
+    "cached_context",
+    "the one-time encoded state of the observed context set"
+   ],
+   [
+    "earlier_targets",
+    "all target values generated before step t and stored in the causal buffer"
+   ],
+   [
+    "joint_probability",
+    "the probability assigned to the full target set"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Suppose there are 3 targets to generate.",
+    "Step 1 uses the cached context and predicts target 1 with probability 0.8.",
+    "Step 2 uses the same cached context plus target 1 and predicts target 2 with probability 0.7.",
+    "Step 3 uses the same cached context plus targets 1 and 2 and predicts target 3 with probability 0.9.",
+    "Joint probability is 0.8 times 0.7 times 0.9, which is 0.504.",
+    "The context was encoded once, but target dependence was still preserved at each step."
+   ]
+  },
+  "note": "The factorization is standard step-by-step prediction modeling; the paper's contribution is to make the conditioning structure efficient for set-based probabilistic models."
+ },
+ "bars": {
+  "h2": "What changes in generation",
+  "charts": [
+   {
+    "title": "Re-encode context each step",
+    "rows": [
+     [
+      "joint sample speed",
+      28,
+      "bad"
+     ],
+     [
+      "context reuse",
+      12,
+      "bad"
+     ],
+     [
+      "joint coherence",
+      74,
+      "good"
+     ]
+    ],
+    "note": "This baseline preserves dependence but spends most of its time on repeated context work."
+   },
+   {
+    "title": "Cached context plus causal buffer",
+    "rows": [
+     [
+      "joint sample speed",
+      79,
+      "good"
+     ],
+     [
+      "context reuse",
+      92,
+      "good"
+     ],
+     [
+      "joint coherence",
+      73,
+      "good"
+     ]
+    ],
+    "note": "The buffer keeps target dependence while the context cache removes repeated full passes."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Context that should not be treated as fixed.",
+    "html": "If later targets truly change what the context representation should be, a frozen cache can miss those feedback effects."
+   },
+   {
+    "warn": true,
+    "b": "Long target chains.",
+    "html": "If the target list is very long, the buffer itself can become expensive because each new target must still read many earlier targets."
+   },
+   {
+    "warn": true,
+    "b": "Poor target ordering.",
+    "html": "Step-by-step generation depends on order. A bad target order can make early uncertain choices harm many later ones."
+   },
+   {
+    "b": "Done right.",
+    "html": "Use the cache when the context is truly fixed and choose a target order that matches the dependence structure of the task."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Train a set-conditioned predictor on a toy function-regression task. Then compare two joint-generation modes on the same target sets: one that re-encodes the entire context after each generated target, and one that caches the context once and uses a causal buffer for the targets.",
+   "Measure both wall-clock time and joint log-likelihood, because the paper claims the new method saves time without giving up coherent joint prediction."
+  ],
+  "metric_eq": "speedup = time for full re-encoding baseline / time for cached-context buffer method",
+  "closing": "A convincing demo shows that speedup rises while joint log-likelihood stays close, because the method removes repeated context computation rather than removing target dependence."
+ }
+}
