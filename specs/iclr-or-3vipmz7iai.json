@@ -1,0 +1,249 @@
+{
+  "slug": "iclr-or-3vipmz7iai",
+  "title": "GTA1: GUI Test-time Scaling Agent",
+  "family": "Agents & Tool Use",
+  "one_liner": "A GUI agent that uses extra compute at decision time to pick better action sequences and reinforcement learning to click on the right interface elements.",
+  "lead": "Imagine trying to complete a task on a computer screen — say, scheduling a meeting in a calendar app. A GUI agent (a trained model) must figure out what to click next, reading the layout each time. But the screen is huge, many valid action sequences exist, and clicking the wrong button wastes steps. GTA1 solves this by (1) trying multiple action ideas in parallel and picking the best one, and (2) using a reward signal to train the agent to click accurately on actual interface elements.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Picking the right action in an infinite screen",
+    "paras": [
+      "A GUI agent reads a screenshot and proposes the next click. But screens are huge — a single screenshot can have thousands of clickable elements. With so many options, the agent can hallucinate the wrong button location or pick a suboptimal sequence of actions. A naive agent just picks the highest-confidence action once and moves on; if it picks wrong, the whole task fails and it never recovers.",
+      "Even harder: there may be many correct ways to complete the same task (different paths to the same goal). With a frozen model, the agent locks into one path without exploring whether a better path exists. And grounding — actually landing the click on the right pixel — is brittle: the model gets confused by overlapping elements or unfamiliar interface layouts it never saw during training."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "GUI agents struggle to pick the best action sequence in massive screens and to click accurately on the right elements."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The GUI Agent Starts",
+        "viz": "brain",
+        "caption": "Agent reads screenshot, proposes one action next."
+      },
+      {
+        "title": "2. The Problem: One Guess",
+        "viz": "box",
+        "viz_args": "Button A: 92%, Button B: 8%, Agent picks A (highest score).",
+        "caption": "Single choice locks in; if wrong, task fails without recovery."
+      },
+      {
+        "title": "3. Test-Time Scaling: Try Many",
+        "viz": "weights",
+        "viz_args": [["sample", 85], ["sample", 92], ["sample", 73], ["judge", 92], ["pick", 92]],
+        "caption": "Generate 4 action candidates; judge model ranks them; pick best."
+      },
+      {
+        "title": "4. RL Fixes Clicking",
+        "viz": "box",
+        "viz_args": "Click at (342, 178): success! Reward +1. Learn from this.",
+        "caption": "Reward successful clicks; training nudges the agent toward right pixel."
+      },
+      {
+        "title": "5. Better Sequences, Better Clicks",
+        "viz": "weights",
+        "viz_args": [["old-clicks", 32], ["new-clicks", 81], ["old-seq", 51], ["new-seq", 89]],
+        "caption": "Combined: smarter action picks and accurate clicking."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Sample many actions",
+        "text": "At each step, generate multiple candidate next-actions in parallel."
+      },
+      {
+        "b": "Judge each one",
+        "text": "A second model scores each candidate for whether it moves closer to the goal."
+      },
+      {
+        "b": "Pick the winner",
+        "text": "Execute the action with the highest judge score."
+      },
+      {
+        "b": "Train on success",
+        "text": "Reward the model when a click lands accurately; use that reward signal to nudge weights toward correct clicking."
+      },
+      {
+        "b": "Repeat until task done",
+        "text": "Loop from step 1 until the goal is reached."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper actually changes",
+    "paras": [
+      "GTA1 changes two things: (1) the action-selection process — instead of picking once, the agent samples many candidates and judges them — and (2) the grounding weights — the model that learns to click on the right pixel coordinates."
+    ],
+    "object": "action selection and clicking weights"
+  },
+  "hidden": {
+    "h2": "Action trajectory quality — which sequence is truly best",
+    "name": "action trajectory quality score",
+    "paras": [
+      "Before GTA1, a GUI agent had no way to know which of several valid action sequences was best — it just picked its highest-confidence guess. The paper introduces a way to measure which sequence actually works: a judge model watches the sequence unfold and scores whether it is moving the task forward. This score guides the selection of better multi-step plans by ranking candidates, so the agent picks the action most likely to succeed based on what the judge learned from past trajectories.",
+      "The paper estimates this hidden quantity by running a candidate action through the judge model to see if it aligns with the goal. The judge is trained to recognize plans that successfully complete the task. By scoring multiple candidates and picking the best, the agent explores a wider space of possibilities at each step: each sampled action is ranked by its likelihood of success — a high score means the action is more similar to sequences the judge saw work before, so picking the highest-scoring candidate statistically leads to better multi-step plans than picking randomly."
+    ],
+    "heat": {
+      "cells": [
+        ["sample-1", 1, false],
+        ["sample-2", 3, true],
+        ["sample-3", 2, false],
+        ["sample-4", 1, false],
+        ["judge-score-1", 1, false],
+        ["judge-score-2", 4, true],
+        ["judge-score-3", 2, false],
+        ["chosen", 4, true],
+        ["executed", 3, false],
+        ["reward-received", 4, true],
+        ["weight-nudge", 3, false],
+        ["next-step", 2, false]
+      ],
+      "caption": "Darker cells score better trajectories; brightest shows the judge's winning choice and the reward signal."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Suppose you have four ways to get to the store. A judge watches each path and rates whether it is getting you there efficiently. You pick the path with the highest rating. That rating is the hidden quantity — it lets you choose the best route."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The judge model is trained to score action trajectories using environment feedback (task success/failure). This score acts as the hidden quantity that guides the sampling-and-selection loop toward optimal sequences."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why test-time sampling and RL grounding work together",
+    "paras": [
+      "At decision time, the agent samples multiple actions because exploring options is cheap and the judge model is fast. The judge has seen many successful and failed trajectories during training, so it can score which candidate is most promising. By trading compute now for better decisions, the agent sidesteps the brittleness of a single guess.",
+      "In parallel, reinforcement learning fixes the clicking problem. The RL reward tells the model which pixel coordinate actually worked — when the agent clicks at position (x, y) and the button activates, the model receives a reward signal. Training nudges the weights so the next time it sees the same button, it will click closer to the right spot. RL feedback directly aligns the model's internal weights with the goal that matters: successful interface interaction. The reward is task-aligned — it directly measures whether a click succeeded, not some indirect metric that might mislead training.",
+      "Together: test-time scaling fixes the planning problem (which sequence), and RL fixes the grounding problem (where to click). The two mechanisms are independent, so they stack naturally."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current screenshot"
+        },
+        {
+          "t": "step",
+          "s": "Sample multiple action candidates",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Judge scores each candidate"
+        },
+        {
+          "t": "step",
+          "s": "Pick action with highest judge score",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Execute click at predicted coordinates"
+        },
+        {
+          "t": "step",
+          "s": "Observe: click success or failure?"
+        },
+        {
+          "t": "step",
+          "s": "RL reward signal nudges clicking weights",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Judge-ranked sequence + RL-trained clicks produce next step that works"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The scoring and reward equation",
+    "words": "The judge scores a candidate action as the likelihood that this action moves toward task completion. The RL loss penalizes incorrect click coordinates by the distance from the true button center. Together they are: action_score = judge(candidate_action, screen, task_goal) and click_loss = mean_squared_error(predicted_click_position, true_button_center) plus RL_reward × negative_log_probability_of_chosen_action.",
+    "equation": "J_total = click_loss + lambda * (- RL_reward * log P(action | screen))",
+    "symbols": [
+      ["click_loss", "squared distance from predicted click to true button center"],
+      ["RL_reward", "signal: 1 if click succeeded, 0 if it missed"],
+      ["P(action | screen)", "model's probability of this action given the screenshot"],
+      ["lambda", "weight balancing grounding loss vs. trajectory reward"],
+      ["judge(candidate)", "neural network that scores if action moves toward goal"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Screenshot shows a button at pixel (300, 200). Model predicts click at (305, 195).",
+        "Distance: sqrt((305-300)^2 + (195-200)^2) = sqrt(25 + 25) = 7.07 pixels.",
+        "click_loss = 7.07^2 = 50.",
+        "Click succeeds (button activates), so RL_reward = 1. Model gave action prob 0.8.",
+        "Reward term: -1 * log(0.8) = 0.22.",
+        "J_total = 50 + 0.5 * (-0.22) = 50 - 0.11 = 49.89.",
+        "On next training step, gradients nudge: predicted click closer to (300,200), action probability increases."
+      ]
+    },
+    "note": "The total loss combines precise clicking (minimize distance) with trajectory quality (maximize reward-weighted action probability)."
+  },
+  "bars": {
+    "h2": "Grounding and planning improvements",
+    "charts": [
+      {
+        "title": "Baseline single-guess agent",
+        "rows": [
+          ["Click accuracy (lands on button)", 65, "bad"],
+          ["Tasks completed (episodic)", 42, "bad"],
+          ["Average steps per task", 8, "bad"]
+        ],
+        "note": "Single greedy choice; no recovery from mistakes."
+      },
+      {
+        "title": "GTA1 (test-time + RL)",
+        "rows": [
+          ["Click accuracy (lands on button)", 88, "good"],
+          ["Tasks completed (episodic)", 76, "good"],
+          ["Average steps per task", 5, "good"]
+        ],
+        "note": "Test-time sampling + judge finds better sequences because the judge filters out poor candidates at decision time; RL grounding lands clicks precisely because the reward signal directly teaches which pixel coordinates activate buttons."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Judge model is poorly trained.",
+        "html": "If the judge was trained on unrepresentative trajectories, it will score incorrect plans highly. Garbage-in trajectories lead to garbage scores — the sampling step will select actions the judge believes are good but actually fail in practice, because the judge learned from bad examples."
+      },
+      {
+        "warn": true,
+        "b": "Click coordinates do not match the actual button.",
+        "html": "If the ground-truth button center is mislabeled or the coordinate system shifts, the RL reward becomes noisy — the agent is rewarded for clicks that miss, or punished for clicks that work. Training becomes confused."
+      },
+      {
+        "warn": true,
+        "b": "Concurrent sampling is expensive.",
+        "html": "Sampling multiple actions and running a judge on each takes time. In low-latency applications where the task must complete in milliseconds, the added latency may outweigh the better decisions because the user perceives slowness even if the final answer is more accurate."
+      },
+      {
+        "b": "Done right.",
+        "html": "When the judge is trained on diverse real task episodes and the ground-truth click labels are accurate, test-time scaling + RL jointly improve both planning and grounding. The model generalizes to new interfaces because the reward signal is task-aligned."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small GUI-interaction benchmark: a simple desktop app with 10 buttons labeled A through J arranged in a 2x5 grid. The task is: click the button matching a spoken instruction (e.g., 'click the one in the top right'). Train a baseline agent (single-shot action selection) and GTA1 (test-time sampling + RL) on half the grid layouts. Then test both on the other half with new unseen layouts. Measure: (1) click accuracy (percentage of clicks landing within 20 pixels of the true button center), (2) task success (did the agent click the right button?), and (3) average steps to complete (episodes where the agent gets it right on first try score 1 step)."
+    ],
+    "metric_eq": "click_accuracy = count(clicks_within_20px_of_true_center) / total_clicks; task_success = count(correct_button_clicked) / total_tasks; efficiency = sum(steps_to_success) / count(successful_tasks)",
+    "closing": "GTA1 should show that test-time sampling discovers better sequences on unseen layouts because the judge ranks candidates according to learned success patterns, and that RL reward-training lands clicks more accurately because the training signal directly rewards correct pixel coordinates, while baseline suffers from both frozen sequences and poor grounding."
+  }
+}

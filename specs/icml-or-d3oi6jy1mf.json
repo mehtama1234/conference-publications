@@ -1,0 +1,453 @@
+{
+ "slug": "icml-or-d3oi6jy1mf",
+ "title": "FlowBot: Inducing LLM Workflows with Bilevel Optimization and Textual Gradients",
+ "family": "Agents & Tool Use",
+ "one_liner": "Instead of humans writing LLM workflows by hand, train an algorithm to write the workflow structure and prompts automatically from examples.",
+ "lead": "Building systems where language models call each other and tools in a planned sequence usually requires a person to hand-write the workflow and prompts. This is slow and fragile. FlowBot learns workflows automatically from data: it learns both what sequence of LLM calls to make and what prompt to use in each call, using a two-level optimization that treats the sequence structure separately from the individual prompts.",
+ "nav": [
+  [
+   "theme-agents-tool-use.html",
+   "Agents & Tool Use"
+  ]
+ ],
+ "toc": [
+  [
+   "zero",
+   "Start from zero"
+  ],
+  [
+   "visual-story",
+   "Visual story"
+  ],
+  [
+   "hidden",
+   "The hidden quantity"
+  ],
+  [
+   "mechanism",
+   "Why it works"
+  ],
+  [
+   "math",
+   "Equation"
+  ],
+  [
+   "failures",
+   "What can go wrong"
+  ],
+  [
+   "demo",
+   "What to build"
+  ]
+ ],
+ "problem": {
+  "h2": "Hand-written workflows are a bottleneck",
+  "paras": [
+   "Right now, building a system where one language model (an LLM, a program that completes text by predicting the next word) calls multiple other language models or tools in sequence requires a person to sit down and write the entire pipeline and every prompt by trial and error. This is tedious and requires deep expertise.",
+   "A naive approach would be to write a single prompt that says do everything at once, then run the LLM once. This breaks because most tasks are too complicated for one forward pass\u2014sorting emails into categories, then writing a response to each, then deciding whether to send it, are fundamentally different decisions that need different prompts and different tools called at different times."
+  ],
+  "callout": {
+   "b": "In one sentence.",
+   "html": "Today we hand-write LLM workflows; we need to learn them automatically from data."
+  }
+ },
+ "comic": {
+  "h2": "Five-panel picture",
+  "panels": [
+   {
+    "title": "1. The bottleneck: humans write workflows",
+    "viz": "brain",
+    "caption": "A person manually designs: call classifier, then router, then generator, then verifier."
+   },
+   {
+    "title": "2. What does a workflow need?",
+    "viz": "box",
+    "viz_args": "structure + prompts",
+    "caption": "Two things: which LLMs to call in what order, and what exact text to prompt each."
+   },
+   {
+    "title": "3. FlowBot learns structure via outer loop",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "free",
+      20
+     ],
+     [
+      "hot",
+      80
+     ],
+     [
+      "free",
+      15
+     ],
+     [
+      "hot",
+      70
+     ],
+     [
+      "free",
+      25
+     ],
+     [
+      "hot",
+      65
+     ],
+     [
+      "free",
+      10
+     ],
+     [
+      "hot",
+      75
+     ],
+     [
+      "free",
+      20
+     ],
+     [
+      "hot",
+      60
+     ],
+     [
+      "free",
+      15
+     ],
+     [
+      "hot",
+      70
+     ]
+    ],
+    "caption": "Outer loop tunes which LLMs to chain together and in what order."
+   },
+   {
+    "title": "4. Inner loop optimizes each prompt",
+    "viz": "weights",
+    "viz_args": [
+     [
+      "moved",
+      60
+     ],
+     [
+      "moved",
+      55
+     ],
+     [
+      "moved",
+      70
+     ],
+     [
+      "moved",
+      65
+     ],
+     [
+      "moved",
+      50
+     ],
+     [
+      "moved",
+      75
+     ],
+     [
+      "moved",
+      60
+     ],
+     [
+      "moved",
+      55
+     ],
+     [
+      "moved",
+      70
+     ],
+     [
+      "moved",
+      65
+     ],
+     [
+      "moved",
+      50
+     ],
+     [
+      "moved",
+      75
+     ]
+    ],
+    "caption": "Inner loop tunes the exact wording of each call's prompt by measuring which words matter most."
+   },
+   {
+    "title": "5. Result: automatic high-quality workflows",
+    "viz": "plain",
+    "caption": "Learned workflows beat hand-crafted and generated baselines on real tasks."
+   }
+  ]
+ },
+ "flow": {
+  "h2": "What it actually does",
+  "steps": [
+   {
+    "b": "Outer loop: sketch the workflow structure",
+    "text": "Choose high-level decisions: how many LLM calls, which ones, in what order, what kind of output from each."
+   },
+   {
+    "b": "Inner loop: optimize one prompt at a time",
+    "text": "For each LLM call, write a trial prompt, run examples through it, measure the error, and nudge the wording toward better results, because phrases that hurt the output (high textual training nudge) get removed or reworded."
+   },
+   {
+    "b": "Textual training nudges: measure impact of word choices",
+    "text": "Measure how the output changes when you tweak a word or phrase, then use that to steer which words to keep and which to drop."
+   },
+   {
+    "b": "Iterate inner before outer",
+    "text": "For each workflow sketch, fully optimize all prompts in it. Then try a new sketch and repeat."
+   },
+   {
+    "b": "Measure on real examples",
+    "text": "Check each learned workflow against held-out tasks to see if it generalizes better than hand-crafted pipelines, because a separate validation set prevents the inner loop from overfitting prompts to just the training examples."
+   }
+  ]
+ },
+ "object": {
+  "h2": "What the paper changes",
+  "paras": [
+   "The paper optimizes two intertwined things: the workflow structure (which LLM calls in what order) and the text inside each prompt. Instead of a human writing both, an algorithm writes both by learning from examples."
+  ],
+  "object": "workflow structure + prompts"
+ },
+ "hidden": {
+  "h2": "The hidden quantity: textual training nudge magnitude",
+  "name": "textual training nudge signal",
+  "paras": [
+   "A textual training nudge is the direction and size of how much the output improves when you change a specific word or phrase in the prompt. It is hard to measure because text is discrete (a word either is in the prompt or it is not), not a continuous number that can slide smoothly. The paper estimates it by trying small variations (swapping synonyms, rephrasing, adding clauses) and measuring how much the loss shrinks or grows.",
+   "The paper uses this signal layer-by-layer: for each LLM call in the workflow, it measures which words or phrases in the prompt matter most (high training nudge), and nudges only the ones that matter, leaving stable wording alone."
+  ],
+  "heat": {
+   "cells": [
+    [
+     "word1",
+     1,
+     false
+    ],
+    [
+     "word2",
+     4,
+     true
+    ],
+    [
+     "word3",
+     2,
+     false
+    ],
+    [
+     "word4",
+     3,
+     true
+    ],
+    [
+     "word5",
+     1,
+     false
+    ],
+    [
+     "word6",
+     4,
+     true
+    ],
+    [
+     "word7",
+     2,
+     false
+    ],
+    [
+     "word8",
+     3,
+     false
+    ],
+    [
+     "word9",
+     1,
+     false
+    ],
+    [
+     "word10",
+     4,
+     true
+    ],
+    [
+     "word11",
+     2,
+     false
+    ],
+    [
+     "word12",
+     3,
+     true
+    ]
+   ],
+   "caption": "Darker means more impact on the output when that word in the prompt changes."
+  },
+  "reads": [
+   {
+    "b": "Plain reading.",
+    "html": "Some words in a prompt matter a lot (changing them breaks the output), others matter little (swapping them does not change the answer). The paper finds which is which by trying small changes and measuring the result."
+   },
+   {
+    "b": "Paper reading.",
+    "html": "Textual training nudges are the derivative of the loss with respect to discrete prompt tokens, approximated via perturbation: try variant prompts (synonym swap, rephrasing, drop clause) and measure the output shift to infer local sensitivity."
+   }
+  ]
+ },
+ "mechanism": {
+  "h2": "Why it works: two-level learning separates structure from tuning",
+  "paras": [
+   "Learning a workflow has two layers of decisions. The outer layer is architectural: which LLM calls and in what order (classifier before router, generator before validator). The inner layer is precision tuning: the exact wording of each prompt. If you tried to optimize both at once, the search space would explode and you would waste effort tuning prompts for bad structure choices.",
+   "Instead, FlowBot separates them. The outer loop picks a structure and freezes it. The inner loop fully tunes all prompts for that structure until they are as good as possible. Then the outer loop tries a different structure. This is faster because each inner loop only tunes prompts given a fixed architecture, and the inner loop can measure which words matter most (textual training nudges: which words change the output if you remove them) instead of random search. The workflow learns to specialize each prompt for its exact role\u2014a classifier prompt different from a router prompt\u2014rather than fighting over one generic prompt that has to work for everything."
+  ],
+  "visual": {
+   "kind": "pipeline",
+   "stages": [
+    {
+     "t": "input",
+     "s": "raw task examples (input, desired output)"
+    },
+    {
+     "t": "step",
+     "s": "outer loop tries workflow structure choice",
+     "hl": true
+    },
+    {
+     "t": "step",
+     "s": "inner loop optimizes prompts for that structure via textual training nudges"
+    },
+    {
+     "t": "step",
+     "s": "measure loss on held-out examples"
+    },
+    {
+     "t": "step",
+     "s": "outer loop picks next structure choice",
+     "hl": true
+    },
+    {
+     "t": "output",
+     "s": "final learned workflow: structure + optimized prompts"
+    }
+   ]
+  }
+ },
+ "math": {
+  "h2": "Bilevel optimization equation",
+  "words": "minimize over workflow choices W: minimize over prompts P for that W: loss on training data",
+  "equation": "min_W L_outer( min_P L_inner(W, P, data) )",
+  "symbols": [
+   [
+    "W",
+    "workflow structure (which LLM calls and order)"
+   ],
+   [
+    "P",
+    "the text of each prompt"
+   ],
+   [
+    "L_inner(W, P, data)",
+    "training loss: how wrong the answers are for a given structure and prompts"
+   ],
+   [
+    "L_outer(...)",
+    "validation loss: how wrong a different held-out task set is after tuning"
+   ]
+  ],
+  "worked": {
+   "title": "A tiny worked example",
+   "lines": [
+    "Outer loop tries Structure A: Classifier -> Router -> Generator.",
+    "Inner loop tunes Classifier prompt, then Router prompt, then Generator prompt on 100 training examples. Final loss: 15% error.",
+    "Inner loop done. Outer loop tries Structure B: Router -> Classifier -> Generator.",
+    "Inner loop tunes all three prompts again on same 100 examples. Final loss: 12% error.",
+    "Validation on held-out 20 examples: Structure A: 18% error, Structure B: 14% error.",
+    "Outer loop picks Structure B because it generalizes better, even though Structure A trained slightly lower.",
+    "This separation prevents overfitting to the training set\u2014inner loop tunes, outer loop validates structure choice."
+   ]
+  },
+  "note": "The outer loop makes big decisions (which LLM calls), the inner loop makes small tweaks (exact wording), and validation on a held-out set prevents the inner loop from memorizing."
+ },
+ "bars": {
+  "h2": "Hand-crafted versus learned workflows",
+  "charts": [
+   {
+    "title": "Hand-written workflow",
+    "rows": [
+     [
+      "Easy to explain",
+      94,
+      "good"
+     ],
+     [
+      "Takes expert time",
+      20,
+      "bad"
+     ],
+     [
+      "Task performance",
+      72,
+      "neutral"
+     ]
+    ],
+    "note": "A person writes the pipeline; it is clear but slow and often suboptimal."
+   },
+   {
+    "title": "FlowBot learned workflow",
+    "rows": [
+     [
+      "Automatic discovery",
+      88,
+      "good"
+     ],
+     [
+      "No expert needed",
+      85,
+      "good"
+     ],
+     [
+      "Task performance",
+      88,
+      "good"
+     ]
+    ],
+    "note": "Algorithm learns structure and prompts from data; faster to build because no expert time is needed and typically more accurate because the algorithm searches many workflow variants that a person would not try."
+   }
+  ]
+ },
+ "failures": {
+  "h2": "What can go wrong",
+  "items": [
+   {
+    "warn": true,
+    "b": "Text changes are discrete, not smooth.",
+    "html": "Changing a prompt word by word is not the same as smoothly moving a number. The textual training nudge is an approximation (try variants and measure), so it misses some good rewrites that require multiple words to change in concert."
+   },
+   {
+    "warn": true,
+    "b": "Outer loop can get stuck in bad structure choices.",
+    "html": "If a structure choice seems bad early (high loss) the outer loop may abandon it before the inner loop finishes tuning. The algorithm needs enough patience to let each structure be fully optimized before deciding it is bad."
+   },
+   {
+    "warn": true,
+    "b": "Prompts may be fragile to new examples.",
+    "html": "A prompt tuned to one set of training examples may fail on slightly different new tasks. The validation set must be diverse and representative."
+   },
+   {
+    "b": "Done right: separate structure and prompt tuning, measure which words matter most, validate on held-out tasks.",
+    "html": "The bilevel design (outer structure, inner prompting) prevents the algorithm from memorizing prompts to a specific bad structure."
+   }
+  ]
+ },
+ "demo": {
+  "h2": "What a runnable demo should prove",
+  "paras": [
+   "Build a simple multi-step task: given a customer support ticket, classify its severity, route it to the right team, generate a response, and verify the response is safe to send. Train a FlowBot on 50 examples by trying different workflow structures (classifier first or router first, one generator or two) and tuning prompts via textual training nudges. Measure accuracy on 10 held-out test tickets. Compare against a hand-written workflow (human expert designs the pipeline and prompts once) and a baseline that uses a single generic prompt for all steps."
+  ],
+  "metric_eq": "accuracy = (correct classifications + correct routes + safe responses) / total tickets",
+  "closing": "The demo must show that learning the workflow structure automatically beats both the hand-written baseline and the single-prompt baseline."
+ }
+}

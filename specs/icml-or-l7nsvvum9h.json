@@ -1,0 +1,237 @@
+{
+  "slug": "icml-or-l7nsvvum9h",
+  "title": "Opt-Verifier: Two-Way Checking for LLM-Generated Math Problems",
+  "family": "Agents & Tool Use",
+  "one_liner": "Before submitting an LLM-written math problem, check it two ways: does the structure make sense, and do the solutions prove it is correct.",
+  "lead": "When an LLM writes a math problem (say, a delivery route that minimizes cost), you need to know: is the math itself valid? Opt-Verifier checks this twice — first by reading whether the problem statement matches what the human asked for, and second by actually solving it to make sure the answer is sensible. This catches nonsense before wasting time on broken models.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "LLMs write broken math problems, and you don't catch it",
+    "paras": [
+      "Math problems are everywhere in industry: How should a factory route its trucks to minimize fuel? How should a warehouse schedule workers? These problems are written as lists of rules (called constraints) and things to measure (called variables). A human OR expert used to write these by hand. Now people use LLMs to draft them from a plain-English description, which is fast. The catch: LLMs often write nonsense — they might forget a rule, contradict themselves, or create a math problem with no good answer.",
+      "A naive approach: just ask the LLM to double-check itself. But LLMs are terrible at self-criticism; they often say their own garbage is fine. You need something stronger: actually *run* the problem through a solver and see if the answer makes sense, because a solver finds the mathematically best answer only if the problem itself is written correctly — if the math is broken or contradictory, the solver either fails or gives nonsensical values. But solving is slow, and even if you get an answer, you do not know if the structure was wrong or if the LLM just hallucinated some plausible-looking numbers."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "Check both whether the problem statement is sensible AND whether real solutions exist and are reasonable."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The mess",
+        "viz": "brain",
+        "caption": "Human describes a delivery problem in English."
+      },
+      {
+        "title": "2. LLM writes rules",
+        "viz": "box",
+        "viz_args": "Constraint A, Constraint B, Constraint C",
+        "caption": "LLM turns it into math rules. Some are nonsense."
+      },
+      {
+        "title": "3. First check: structure",
+        "viz": "weights",
+        "viz_args": [["good", 70], ["good", 65], ["bad", 20], ["good", 72], ["bad", 15]],
+        "caption": "Does each rule match the original problem? Mark bad ones."
+      },
+      {
+        "title": "4. Second check: solutions",
+        "viz": "box",
+        "viz_args": "Route cost=150, Constraint A satisfied?",
+        "caption": "Solve it. If the answer is weird or breaks rules, mark it."
+      },
+      {
+        "title": "5. Fixed problem",
+        "viz": "weights",
+        "viz_args": [["moved", 70], ["moved", 65], ["free", 15], ["moved", 72]],
+        "caption": "Remove broken rules. LLM now writes good models."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Parse the LLM output",
+        "text": "Read the math problem the LLM wrote as a structured object: variables, constraints, objective."
+      },
+      {
+        "b": "Structure check",
+        "text": "Ask another LLM: for each constraint, does it restate something the human actually wanted?"
+      },
+      {
+        "b": "Flag broken rules",
+        "text": "Keep constraints that align with the original problem; mark others as suspicious."
+      },
+      {
+        "b": "Solve the cleaned version",
+        "text": "Feed the problem (with flagged rules removed) to a solver and get back a solution."
+      },
+      {
+        "b": "Solution check",
+        "text": "Is the solver output reasonable? Does it use sensible values? Are all unsuspicious constraints satisfied?"
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper modifies the LLM generation pipeline by adding a feedback loop. Instead of trusting the LLM's first draft, Opt-Verifier runs two verification passes and uses the results to either reject the problem or guide the LLM to rewrite it."
+    ],
+    "object": "The verification feedback loop"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: model validity score",
+    "name": "validity score (structure + solution alignment)",
+    "paras": [
+      "The paper measures a hidden quantity: how valid is the generated model? This is not just whether the LLM *thinks* it is good, but whether the actual structure matches the human's needs *and* whether solutions to the math problem are sensible. The validity score combines two pieces: structure alignment (how many constraints actually restate the original problem) and solution feasibility (whether a solver finds a reasonable answer that respects all the clean constraints).",
+      "Opt-Verifier estimates this validity score by running the structure check (an LLM reads each rule and scores it against the original problem) and the solution check (a solver either finds an answer or times out, signaling trouble). Low scores mean the model needs fixing."
+    ],
+    "heat": {
+      "cells": [
+        ["Constraint 1", 4, true],
+        ["Constraint 2", 4, true],
+        ["Constraint 3", 1, false],
+        ["Constraint 4", 2, false],
+        ["Constraint 5", 4, true],
+        ["Constraint 6", 1, false],
+        ["Variable A", 3, true],
+        ["Variable B", 4, true],
+        ["Variable C", 2, false],
+        ["Objective", 4, true],
+        ["Solver time", 2, false],
+        ["Solution sensible", 3, true]
+      ],
+      "caption": "Darker means higher validity. Highlighted items are checked by the structure verifier."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The validity score is: does the problem look right, and does solving it give reasonable answers?"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper jointly scores model structure (semantic alignment with the problem statement) and solution feasibility (whether solutions satisfy constraints and have realistic values)."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why two checks beat one",
+    "paras": [
+      "A single check fails in two ways. If you only check structure (read the constraints), you miss the case where the math *looks* right but has no good solutions — perhaps the constraints contradict each other. If you only check solutions (run a solver), you might find an answer even though the problem statement was nonsensical — the solver will optimize *something*, even if it is the wrong thing.",
+      "Opt-Verifier uses both because they catch different errors. The structure check asks: does this rule actually say what the human wanted? The solution check asks: when I solve this, do I get something that makes sense in the real world? Together, they screen out both misaligned problems and infeasible ones. The feedback to the LLM is concrete: not just you are wrong, but *these specific constraints* do not match the problem, and *here is a solution that shows the issue*."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "LLM-generated model: variables, constraints, objective"
+        },
+        {
+          "t": "step",
+          "s": "Structure verifier checks each constraint against problem statement",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Remove flagged constraints, keep aligned ones"
+        },
+        {
+          "t": "step",
+          "s": "Solver finds solution to cleaned model",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Evaluate: is solution realistic and does it satisfy constraints?"
+        },
+        {
+          "t": "output",
+          "s": "Validity score and corrected model"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The validity equation",
+    "words": "validity score = (fraction of constraints that align with problem) times (solver succeeds and solution is sensible)",
+    "equation": "V = (C_align / C_total) * (1 if solver_feasible and within_bounds else 0)",
+    "symbols": [
+      ["V", "the validity score, between 0 and 1"],
+      ["C_align", "number of constraints verified to match the problem"],
+      ["C_total", "total number of constraints written by the LLM"],
+      ["solver_feasible", "true if the solver found a solution that satisfies all remaining constraints"],
+      ["within_bounds", "true if the solution uses realistic values (e.g., cost is not negative)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "LLM writes 5 constraints. Verifier checks: Constraint 1 aligns (yes), Constraint 2 aligns (yes), Constraint 3 aligns (no), Constraint 4 aligns (yes), Constraint 5 aligns (no).",
+        "Aligned count = 3 out of 5, so C_align / C_total = 3 / 5 = 0.6.",
+        "Remove Constraints 3 and 5. Solver runs on the remaining 3. It finds a solution: cost = 150, all constraints satisfied, no negative values.",
+        "solver_feasible = true, within_bounds = true, so the second factor = 1.",
+        "V = 0.6 * 1 = 0.6. The model is partially valid. The LLM is asked to rewrite the bad constraints."
+      ]
+    },
+    "note": "The validity score rewards both structure (many aligned constraints) and feasibility (a real solver can find an answer). Low scores signal: either the problem statement was nonsensical or the LLM missed something."
+  },
+  "bars": {
+    "h2": "Accuracy across real benchmarks",
+    "charts": [
+      {
+        "title": "LLM alone (no verification)",
+        "rows": [
+          ["Correct model structure", 65, "bad"],
+          ["Correct constraints", 58, "bad"],
+          ["Solvable models", 72, "bad"]
+        ],
+        "note": "LLM guesses. Many models are broken in ways invisible at first glance."
+      },
+      {
+        "title": "Opt-Verifier (structure + solution checks)",
+        "rows": [
+          ["Correct model structure", 87, "good"],
+          ["Correct constraints", 83, "good"],
+          ["Solvable models", 95, "good"]
+        ],
+        "note": "Dual verification catches misaligned rules and infeasible problems. All improvements are from filtering and feedback, not fine-tuning."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Solver is slow on big problems.",
+        "html": "If the math problem has thousands of variables, the solver might time out, because solvers explore many candidate solutions and each step takes time. When a solver runs out of time, you cannot tell whether the problem is infeasible or just hard, so the solution check gives no signal. Opt-Verifier must set a time limit and flag slow models as ambiguous, not broken."
+      },
+      {
+        "warn": true,
+        "b": "Structure verifier is itself an LLM, so it can miss subtle issues.",
+        "html": "If the structure verifier is fooled by plausible-sounding but wrong constraints, it will not flag them. The check is only as good as its own consistency and training. Pairing it with solution verification helps: even if a bad constraint sneaks through the structure check, the solver will reveal it by producing strange answers."
+      },
+      {
+        "warn": true,
+        "b": "Some problems have multiple valid solutions, so one answer does not prove correctness.",
+        "html": "A solver might find a valid but inefficient solution. The solution-side check must look not only for feasibility but also for whether the objective value is reasonable (not obviously suboptimal). This requires either sampling multiple solutions or using domain knowledge."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works best when the original problem description is itself clear and unambiguous. If the human's requirements are contradictory, no verifier will fix it. The dual-side approach trades speed for safety: it is slower than trusting the LLM, but it catches the majority of model errors before they reach a real solver on real data."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small benchmark of 10 optimization problems (e.g., simple delivery routes, warehouse staffing, production scheduling). For each one, write a plain English description. Use an LLM to generate a math model (variables, constraints, objective). Then run Opt-Verifier: the structure check, the solution check, and measure the validity score. Compare the validity scores for models that are actually correct versus models that were broken by the LLM. Show that broken models score lower."
+    ],
+    "metric_eq": "improvement = (valid_models_found_with_dual_check) / (valid_models_found_without_check) - 1",
+    "closing": "The demo must make it impossible to miss: the LLM alone produces some completely wrong models, but when you add the structure check *and* the solution check, almost all mistakes are caught."
+  }
+}

@@ -1,0 +1,241 @@
+{
+  "slug": "icml-or-ep6ecexliy",
+  "title": "Reinforcement Learning for Tool-Calling Agents in FHIR",
+  "family": "Agents & Tool Use",
+  "one_liner": "An agent learns to reason over hospital data graphs by getting rewarded when it finds correct answers, using a smaller cheaper model that beats a bigger one.",
+  "lead": "Doctors ask questions about patient records stored as interconnected data. A large language model — a neural network trained to predict text — struggles to find the right pieces of data and often violates rules about how data connects. This paper teaches a medium-sized model to navigate this graph correctly by rewarding it when it gets the answer right.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Models make wrong moves on connected data",
+    "paras": [
+      "Hospital data is stored as interconnected records: a patient points to visits, which point to notes and lab results, which point to medications. To answer a clinical question like 'Did this patient have a reaction to this antibiotic?', the model must follow the right links in the right order.",
+      "A naive try: give the model a retrieval tool (search for matching records) and a code-execution tool (run Python to filter and combine). The model often selects the wrong record type or tries moves that violate the graph structure. For example, it might try to read a lab result from a patient who never had that test, or it might fetch data in an order that breaks the logical connections. Bigger models like o4-mini reach only 50% accuracy on realistic hospital questions."
+    ],
+    "callout": {
+      "b": "The core problem:",
+      "html": "Tool-using models learn patterns from text but do not learn to respect the structure of the data graph they navigate."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Hospital data is a graph",
+        "viz": "box",
+        "viz_args": "Patient -> Visit -> Lab -> Result",
+        "caption": "Connected records. Wrong path means wrong answer."
+      },
+      {
+        "title": "2. Model guesses blindly",
+        "viz": "weights",
+        "viz_args": [["free", 30], ["free", 25], ["free", 28], ["free", 32], ["free", 29]],
+        "caption": "No training signal; all moves equally likely, many invalid."
+      },
+      {
+        "title": "3. Get a reward for correct answers",
+        "viz": "box",
+        "viz_args": "Judge: Answer right? +1",
+        "caption": "Execute plan, check answer, send score back to model."
+      },
+      {
+        "title": "4. Model learns better paths",
+        "viz": "weights",
+        "viz_args": [["hot", 65], ["warm", 40], ["free", 15], ["warm", 35], ["free", 20]],
+        "caption": "Reinforcement learning: nudge high-scoring moves toward higher probability."
+      },
+      {
+        "title": "5. Cheaper model now beats bigger one",
+        "viz": "weights",
+        "viz_args": [["hot", 77], ["moved", 50], ["free", 15]],
+        "caption": "Smaller Qwen3 model now outscores o4-mini on real hospital data."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Run the agent",
+        "text": "Model produces a sequence of steps: fetch patient, get their visits, filter by date, extract results."
+      },
+      {
+        "b": "Execute and validate",
+        "text": "Run the steps as code; check if the final answer matches ground truth."
+      },
+      {
+        "b": "Judge grades the attempt",
+        "text": "A separate trained model examines the answer and true answer; outputs a numeric reward."
+      },
+      {
+        "b": "Credit the steps",
+        "text": "Reinforce the learning: steps in correct sequences get higher probability weight."
+      },
+      {
+        "b": "Repeat and improve",
+        "text": "Over thousands of examples, the model converges to valid, correct paths."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper trains the model to output the correct sequence of calls to a code executor, where each call must respect the data graph structure. Without training, the model generates random or hallucinated steps. With reinforcement learning, it learns to emit only valid, executable steps."
+    ],
+    "object": "Step selection probabilities"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Execution-grounded correctness",
+    "name": "Correctness reward from actual code run",
+    "paras": [
+      "Instead of using a language-model score (just asking if the answer sounds right), the paper runs the agent's steps as actual code and checks if the answer is correct. This is the ground truth signal — you either get the right patient data or you do not.",
+      "The paper estimates this by: execute the step sequence, fetch the data, run the code, compare the result to the true answer. If the answer is right, reward is high; if wrong, low. This reward signal is the difference between a model that learns real correctness and one that learns to sound plausible."
+    ],
+    "heat": {
+      "cells": [
+        ["Step 1 correct", 4, true],
+        ["Step 2 correct", 4, true],
+        ["Step 3 wrong", 1, false],
+        ["Step 4 skipped", 1, false],
+        ["Correct answer", 2, false],
+        ["Fake answer", 1, false],
+        ["Penalty total", 3, true],
+        ["Retry signal", 2, true],
+        ["Model updates", 4, true],
+        ["Next attempt", 3, true],
+        ["Convergence", 4, true],
+        ["Final accuracy", 4, true]
+      ],
+      "caption": "Darker cells mean more correctness signal in training. Lighter means noise or absence."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model learns which steps produce right answers by actually running them on real data and checking the result."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Execution-grounded rewards from a custom training setup with an LLM Judge provide the training signal; the Judge model scores answer correctness independent of the generation path."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why execution feedback teaches the right moves",
+    "paras": [
+      "A language model predicts tokens (short text fragments) one at a time based on patterns in training data. Without reinforcement learning, it has no signal about which sequences of tool calls actually work on a given data graph. With execution-grounded feedback, every time the agent produces a sequence of steps, you run that code, get the answer, and ask: is this right or wrong?",
+      "Reinforcement learning then uses that right-or-wrong signal to update the model: steps that led to correct answers are made more likely; steps that led to wrong answers are made less likely. Over many examples, the model learns that certain sequences of data-fetch and code-filter operations are reliable paths to correct answers, while others reliably fail. Because the signal comes from real execution (not a heuristic guess), the model learns the true structure of the graph and the real requirements of the task.",
+      "A smaller model (Qwen3-8B) can learn this because the problem is no longer 'guess the right answer from text patterns' (where bigger is always better) but 'navigate a specific graph structure using feedback from actual code execution' (a learnable pattern in smaller models when trained correctly)."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Question about patient data"
+        },
+        {
+          "t": "step",
+          "s": "Model emits step sequence",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Execute steps on real data graph",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Check answer against ground truth",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Update model: reward right moves",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Model converges to correct sequences"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The learning update",
+    "words": "The probability of a step sequence increases by a fraction proportional to how much the reward exceeds the average reward. In symbols: probability times (1 + learning-rate times (reward minus baseline)).",
+    "equation": "p_new = p_old * (1 + alpha * (R - b))",
+    "symbols": [
+      ["p_old", "The current probability the model assigns to a step sequence"],
+      ["alpha", "Learning rate — how big each nudge is"],
+      ["R", "Reward signal: 1 if answer is correct, 0 if wrong (or a continuous score)"],
+      ["b", "Baseline — the average reward so far (to reduce noise)"],
+      ["p_new", "Updated probability after one training step"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Sequence A: p_old = 0.3, R = 1 (correct), b = 0.5, alpha = 0.1",
+        "p_new = 0.3 * (1 + 0.1 * (1 - 0.5)) = 0.3 * 1.05 = 0.315",
+        "Sequence B: p_old = 0.2, R = 0 (wrong), b = 0.5, alpha = 0.1",
+        "p_new = 0.2 * (1 + 0.1 * (0 - 0.5)) = 0.2 * 0.95 = 0.190",
+        "After one step: correct sequences are 4% more likely, wrong ones 5% less likely. Over thousands of steps, this concentrates probability on correct paths."
+      ]
+    },
+    "note": "The core idea: reward high-scoring moves by making them more probable; penalize low-scoring ones by making them less probable. The strength of change depends on how much the reward beats the average (not just whether it is good or bad)."
+  },
+  "bars": {
+    "h2": "Accuracy before and after reinforcement learning",
+    "charts": [
+      {
+        "title": "Baseline (no RL, just retrieval + code tools)",
+        "rows": [
+          ["o4-mini on FHIR questions", 50, "bad"],
+          ["Random tool combinations", 20, "bad"],
+          ["Expert hand-coded paths", 95, "good"]
+        ],
+        "note": "Large models struggle without training on the graph structure. Expert hand-coding works but does not scale."
+      },
+      {
+        "title": "After reinforcement learning",
+        "rows": [
+          ["Qwen3-8B (smaller model) on FHIR", 77, "good"],
+          ["Constraint violations", 5, "good"],
+          ["Correct reasoning paths learned", 77, "good"]
+        ],
+        "note": "Smaller model reaches competitive accuracy by learning the graph structure from execution feedback. Data-integrity constraints are now enforced."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Reward signal is noisy or delayed.",
+        "html": "If the judge model is miscalibrated (says right answer when wrong) or if you wait too long to give feedback, the model learns spurious correlations instead of true paths. Fix: use execution-grounded ground truth (compare to actual records) and give rewards immediately after each sequence."
+      },
+      {
+        "warn": true,
+        "b": "Graph structure changes or is not stable.",
+        "html": "If the underlying data graph has missing links or inconsistencies, or if the rules for valid traversal are not explicit, the model converges to whatever paths maximize local reward, not global correctness. Fix: enforce structural constraints in the code executor (reject invalid moves before they are scored)."
+      },
+      {
+        "warn": true,
+        "b": "Training data is biased toward easy questions.",
+        "html": "If all training examples are simple (e.g., single-visit queries), the model learns fast on those but fails on complex multi-hop questions. Fix: include a mix of question difficulty in training."
+      },
+      {
+        "b": "Done right.",
+        "html": "Combine a clean training loop, real ground-truth data, a stable graph schema, and diverse training questions; the model converges to reliable reasoning that works on new questions."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small dataset: 50 real hospital questions with correct answers. Implement a code executor that can fetch from a patient graph (use a synthetic or real small sample). Train the reinforcement-learning agent on half the questions; test on the held-out half. Measure: (1) final accuracy on test questions, (2) fraction of steps that respect data-graph constraints, (3) comparison to a baseline model with no RL training."
+    ],
+    "metric_eq": "Test accuracy = (number of correct answers on test set) / (total test questions). Constraint violations = (invalid step sequences attempted) / (total step sequences). RL gain = (accuracy with RL) - (accuracy without RL).",
+    "closing": "The demo must show that the same model size reaches higher accuracy with reinforcement learning than without it because execution feedback tells it which step sequences work. When the model sees which paths produced correct answers, it learns to repeat those paths; without feedback, it randomly tries invalid moves."
+  }
+}

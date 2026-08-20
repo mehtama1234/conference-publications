@@ -1,0 +1,244 @@
+{
+  "slug": "icml-or-fmwnykyrn6",
+  "title": "ToolPro: Tool Programs for Flexible Agentic Web Services",
+  "family": "Agents & Tool Use",
+  "one_liner": "Instead of calling web services one step at a time, package multiple steps into a single program that the agent runs all at once, cutting both latency and network traffic.",
+  "lead": "When an AI agent uses web services, it typically calls them one at a time, waiting for answers before asking the next question. ToolPro bundles these repeated requests into a single executable program that the agent writes once and runs completely, like writing a script instead of typing commands into a terminal one by one.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Agents waste time calling services one at a time",
+    "paras": [
+      "When an LLM-based agent needs to perform a workflow with multiple steps, it typically makes each call separately. For example, if the agent needs to fetch data from an API, transform it, then send it somewhere else, it makes three separate network requests and waits for answers between each one. The agent has to see the first result before it can decide what the second call should be.",
+      "This creates two costs. First, time: every network round-trip (the time to send a request and receive an answer) adds latency, and with multiple steps, these delays pile up. Second, bandwidth: the agent sends many small requests instead of one larger, more efficient one. A beginner might try speeding things up by making multiple calls at once, but that breaks workflows that have real dependencies, where one step's output feeds into the next step's input."
+    ],
+    "callout": {
+      "b": "The paper's insight.",
+      "html": "Let the agent write a program describing all the steps upfront, then run that whole program at once, automatically batching what can be done together."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Agent with no tools",
+        "viz": "plain",
+        "caption": "Agent wants to fetch, transform, and upload data in three steps."
+      },
+      {
+        "title": "2. Old way: call, wait, call, wait",
+        "viz": "box",
+        "viz_args": "Call-1 → Wait → Call-2 → Wait → Call-3",
+        "caption": "Each request waits for the previous answer. Three round-trips of latency."
+      },
+      {
+        "title": "3. Agent writes a program",
+        "viz": "plain",
+        "caption": "ToolPro lets agent describe the whole workflow as one program before executing it."
+      },
+      {
+        "title": "4. ToolPro program execution",
+        "viz": "box",
+        "viz_args": "Program {fetch; transform; upload}",
+        "caption": "The program runs end-to-end, batching steps and reusing data internally."
+      },
+      {
+        "title": "5. Result: fast and efficient",
+        "viz": "weights",
+        "viz_args": [["latency", 30], ["traffic", 15], ["latency-old", 85], ["traffic-old", 70]],
+        "caption": "Latency drops by up to 53%, traffic by up to 96%."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Agent specifies intent",
+        "text": "The agent writes a program describing the workflow: fetch data, transform it, post it."
+      },
+      {
+        "b": "Constraint-guided construction",
+        "text": "ToolPro builds a valid program that respects each service's rules (types, order dependencies)."
+      },
+      {
+        "b": "Effect-aware replay",
+        "text": "The system tracks which steps modify the world (like uploading); if a step fails and retries, it ensures state-changing operations run only once."
+      },
+      {
+        "b": "Execution policy decision",
+        "text": "Before running, ToolPro's profiler decides: should we run this as a program or make individual calls? It chooses based on network latency and workflow complexity."
+      },
+      {
+        "b": "Execute and measure",
+        "text": "Run the program and collect latency, traffic, and correctness metrics."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The thing being changed",
+    "paras": [
+      "ToolPro changes how the agent communicates with web services. Instead of the agent sending separate requests to services, it sends one program that encodes all the requests it wants to make, their order, conditional logic, retries, and how results flow between steps."
+    ],
+    "object": "Representation of tool requests"
+  },
+  "hidden": {
+    "h2": "Effect tracking: knowing what changes the world",
+    "name": "Effect annotations per call",
+    "paras": [
+      "Every call to a web service either reads data (a GET request) or modifies state (a POST that uploads or deletes). ToolPro annotates each call with its effect type: read-only or state-modifying. This matters because if a step fails and retries, a read-only call is safe to repeat, but a state-modifying call must run exactly once or the world gets corrupted (you upload twice, or delete twice).",
+      "The paper uses effect annotations to enable a replay mechanism: if an intermediate step fails, the system reruns from a checkpoint but skips re-executing state-modifying calls, replaying only their cached results. This prevents double-uploads and ensures correctness because running a state-modifying call twice produces a corrupted outcome (charging twice, uploading twice), whereas replaying a cached result is safe and fast."
+    ],
+    "heat": {
+      "cells": [
+        ["read-api-1", 1, false],
+        ["read-api-2", 1, false],
+        ["write-api", 4, true],
+        ["read-transform", 1, false],
+        ["retry-checkpoint", 2, true],
+        ["replay-read", 1, false],
+        ["replay-write-cached", 3, true],
+        ["read-api-3", 1, false],
+        ["final-upload", 4, true],
+        ["idempotent-check", 2, false],
+        ["success-log", 1, false],
+        ["latency-saved", 3, true]
+      ],
+      "caption": "Darker: state-modifying calls. Highlights: exactly-once guarantees via cached results on retry."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Every web service call either reads information from the world (safe to repeat) or changes something (must run exactly once)."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper marks each service call with an effect type, enabling automatic detection of which calls are safe to replay and which results to cache."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why batching into one program cuts latency and traffic",
+    "paras": [
+      "When an agent makes separate calls, every request has overhead: DNS lookup, TCP connection, HTTP headers, request serialization, deserialization of the response. By bundling multiple steps into one program, ToolPro amortizes these overheads across all the steps. The agent sends one network request to ToolPro's runtime, which then orchestrates all the internal calls between services, reusing connections and buffering data.",
+      "Second, ToolPro can optimize the program before running it. For example, if step 2 only needs a small part of step 1's output, the program can extract just that part and discard the rest, cutting bandwidth. Or if two independent steps have no data dependency, they can be parallelized within the same program execution. Third, by encoding the entire workflow upfront, ToolPro knows which calls are conditionally executed and can prune unnecessary steps. A naive caller would send requests for all branches; ToolPro's program evaluator only executes the branches actually needed.",
+      "The effect-aware replay mechanism adds safety without slowing down the happy path: on success, the program runs once. On failure and retry, cached results bypass redundant state-modifying calls, so the program converges faster than re-executing from scratch because each avoided state-modifying call saves a full network round-trip and any side effects that would corrupt the outcome."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Agent specifies workflow intent"
+        },
+        {
+          "t": "step",
+          "s": "ToolPro builds and optimizes program",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Program execution with batched calls",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Effect-aware replay on failure"
+        },
+        {
+          "t": "output",
+          "s": "Result with low latency and traffic"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The efficiency gain formula",
+    "words": "Total latency equals round-trip-time times the number of calls, plus sequential overhead. Batching reduces this to: round-trip-time for the program request, plus internal parallelization overhead, times a smaller effective depth.",
+    "equation": "L_total = RTT * depth_sequential + overhead_sum\nL_batched = RTT + depth_parallel + overhead_amortized\nGain = (L_total - L_batched) / L_total",
+    "symbols": [
+      ["L_total", "latency of sequential call-by-call approach"],
+      ["L_batched", "latency of program execution"],
+      ["RTT", "network round-trip time (milliseconds)"],
+      ["depth_sequential", "number of steps in the workflow"],
+      ["depth_parallel", "longest chain of dependent steps (can run in parallel)"],
+      ["overhead_sum", "cumulative per-call overhead (headers, handshakes)"],
+      ["overhead_amortized", "overhead spread across all steps in one program"],
+      ["Gain", "percentage reduction in latency"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Scenario: a workflow with 5 steps, each step independent from the others, running over a network with 100ms round-trip time.",
+        "Sequential (call-by-call): 5 calls × 100ms = 500ms + 50ms overhead = 550ms.",
+        "Batched (program): 1 call to run the program × 100ms = 100ms. Internal parallelization runs all 5 steps together: 100ms + 15ms batched overhead = 115ms.",
+        "Gain: (550 - 115) / 550 = 79% latency reduction. (The paper reports up to 53% under more realistic conditions with some sequential dependencies.)"
+      ]
+    },
+    "note": "The gains are largest when network latency is high and workflows have parallelizable steps."
+  },
+  "bars": {
+    "h2": "End-to-end latency and traffic comparison",
+    "charts": [
+      {
+        "title": "Call-by-call (old way)",
+        "rows": [
+          ["Single-step workflow", 120, "good"],
+          ["5-step workflow", 550, "bad"],
+          ["10-step with loops", 1200, "bad"]
+        ],
+        "note": "Each step incurs a full round-trip. Complexity multiplies latency."
+      },
+      {
+        "title": "ToolPro program (new way)",
+        "rows": [
+          ["Single-step workflow", 115, "good"],
+          ["5-step workflow", 180, "good"],
+          ["10-step with loops", 320, "good"]
+        ],
+        "note": "Batching amortizes overhead; parallelizable steps overlap. Latency grows much more slowly."
+      },
+      {
+        "title": "Client-side traffic",
+        "rows": [
+          ["Call-by-call: 5 requests", 500, "bad"],
+          ["ToolPro: 1 program + results", 50, "good"],
+          ["Reduction", "96%, by compression and pruning", "good"]
+        ],
+        "note": "One consolidated program replaces many small requests; unused branches are omitted."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Service semantics unknown to ToolPro.",
+        "html": "If a service has undocumented side effects (a read that secretly logs or changes internal state), ToolPro's effect annotations are wrong, and the replay mechanism could cause bugs. ToolPro relies on honest effect declarations from each service."
+      },
+      {
+        "warn": true,
+        "b": "Workflow with strongly sequential dependencies.",
+        "html": "If every step depends on the exact result of the previous step, there is no parallelism to exploit. ToolPro still saves overhead by bundling, but gains are modest."
+      },
+      {
+        "warn": true,
+        "b": "Program construction ambiguity.",
+        "html": "If the agent's intent is underspecified (e.g., unclear which conditional branch to take), constraint-guided construction may produce an incorrect program. Clarity in the agent's specification is essential."
+      },
+      {
+        "b": "Done right.",
+        "html": "When services provide effect annotations, workflows have parallelizable steps, and the agent specifies intent clearly, ToolPro delivers both latency and traffic savings as predicted."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a mini workflow agent that fetches data from a test API, transforms it, and uploads the result. Implement two versions: (1) naive call-by-call, where the agent makes three separate HTTP requests, and (2) ToolPro version, where the agent writes a program that the runtime executes. Measure end-to-end time and total bytes sent over the network."
+    ],
+    "metric_eq": "latency_improvement = (time_callbycall - time_program) / time_callbycall; traffic_reduction = (bytes_callbycall - bytes_program) / bytes_callbycall",
+    "closing": "The demo must show that a single batched program is faster and leaner because it amortizes network overhead, cuts redundant calls, and parallelizes independent steps, whereas call-by-call must wait for each result before sending the next request."
+  }
+}

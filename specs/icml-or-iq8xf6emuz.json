@@ -1,0 +1,204 @@
+{
+  "slug": "icml-or-iq8xf6emuz",
+  "title": "ORLoopBench: Solver-in-the-Loop Self-Correction for Operations Research",
+  "family": "Agents & Tool Use",
+  "one_liner": "Train language models to debug and repair infeasible optimization problems through iterative solver feedback rather than one-shot code generation.",
+  "lead": "Operations research practitioners spend most of their time fixing broken models, not writing them from scratch. When a complex optimization fails to solve, they inspect the solver's diagnosis (which constraints conflict), repair the formulation, and try again. But existing LLM benchmarks treat OR as a one-shot puzzle: describe a problem, generate code, done. This paper captures the real diagnostic loop as a repeatable game where each model action triggers solver execution and error feedback, allowing the model to learn from the solver's ground-truth yes-or-no verdict, which produces models better at self-correction than frontier APIs because they actually see and learn from failures.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "The mismatch between real debugging and benchmark testing",
+    "paras": [
+      "In real operations research work, practitioners receive infeasible models regularly. The solver says the model has no solution, and it reports an Irreducible Infeasible Subsystem (a minimal set of conflicting constraints). A human reads this, spots the logical error, modifies one or two constraints, and re-runs the solver. This loop repeats until the model is feasible and reasonable.",
+      "Existing LLM benchmarks instead ask: given a problem description, output the OR code. One shot. No feedback. No solver output to learn from. No chance to inspect what went wrong. The LLM either gets it right or fails. This treats OR as pure code generation, not as debugging under pressure.",
+      "A beginner's first try is usually brute force: feed the problem description and solver output to the model as text and ask it to fix things. But without a formal reward signal tied to feasibility, the model generates plausible-sounding but incorrect repairs—it may rewrite the entire model and solve a different problem altogether, even if the new code is syntactically sound."
+    ],
+    "callout": {
+      "b": "The method.",
+      "html": "Turn infeasible-model repair into a Markov Decision Process: the state is the current model plus solver feedback, the action is a proposed repair, and the reward is whether the solver validates the fix."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Real loop: broken model",
+        "viz": "box",
+        "viz_args": "Inventory model: -5 units left",
+        "caption": "Practitioner receives infeasible model with conflicting constraints."
+      },
+      {
+        "title": "2. Solver diagnosis",
+        "viz": "box",
+        "viz_args": "Solver: constraints 2,5,7 conflict",
+        "caption": "Solver returns the exact clashing rules that make it impossible."
+      },
+      {
+        "title": "3. Model fixes it",
+        "viz": "weights",
+        "viz_args": [["constraint-2", 3], ["constraint-5", 4], ["constraint-7", 2], ["demand-bound", 3], ["supply-bound", 4]],
+        "caption": "LLM inspects diagnosis, modifies one constraint, re-submits to solver."
+      },
+      {
+        "title": "4. Solver validates",
+        "viz": "box",
+        "viz_args": "Solver: FEASIBLE + objective 850",
+        "caption": "Solver confirms repair; model now solvable with a real objective value."
+      },
+      {
+        "title": "5. Payoff: learned correction",
+        "viz": "weights",
+        "viz_args": [["success-count", 4], ["correct-repairs", 4], ["wrong-fixes", 1], ["regenerations", 2]],
+        "caption": "Training on this loop teaches the model to repair, not regenerate."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {"b": "State representation", "text": "Encode the current model formulation and the solver's error report as numbers for the model."},
+      {"b": "Action space", "text": "The model proposes a specific edit (modify a constraint, add a variable, relax a bound)."},
+      {"b": "Solver feedback", "text": "Submit the edited model to the solver; get back feasibility yes/no plus objective value."},
+      {"b": "Reward signal", "text": "Reward is 1 if feasible and reasonable, 0 if infeasible or nonsensical."},
+      {"b": "Learning from loops", "text": "Train on trajectories of state-action-reward tuples; model learns to diagnose and repair correctly."}
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper replaces one-shot code generation with iterative repair trajectories. The LLM is no longer asked to nail the problem in one step; instead it takes actions (edit this constraint, add this variable) and sees the immediate outcome."
+    ],
+    "object": "Generation loop structure"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: constraint-conflict detection accuracy",
+    "name": "Repair success on the first diagnostic feedback",
+    "paras": [
+      "The paper measures a hidden quantity: how many times does the model make a repair that the solver validates on the first try? This is distinct from the final accuracy (whether the model eventually fixes the problem). A model that makes correct diagnoses finds the right repair quickly; one that guesses randomly will need many attempts.",
+      "The paper estimates this by running the trained model on a test instance (a broken model with a known solution), counting how many solver iterations it takes, and comparing to a naive baseline (random edits). A model that understands the constraint logic repairs the problem in fewer steps, because it reads the solver's diagnosis and acts on it, rather than regenerating the whole model."
+    ],
+    "heat": {
+      "cells": [
+        ["instance-1", 4, true],
+        ["instance-2", 2, false],
+        ["instance-3", 3, true],
+        ["instance-4", 4, true],
+        ["instance-5", 1, false],
+        ["instance-6", 4, true],
+        ["instance-7", 2, false],
+        ["instance-8", 3, false],
+        ["instance-9", 4, true],
+        ["instance-10", 2, false],
+        ["instance-11", 3, true],
+        ["instance-12", 1, false]
+      ],
+      "caption": "Darker means repaired in one diagnostic step; lighter means needed multiple attempts or failed."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Can the model spot the constraint conflict from the solver's error message and propose a one-step fix?"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Repair success rate (fraction of test instances fixed in ≤N solver calls), measured on both LP and MILP."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why iterative feedback teaches better diagnosis",
+    "paras": [
+      "One-shot generation divorces the model from the consequence of its code. The model guesses, and if the code is wrong, there is no clear signal steering its learning toward the error. It never learns what bad constraint logic looks like after a solver rejects it.",
+      "In the loop, every action immediately triggers a solver call. The solver is the ground truth: it says yes or no. The model receives this signal and the associated error report (which constraints clashed). Over many trajectories, the model learns to interpret the error report and propose edits that actually work. The solver acts as an oracle that makes feedback deterministic and verifiable.",
+      "The second mechanism is semantic integrity: when the model edits constraints surgically instead of regenerating the whole model, it is less likely to accidentally change the problem. Regenerating a MILP (a more complex optimization with integer variables) often succeeds syntactically but solves the wrong problem—the model rewrote the objective or the variable bounds subtly. Diagnostic editing preserves the original intent."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {"t": "input", "s": "Infeasible model and solver diagnosis"},
+        {"t": "step", "s": "Encode state as numbers for the model", "hl": false},
+        {"t": "step", "s": "Model proposes one edit (constraint/variable)", "hl": true},
+        {"t": "step", "s": "Submit to solver, wait for outcome", "hl": true},
+        {"t": "step", "s": "Log state-action-reward triple", "hl": false},
+        {"t": "output", "s": "Feasible model or continue loop"}
+      ]
+    }
+  },
+  "math": {
+    "h2": "The repair-as-MDP formulation",
+    "words": "Maximum expected cumulative reward equals sum over time steps of discounted reward per action, where reward is one if the solver says feasible and zero otherwise.",
+    "equation": "V(state_t) = E[ sum_{t=0}^{T} gamma^t * R_t | state_t ]",
+    "symbols": [
+      ["V(state_t)", "Expected total reward starting from the current model and solver diagnosis"],
+      ["E[ ]", "Expected value, averaged over many repair trajectories"],
+      ["gamma", "Discount factor (how much to value near-term vs far-future repairs)"],
+      ["R_t", "Reward at step t: 1 if solver says feasible, 0 otherwise"],
+      ["T", "Time horizon (maximum allowed repair attempts)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Instance: inventory model, three constraints. Solver rejects. Reward = 0.",
+        "Step 1: Model edits constraint 2. Solver: still infeasible. Reward = 0. cumulative = 0 * 0.9^0 = 0.",
+        "Step 2: Model edits constraint 5. Solver: feasible, objective 850. Reward = 1. cumulative = 0 + 1 * 0.9^1 = 0.9.",
+        "Total V = 0.9. If the model had guessed wrong on step 2 too, V = 0. Training maximizes V by learning which edits work."
+      ]
+    },
+    "note": "The model is trained to maximize the expected cumulative reward, which means it learns to propose repairs that pass the solver as quickly as possible."
+  },
+  "bars": {
+    "h2": "Repair accuracy: one-shot vs solver-in-the-loop",
+    "charts": [
+      {
+        "title": "One-shot generation",
+        "rows": [
+          ["LP repair accuracy", 78, "bad"],
+          ["MILP repair accuracy", 54, "bad"],
+          ["Semantic correctness", 68, "bad"]
+        ],
+        "note": "Models generate plausible code but do not learn from solver feedback; MILP regeneration often solves a different problem."
+      },
+      {
+        "title": "ORLoopBench trained on solver feedback",
+        "rows": [
+          ["LP repair accuracy", 95, "good"],
+          ["MILP repair accuracy", 82, "good"],
+          ["Semantic correctness", 91, "good"]
+        ],
+        "note": "Training on deterministic solver outcomes teaches the model to diagnose and edit surgically, not regenerate."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Regeneration trap.",
+        "html": "When faced with a tricky infeasibility, the model may throw away the original formulation and rewrite it from scratch. If it rewrites the wrong problem, the solver accepts it as feasible (it is) but now it solves a different optimization. Diagnostic training mitigates this because editing one constraint is simpler than rewriting everything correctly."
+      },
+      {
+        "warn": true,
+        "b": "Infinite loops.",
+        "html": "The model may circle: edit constraint 2, solver rejects, edit it the same way again, reject, repeat. This is addressed in the paper by a step budget (max iterations before the trajectory ends with zero reward) and by RLVR training, which learns to avoid revisiting failed states."
+      },
+      {
+        "warn": true,
+        "b": "Over-fitting to training instances.",
+        "html": "If the test set reuses instances from training, the model may memorize the repair rather than learning the principle. The paper addresses this with a clean split: training instances and test instances never overlap."
+      },
+      {
+        "b": "Done right.",
+        "html": "Solver-verified training with diagnostic feedback beats one-shot generation on both LP and MILP, and the trained model's repairs are semantically correct—it fixes the problem it was given, not a different one."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should generate a synthetic infeasible LP (e.g. a tiny inventory model with a demand bound and supply bound that contradict). Encode it and the solver's diagnosis (which two constraints clash) as a prompt. Ask the trained model to propose an edit. Run the edited model on a solver. Show the before/after feasibility. Repeat on MILP to show the model generalizes beyond LP."
+    ],
+    "metric_eq": "Repair-success rate = (number of test instances fixed in ≤ N steps) / (total test instances)",
+    "closing": "The demo must make visible that the model reads the solver's error message and proposes a targeted fix, rather than rewriting the formulation blindly."
+  }
+}
