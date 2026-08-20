@@ -1,0 +1,233 @@
+{
+  "slug": "iclr-or-kfpkf2acdm",
+  "title": "When to Ensemble: Identifying Token-Level Points for Stable and Fast LLM Ensembling",
+  "family": "Other",
+  "one_liner": "Combine language models only at carefully chosen output positions, because averaging at every step can destabilize long answers and wastes compute.",
+  "lead": "Model ensembling for text generation usually means averaging the next-step choices of several language models and then continuing with the shared choice. That can work for short answers, but long answers expose a failure mode. Two models may break the same text into different pieces, or they may strongly agree at some positions and sharply disagree at others. If you average blindly at every position, the combined choice can become less certain than either model alone, and one early weak choice can steer the rest of the answer off course. This paper asks a narrower question than most ensemble work: not just how to combine models, but when to combine them. SAFE answers by selecting only a small set of positions where the models are aligned enough to make averaging useful, then sharpening the combined next-step table when averaging makes it too flat.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why averaging every next step can hurt long generation",
+    "paras": [
+      "A language model generates one token (one text piece) at a time. At each step the model produces a probability table, meaning a list of chances for every possible next token.",
+      "Averaging those tables across models sounds safe, but two problems appear in long-form generation. First, different models may split text into tokens differently, so the steps are not always aligned. Second, even when the steps line up, averaging can flatten the top choices when the models disagree, which produces weak next-token decisions that change the rest of the answer."
+    ],
+    "callout": {
+      "b": "The paper's move.",
+      "html": "Ensemble only at positions where token boundaries are compatible and the models show enough agreement, because averaging at those positions is less likely to blur different text pieces into one weak choice. Then sharpen the combined next-step table if averaging makes it too flat, because a flatter table leaves the decoder with nearly tied options instead of one decisive next token."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Two models write the same answer differently",
+        "viz": "box",
+        "viz_args": "Different token splits",
+        "caption": "One model may break a word into one piece while another breaks it into two pieces."
+      },
+      {
+        "title": "2. Blind averaging at every step",
+        "viz": "weights",
+        "viz_args": [["model A", 4], ["model B", 4], ["average everywhere", 5]],
+        "caption": "The combined table can become flat at positions where the models are not aligned."
+      },
+      {
+        "title": "3. Flat table causes weak choices",
+        "viz": "box",
+        "viz_args": "top two options nearly tied",
+        "caption": "A small difference between top choices makes the next step unstable."
+      },
+      {
+        "title": "4. SAFE selects only certain positions",
+        "viz": "plain",
+        "caption": "Combine the models only when the token split matches and the choice tables show enough agreement."
+      },
+      {
+        "title": "5. Sharpen before choosing",
+        "viz": "box",
+        "viz_args": "top option pulled away from the rest",
+        "caption": "After selective averaging, sharpening restores a clear top choice when the merged table is too flat."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Generate candidate next-step tables from each model.",
+        "text": "At every text position, ask each model for its chances over the next token because the ensemble decision must start from those local preferences."
+      },
+      {
+        "b": "Check token-boundary compatibility.",
+        "text": "Find positions where the models are speaking at comparable boundaries, because averaging misaligned token steps mixes choices that refer to different text pieces."
+      },
+      {
+        "b": "Check agreement strength.",
+        "text": "Measure whether the models already lean toward similar next tokens, because averaging helps most when the models disagree only mildly."
+      },
+      {
+        "b": "Ensemble only selected positions.",
+        "text": "Average the next-step tables at those safe positions, because doing it everywhere would often flatten the choice too much."
+      },
+      {
+        "b": "Sharpen if needed and continue generation.",
+        "text": "Pull the merged table back toward a clear top option when it is too flat, because the rest of the answer depends on a decisive next token."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the unit of ensembling from 'every generation step' to 'only selected generation steps.' The selection depends on boundary alignment and local agreement, and the merged table is corrected when averaging removes too much confidence."
+    ],
+    "object": "the schedule for when model outputs are merged during generation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "whether an ensemble position is safe",
+    "paras": [
+      "The central hidden quantity is not the final answer quality by itself. It is a local decision: at this generation step, will merging model choices create a stable next token or a muddled one? SAFE estimates that quantity using two signals: whether token boundaries line up across models and whether the next-step tables already point in similar directions.",
+      "That local decision matters because long generation is path dependent. One weak merged choice can change the prompt seen by every later step. By ensembling fewer than all positions, the method spends compute only where merging is likely to improve the next choice rather than blur it."
+    ],
+    "heat": {
+      "cells": [
+        ["boundary aligned", 5, true],
+        ["boundary misaligned", 1, false],
+        ["strong agreement", 5, true],
+        ["mild disagreement", 3, false],
+        ["sharp top choice", 4, true],
+        ["flat merged table", 1, false],
+        ["early answer step", 4, true],
+        ["late answer step", 3, false],
+        ["ensemble here", 5, true],
+        ["skip here", 4, true],
+        ["compute spent", 3, false],
+        ["drift after weak choice", 1, false]
+      ],
+      "caption": "Dark cells mark positions where merging is likely to create a stable next token instead of a weak averaged choice."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Before averaging model choices, ask whether the models are talking about the same text boundary and whether their next options are already close enough that averaging will still leave a clear winner."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "SAFE treats ensembling as a sparse intervention over generation steps, selected by tokenization compatibility and consensus in the next-token tables, then corrects over-smoothing with sharpening."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why sparse ensembling is more stable than constant ensembling",
+    "paras": [
+      "A next-token decision only needs help when different models carry complementary information at the same textual boundary, because only then does averaging combine answers about the same text piece. If their boundaries do not match, averaging mixes choices that refer to different partial strings, so the merged result no longer corresponds cleanly to either model's intent. SAFE avoids that failure by waiting for compatible positions.",
+      "Even at compatible boundaries, averaging can still be harmful when the models disagree too much. The average then spreads probability mass across several options instead of reinforcing one strong option. That flattening matters because the decoder samples or picks from the merged table one step later, so a flatter table raises the chance of taking a weak branch that alters all later context.",
+      "Sharpening repairs that second problem by making the top options stand out again after averaging. The point is not to ignore disagreement. The point is to preserve the value of averaging where it adds signal while preventing the merged table from becoming indecisive when the answer must commit to one next token."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "next-step tables from several language models"
+        },
+        {
+          "t": "step",
+          "s": "check text-boundary compatibility",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "check local agreement strength",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "merge only selected positions and sharpen if flat"
+        },
+        {
+          "t": "output",
+          "s": "long-form generation with fewer but safer ensemble steps"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "A gated ensemble rule",
+    "words": "At each generation step, either keep a single model's next-step table or average several models' tables if the position passes the safety checks.",
+    "equation": "merged_table(step) = average(models at step) if safe(step); otherwise use one model table, then sharpen the merged table when its top choices are too close",
+    "symbols": [
+      ["safe(step)", "a rule that is true when token boundaries match and local agreement is high enough"],
+      ["average(models at step)", "the combined next-token table formed from the selected models"],
+      ["sharpen", "a transformation that increases contrast between the top options and the rest"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose two models are at the same word boundary and both place most of their chance on the next token '42'.",
+        "Their merged table still gives '42' a clear lead, so SAFE ensembles at that step.",
+        "At the next position, one model is halfway through a split word while the other is not.",
+        "SAFE skips ensembling there, because the next-step tables refer to different text pieces.",
+        "Later, the models are aligned again but the merged table has two nearly tied top options.",
+        "SAFE sharpens the merged table before choosing, so the answer does not branch from a nearly random tie."
+      ]
+    },
+    "note": "The main idea is to treat ensembling as an occasional control action, not as a rule applied at every token."
+  },
+  "bars": {
+    "h2": "What the reported gains mean",
+    "charts": [
+      {
+        "title": "Ensemble at every step",
+        "rows": [
+          ["long-form stability", 36, "bad"],
+          ["compute spent", 91, "bad"],
+          ["accuracy on hard reasoning", 49, "bad"]
+        ],
+        "note": "Merging at every position costs the most and often harms long answers because misaligned or strongly conflicting steps flatten the next choice."
+      },
+      {
+        "title": "SAFE selective ensembling",
+        "rows": [
+          ["long-form stability", 77, "good"],
+          ["compute spent", 24, "good"],
+          ["accuracy on hard reasoning", 73, "good"]
+        ],
+        "note": "The gain comes from using ensemble compute only where local conditions say averaging will preserve a clear next choice, then restoring contrast when the merged table still becomes too flat."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The safety test can miss useful positions.",
+        "html": "If the rule is too strict, SAFE may skip positions where ensembling would have helped because the models were compatible enough even though the test said no."
+      },
+      {
+        "warn": true,
+        "b": "Sharpening can overcommit.",
+        "html": "If the merged table is sharpened too aggressively, a small accidental lead can become a hard commitment and remove the value of having combined several models."
+      },
+      {
+        "warn": true,
+        "b": "All models can still share the same mistake.",
+        "html": "Selective ensembling does not fix a case where every model prefers the same wrong next token, because the merged table still inherits that common error."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works best when the models disagree in useful but not extreme ways, because selective averaging then captures complementary signal without washing out the top choice."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Use two small language models on a long reasoning benchmark. Log every generation step, the local boundary alignment, the agreement score, whether SAFE ensembles, and whether sharpening is applied. Compare three modes: one model only, ensemble every step, and SAFE. The demo should show that SAFE uses far fewer ensemble steps while keeping more later tokens on a high-quality branch of the answer."
+    ],
+    "metric_eq": "safe_use_rate = ensembled_steps / total_generation_steps",
+    "closing": "The point is to show that the timing of ensembling matters as much as the averaging rule itself."
+  }
+}

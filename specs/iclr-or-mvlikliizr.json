@@ -1,0 +1,232 @@
+{
+  "slug": "iclr-or-mvlikliizr",
+  "title": "NEO — No-Optimization Test-Time Adaptation through Latent Re-Centering",
+  "family": "Other",
+  "one_liner": "Adapt to corrupted test data by shifting internal feature vectors back toward the source center instead of running test-time weight updates.",
+  "lead": "Test-time adaptation tries to recover accuracy after the data at deployment differs from the data used in training. Most methods do this by changing model weights during deployment, which adds extra passes, tuning knobs, and failure modes. NEO takes a lighter route. It looks at the model's internal feature vector (the list of numbers produced before the classifier head), measures how far the new batch has drifted from the source feature center, and shifts those feature vectors back toward the origin before classification. The claim is simple: part of the damage from corruption is a systematic translation of the feature cloud, so removing that translation can recover alignment without updating weights.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why ordinary test-time adaptation is expensive and fragile",
+    "paras": [
+      "A classifier is trained on source data, then deployed on data that may be blurred, noisy, restyled, or otherwise shifted. Even when the semantic class is unchanged, the internal feature vectors can move away from the regions where the source classifier was calibrated. The final class boundary then receives inputs from the wrong place and accuracy drops.",
+      "A common response is to keep optimizing during deployment. Methods update normalization statistics, minimize an uncertainty objective that pushes predictions to become sharper, or adapt selected weights on the fly. That adds compute because each deployment batch triggers extra forward or backward passes. It also adds tuning because small mistakes in learning rate, batch size, or adaptation schedule can erase gains or even damage predictions.",
+      "NEO targets a narrower failure mode: the feature vectors move, but the learned class structure still exists. If that is true, the main task is not to relearn the classifier but to put the feature cloud back into the coordinate system where the classifier already works."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "NEO treats part of test-time shift as a translation of internal feature vectors and corrects it directly, because moving features back can be cheaper than changing weights."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Source training",
+        "viz": "box",
+        "viz_args": "Classes are separated in the model's internal feature space around a learned center.",
+        "caption": "The classifier head is tuned for the source feature arrangement."
+      },
+      {
+        "title": "2. Corruption at deployment",
+        "viz": "weights",
+        "viz_args": [["class-1", 78], ["class-2", 76], ["class-3", 74], ["shift", 25], ["shift", 25], ["shift", 25], ["free", 5], ["free", 5], ["free", 5], ["free", 5], ["free", 5], ["free", 5]],
+        "caption": "Corruption moves the whole feature cloud, so points reach the classifier from the wrong region."
+      },
+      {
+        "title": "3. Standard reaction",
+        "viz": "box",
+        "viz_args": "Run optimization at test time.",
+        "caption": "Weight updates can help, but they cost extra passes and depend on tuning choices."
+      },
+      {
+        "title": "4. NEO reaction",
+        "viz": "box",
+        "viz_args": "Estimate the batch shift and subtract it from the batch features.",
+        "caption": "No weight update is needed because the correction happens on the features themselves."
+      },
+      {
+        "title": "5. Classifier works again",
+        "viz": "weights",
+        "viz_args": [["realigned", 84], ["boundary-fit", 82], ["extra-compute", 18], ["batch-size-need", 28], ["calibration", 78], ["accuracy", 80]],
+        "caption": "Predictions improve when the batch is moved back toward the source feature center."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "1. Run the backbone once",
+        "text": "Extract internal feature vectors for the target batch using the frozen model."
+      },
+      {
+        "b": "2. Compute the target batch center",
+        "text": "Average the feature vectors in the batch to estimate where the shifted batch sits in feature space."
+      },
+      {
+        "b": "3. Re-center the batch",
+        "text": "Subtract the estimated shift so the batch center moves back toward the source origin."
+      },
+      {
+        "b": "4. Reuse the existing classifier head",
+        "text": "Feed the re-centered features into the original class predictor because the class boundaries were learned in that source-centered coordinate system."
+      },
+      {
+        "b": "5. Repeat for the next batch",
+        "text": "Adapt each batch independently without storing optimizer state or modifying weights."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the representation presented to the classifier head at deployment time. It leaves model weights fixed and instead shifts the internal feature vectors before the final prediction step."
+    ],
+    "object": "the test-time feature coordinates"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: feature-center drift",
+    "name": "how far the target batch center has moved away from the source center in the model's internal feature space",
+    "paras": [
+      "The target labels are unknown at deployment, so the system cannot directly measure class error while adapting. What it can measure is the batch center of the internal feature vectors. If the source model was trained so features were centered in a useful way, then a shift in that center is a visible signal that the whole batch has moved in a systematic direction.",
+      "This quantity matters because a linear classifier depends on relative position. If every feature vector is translated by a similar amount, many points cross class boundaries for the same geometric reason: the classifier sees them in the wrong coordinates. Re-centering fixes that common offset without touching the shape of the classifier.",
+      "The abstract also reports cross-class transfer from one adapted class to many others. That makes sense under this view because the correction is shared at the batch level. A center shift estimated from some examples can help the rest because the same batch-level translation moves many classes together when the corruption acts on the whole feature cloud rather than one class in isolation."
+    ],
+    "heat": {
+      "cells": [["source-center", 4, true], ["target-center", 4, true], ["translation", 4, true], ["class-boundary", 3, false], ["batch-mean", 4, true], ["local-noise", 2, false], ["global-shift", 4, true], ["weight-update", 1, false], ["shape-distortion", 2, false], ["recentered-batch", 4, true], ["misclassification", 2, false], ["shared-correction", 3, false]],
+      "caption": "Darker cells mark the shared batch-level quantities that NEO can measure and correct without labels."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The method watches whether the whole batch has slid away from the place where the classifier expects to see it."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "NEO uses the target batch mean in internal feature space as the adaptation signal and removes that mean shift, because the dominant corruption effect is treated as a translation."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why a simple shift can recover accuracy",
+    "paras": [
+      "Suppose the classifier head was learned on source features whose center was near zero. Now suppose a corruption changes contrast or texture in a way that pushes many features in roughly the same direction. The class clusters may still keep their relative arrangement, yet the whole collection is displaced. In that case, weight updates are solving a translation problem with a much heavier tool than needed.",
+      "NEO works when the source classifier remains mostly correct in the source coordinate system. By subtracting the target batch center, it moves the batch back toward that coordinate system. This helps because the class scores depend on dot products with fixed classifier weights, and those dot products change systematically when all features inherit a shared offset.",
+      "The method is cheap because it replaces optimization with a mean computation and a subtraction. It is also stable in the reported setting because there is no learning-rate choice and no risk of accumulating bad weight changes across batches. The tradeoff is that it only fixes the part of the shift that looks like translation; it does not repair more complex warping of the feature space."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Deployment batch under corruption"
+        },
+        {
+          "t": "step",
+          "s": "Frozen backbone extracts internal feature vectors"
+        },
+        {
+          "t": "step",
+          "s": "Compute batch center",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Subtract the shared center shift",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Apply the original classifier head"
+        },
+        {
+          "t": "output",
+          "s": "Adapted predictions with no test-time weight update"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The re-centering rule",
+    "words": "Compute the mean feature vector of the target batch and subtract it from each target feature vector before classification.",
+    "equation": "mu_target = (1 / B) * sum_b z_b,    z_b' = z_b - mu_target,    y_b = classifier(z_b')",
+    "symbols": [
+      ["B", "number of examples in the target batch"],
+      ["z_b", "internal feature vector for example b before adaptation"],
+      ["mu_target", "mean feature vector of the current target batch"],
+      ["z_b'", "re-centered feature vector after subtracting the batch mean"],
+      ["y_b", "predicted class after re-centering"],
+      ["classifier", "the original frozen class head learned on source data"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a batch has three one-dimensional features: 3, 4, and 5.",
+        "The target batch mean is 4.",
+        "After re-centering, the features become -1, 0, and 1.",
+        "If the source classifier was learned around zero, these corrected values match the source coordinate system far better than the raw shifted values.",
+        "The method therefore fixes the shared offset with one subtraction per feature vector instead of changing any model weight."
+      ]
+    },
+    "note": "The paper's idea is that the common shift matters more than per-example corrections in many corruptions, so removing the batch mean can restore useful alignment at almost no extra cost."
+  },
+  "bars": {
+    "h2": "Heavy adaptation versus direct re-centering",
+    "charts": [
+      {
+        "title": "Weight-updating test-time adaptation",
+        "rows": [
+          ["Extra compute per batch", 24, "bad"],
+          ["Hyperparameter sensitivity", 26, "bad"],
+          ["Shift correction strength", 74, "good"],
+          ["Ease of deployment", 32, "bad"]
+        ],
+        "note": "These methods can recover accuracy, but they pay for it with extra passes and tuning choices because adaptation happens through weight changes."
+      },
+      {
+        "title": "NEO",
+        "rows": [
+          ["Extra compute per batch", 86, "good"],
+          ["Hyperparameter sensitivity", 82, "good"],
+          ["Shift correction strength", 76, "good"],
+          ["Ease of deployment", 88, "good"]
+        ],
+        "note": "NEO stays simple because it attacks the shared center shift directly instead of learning a new set of weights at deployment time."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The shift is not mainly a translation.",
+        "html": "If corruption stretches, rotates, or bends class clusters rather than moving them together, subtracting one shared center cannot undo the damage."
+      },
+      {
+        "warn": true,
+        "b": "The batch is too small or unbalanced.",
+        "html": "If the batch mean is estimated from only a few examples or mostly from one class, the re-centering vector can be noisy and may move the batch in the wrong direction."
+      },
+      {
+        "warn": true,
+        "b": "Source features were not centered in a useful way.",
+        "html": "The method assumes the trained classifier head expects source features in a stable coordinate system near the origin. If that training arrangement was already uneven, re-centering may not help much because there may be no single source-centered location that restores the class boundaries cleanly."
+      },
+      {
+        "b": "Done right.",
+        "html": "When corruption mainly adds a shared offset to internal features, re-centering works well because it restores the coordinate system the classifier head already knows."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Train a small image classifier on clean digits. Then create a shifted test set by adding one corruption that mostly changes contrast or blur and another that changes style more severely. Extract the penultimate-layer feature vectors for each test batch. Compare three settings: no adaptation, batch re-centering, and a simple uncertainty-minimizing test-time optimizer.",
+      "The demo should show that re-centering gives most of the gain on the translation-like corruption because the batch mean captures the dominant drift, while it helps less on the style change because the class arrangement itself is warped."
+    ],
+    "metric_eq": "adapted_accuracy = correct_predictions / total_predictions\ncenter_shift_size = average_batch_norm_of(mu_target)",
+    "closing": "A good result is not only higher accuracy, but the visible link between large batch-center drift and the cases where re-centering helps most, because those are the cases where a shared translation error is large enough for mean subtraction to undo it."
+  }
+}
