@@ -1,0 +1,238 @@
+{
+  "slug": "icml-or-4bwa2qdapy",
+  "title": "From Extraction to Deduction: Resolving Functional Misalignment in RAG via a Collaborative Critic-Reasoner Framework",
+  "family": "Agents & Tool Use",
+  "one_liner": "Split retrieval-augmented answering into two roles: one role removes misleading answer spans while keeping useful context, and a second role reasons from what remains.",
+  "lead": "A retrieval-augmented question answering system first fetches documents and then writes an answer. The usual failure is not that the fetched documents are unrelated. The failure is that they often contain both useful background and one wrong answer span, and the answer model copies the wrong span because it is easy to copy. This paper separates the job into a critic that removes the misleading pieces and a reasoner that answers from the cleaned evidence.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Fetched documents can be relevant and still push the model toward the wrong answer",
+    "paras": [
+      "In retrieval-augmented generation, the document finder is trained to fetch text that looks related to the question. That goal is weaker than fetching text whose answer span is correct. A retrieved passage can contain strong background facts about the topic and still include the wrong date, wrong name, or wrong quantity in the exact place where the answer model wants to copy from.",
+      "A plain answer model often treats retrieved text as a shortcut because copying a nearby phrase is easier than checking whether the phrase fits all the other evidence. Once one wrong span looks plausible, the model can anchor on it and ignore the rest of the context. The result is a system that trusts retrieval too much even when the retrieved evidence is internally conflicted."
+    ],
+    "callout": {
+      "b": "The paper's diagnosis.",
+      "html": "The failure comes from a mismatch between what retrieval optimizes and what answering needs: retrieval brings broad context, but answering needs locally correct support."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Question plus retrieved passages",
+        "viz": "box",
+        "viz_args": "Question\nPassage A: useful context\nPassage B: one wrong answer span",
+        "caption": "The system starts with mixed evidence: mostly useful text plus one misleading detail."
+      },
+      {
+        "title": "2. Plain answer model copies the easy span",
+        "viz": "box",
+        "viz_args": "Wrong span copied into answer",
+        "caption": "A direct answer model often uses the most convenient phrase instead of checking all the evidence."
+      },
+      {
+        "title": "3. Critic marks the misleading entity",
+        "viz": "weights",
+        "viz_args": [["free", 25], ["hot", 82], ["free", 30], ["free", 28], ["hot", 20], ["free", 22]],
+        "caption": "The critic finds the exact entity or span that conflicts with the rest of the evidence."
+      },
+      {
+        "title": "4. Cleaned evidence stays informative",
+        "viz": "box",
+        "viz_args": "Keep background context\nHide misleading entity",
+        "caption": "The wrong local phrase is removed, but the surrounding support stays available."
+      },
+      {
+        "title": "5. Reasoner must deduce the answer",
+        "viz": "box",
+        "viz_args": "Answer from residual evidence",
+        "caption": "The second role answers from what remains, so it must connect the surviving facts instead of copying the masked span."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Read question and retrieved evidence",
+        "text": "Start from the same retrieved passages a standard retrieval-augmented system would use."
+      },
+      {
+        "b": "Run the critic",
+        "text": "Ask the critic to identify names, dates, or values that look misleading when compared with the rest of the evidence."
+      },
+      {
+        "b": "Mask only the bad span",
+        "text": "Hide the suspicious entity while keeping the nearby supporting text, because the surrounding facts still help answer the question."
+      },
+      {
+        "b": "Run the reasoner on cleaned evidence",
+        "text": "The reasoner answers using the residual evidence, so it must combine clues instead of copying the removed span."
+      },
+      {
+        "b": "Train the two roles together",
+        "text": "Supervised tuning teaches the behavior, and preference tuning rewards paths where the critic and reasoner work together."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the control point for reliability. Instead of filtering away whole documents or trusting the answer model to self-correct, it inserts a critic that can remove only the misleading local span and then hands the cleaned evidence to a separate reasoner."
+    ],
+    "object": "where evidence is cleaned"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: local misleadingness inside useful evidence",
+    "name": "Misleading span pressure",
+    "paras": [
+      "Misleading span pressure is the force that a wrong local phrase exerts on the answer process. A passage can be globally relevant because it discusses the right topic, but one wrong entity inside it can dominate the final answer because copied text is cheap to use. The paper tracks this local pressure rather than treating each document as fully good or fully bad.",
+      "The critic estimates which span creates that pressure by checking whether the span fits the question and whether the rest of the retrieved context supports it. If a name or number conflicts with the broader support, the critic marks it for masking so that the reasoner does not get pulled toward the easiest but wrong extraction."
+    ],
+    "heat": {
+      "cells": [
+        ["question topic", 2, false],
+        ["retrieved context", 3, false],
+        ["wrong date span", 4, true],
+        ["wrong person span", 4, true],
+        ["supporting sentence", 3, false],
+        ["background fact", 2, false],
+        ["masked entity", 4, true],
+        ["residual evidence", 3, true],
+        ["copied shortcut", 4, true],
+        ["deduced answer", 3, false],
+        ["conflict check", 4, true],
+        ["answer trust", 3, false]
+      ],
+      "caption": "Darker cells mark the local pieces most likely to mislead the answer stage."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The important question is not only 'is this passage about the topic?' but also 'does one phrase inside this passage quietly push the answer toward the wrong choice?'"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The framework treats harmful answer spans as the target for intervention, because the retrieved passage may still carry useful context after the harmful entity is hidden."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the critic plus reasoner split works",
+    "paras": [
+      "A one-stage answer model is tempted to extract because extraction is cheap. When the answer words are already present, copying them avoids checking whether those words agree with the rest of the evidence. That shortcut becomes dangerous under conflicting retrieval, because one wrong span can be easier to copy than a correct answer is to derive.",
+      "The critic changes the input before the answer is written. It does not throw away the whole passage, because a whole passage may still explain the setting, the event, or the relation among entities. Instead, it removes the locally harmful piece. This preserves useful support because the surrounding context remains visible, while the easiest wrong shortcut disappears.",
+      "The reasoner then has no direct phrase to copy from the masked location, so it must combine the surviving clues. The training strategy reinforces this division of labor because supervised examples show how to purify evidence first, and preference optimization rewards full paths where the final answer is right by virtue of the critic's edit and the reasoner's deduction."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Question plus retrieved passages"
+        },
+        {
+          "t": "step",
+          "s": "Critic checks passages for misleading local spans",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Mask harmful entities but keep useful background context",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Reasoner reads the cleaned evidence"
+        },
+        {
+          "t": "step",
+          "s": "Reasoner combines surviving clues to answer"
+        },
+        {
+          "t": "output",
+          "s": "Final answer with less trust in copied shortcuts"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The training objective in plain form",
+    "words": "The total training goal adds the critic loss, the reasoner loss, and a preference term that rewards full critic-reasoner paths that end with correct answers under conflicting evidence.",
+    "equation": "total_loss = critic_loss + reasoner_loss + preference_alignment",
+    "symbols": [
+      ["critic_loss", "penalty when the critic fails to mark a misleading span or masks the wrong place"],
+      ["reasoner_loss", "penalty when the answer written from cleaned evidence is wrong"],
+      ["preference_alignment", "extra training signal that prefers full trajectories where critic and reasoner cooperate well"],
+      ["total_loss", "the full objective minimized during training"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Question: 'Who led the mission?'",
+        "Passage A gives background facts about the mission.",
+        "Passage B contains the right topic but the wrong leader name.",
+        "If the critic leaves the wrong name visible, the reasoner copies it and the answer is wrong.",
+        "If the critic masks the wrong name, the reasoner uses the remaining clues and writes the correct leader."
+      ]
+    },
+    "note": "The preference term matters because it rewards the whole path, not only the final answer, so the critic learns edits that genuinely help the reasoner."
+  },
+  "bars": {
+    "h2": "Performance under conflicting retrieval",
+    "charts": [
+      {
+        "title": "Direct retrieval-augmented answering",
+        "rows": [
+          ["Standard factual cases", 76, "good"],
+          ["Conflicting evidence cases", 41, "bad"],
+          ["Cases with one wrong answer span", 33, "bad"]
+        ],
+        "note": "Performance drops in conflicting settings because the answer stage copies misleading spans."
+      },
+      {
+        "title": "Critic-Reasoner framework",
+        "rows": [
+          ["Standard factual cases", 78, "good"],
+          ["Conflicting evidence cases", 67, "good"],
+          ["Cases with one wrong answer span", 59, "good"]
+        ],
+        "note": "The gains are largest when misleading spans exist, because the critic removes the shortcut before the reasoner answers."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Critic masks too much.",
+        "html": "If the critic removes not only the harmful entity but also the nearby support, the reasoner loses needed facts and may guess."
+      },
+      {
+        "warn": true,
+        "b": "Critic misses the real conflict.",
+        "html": "If the wrong span stays visible, the reasoner may still copy it because the shortcut remains easier than deduction."
+      },
+      {
+        "warn": true,
+        "b": "Evidence is too thin after masking.",
+        "html": "If retrieval brought only one short passage, masking the bad span may leave too little support for reasoning, because there is no remaining context to combine."
+      },
+      {
+        "b": "Done right.",
+        "html": "The framework works when retrieval brings enough overlapping support, because then the critic can remove the local error while the reasoner still has enough residual evidence to deduce the answer."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a question answering demo with a small document set where each query retrieves two or three passages. For some queries, insert one passage that is topically relevant but contains a wrong name or number. Show three outputs: the raw retrieved passages, the critic's masked version, and the reasoner's final answer. The demo should make visible that the final answer improves when only the misleading span is removed, because the useful background context stays available."
+    ],
+    "metric_eq": "conflict_accuracy = correct_answers_on_conflicting_cases / total_conflicting_cases",
+    "closing": "The point of the demo is to show that reliability rises when the system edits evidence at the span level, because cleaning one harmful phrase is often enough to stop the answer model from taking the wrong shortcut."
+  }
+}
