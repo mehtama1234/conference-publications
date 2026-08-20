@@ -1,0 +1,212 @@
+{
+  "slug": "icml-or-plvye0zhuc",
+  "title": "Just-In-Time Reinforcement Learning: Continual Learning in LLM Agents Without Gradient Updates",
+  "family": "Agents & Tool Use",
+  "one_liner": "Adapt an agent at test time by retrieving earlier successful trajectories and shifting the model's next-step output scores, without changing model weights.",
+  "lead": "Deployed language-model agents are usually frozen. If the environment changes, standard reinforcement learning can adapt them, but that often requires expensive weight updates and may erase earlier skills. This paper asks whether a deployed agent can still improve from new experience without retraining the model itself, because the current action can still be adjusted even when the weights stay fixed. The proposed answer is to keep a memory of past trajectories, estimate which next actions were rewarded in similar states, and use that estimate to tilt the agent's next choice on the fly.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why frozen agents struggle to keep learning after deployment",
+    "paras": [
+      "A deployed agent keeps facing new tasks, new website layouts, or new game states. If its weights stay fixed, it can only rely on what it already learned before deployment. Full reinforcement learning could adapt those weights, but that is costly and risky because updating weights for one new setting can damage earlier behavior.",
+      "The paper focuses on a narrower question: can the agent improve its next action right now, during interaction, by using earlier experience as guidance. That would allow continual adjustment because the improvement happens at decision time instead of during a heavy retraining job."
+    ],
+    "callout": {
+      "b": "The paper's move in one sentence.",
+      "html": "Store past trajectories in a non-parametric memory, retrieve the trajectories most relevant to the current state, estimate which actions had higher return there, and add that estimate directly to the model's next-step output scores."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The deployed agent is frozen",
+        "viz": "box",
+        "viz_args": "No weight update during use",
+        "caption": "The base model stays fixed, so adaptation must happen somewhere else."
+      },
+      {
+        "title": "2. New experience arrives",
+        "viz": "box",
+        "viz_args": "Trajectories with actions and rewards are collected",
+        "caption": "Each run adds evidence about which actions worked in which states."
+      },
+      {
+        "title": "3. Retrieve similar past cases",
+        "viz": "weights",
+        "viz_args": [["current state match", 5], ["high-return action", 5], ["low-return action", 2], ["old unrelated case", 1], ["useful memory hit", 5], ["weak memory hit", 2]],
+        "caption": "The memory search tries to find earlier situations that look similar to the current one."
+      },
+      {
+        "title": "4. Shift the next-step score",
+        "viz": "box",
+        "viz_args": "Raise actions with good estimated advantage; lower weak ones",
+        "caption": "The model is nudged toward the better action without changing weights."
+      },
+      {
+        "title": "5. The agent adapts during use",
+        "viz": "plain",
+        "caption": "Performance can improve because the current decision uses stored experience immediately."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Store trajectories in memory",
+        "text": "Keep past states, chosen actions, and returns in a searchable memory because later decisions may need similar evidence."
+      },
+      {
+        "b": "Retrieve relevant cases",
+        "text": "When a new state appears, fetch earlier trajectories that are close to the current one so the agent can reuse local experience."
+      },
+      {
+        "b": "Estimate action advantage",
+        "text": "Compare how well different actions did in those retrieved cases because the agent needs a direction for the current choice."
+      },
+      {
+        "b": "Adjust the next-step output scores",
+        "text": "Add the estimated action preference directly to the model's output scores so that higher-return actions become more likely."
+      },
+      {
+        "b": "Act and update memory",
+        "text": "Take the chosen action, observe the result, and add the new trajectory back into memory for future decisions."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes where adaptation lives. Instead of changing model weights, it changes the temporary decision score at action time by using retrieved experience from memory."
+    ],
+    "object": "the step where reinforcement learning updates are applied"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "the action advantage in the current state",
+    "paras": [
+      "The key hidden quantity is advantage: how much better one action is than the agent's usual choice in the current state, because that gap says how strongly the current decision should be shifted. The agent does not observe that number directly. It must estimate it from similar past trajectories and their returns.",
+      "JitRL uses memory because similar states can reveal which action tended to pay off. That estimate matters because the current action score should rise only when the memory says that action led to stronger outcomes in related situations."
+    ],
+    "heat": {
+      "cells": [["current state match quality", 5, true], ["high-return past action", 5, true], ["low-return past action", 2, false], ["memory coverage", 4, false], ["advantage estimate", 5, true], ["base model score", 4, false], ["score adjustment size", 4, false], ["unrelated memory hit", 1, false], ["new trajectory value", 3, false], ["old stale trajectory", 2, false], ["final action choice", 5, true], ["no memory support", 1, false]],
+      "caption": "Darker cells mark the hidden decision signal the method is trying to estimate from memory."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The hidden quantity is how much one action should be preferred over the default choice right now."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The method estimates action advantage from retrieved trajectories and uses that estimate to solve a constrained policy update in closed form at test time."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why this works: change the current decision instead of the weights",
+    "paras": [
+      "A full weight update spreads its effect across many states, which is expensive and can alter behavior that had already been working. JitRL takes a narrower path. It asks what should change for this one decision in this one state, then changes only that temporary score.",
+      "That works when memory retrieval is good because similar past trajectories carry local evidence about action quality. If the retrieved cases show that one action repeatedly led to higher return, adding that preference to the next-step output score can improve the current choice immediately. The method also avoids forgetting because the base weights remain untouched."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Current state plus stored trajectories"
+        },
+        {
+          "t": "step",
+          "s": "Retrieve similar trajectories",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Estimate action advantage from retrieved returns"
+        },
+        {
+          "t": "step",
+          "s": "Add the estimate to the output scores",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "A test-time action choice that uses experience without weight updates"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Shift action scores by the estimated advantage",
+    "words": "A compact summary is that the new decision score for one action equals the base model score plus an advantage estimate taken from relevant past trajectories, under a constraint that keeps the new policy close to the old one.",
+    "equation": "new_score(action) = base_score(action) + eta * estimated_advantage(action)",
+    "symbols": [
+      ["new_score(action)", "score used to choose one action after test-time adjustment"],
+      ["base_score(action)", "the original model score for that action before memory-based adjustment"],
+      ["estimated_advantage(action)", "how much better that action appears in retrieved trajectories"],
+      ["eta", "strength of the test-time adjustment"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the base model gives action A a score of 6 and action B a score of 5.",
+        "Retrieved trajectories show that action B led to higher return in similar states, so its estimated advantage is 3 while action A has estimated advantage 0.",
+        "With eta = 1, the new score for action A stays 6 and the new score for action B becomes 8.",
+        "The agent now prefers action B because the retrieved evidence says B paid off more often in related cases.",
+        "No model weight is changed; only the current choice uses the adjusted scores."
+      ]
+    },
+    "note": "The paper proves that this additive update is the exact solution of a constrained policy-improvement problem, which is why a simple score shift can stand in for an explicit training loop."
+  },
+  "bars": {
+    "h2": "What changes in practice",
+    "charts": [
+      {
+        "title": "Frozen agent with no test-time update",
+        "rows": [["adaptation during deployment", 22, "bad"], ["cost of updating behavior", 61, "bad"], ["risk of forgetting older skills", 64, "bad"]],
+        "note": "Doing nothing at test time keeps cost low per step but leaves the agent unable to exploit newly observed reward patterns."
+      },
+      {
+        "title": "JitRL",
+        "rows": [["adaptation during deployment", 74, "good"], ["cost of updating behavior", 79, "good"], ["risk of forgetting older skills", 81, "good"]],
+        "note": "The paper reports stronger test-time adaptation because memory-based score adjustment reuses local experience without paying for weight updates."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The memory may retrieve the wrong cases.",
+        "html": "If similar-state search is poor, the estimated advantage can point toward the wrong action because the update is built on irrelevant evidence."
+      },
+      {
+        "warn": true,
+        "b": "Coverage may be too sparse.",
+        "html": "If memory contains few useful trajectories, the agent may have no strong basis for adjustment because the current state has not been seen in a related form before."
+      },
+      {
+        "warn": true,
+        "b": "Score shifts can become too large.",
+        "html": "If the adjustment strength is too high, one noisy memory estimate can dominate the base model because the temporary update overwhelms the original scoring pattern."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method is most useful when trajectory retrieval is reliable and the score shift stays moderate, because then the update adds local evidence without drowning out the base policy."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small web-navigation or game agent that receives reward after each episode. Compare three settings: no adaptation after deployment, full fine-tuning after batches of episodes, and a JitRL-style memory system that adjusts only the current action scores.",
+      "Track success rate, update cost, and retention on old tasks. The JitRL-style setting should improve within a session because retrieved trajectories guide the next choice, and it should retain old behavior because the base weights never change."
+    ],
+    "metric_eq": "adapt_gain = success_after_memory_update - success_without_update ; update_cost = runtime_update_spend",
+    "closing": "The result should show that test-time policy improvement can be practical when the system borrows reward information from memory instead of retraining the whole model."
+  }
+}
