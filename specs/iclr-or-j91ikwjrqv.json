@@ -1,0 +1,239 @@
+{
+  "slug": "iclr-or-j91ikwjrqv",
+  "title": "QLCoder: Automatically Writing Security Checkers",
+  "family": "Agents & Tool Use",
+  "one_liner": "Instead of letting security experts write the checkers, an AI agent writes them automatically by talking to a code analysis tool.",
+  "lead": "Finding security holes in code is tedious work done by experts. When a new security bug is discovered, someone has to manually write a checker to find it in other code. QLCoder automates this: given a description of a security hole, it uses an AI to talk to a code analysis tool and writes the checker automatically. The hard part is keeping the AI from making up fake syntax that doesn't actually work.",
+  "nav": [["theme-agents-tool-use.html","Agents & Tool Use"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why hand-written security checkers are stuck",
+    "paras": [
+      "CodeQL is a tool for finding security holes. You describe what a bad pattern looks like in a special language, and it searches your codebase for that pattern. When a new vulnerability (a security hole) is discovered, a human expert must write a new CodeQL query from scratch. This is slow, boring, and error-prone.",
+      "A beginner might try: hand the raw CVE description (a public security report) to a large language model and ask it to write the query. This fails because large language models were trained on outdated CodeQL syntax. The model confidently writes syntax that looks plausible but no longer works—the code analysis tool rejects it. The result is a useless query that compiles but is wrong."
+    ],
+    "callout": {
+      "b": "In one sentence.",
+      "html": "An agent repeatedly talks to the code analysis tool, catching hallucinations and fixing them until the query works."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem",
+        "viz": "box",
+        "viz_args": "Expert: write CodeQL query by hand",
+        "caption": "Expert manually writes a query for each new security hole."
+      },
+      {
+        "title": "2. Naive failure",
+        "viz": "box",
+        "viz_args": "LLM writes wrong syntax silently",
+        "caption": "LLM hallucinates outdated syntax. Looks OK but tool rejects it."
+      },
+      {
+        "title": "3. QLCoder's move",
+        "viz": "weights",
+        "viz_args": [["send",30],["test",60],["fix",50],["send",70],["test",85],["fix",75]],
+        "caption": "Agent sends draft, sees tool error, fixes it, tries again."
+      },
+      {
+        "title": "4. Catching hallucinations",
+        "viz": "box",
+        "viz_args": "Error feedback loop",
+        "caption": "Tool error tells agent exactly what went wrong."
+      },
+      {
+        "title": "5. Working query emerges",
+        "viz": "weights",
+        "viz_args": [["valid",95],["correct",88],["complete",82]],
+        "caption": "After iterations, agent writes a query that runs successfully."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Agent reads the security report",
+        "text": "Take a CVE description (plain English describing the hole)."
+      },
+      {
+        "b": "Agent drafts a query",
+        "text": "Generate a CodeQL query based on the description."
+      },
+      {
+        "b": "Test it against the tool",
+        "text": "Send the query to CodeQL. If syntax is wrong, it fails."
+      },
+      {
+        "b": "Fix errors iteratively",
+        "text": "Read the error message, revise the query, and try again."
+      },
+      {
+        "b": "Emit a working query",
+        "text": "Stop when CodeQL accepts it and the logic is correct."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how the LLM interacts with the code analysis tool. Instead of writing a query once and hoping it works, the agent now gets real-time feedback. Each time it writes a line, the tool immediately says whether it is valid. The agent uses this feedback to iteratively fix hallucinations instead of submitting broken code."
+    ],
+    "object": "The feedback loop between agent and tool"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: Syntax hallucination rate",
+    "name": "How often the LLM makes up syntax",
+    "paras": [
+      "The core problem the paper addresses is that large language models confidently invent syntax that looks right but does not exist in CodeQL. A hallucination rate measures what fraction of the LLM's first attempts are syntactically invalid. If you ask the model ten times to write a query, how many are wrong? With no feedback, the hallucination rate is high because the model's training data is old and incomplete.",
+      "QLCoder measures hallucinations by running the draft query through CodeQL. If the tool rejects it with an error, the draft was hallucinated. By reading the error message and regenerating, the agent can iteratively shrink the hallucination rate until it reaches zero—the query parses and compiles."
+    ],
+    "heat": {
+      "cells": [
+        ["Attempt 1", 4, true],
+        ["Attempt 2", 4, false],
+        ["Attempt 3", 3, true],
+        ["Attempt 4", 2, false],
+        ["Attempt 5", 1, false],
+        ["Attempt 6", 1, false],
+        ["Attempt 7", 1, false],
+        ["Attempt 8", 1, false],
+        ["Attempt 9", 1, false],
+        ["Attempt 10", 1, false],
+        ["Final", 1, true],
+        ["Valid", 4, false]
+      ],
+      "caption": "Darker means more syntax errors; highlights show attempts and the final valid query."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Hallucination rate: the fraction of attempted queries that CodeQL rejects because the syntax is wrong or outdated."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper estimates hallucination by running each draft through the code analysis tool and examining which errors are syntax-related vs. semantic."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why iterative feedback kills hallucinations",
+    "paras": [
+      "The mechanism is straightforward: when the LLM writes a query, it makes mistakes because its training data includes old CodeQL docs. If you just accept the first draft, you get wrong code. But CodeQL gives you an error message that says exactly what went wrong—for example, 'the syntax predicate foo_bar no longer exists' or 'the operator > is not defined for this type'. The agent reads this error and regenerates the query, avoiding the exact mistake it just made.",
+      "Why does this work? Because the error message is far more specific than the original task. The original task (CVE description) is vague and incomplete. The error message says: 'your attempt was wrong in this precise way.' This narrows the space of possible fixes. After a few iterations, the agent has seen every mistake CodeQL can find, and the next attempt is correct. Each iteration is cheaper than training a better model because you are just running the LLM five times (one minute each) instead of retraining it on new data (weeks of compute). It works right now with the existing model because the model is already smart enough to fix its mistakes once it sees them."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "CVE description (plain English)"
+        },
+        {
+          "t": "step",
+          "s": "Agent writes a CodeQL query draft",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Send to CodeQL, capture error message",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Agent reads error, regenerates the query",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Repeat until CodeQL accepts it",
+          "hl": false
+        },
+        {
+          "t": "output",
+          "s": "Working query (executable, correct)"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The cost of feedback versus retraining",
+    "words": "success_rate = 1 minus (hallucination_rate_per_attempt times max_attempts). If the model has a 40 percent hallucination rate per try, and you allow 5 attempts, then success is one minus 0.4 times 5, but capped at 1 (you can't go above 100 percent).",
+    "equation": "success = 1 - (1 - hallucination_per_attempt)^max_attempts",
+    "symbols": [
+      ["success", "fraction of queries that end up working"],
+      ["hallucination_per_attempt", "probability the model makes a syntax mistake on this try (0 to 1)"],
+      ["max_attempts", "how many times the agent is allowed to revise before giving up"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose hallucination_per_attempt = 0.4 (model is wrong 40 percent of the time) and max_attempts = 5.",
+        "Probability the model is correct on attempt 1: 1 - 0.4 = 0.6 (60 percent).",
+        "Probability it is correct by attempt 2 (either attempt 1 was right OR attempt 1 failed but attempt 2 was right): 1 - (0.4 × 0.4) = 1 - 0.16 = 0.84 (84 percent).",
+        "Probability it is correct by attempt 5: 1 - (0.4^5) = 1 - 0.01024 = 0.99 (99 percent).",
+        "Even with a bad model, five attempts is often enough because each error eliminates a class of wrong answers."
+      ]
+    },
+    "note": "The exponential captures the intuition that the second attempt fixes mistakes the first one made, the third catches edge cases, and so on."
+  },
+  "bars": {
+    "h2": "Success rate: one shot versus iterative",
+    "charts": [
+      {
+        "title": "Naive (one attempt)",
+        "rows": [
+          ["Queries attempted", 50, "neutral"],
+          ["Queries that worked", 18, "bad"],
+          ["Success rate", 36, "bad"]
+        ],
+        "note": "LLM writes once, most hallucinations are never caught."
+      },
+      {
+        "title": "QLCoder (five attempts with feedback)",
+        "rows": [
+          ["Queries attempted", 50, "neutral"],
+          ["Queries that worked", 45, "good"],
+          ["Success rate", 90, "good"]
+        ],
+        "note": "Agent iterates, fixing hallucinations revealed by CodeQL errors."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The error message is confusing or incorrect.",
+        "html": "If CodeQL emits a cryptic error, the agent might fix the wrong part. For example, the real problem might be a logic bug, but the error message points to syntax. The agent then wastes attempts chasing the wrong issue."
+      },
+      {
+        "warn": true,
+        "b": "The model gets stuck in a loop.",
+        "html": "If the agent regenerates the same broken line every time, it will not converge. The fix: track which fixes were tried, and feed that history to the model so it learns which direction to move."
+      },
+      {
+        "warn": true,
+        "b": "Iterative fixes introduce new bugs.",
+        "html": "While fixing one syntax error, the agent may break something else. For example, removing a deprecated function name might leave a type mismatch. The agent then has to fix that too."
+      },
+      {
+        "warn": false,
+        "b": "Done right: semantic validation after syntax passes.",
+        "html": "Once CodeQL accepts the query, check that it actually detects the vulnerability it was supposed to find. This requires a test case (real vulnerable code). If the query is syntactically correct but semantically wrong, flag it manually."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A minimal demo takes a single CVE (a known security vulnerability) and shows that QLCoder writes a working query for it, while a naive LLM fails. Pick a simple hole: for example, a buffer overflow or a SQL injection. Tell both the LLM and QLCoder the CVE description. The naive LLM writes a query once and submits it. QLCoder iterates, and after a few revisions, produces a query CodeQL accepts. Then test both queries against real vulnerable code and see how many true positives each finds. The gap shows the value of iteration."
+    ],
+    "metric_eq": "success = num_queries_that_compile_and_run / total_queries_attempted",
+    "closing": "The demo must show that iteration through real tool feedback is radically better than betting on one LLM attempt, because the tool tells you exactly what is wrong instead of leaving you guessing."
+  }
+}

@@ -1,0 +1,245 @@
+{
+  "slug": "iclr-or-gt4v9wbpzm",
+  "title": "HiPRAG: Search-Aware Reward Training for Agentic RAG",
+  "family": "Agents & Tool Use",
+  "one_liner": "Train search agents to know when to search by grading each search decision independently, not just the final answer.",
+  "lead": "Language models lack information, so agents search for it. But they often search too much (already know it) or too little (should have looked). Training them to get the right answer at the end misses the real problem: each individual search decision—to look something up or skip it—should be judged on its own merits.",
+  "nav": [["theme-agents-tool-use.html", "Agents & Tool Use"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Search agents waste time and miss information",
+    "paras": [
+      "An agent answers questions by searching for facts, then thinking through them. But it learns only from whether the final answer is right or wrong. It has no signal about whether individual searches were necessary. So it either searches for everything (even facts it already knew) or searches for nothing (ignoring useful information it should have found).",
+      "A naive approach: train on outcome alone. Reward the agent if the final answer matches the truth, punish it if wrong. This teaches the right endpoint, but not the right decisions along the way. The agent learns to avoid the pain of a wrong answer, but it has no feedback saying 'that search was pointless' or 'you should have searched there'."
+    ],
+    "callout": {
+      "b": "The problem in one sentence.",
+      "html": "The agent is graded only on the final answer, so it has no incentive to search smartly—it cannot tell if a search was necessary or wasteful."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Agent has a question",
+        "viz": "box",
+        "viz_args": "Question: What is the capital of France?",
+        "caption": "The agent needs to answer a question using information it does not have."
+      },
+      {
+        "title": "2. The old way: only grade the ending",
+        "viz": "weights",
+        "viz_args": [["search-a", 45], ["search-b", 30], ["search-c", 20], ["search-d", 15], ["answer", 80]],
+        "caption": "Training looks only at whether the final answer was right. Every search path is equally invisible."
+      },
+      {
+        "title": "3. Over-search and under-search both happen",
+        "viz": "weights",
+        "viz_args": [["waste-search", 70], ["avoid-search", 60], ["right-search", 40]],
+        "caption": "Without feedback on individual searches, the agent is blind to efficiency. It either does too much or too little."
+      },
+      {
+        "title": "4. HiPRAG grades each step",
+        "viz": "box",
+        "viz_args": "Search deemed: necessary, unnecessary, necessary, correct answer",
+        "caption": "A new reward function examines each search decision and marks it necessary or wasteful on the spot."
+      },
+      {
+        "title": "5. Agent learns which searches to keep",
+        "viz": "weights",
+        "viz_args": [["necessary-searches", 85], ["wasted-searches", 5], ["correct-answer", 95]],
+        "caption": "With per-decision feedback, the agent learns to keep only searches that matter."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Decompose the trajectory",
+        "text": "Break the agent's reasoning chain into discrete steps: decide to search, execute search, read result, update belief, decide next move."
+      },
+      {
+        "b": "Judge search necessity",
+        "text": "For each search step, assess: does this search provide information the agent did not have? Would the final answer be the same without it?"
+      },
+      {
+        "b": "Assign per-step grades",
+        "text": "Mark each search as necessary (reward) or wasteful (penalize). Mark skipped searches as correct (did not search when not needed) or wrong (should have searched)."
+      },
+      {
+        "b": "Calculate hierarchical reward",
+        "text": "Add to the normal final-answer reward a bonus based on the fraction of search steps that were graded correctly (necessary searches that happened, unnecessary searches that did not)."
+      },
+      {
+        "b": "Train the agent",
+        "text": "Use the boosted reward signal to teach the agent which search patterns lead to better decisions and fewer wasted lookups, because now the agent receives explicit feedback on whether each search was worth the cost."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes how the agent is graded during training. Instead of only looking at the final answer, it also looks at each intermediate search decision and judges whether that search was necessary."
+    ],
+    "object": "The reward signal"
+  },
+  "hidden": {
+    "h2": "Search necessity: the hidden quantity",
+    "name": "Search necessity: whether each search was actually needed",
+    "paras": [
+      "Search necessity is a hidden quantity because the agent cannot measure it directly. It is the true answer to the question: 'Would the agent have reached the same correct answer without this search?' This is invisible to training until someone explicitly checks it.",
+      "HiPRAG estimates search necessity by examining the agent's beliefs before and after each search, and cross-checking against the ground-truth answer. If a search changed the agent's belief without moving it closer to the truth, the search was unnecessary. If the agent reached the correct answer without a particular search, that search was wasteful. The paper constructs a binary label for each search: necessary (true) or unnecessary (false)."
+    ],
+    "heat": {
+      "cells": [
+        ["search-1", 4, true],
+        ["search-2", 1, false],
+        ["search-3", 4, true],
+        ["search-4", 1, false],
+        ["search-5", 3, true],
+        ["search-6", 1, false],
+        ["search-7", 4, true],
+        ["search-8", 2, false],
+        ["search-9", 3, true],
+        ["search-10", 1, false],
+        ["search-11", 4, true],
+        ["search-12", 1, false]
+      ],
+      "caption": "Darker means the search was necessary to reach the correct answer; paler searches were wasteful."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Search necessity is: after this search, is the agent closer to the right answer? Did the information it learned matter for the final decision?"
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Inferred from the reasoning trajectory: examine agent beliefs before and after each search step, compare against ground truth, and construct binary labels indicating whether the search provided critical information."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: process rewards beat outcome-only training",
+    "paras": [
+      "Training on outcome alone tells the agent only 'right' or 'wrong' on the final answer. It creates a backward signal that teaches the agent to follow paths to correct answers, but it provides no information about the intermediate steps. Over time, the agent learns statistical patterns—searches that tend to precede correct answers—but it does not learn that some searches are pointless.",
+      "HiPRAG adds a separate reward signal for search decisions. Every time the agent decides to search, the system checks: was that search necessary? If yes, add a bonus. If no, subtract. Every time the agent decides not to search, the system checks: was that skip correct? If yes, add a bonus. If no, subtract. This creates an additional training pressure that directly penalizes wasteful searches and rewards smart skips. Over time, the agent learns to distinguish necessary searches from noise, because now it is explicitly rewarded for doing so. The final-answer reward keeps it honest about correctness; the process reward keeps it honest about efficiency."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Agent trajectory: sequence of search and reasoning steps"
+        },
+        {
+          "t": "step",
+          "s": "Decompose into discrete steps: search decision, search execution, belief update, next choice",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Grade each step: necessary or wasteful, correct or wrong",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Compute hierarchical reward: outcome bonus plus process bonus (fraction of correct decisions)",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Boosted signal guides training toward efficiency and accuracy"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The hierarchical reward equation",
+    "words": "Total reward equals the outcome reward for the final answer, plus a bonus based on the fraction of search steps the agent got right.",
+    "equation": "R_total = R_outcome + alpha * R_process\nR_process = (correct_searches + correct_skips) / total_steps",
+    "symbols": [
+      ["R_total", "The final training signal: how much to reward or penalize this trajectory"],
+      ["R_outcome", "The grade on the final answer: 1 if correct, 0 if wrong"],
+      ["R_process", "The process reward: fraction of search decisions that were correct"],
+      ["correct_searches", "Number of searches that were marked necessary and executed"],
+      ["correct_skips", "Number of non-searches that were marked unnecessary"],
+      ["total_steps", "Total number of search/non-search decisions the agent made"],
+      ["alpha", "How much to weight process reward relative to outcome reward (tunable hyperparameter)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "An agent makes 10 search/skip decisions on one question.",
+        "4 searches were necessary and the agent did them: +4 correct decisions.",
+        "3 searches were unnecessary and the agent skipped them: +3 correct decisions.",
+        "3 searches were necessary but the agent missed them: +0 correct decisions.",
+        "R_process = (4 + 3) / 10 = 0.7.",
+        "If R_outcome = 1 (final answer correct) and alpha = 1.0:",
+        "R_total = 1.0 + 1.0 * 0.7 = 1.7.",
+        "Same outcome, but high process reward because the agent chose smartly.",
+        "Compare: agent reaches same right answer via lucky guesses with R_process = 0.3:",
+        "R_total = 1.0 + 1.0 * 0.3 = 1.3 — lower reward for sloppy decisions."
+      ]
+    },
+    "note": "The agent now earns two types of credit: being right at the end, and being smart at each step in between."
+  },
+  "bars": {
+    "h2": "Search efficiency before and after",
+    "charts": [
+      {
+        "title": "Old outcome-only training",
+        "rows": [
+          ["Accuracy on questions", 64, "good"],
+          ["Over-search rate (wasteful)", 27, "bad"],
+          ["Under-search rate (missed)", 12, "bad"],
+          ["Average searches per question", 8.2, "bad"]
+        ],
+        "note": "The agent gets the answer right enough, but wastes searches and misses information."
+      },
+      {
+        "title": "HiPRAG with process rewards",
+        "rows": [
+          ["Accuracy on questions", 67, "good"],
+          ["Over-search rate (wasteful)", 2, "good"],
+          ["Under-search rate (missed)", 4, "good"],
+          ["Average searches per question", 3.1, "good"]
+        ],
+        "note": "Slightly better accuracy, but dramatically more efficient—less waste, fewer missed opportunities, fewer total searches, because the process reward directly penalizes wasteful searches and rewards smart skips."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Mislabeling search necessity.",
+        "html": "If the system incorrectly marks a necessary search as wasteful (or vice versa), it trains the agent to make the wrong decision. This requires the necessity-detection system itself to be accurate. If ground truth is noisy or incomplete, the process reward backfires."
+      },
+      {
+        "warn": true,
+        "b": "Process reward and outcome reward conflict.",
+        "html": "Suppose the agent finds the right answer via searches the system marked unnecessary, or finds the wrong answer despite 'correct' search choices. The two rewards pull in different directions. If alpha is too high, the agent optimizes for process score instead of correctness."
+      },
+      {
+        "warn": true,
+        "b": "Generalization to new question types.",
+        "html": "What counts as a necessary search depends on the task. A search that is wasteful for factoid questions might be critical for reasoning questions. If the agent is trained on one type, the learned efficiency patterns may not transfer."
+      },
+      {
+        "warn": false,
+        "b": "Done right.",
+        "html": "When search necessity is labeled accurately, alpha is set to balance both rewards, and the agent is tested on question types similar to training, HiPRAG reduces waste without sacrificing accuracy."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple question-answering agent with a small knowledge base. Give it a set of test questions. For each question, track: (1) Did the agent reach the correct answer? (2) For each search the agent performed, was that search information actually used in the final reasoning? (3) How many unnecessary searches did it do? Train two versions: one with outcome reward only, and one with HiPRAG (outcome plus process reward). Compare the metrics."
+    ],
+    "metric_eq": "efficiency_gain = (over_search_baseline - over_search_hiprag) / over_search_baseline; accuracy_delta = accuracy_hiprag - accuracy_baseline",
+    "closing": "The demo must make it unmissable that the agent learns to search less while staying just as accurate or better—not by luck, but because it learned which searches matter."
+  }
+}
