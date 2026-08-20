@@ -1,0 +1,219 @@
+{
+  "slug": "icml-or-ofzt8hcxmw",
+  "title": "Semantic Impact-Driven Visual Scheduling in Vision-Language Models",
+  "family": "Multimodal",
+  "one_liner": "Keep only the visual cache entries that still change the model's next-word choice, so long visual inputs stop paying full cost at every decoding step.",
+  "lead": "A vision-language model generates text one step at a time while carrying a large visual cache from the image. That cache is expensive because every new word prediction can read from many visual entries even when most of them no longer matter. Existing pruning rules often inspect attention (the weighting rule the model uses to decide which earlier positions to read from), but attention weights are only an indirect signal. This paper asks a stricter question: which visual entries actually change the next-word distribution (the weighted probabilities over the next output words)? Its answer is a training-free method that builds a semantic lens from the current top candidate words, measures how much the visual input shifts the hidden state toward those candidate meanings, and keeps only the visual cache entries with large measured impact.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why visual image pieces become wasteful during decoding",
+    "paras": [
+      "A vision-language model may receive hundreds or thousands of visual tokens (small learned pieces of the image representation) before it writes the answer. During decoding, every new word can still attend to that whole visual memory even after the text context has already narrowed the relevant part of the image. This creates latency because the model keeps paying for visual context that no longer changes the decision.",
+      "A common shortcut is to look at internal attention maps and keep the entries with large weights. That can fail because a large weight does not guarantee a large effect on the output. A visual feature may receive attention yet still move the hidden state in a direction that does not change which word is chosen. The real question is causal at the next prediction step: if this visual information were removed, would the next-word probabilities move enough to change the decision?"
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Estimate visual importance by measuring how much each visual entry changes the model's current semantic decision, then schedule only the impactful entries into the cache."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Large visual cache arrives",
+        "viz": "box",
+        "viz_args": "many image-derived cache entries stay available during text generation",
+        "caption": "The model starts with more visual memory than most decoding steps still need."
+      },
+      {
+        "title": "2. Attention is not enough",
+        "viz": "weights",
+        "viz_args": [["high weight, low effect", 58], ["high weight, high effect", 79], ["low weight, low effect", 12], ["medium weight, high effect", 73], ["high weight, low effect", 51], ["low weight, high effect", 67]],
+        "caption": "Internal read weights do not directly tell you which visual entries change the answer."
+      },
+      {
+        "title": "3. Build semantic lens",
+        "viz": "box",
+        "viz_args": "top candidate word embeddings -> orthogonal basis",
+        "caption": "The lens defines the semantic directions that matter for the current next-word decision."
+      },
+      {
+        "title": "4. Measure impact of each visual entry",
+        "viz": "weights",
+        "viz_args": [["drop", 15], ["keep", 82], ["drop", 9], ["keep", 76], ["drop", 18], ["keep", 71]],
+        "caption": "Entries stay only when their hidden-state effect projects strongly onto the active semantic directions."
+      },
+      {
+        "title": "5. Decode with smaller cache",
+        "viz": "plain",
+        "caption": "The model keeps most of its answer quality because it preserved the visual entries that still affect the prediction."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Read the current top candidate words.",
+        "text": "At selected decoding steps, take the top-K next-word candidates because those candidates define the decision the model is about to make."
+      },
+      {
+        "b": "Construct a semantic basis.",
+        "text": "Use the candidate word embeddings (the learned lists of numbers for those words) to build orthogonal semantic directions so overlapping candidate meanings are separated before scoring visual impact."
+      },
+      {
+        "b": "Measure visual-induced state change.",
+        "text": "Compare hidden states with and without the visual contribution so the method isolates what the image is adding at the current step."
+      },
+      {
+        "b": "Project the change onto the semantic basis.",
+        "text": "Score each visual cache entry by how strongly its state change aligns with the current candidate-word directions because alignment with those directions is what can alter the next-word probabilities."
+      },
+      {
+        "b": "Schedule the cache.",
+        "text": "Keep high-impact visual entries and drop low-impact ones until the next refresh interval, which cuts decoding cost because future steps read from a smaller visual memory."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the criterion for visual pruning. Instead of ranking visual memory by internal interaction signals, it ranks memory by measured effect on the current output decision."
+    ],
+    "object": "the rule used to keep or remove visual cache entries during decoding"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "semantic impact of one visual cache entry on the next-word decision",
+    "paras": [
+      "The hidden quantity is not how much the model reads from a visual entry, but how much that entry pushes the hidden state toward one candidate word rather than another. Two entries can receive similar attention weights while one of them changes the relative scores of the top candidates and the other changes almost nothing important.",
+      "The semantic lens makes that quantity measurable. By building a basis from the current top candidate word embeddings, the method asks whether the visual-induced hidden-state change has components along the exact semantic directions that distinguish the candidate outputs. A large projection means the entry can change the next-word distribution. A small projection means the entry is mostly irrelevant at that step even if internal attention remains nonzero."
+    ],
+    "heat": {
+      "cells": [["object identity", 5, true], ["background patch", 1, false], ["counting cue", 4, true], ["empty border", 1, false], ["text region", 5, true], ["repeated texture", 1, false], ["action cue", 4, true], ["old irrelevant detail", 1, false], ["color cue", 3, false], ["spatial relation cue", 4, true], ["decorative region", 1, false], ["answer-critical crop", 5, true]],
+      "caption": "Darker cells mark visual entries whose state changes point strongly toward the active candidate words."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Ask whether removing this visual entry would noticeably change which next word the model is about to choose."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "SIVS estimates importance from the projection of visual-induced hidden-state variation onto a basis built from the current top candidate word embeddings."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the semantic lens gives a better pruning signal",
+    "paras": [
+      "The next-word choice is made in the space of candidate word meanings, not in the raw space of attention scores. A pruning rule should therefore ask how visual information moves the hidden state relative to those candidate meanings. The semantic lens does exactly that because it derives its basis from the current top candidates instead of from generic visual activity.",
+      "The orthogonalization step matters because top candidate words often have overlapping embeddings. Without separating those directions, one candidate can dominate the score simply because its embedding overlaps strongly with another candidate. Orthogonal directions turn the question into a cleaner measurement of how much the visual signal supports distinct alternatives.",
+      "The projection step matters because hidden-state variation can contain many components unrelated to the imminent decision. The method keeps the components that align with candidate-word directions and ignores the rest. That yields aggressive compression without a training step because the scoring rule is tied directly to the output choice the model is about to make."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "current hidden state plus large visual cache"
+        },
+        {
+          "t": "step",
+          "s": "extract top candidate next words",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "build orthogonal semantic basis from their embeddings",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "measure hidden-state change caused by each visual entry"
+        },
+        {
+          "t": "step",
+          "s": "project that change onto the semantic basis and rank entries",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "smaller visual cache tied to the current prediction"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Score one visual entry by semantic projection magnitude",
+    "words": "A compact summary is to measure the hidden-state change caused by one visual entry and then add up its projection strengths on the semantic basis built from the current top candidate words.",
+    "equation": "impact(v) = sum_j | q_j^T * delta_h(v) |",
+    "symbols": [
+      ["v", "one visual cache entry"],
+      ["delta_h(v)", "the hidden-state change caused by that visual entry at the current decoding step"],
+      ["q_j", "the j-th orthogonal semantic basis vector built from top candidate word embeddings"],
+      ["q_j^T * delta_h(v)", "the signed projection of the visual-induced change onto semantic direction j"],
+      ["impact(v)", "the total semantic influence score used for scheduling"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the basis has three directions tied to the current candidate words.",
+        "One visual entry changes the hidden state so its projections are 0.40, 0.05, and 0.02.",
+        "Its impact score is 0.47.",
+        "Another entry produces projections 0.03, 0.01, and 0.00, so its score is 0.04.",
+        "The first entry stays in the cache because it can still move the next-word decision, while the second entry is a strong candidate for removal."
+      ]
+    },
+    "note": "The paper contains more implementation detail, but the main idea is this direct projection test: keep the visual entries whose state changes point along active candidate-word directions."
+  },
+  "bars": {
+    "h2": "What the reported gains mean",
+    "charts": [
+      {
+        "title": "Before scheduling",
+        "rows": [["visual cache kept", 100, "bad"], ["relative answer quality", 100, "good"], ["decoding cost per step", 100, "bad"]],
+        "note": "The baseline pays the full visual-memory cost even after many entries stop affecting the next-word choice."
+      },
+      {
+        "title": "With SIVS",
+        "rows": [["visual cache kept", 13, "good"], ["relative answer quality", 99, "good"], ["decoding cost per step", 23, "good"]],
+        "note": "The compression is large because most visual entries have low semantic impact after the text context has narrowed the decision."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Top-K candidates can omit the later-correct word.",
+        "html": "If the current candidate set misses the word that should win after more visual evidence is considered, the semantic basis is incomplete and the method may prune a visual entry that would have mattered."
+      },
+      {
+        "warn": true,
+        "b": "Refresh intervals can be too sparse.",
+        "html": "If the cache is not rescored often enough, the model can carry an outdated keep-or-drop decision into a later decoding step where the relevant visual evidence has changed."
+      },
+      {
+        "warn": true,
+        "b": "Small semantic shifts can still matter near ties.",
+        "html": "When two candidate words have nearly equal probability, a visually induced hidden-state change with modest magnitude can flip the ranking. A hard threshold can then remove an entry that appears weak in absolute score but is decisive for a close competition."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works best when the candidate set is broad enough, the refresh schedule matches how quickly the text context changes, and the pruning threshold is checked against near-tie cases."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a decoder that answers visual questions while carrying a visual cache. At fixed intervals, compute the top candidate words, form the semantic basis from their embeddings, score each visual cache entry by its projected hidden-state change, and prune the lowest-impact entries.",
+      "The demo should log answer quality, average kept cache size, and latency. It should also include close-decision examples such as counting or reading text, because those cases show whether the projection score is really preserving the visual evidence that changes the next-word choice."
+    ],
+    "metric_eq": "compression = 1 - kept_visual_entries / total_visual_entries",
+    "closing": "A convincing result is high compression with nearly unchanged answer quality because that means the retained visual cache still contains the entries that move the current semantic decision."
+  }
+}

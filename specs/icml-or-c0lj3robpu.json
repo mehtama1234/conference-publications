@@ -1,0 +1,214 @@
+{
+  "slug": "icml-or-c0lj3robpu",
+  "title": "SPARC: Separating Perception And Reasoning Circuits for Test-time Scaling of VLMs",
+  "family": "Multimodal",
+  "one_liner": "Split seeing from reasoning so a model can spend compute where the bottleneck actually is while generating an answer.",
+  "lead": "A vision-language model often answers a question by mixing two jobs in one long text chain: first determine what parts of the image matter, then reason over those parts. When those jobs are entangled, one small seeing error can pollute every later reasoning step. SPARC separates them. It runs an explicit visual search stage to localize question-relevant regions, then runs reasoning on the resulting evidence. This lets the system scale perception and reasoning independently, which matters because some failures come from missing the right region while others come from weak multi-step reasoning.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why one long reasoning chain breaks visual question answering",
+    "paras": [
+      "In a monolithic vision-language model, image patches, meaning small regions converted to model inputs, and reasoning tokens, meaning text-side steps in the answer chain, all live in one context. The model can spend hundreds of tokens describing possibilities before it has even locked onto the relevant object. If the early guess about location is wrong, the later chain reasons carefully about the wrong evidence.",
+      "This becomes worse under test-time scaling, meaning the practice of giving the model more compute during answer generation only when a problem looks hard. In a monolithic system, extra compute extends the same mixed chain. That spends more budget on already-corrupted context instead of separately fixing perception or separately extending reasoning. The result is long outputs, brittle answers, and poor control over where the compute went."
+    ],
+    "callout": {
+      "b": "The paper's move in one sentence.",
+      "html": "Make the model search the image first and reason second so perception and reasoning can each receive their own compute budget."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. A visual question arrives",
+        "viz": "box",
+        "viz_args": "Question: find the relevant region before answering.",
+        "caption": "The task may depend on one small part of a large image."
+      },
+      {
+        "title": "2. Monolithic chains mix jobs",
+        "viz": "weights",
+        "viz_args": [["image search", 32], ["reasoning text", 78], ["error carryover", 74], ["region focus", 29], ["token cost", 81], ["answer stability", 35]],
+        "caption": "The model spends many tokens talking while still uncertain about what it should look at."
+      },
+      {
+        "title": "3. SPARC runs visual search first",
+        "viz": "box",
+        "viz_args": "Localize candidate regions that matter for the question.",
+        "caption": "Perception becomes an explicit stage rather than a hidden side effect of chain-of-thought."
+      },
+      {
+        "title": "4. Reason over selected evidence",
+        "viz": "weights",
+        "viz_args": [["image search", 76], ["reasoning text", 63], ["error carryover", 29], ["region focus", 82], ["token cost", 41], ["answer stability", 74]],
+        "caption": "The reasoning stage receives compressed, question-relevant evidence, so it uses tokens on answer generation rather than on search."
+      },
+      {
+        "title": "5. Scale each stage independently",
+        "viz": "plain",
+        "caption": "Hard changes in image statistics can trigger more visual search without paying for an equally large reasoning chain."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Read the question and coarse image",
+        "text": "Start with a low-resolution global pass so the model can scan the whole scene with fewer visual tokens because coarse search is enough to rule out most irrelevant regions."
+      },
+      {
+        "b": "Run explicit visual search",
+        "text": "Propose image regions that are likely to contain evidence for the question because the answer should depend on localized visual facts."
+      },
+      {
+        "b": "Allocate high resolution only to chosen regions",
+        "text": "Crop or revisit the selected regions at finer detail so compute is spent where ambiguity is highest."
+      },
+      {
+        "b": "Pass the retrieved evidence to the reasoning stage",
+        "text": "Condition the answer module on the selected regions instead of on the full raw image context."
+      },
+      {
+        "b": "Scale either stage when needed",
+        "text": "Increase search depth, reasoning depth, or both depending on which stage is limiting end-to-end accuracy."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the answer-generation graph. It separates the visual evidence-gathering pathway from the answer-generation pathway so errors and compute budgets can be managed stage by stage."
+    ],
+    "object": "the test-time computation pipeline"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "whether the answer failure came from missing evidence or from weak reasoning over correct evidence",
+    "paras": [
+      "A wrong answer in a vision-language model can come from two distinct causes. The model may have looked at the wrong region, or it may have looked at the right region and still failed to combine the facts correctly. A monolithic chain hides that difference because both errors appear only as a bad final answer.",
+      "SPARC exposes that hidden split. Once the system produces explicit region selections, developers can inspect whether the evidence was present before reasoning began. That matters because extra perception compute helps only the first kind of error, while extra reasoning compute helps only the second kind."
+    ],
+    "heat": {
+      "cells": [["global scan", 4, true], ["region proposal", 5, true], ["high-res crop", 5, true], ["reasoning chain", 4, true], ["missed evidence", 1, false], ["wrong deduction", 1, false], ["token budget", 4, true], ["image-statistic shift", 5, true], ["visual bottleneck", 5, true], ["logic bottleneck", 5, true], ["full-image context", 2, false], ["stage diagnosis", 5, true]],
+      "caption": "Dark cells mark the parts SPARC makes explicit so the system can diagnose which stage deserves more compute."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The key question is whether the model failed because it did not inspect the right part of the image or because it could not reason from the right evidence."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "SPARC turns visual grounding into an explicit intermediate product so the bottleneck between perception and reasoning can be identified and scaled separately."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why separation improves test-time scaling",
+    "paras": [
+      "Separating perception from reasoning reduces error cascades because the reasoning stage receives a curated evidence set instead of a raw scene plus a speculative text chain. If visual search is wrong, that mistake is visible early and can be corrected with more region proposals or higher resolution. In a monolithic chain, the same mistake is buried inside many later tokens.",
+      "The method also lowers token cost because most questions do not need high-resolution processing over the entire image. A low-resolution scan can find candidate regions, and only those regions are revisited in detail. That preserves important local information while avoiding the cost of converting every patch at full detail into context tokens.",
+      "The largest benefit is control. Test-time scaling becomes a targeted intervention rather than a uniform lengthening of the entire answer-generation trace. Under a shift in image statistics, the system can spend more budget on perception because the visual appearance changed. On logic-heavy questions with clear visual evidence, it can spend more budget on reasoning because the visual grounding is already sound."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Question and image"
+        },
+        {
+          "t": "step",
+          "s": "Low-resolution global search for candidate evidence",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Select question-relevant regions"
+        },
+        {
+          "t": "step",
+          "s": "Run high-resolution inspection only on selected regions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Reason over selected evidence and produce answer"
+        },
+        {
+          "t": "output",
+          "s": "Answer plus a visible trace of which stage consumed the budget"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Separate the compute budget",
+    "words": "A compact way to describe SPARC is to split inference cost into a perception term and a reasoning term and allocate them independently.",
+    "equation": "C_total = C_perception + C_reasoning",
+    "symbols": [
+      ["C_total", "total inference cost for one question"],
+      ["C_perception", "cost of scanning the image, proposing regions, and revisiting them at higher resolution"],
+      ["C_reasoning", "cost of the text-side reasoning stage that consumes the selected evidence"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a monolithic system spends 200 visual tokens on the full image and 120 reasoning tokens, for total cost 320.",
+        "A SPARC-style run might spend 40 low-resolution tokens to scan globally, 20 high-resolution tokens on two regions, and 80 reasoning tokens on the selected evidence, for total cost 140.",
+        "The lower total matters because the model kept detailed processing only where the question needed it."
+      ]
+    },
+    "note": "The paper's exact accounting can use token counts and module calls, but the core idea is the same: the two stages are separable budget terms."
+  },
+  "bars": {
+    "h2": "What the reported gains mean",
+    "charts": [
+      {
+        "title": "Monolithic VLM scaling",
+        "rows": [["grounding quality", 58, "bad"], ["reasoning quality", 63, "good"], ["token efficiency", 22, "bad"]],
+        "note": "Extra chain length helps only partially because the system still spends budget in a mixed and poorly diagnosed context."
+      },
+      {
+        "title": "SPARC",
+        "rows": [["grounding quality", 71, "good"], ["reasoning quality", 69, "good"], ["token efficiency", 78, "good"]],
+        "note": "The gains come from isolating region search and then reasoning over a smaller evidence set."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The search stage can prune away needed evidence.",
+        "html": "If the relevant region is never proposed, reasoning has no path to recovery because the answer module only sees the selected evidence."
+      },
+      {
+        "warn": true,
+        "b": "Reasoning may depend on global context.",
+        "html": "Some questions require relations across distant regions. If compression is too aggressive, the selected evidence can omit global cues that the final deduction needs."
+      },
+      {
+        "warn": true,
+        "b": "Stage interfaces can become brittle.",
+        "html": "If the search module produces region summaries in a format the reasoning module does not use well, separation can add interface loss instead of reducing confusion."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method is strongest when questions hinge on localized evidence and when developers need control over whether added compute should improve seeing or improve step-by-step reasoning, because the two stages can then be diagnosed and scaled separately."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a document or chart question-answering demo with two pipelines. The baseline reads the whole image and answers in one chain. The SPARC version first selects relevant panels or table cells using a search module, then answers from those regions.",
+      "Track answer accuracy, number of visual tokens processed, and whether failures came from wrong region selection or wrong reasoning. The demo should show that the modular version keeps a clearer error breakdown because the search output is explicit, and it can improve one stage without rewriting the other because perception and reasoning are separate modules."
+    ],
+    "metric_eq": "efficiency_score = answer_acc / visual_tokens_used",
+    "closing": "The important output is not only the final answer but also a record of where the system spent compute and which stage limited the result."
+  }
+}

@@ -1,0 +1,213 @@
+{
+  "slug": "icml-or-sq6odlzwfb",
+  "title": "Mitigating Mask Prior Drift and Positional Attention Collapse in Large Diffusion Vision-Language Models",
+  "family": "Multimodal",
+  "one_liner": "Repair long-form decoding in diffusion vision-language models by suppressing the shared mask-token bias and rescaling positional encoding so visual evidence stays readable across unmasking steps.",
+  "lead": "Large diffusion vision-language models generate many text positions in parallel by starting from mask tokens (special placeholder tokens that mean 'content not decided yet') and repeatedly replacing them. This decoding style is fast, but it introduces two structural failures during long responses. First, many undecided positions begin from the same mask-token prior (the shared default hidden-state direction inherited from the mask token), so their representations drift toward a common direction and produce repetitive text. Second, the positional read bias becomes misaligned with iterative unmasking, so later decoding steps under-read the informative visual tokens. This paper identifies both failures and fixes them without retraining the model by adding Mask Prior Suppression and Monotonic RoPE Scaling during decoding.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why parallel masked decoding degrades on long outputs",
+    "paras": [
+      "In a left-to-right decoder, each new token is generated from a growing prefix, so resolved words break symmetry between positions as decoding proceeds. In a diffusion language decoder, many positions remain masked and are refined together over multiple rounds. That means unresolved positions keep inheriting information from the same mask-token state for longer.",
+      "This produces repetition because hidden states at different positions drift toward the same prior direction instead of differentiating into distinct content. At the same time, positional attention (the weighting rule that decides which positions to read from, combined with position-dependent bias) was designed for ordered sequence processing, not for iterative unmasking where positions are progressively resolved out of step with their index. The result is weaker grounding to image content during long generation, since informative visual tokens receive less effective attention exactly when text positions need fresh external evidence."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "During decoding, subtract the shared mask-token bias from unresolved positions and rescale rotary position encoding monotonically so text positions keep reading useful visual evidence instead of collapsing toward repetition."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Parallel masked decoding begins",
+        "viz": "box",
+        "viz_args": "many text positions start from the same mask token",
+        "caption": "Parallel decoding introduces a shared initial state across many unresolved positions."
+      },
+      {
+        "title": "2. Hidden states drift together",
+        "viz": "weights",
+        "viz_args": [["position 1", 62], ["position 2", 63], ["position 3", 61], ["position 4", 64], ["position 5", 62], ["position 6", 63]],
+        "caption": "When positions inherit the same bias for too long, their representations become too similar and repetition appears."
+      },
+      {
+        "title": "3. Visual reads weaken over rounds",
+        "viz": "weights",
+        "viz_args": [["early visual access", 78], ["middle visual access", 49], ["late visual access", 22], ["late text-text bias", 71], ["image cue missed", 19], ["visual grounding weakens", 24]],
+        "caption": "The positional scheme stops matching the iterative unmasking schedule, so visual evidence is underused later."
+      },
+      {
+        "title": "4. Add two decoding fixes",
+        "viz": "box",
+        "viz_args": "mask prior suppression + monotonic RoPE scaling",
+        "caption": "One fix separates unresolved positions, and the other restores useful position bias across rounds."
+      },
+      {
+        "title": "5. Long responses stay grounded",
+        "viz": "plain",
+        "caption": "The model writes less repetitive text and preserves image-conditioned detail deeper into the sequence."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Inspect unresolved text positions.",
+        "text": "At each diffusion decoding round, identify the positions that still carry mask-token influence because those are the positions most at risk of collapsing toward shared content."
+      },
+      {
+        "b": "Suppress the mask prior.",
+        "text": "Remove or downweight the common mask-token direction from their hidden states so unresolved positions can separate according to context instead of copying one shared template."
+      },
+      {
+        "b": "Rescale rotary position encoding.",
+        "text": "Apply Monotonic RoPE Scaling to the position encoding because the raw position bias was designed for ordered decoding, while iterative unmasking needs a schedule that tracks which positions are still unresolved."
+      },
+      {
+        "b": "Recompute attention with the adjusted states.",
+        "text": "Use the modified hidden states and position encoding to update token-token and token-image interactions, which restores access to informative visual features during later rounds."
+      },
+      {
+        "b": "Repeat until all positions are resolved.",
+        "text": "Continue the corrected diffusion steps so long-form outputs can diversify across positions and remain visually grounded."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the decoding rule of diffusion vision-language models. It leaves model weights untouched and modifies the hidden-state and positional treatment applied during iterative unmasking."
+    ],
+    "object": "the test-time decoding dynamics of masked diffusion language generation"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "how much unresolved positions are pulled toward shared mask bias instead of distinct content",
+    "paras": [
+      "The hidden quantity is the balance between shared mask bias and content-specific signal at each unresolved position. When the shared component dominates, many positions carry nearly the same hidden direction, so the decoder has little basis for writing different words at different places.",
+      "A second linked hidden quantity is the usable strength of visual evidence across rounds. If the positional scheme increasingly favors text-side self-reinforcement over image reads, the decoder will keep refining text from its own partial output rather than from the picture. The two failures interact: shared mask bias promotes repetition, and weakened image access removes a source of differentiation that could have broken that repetition."
+    ],
+    "heat": {
+      "cells": [["shared mask bias", 5, true], ["content-specific signal", 2, false], ["late-round visual read", 1, false], ["early-round visual read", 4, true], ["position collapse", 5, true], ["distinct phrase formation", 2, false], ["text self-reinforcement", 4, true], ["image-conditioned correction", 3, false], ["resolved token diversity", 2, false], ["late repetition risk", 5, true], ["RoPE alignment", 4, true], ["visual grounding retention", 4, true]],
+      "caption": "Darker cells mark forces that dominate when long-form diffusion decoding starts to repeat and lose image grounding."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Ask whether an unresolved position is being driven by its own content evidence or by the generic mask-token template, and whether it can still read useful image information."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper analyzes hidden-state drift toward a mask prior direction and a round-dependent collapse of position-biased visual attention."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the two decoding fixes address the two observed failures",
+    "paras": [
+      "Mask Prior Suppression works because the repetition problem starts from a shared initialization bias. If many unresolved positions inherit the same dominant hidden component, the decoder keeps proposing similar updates at different positions. Subtracting or damping that component reduces the coupling between positions, so local context and image evidence can differentiate them.",
+      "Monotonic RoPE Scaling works because rotary position encoding determines how similarity between positions changes with distance and order. In iterative unmasking, the semantic maturity of a position no longer matches its raw index: a later position may already be resolved while an earlier one is still masked, or the reverse. A monotonic rescaling makes the positional bias evolve with the decoding schedule, so image-conditioned reads do not fade in a way that is inconsistent with which positions still need information.",
+      "The fixes reinforce each other. Suppressing the shared mask bias gives positions room to diverge. Preserving usable visual attention supplies external evidence that drives that divergence toward image-grounded content instead of random variation. Since both interventions act at test time, the method can be applied to existing diffusion vision-language models without retraining."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "masked diffusion decoding state plus image features"
+        },
+        {
+          "t": "step",
+          "s": "estimate unresolved positions dominated by mask prior",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "suppress shared mask-token direction",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "rescale rotary position encoding monotonically",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "later decoding rounds with more distinct and more image-grounded text states"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Write the corrected hidden state as content minus shared mask bias",
+    "words": "A simple view is to decompose an unresolved hidden state into its current value minus a scaled shared mask direction before the next attention update.",
+    "equation": "h'_t = h_t - beta_t * m",
+    "symbols": [
+      ["h_t", "the hidden state at one unresolved text position during diffusion round t"],
+      ["m", "the shared mask-token direction estimated from the model's mask representation"],
+      ["beta_t", "the suppression strength used at round t"],
+      ["h'_t", "the corrected hidden state after mask prior suppression"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose two unresolved positions have hidden states that differ only slightly because both still contain a large copy of the mask direction.",
+        "If beta_t is set so that half of the shared mask component is removed, the remaining hidden states differ more in their context-specific parts.",
+        "Those remaining differences then produce different attention updates and different candidate words.",
+        "Without the subtraction, the next round would keep pushing both positions toward similar content."
+      ]
+    },
+    "note": "The second intervention changes the positional encoding used inside attention. The main structural idea is the same: reduce shared bias and restore position handling that matches iterative unmasking."
+  },
+  "bars": {
+    "h2": "What the reported gains mean",
+    "charts": [
+      {
+        "title": "Baseline long-form diffusion VLM",
+        "rows": [["repetition frequency", 71, "bad"], ["visual grounding retention", 34, "bad"], ["extra training needed", 0, "good"]],
+        "note": "The model is already trained, but long responses degrade because unresolved positions collapse toward shared content and image reads weaken."
+      },
+      {
+        "title": "With decoding fixes",
+        "rows": [["repetition frequency", 38, "good"], ["visual grounding retention", 63, "good"], ["extra training needed", 0, "good"]],
+        "note": "The gains matter because they come from test-time corrections rather than a new training run."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Over-suppressing the mask prior can remove useful uncertainty structure.",
+        "html": "The mask token is not purely harmful. If the suppression strength is too large, the decoder can lose a stabilizing default state and produce noisy updates."
+      },
+      {
+        "warn": true,
+        "b": "One rescaling schedule may not fit every architecture.",
+        "html": "Different diffusion vision-language models can use distinct layer depths, token layouts, and unmasking schedules. A fixed monotonic scaling rule may under-correct one model and over-correct another."
+      },
+      {
+        "warn": true,
+        "b": "Short outputs may not need the fix.",
+        "html": "When only a few rounds are needed or the answer is short, the original model may not show strong prior drift. In that case the added decoding logic yields little change."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method is strongest on long-form generation where repeated mask inheritance and late-round visual under-reading are visible, and the suppression and scaling strengths are tuned per architecture."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Run a diffusion vision-language model on long image description prompts and log hidden-state similarity across unresolved positions over decoding rounds. Then add mask prior suppression and monotonic RoPE scaling and repeat the run.",
+      "The demo should track repetition rate, attention mass on image tokens, and image-grounded factual details in the output. It should also show the normalized dot-product similarity between unresolved positions, because that directly tests whether the shared mask direction is no longer dominating the later rounds."
+    ],
+    "metric_eq": "drift_score = average_pairwise_similarity(unresolved_hidden_states)",
+    "closing": "A convincing result is lower drift score together with stronger image-token reading and fewer repeated phrases, because that shows the fixes addressed the diagnosed decoding failures rather than merely changing style."
+  }
+}
