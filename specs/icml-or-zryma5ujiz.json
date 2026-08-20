@@ -1,0 +1,215 @@
+{
+  "slug": "icml-or-zryma5ujiz",
+  "title": "AffIn-Space: Learning Affine-Invariant Representations for 3D Spatial Understanding with MLLMs",
+  "family": "Multimodal",
+  "one_liner": "Remove viewpoint and scale effects from 3D scene features so a multimodal language model can answer spatial questions from the scene itself rather than from the camera pose.",
+  "lead": "A multimodal language model that reasons about 3D scenes often works only from the viewpoints it has seen before. Move the camera, zoom in, or change viewing angle, and the model's internal feature representation can drift even though the underlying room and object arrangement did not change. That is a serious problem for spatial tasks such as grounding, captioning, and question answering, because the answer should depend on which object is left of the chair or inside the cabinet, not on the camera that observed it. AffIn-Space tries to separate intrinsic scene structure from pose-dependent distortion in two explicit stages: first align features to a canonical form through affine resampling, then project hidden states away from pose directions inside the multimodal model.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why spatial understanding is fragile under view changes",
+    "paras": [
+      "Many visual encoders process a scene through the pixel grid of the current camera image. That means the representation changes when the camera rotates, shifts, or changes distance, because the same object now occupies different image regions and scales. If the model then answers a 3D question from those unstable features, part of its answer depends on the camera transform rather than only on object arrangement.",
+      "Some systems hope that enough data will make the model ignore those changes. The paper argues that this is unreliable because the nuisance signal is built into the representation pathway itself. If pose information is entangled with scene structure all the way through the network, the model has to unlearn that entanglement from downstream supervision alone."
+    ],
+    "callout": {
+      "b": "The paper's move in one sentence.",
+      "html": "Explicitly align scene features before fusion and explicitly remove pose directions inside the model so the remaining representation keeps the scene content while discarding camera-dependent variation."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Same room, new camera",
+        "viz": "box",
+        "viz_args": "scene fixed | camera moved",
+        "caption": "The physical scene is unchanged, but the observed image changes a lot."
+      },
+      {
+        "title": "2. Raw features drift",
+        "viz": "weights",
+        "viz_args": [["chair", 38], ["table", 52], ["cabinet", 44], ["pose noise", 76], ["distance shift", 63], ["crop effect", 58]],
+        "caption": "Viewpoint and scale changes leak into the feature values."
+      },
+      {
+        "title": "3. Resample to canonical form",
+        "viz": "box",
+        "viz_args": "undo affine transform before fusion",
+        "caption": "The encoder first aligns the scene features into one reference pose."
+      },
+      {
+        "title": "4. Project away pose directions",
+        "viz": "weights",
+        "viz_args": [["scene relation", 72], ["object identity", 68], ["pose direction", 18], ["distance direction", 14], ["room layout", 61], ["camera artifact", 12]],
+        "caption": "The hidden state keeps scene content while removing directions tied to camera pose."
+      },
+      {
+        "title": "5. Answer from structure",
+        "viz": "plain",
+        "caption": "Spatial reasoning becomes stable across affine perturbations because the representation depends less on the camera."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Estimate affine factors.",
+        "text": "Extract pose-related quantities such as rotation, translation, and scaling information from the scene observations."
+      },
+      {
+        "b": "Resample features explicitly.",
+        "text": "Warp the 3D features into a canonical coordinate frame before multimodal fusion because early alignment removes pose variation before it spreads downstream."
+      },
+      {
+        "b": "Fuse with the language model.",
+        "text": "Pass the aligned visual features into the multimodal language model for grounding, question answering, or captioning."
+      },
+      {
+        "b": "Project away pose components.",
+        "text": "Use an orthogonal projection, which means subtracting the part of a hidden state that lies along pose-dependent directions, so the hidden state retains less camera information."
+      },
+      {
+        "b": "Reconstruct conditionally.",
+        "text": "Keep a conditional reconstruction path so the system can preserve recoverable scene semantics rather than throwing away all variation indiscriminately."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the internal representation used for spatial tasks. Instead of feeding view-entangled features directly into the multimodal model, it creates a representation that is aligned to a shared coordinate frame and then stripped of pose-dependent components."
+    ],
+    "object": "the visual representation passed into the multimodal language model"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "scene content that survives affine viewpoint changes",
+    "paras": [
+      "The hidden quantity is the part of the representation that should stay the same when the camera changes by an affine transform. An affine transform here means a combination of shift, rotation, shear, or scale changes that preserve straight lines. For spatial tasks, object relations and room structure should remain; only the observation viewpoint should change.",
+      "AffIn-Space tries to isolate that stable part in two stages. Resampling reduces the mismatch at the input feature level. Projection reduces it again at the hidden-state level by removing the pose-aligned component of each vector, where a vector is simply a list of numbers representing the current state. The conditional reconstruction path checks that the remaining state still carries enough scene information to solve the task."
+    ],
+    "heat": {
+      "cells": [["object relation", 5, true], ["camera rotation", 1, false], ["view distance", 1, false], ["room layout", 5, true], ["pixel crop", 1, false], ["canonical feature", 4, true], ["pose direction", 1, false], ["projected hidden state", 4, true], ["scene semantics", 5, true], ["resampling error", 2, false], ["question answer signal", 4, true], ["camera-dependent residue", 1, false]],
+      "caption": "Darker cells mark the information that should remain after camera-dependent variation is removed."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The model should keep facts about where objects are relative to each other and drop facts that only describe how the camera happened to see them."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The target representation is affine-invariant scene structure: hidden states that preserve task-relevant 3D semantics while suppressing components induced by extrinsic pose."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why explicit alignment plus projection works",
+    "paras": [
+      "The first stage matters because many later errors are already baked in before fusion. If the visual encoder outputs different feature patterns for the same scene under two camera poses, the language model receives inconsistent evidence. Explicit resampling attacks that inconsistency early by mapping both observations toward one reference frame. That makes corresponding objects land in more comparable feature locations.",
+      "The second stage matters because resampling is not perfect. Hidden states can still contain camera residue after fusion. Orthogonal projection removes the component of a hidden vector that points along pose-dependent directions. In plain terms, if part of the hidden state can be predicted from camera pose alone, the projection subtracts that part. What remains is more suitable for answering spatial questions because it contains less viewpoint leakage.",
+      "The reconstruction branch prevents over-removal. If the system projected away too much, task-relevant scene information would vanish together with pose information. Conditional reconstruction keeps pressure on the model to preserve the parts needed to recover real scene content. The full method works because alignment reduces pose variation before fusion, projection removes residual pose traces after fusion, and reconstruction guards the useful scene semantics."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "3D scene under an arbitrary camera pose"
+        },
+        {
+          "t": "step",
+          "s": "estimate affine pose factors"
+        },
+        {
+          "t": "step",
+          "s": "resample features into a canonical frame",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "fuse with the multimodal language model"
+        },
+        {
+          "t": "step",
+          "s": "project hidden state away from pose directions",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "pose-reduced representation for spatial tasks"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Project a hidden state off the pose subspace",
+    "words": "A simple summary is that the model subtracts the part of a hidden state that lies in the pose subspace, which is the set of directions associated with camera variation.",
+    "equation": "h_clean = h - P_pose(h)",
+    "symbols": [
+      ["h", "the original hidden state inside the multimodal model"],
+      ["P_pose(h)", "the projection of that hidden state onto pose-dependent directions"],
+      ["h_clean", "the remaining hidden state after pose-dependent components are removed"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose one hidden direction rises whenever the camera moves closer, regardless of which object is present.",
+        "If that direction stays in the state, the answer head can treat zoom level as evidence about the scene.",
+        "Projection estimates that zoom-related component and subtracts it.",
+        "The cleaned state then changes less across camera distance while keeping the directions tied to object relations."
+      ]
+    },
+    "note": "The real method includes the earlier resampling stage and a reconstruction term, but this projection equation captures the central removal step inside the multimodal model."
+  },
+  "bars": {
+    "h2": "What the reported gains mean",
+    "charts": [
+      {
+        "title": "View-entangled spatial model",
+        "rows": [["spatial question accuracy", 52, "bad"], ["stability under affine perturbation", 21, "bad"], ["grounding consistency across views", 29, "bad"]],
+        "note": "Performance drops after viewpoint changes because the representation still carries too much camera information."
+      },
+      {
+        "title": "AffIn-Space",
+        "rows": [["spatial question accuracy", 74, "good"], ["stability under affine perturbation", 79, "good"], ["grounding consistency across views", 76, "good"]],
+        "note": "Performance holds up better because the representation is aligned before fusion and cleaned again inside the model."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Pose estimation can be wrong.",
+        "html": "If the affine factors are estimated poorly, the resampling step can misalign the scene because it warps features toward the wrong canonical frame."
+      },
+      {
+        "warn": true,
+        "b": "Projection can remove useful information.",
+        "html": "Some pose-related directions may also carry scene detail. If the projection basis is too broad, the model may lose object cues together with camera cues."
+      },
+      {
+        "warn": true,
+        "b": "Affine invariance is not the whole problem.",
+        "html": "Real scenes also change through occlusion, lighting, and missing observations. Those effects are not fully handled by affine correction, so the method can still fail when the observation gap is not mainly caused by camera pose."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method works when the canonical alignment is accurate, the projection basis is narrow enough to target pose residue, and reconstruction keeps the cleaned representation tied to real scene content."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small synthetic 3D room with a few objects and render it from many camera poses and distances. Ask fixed spatial questions such as which object is left of the sofa or which item is inside the cabinet. Compare a baseline multimodal model that reads raw scene features with a version that first aligns features to a canonical frame and then projects hidden states away from pose directions.",
+      "The demo should show that answers remain consistent when the camera moves while the scene stays fixed, because the cleaned representation carries object relations more than viewpoint residue."
+    ],
+    "metric_eq": "view_consistency = identical_answers_across_camera_changes / total_repeated_questions",
+    "closing": "A strong result is high view consistency together with good task accuracy, because that means the model kept scene structure instead of memorizing camera-specific feature patterns."
+  }
+}

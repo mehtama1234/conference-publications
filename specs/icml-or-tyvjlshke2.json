@@ -1,0 +1,237 @@
+{
+  "slug": "icml-or-tyvjlshke2",
+  "title": "ModernVBERT: Towards Smaller Visual Document Retrievers",
+  "family": "Multimodal",
+  "one_liner": "ModernVBERT shows that visual document retrieval works better with a compact bidirectional encoder trained for retrieval from the start, not with a large generator repurposed afterward.",
+  "lead": "Visual document retrieval turns an image of a page into a search representation and matches it to a query. Many recent systems reuse very large generative vision-language models for this job. ModernVBERT argues that this reuse is the wrong starting point. Retrieval needs dense page representations, strong contrastive learning, and efficient matching where one page is stored as several vectors, which are lists of numbers, rather than one summary. It does not mainly need generation trained to predict the next token, which is the next text unit in sequence. The paper rebuilds the stack around those needs and ends up with a much smaller model that retrieves better because more of its capacity is spent on ranking and page matching, and it can run on CPU hardware because the encoder stays compact.",
+  "nav": [["theme-multimodal.html", "Multimodal"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Generative vision-language models are not naturally retrieval models",
+    "paras": [
+      "A page retriever needs to map a page image and a text query into comparable representations so that relevant pages end up near the query and irrelevant pages end up far away. A generative model is trained for a different job: predict the next token, which is the next text unit in a sequence. That objective spends capacity on fluent generation, long-range decoding behavior, and language modeling habits that do not directly improve retrieval, because ranking pages does not require the model to practice producing long text continuations.",
+      "The mismatch becomes sharper in multi-vector retrieval, where one document is represented by several vectors, which are lists of numbers, instead of only one summary vector. Multi-vector matching helps because a page often contains several independent pieces of evidence: title, table, figure, caption, and footnote. A generative design with causal masking and decoding-oriented training does not organize those pieces well for retrieval. ModernVBERT starts from the opposite assumption: build a bidirectional encoder whose entire training path serves matching."
+    ],
+    "callout": {
+      "b": "Core claim.",
+      "html": "Document retrieval gets stronger when the architecture and training objective are chosen for matching page content, because direct ranking pressure preserves page evidence that generation-oriented training never has to separate."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Old recipe: reuse a generator",
+        "viz": "box",
+        "viz_args": "large generative VLM -> retrieval head",
+        "caption": "Most earlier systems adapt a generator instead of training an encoder for retrieval."
+      },
+      {
+        "title": "2. Retrieval needs page matching",
+        "viz": "weights",
+        "viz_args": [["title", 58], ["table", 72], ["figure", 61], ["caption", 49], ["body", 43], ["footer", 26]],
+        "caption": "A query may match only one part of the page, so fine-grained representations matter."
+      },
+      {
+        "title": "3. Train an encoder from scratch",
+        "viz": "box",
+        "viz_args": "page image + query -> bidirectional encoder -> retrieval vectors",
+        "caption": "ModernVBERT is designed around encoding and matching rather than generation."
+      },
+      {
+        "title": "4. Use contrastive retrieval training",
+        "viz": "weights",
+        "viz_args": [["positive", 78], ["hard-negative", 66], ["easy-negative", 29], ["multi-vector", 71], ["single-vector", 48], ["cpu", 62]],
+        "caption": "The model learns by pulling matched query-page pairs together and pushing mismatches apart."
+      },
+      {
+        "title": "5. Smaller model, stronger retrieval",
+        "viz": "box",
+        "viz_args": "250M encoder beats much larger repurposed models",
+        "caption": "The design matches the task, so model size matters less."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Choose an encoder-only architecture",
+        "text": "Use bidirectional attention, which means each patch or text unit can read context on both sides, because retrieval needs page understanding rather than left-to-right generation."
+      },
+      {
+        "b": "Study masking and training phases",
+        "text": "Run controlled ablations on masking rules, multimodal pretraining mixtures, and contrastive objectives to isolate what improves retrieval, because each change is tested while the others stay fixed."
+      },
+      {
+        "b": "Train page and query representations",
+        "text": "Map document images and queries into retrieval representations optimized directly for matching."
+      },
+      {
+        "b": "Support single-vector and multi-vector search",
+        "text": "Emit either one page summary vector or several vectors so different page regions can independently match the query."
+      },
+      {
+        "b": "Deploy efficiently",
+        "text": "Because the encoder is compact, indexing and CPU search-time execution stay practical."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the design starting point. Instead of asking how to adapt a generator into a retriever, it asks what a retriever for page images actually needs and then trains that architecture directly."
+    ],
+    "object": "retrieval-first visual document encoder"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: retrieval granularity",
+    "name": "retrieval granularity",
+    "paras": [
+      "Retrieval granularity is the amount of page detail preserved in the representation. A single summary vector is compact, but it can mix several unrelated page regions into one number pattern. A multi-vector representation keeps more of those regions separate, so a query about a table row does not have to compete with the page title or surrounding paragraph inside one summary.",
+      "This quantity matters because many document queries are narrow. If the representation collapses fine details too early, the query cannot latch onto the right region. ModernVBERT studies masking and contrastive training through this lens: the model should preserve enough distinct evidence so that relevant page parts remain retrievable after encoding."
+    ],
+    "heat": {
+      "cells": [
+        ["single-summary", 1, false],
+        ["title-match", 3, true],
+        ["table-match", 4, true],
+        ["caption-match", 3, true],
+        ["fine-detail-lost", 1, false],
+        ["fine-detail-kept", 4, true],
+        ["multi-vector-1", 4, true],
+        ["multi-vector-2", 4, true],
+        ["multi-vector-3", 3, true],
+        ["coarse-only", 1, false],
+        ["query-specific", 4, true],
+        ["region-collision", 1, false]
+      ],
+      "caption": "Darker means the representation preserves more independently matchable page evidence."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A good retriever keeps enough separate page evidence so a query can match the right local content instead of only a page-wide summary."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "ModernVBERT shows that retrieval quality, especially in multi-vector settings, depends strongly on training choices that preserve fine-grained page-query matching rather than generative behavior."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the smaller encoder wins",
+    "paras": [
+      "The model wins because every major design choice points at the retrieval objective. Bidirectional encoding helps page understanding because a word or visual patch can use context from the whole page before its representation is finalized. That is useful for retrieval, because matching a query often depends on neighboring structure such as which column a number belongs to or which caption belongs to a figure.",
+      "Contrastive learning is the right training signal here because retrieval is a ranking problem. The model should assign higher similarity to matched query-page pairs and lower similarity to mismatched pairs. Training directly on that separation is more efficient than first teaching the model to generate text and only later asking it to rank pages. The controlled ablations matter because masking and data mixtures decide how much local page structure survives into the retrieval representation.",
+      "Multi-vector retrieval benefits most from the retrieval-first design because several page vectors can specialize to different evidence regions. A query about an invoice total can align to the numeric block while a query about company name can align to the header. That works only if the encoder preserves those regions as distinct representations. ModernVBERT does, whereas a generator adapted after the fact tends to carry extra modeling baggage that is useful for generation but not for ranking."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Document page image and text query"
+        },
+        {
+          "t": "step",
+          "s": "Encode the page with bidirectional context across the whole page",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Produce one or several retrieval vectors for the page"
+        },
+        {
+          "t": "step",
+          "s": "Encode the query into a matching representation",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Train with contrastive positives and negatives to separate good matches from bad ones"
+        },
+        {
+          "t": "output",
+          "s": "Rank pages by similarity for efficient search"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Contrastive retrieval objective",
+    "words": "The model learns by raising the similarity of matched query-page pairs and lowering the similarity of mismatched pairs.",
+    "equation": "retrieval_loss = negative log of exp(similarity(query, positive_page)) divided by the sum of exp(similarity(query, candidate_page_j)) over all candidates j",
+    "symbols": [
+      ["similarity(query, positive_page)", "match score for the correct query-page pair"],
+      ["candidate_page_j", "the j-th page considered in the contrastive batch"],
+      ["exp(...)", "a way to turn scores into positive weights before normalization"],
+      ["retrieval_loss", "the ranking error the encoder tries to minimize"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a query about an invoice total scores 8 with the correct page, 5 with a similar invoice, and 1 with an unrelated page.",
+        "The loss is small because the correct page already has the largest score, so normalization gives most of the weight to the positive pair.",
+        "Now suppose a generator-based baseline scores 6 with the correct page and 6 with the similar but wrong invoice.",
+        "The loss is larger because the model has not separated the hard negative from the true match, so training pushes the encoder to preserve the missing detail."
+      ]
+    },
+    "note": "The exact formula matters less than the training pressure it creates: correct matches must outrank confusing near-matches."
+  },
+  "bars": {
+    "h2": "What the design changes",
+    "charts": [
+      {
+        "title": "Repurposed generative retriever",
+        "rows": [
+          ["Single-vector retrieval", 58, "bad"],
+          ["Multi-vector retrieval", 47, "bad"],
+          ["CPU practicality", 32, "bad"]
+        ],
+        "note": "The model carries generation-oriented structure that does not directly improve ranking, so efficiency and fine-grained retrieval both suffer because model capacity and compute are spent on behavior the search task does not use."
+      },
+      {
+        "title": "ModernVBERT",
+        "rows": [
+          ["Single-vector retrieval", 71, "good"],
+          ["Multi-vector retrieval", 76, "good"],
+          ["CPU practicality", 74, "good"]
+        ],
+        "note": "The retrieval-first encoder performs better because its architecture, training objective, and representation format all target ranking quality."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Weak negative sampling.",
+        "html": "If most negatives are easy, the encoder never learns the fine distinctions that matter in real search. It may separate unrelated pages well but still confuse near-duplicate layouts."
+      },
+      {
+        "warn": true,
+        "b": "Representation collapse in the multi-vector setting.",
+        "html": "If all page vectors end up carrying the same information, the model pays the cost of multi-vector retrieval without gaining extra granularity. Training must encourage specialization across vectors."
+      },
+      {
+        "warn": true,
+        "b": "Domain shift across document types.",
+        "html": "A model trained mostly on reports and forms may underperform on handwritten notes or scientific pages with unusual figure layouts, because the page structures that drive matching are different."
+      },
+      {
+        "b": "Done right.",
+        "html": "The design is strongest when hard negatives are abundant, page layouts in pretraining resemble deployment data, and the retrieval evaluation includes narrow queries that force fine-grained matching."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small page-image retrieval benchmark with queries that target different page regions such as title, table value, caption text, and footer code. Train one compact bidirectional encoder with contrastive retrieval loss and compare it to a similarly sized model first trained for generation and then fine-tuned for retrieval. Measure single-vector retrieval, multi-vector retrieval, latency on CPU, and performance on hard negatives that share layout but differ in one local field."
+    ],
+    "metric_eq": "hard_negative_gap = retrieval score on true page minus retrieval score on the most similar wrong page",
+    "closing": "The demo should show that the retrieval-first encoder wins especially on narrow queries and hard negatives, because those cases depend on preserving local page evidence rather than broad document themes."
+  }
+}
