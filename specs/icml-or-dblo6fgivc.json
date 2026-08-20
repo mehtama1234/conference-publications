@@ -1,0 +1,215 @@
+{
+  "slug": "icml-or-dblo6fgivc",
+  "title": "Tokenised Flow Matching for Hierarchical Simulation Based Inference",
+  "family": "Other",
+  "one_liner": "Learn a per-site likelihood from cheap single-site simulations, then assemble many-site evidence at test time so hierarchical simulation-based inference needs far fewer expensive simulator runs.",
+  "lead": "Simulation-based inference, which means recovering unknown parameter values, meaning the numeric settings of the simulator, from simulator outputs when no closed-form likelihood is available, becomes costly in hierarchical settings. In a hierarchical model, one set of global parameters affects every site, while each site also has its own local parameters and observation. Standard training still simulates many sites together for each training example, so one update step of learning can cost many simulator calls. This paper changes the unit of training. It learns a site-level likelihood factor by applying flow matching to small fixed-length observation pieces, and then combines those learned site factors to recover the posterior, which is the probability distribution, meaning the rule that assigns probability mass across possible parameter values, after seeing multi-site data.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why hierarchical SBI becomes expensive",
+    "paras": [
+      "Hierarchical simulation-based inference starts from a repeated structure. A global parameter controls shared behavior across sites, each site has its own local parameter, and each site produces its own observation. If a training method wants examples from the full joint model, it usually samples the global parameter, samples every site parameter conditional on it, and runs the simulator for every site before it gets one training item.",
+      "That cost is wasteful when the sites are exchangeable, meaning their order does not matter and they follow the same site-level data-generating rule. The simulator still repeats the same local work many times inside one training example. Earlier hierarchical SBI methods factorized the posterior distribution over parameter values after data, but they still paid for multi-site simulation at training time. This paper asks whether the factorization should move one step earlier, to the likelihood terms, so that one training example can come from one site."
+    ],
+    "callout": {
+      "b": "The central move.",
+      "html": "Learn one reusable site-level likelihood factor from single-site simulations, because hierarchical structure lets the full data likelihood break into a product over sites."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Full training sample is expensive",
+        "viz": "box",
+        "viz_args": "one global draw -> many local draws -> many simulator calls",
+        "caption": "A standard hierarchical example spends simulator cost on every site before learning begins."
+      },
+      {
+        "title": "2. The hierarchy has repeated site structure",
+        "viz": "weights",
+        "viz_args": [["shared global", 82], ["site 1", 48], ["site 2", 48], ["site 3", 48], ["site 4", 48], ["site 5", 48]],
+        "caption": "Each site uses the same local rule, so the training target contains repeated pieces."
+      },
+      {
+        "title": "3. Learn one site factor at a time",
+        "viz": "box",
+        "viz_args": "single-site simulation -> site likelihood factor",
+        "caption": "The model trains on one site because the full likelihood can be rebuilt from repeated site terms."
+      },
+      {
+        "title": "4. Tokenise function-valued observations",
+        "viz": "box",
+        "viz_args": "time series or field -> short tokens -> flow matching model",
+        "caption": "Breaking long observations into short pieces keeps local structure available to the model."
+      },
+      {
+        "title": "5. Reassemble multi-site evidence",
+        "viz": "plain",
+        "caption": "At inference time, the learned site factors are multiplied across sites so the full hierarchical posterior can be estimated."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Sample one site from the simulator.",
+        "text": "Draw the global parameter and one local site parameter, then run the simulator for one site instead of all sites so each training example is cheap."
+      },
+      {
+        "b": "Split the observation into pieces.",
+        "text": "Break a function-valued observation into tokens, which are short numeric segments or patches, so the model can process long structured outputs without flattening away their shape, because each token preserves a local piece of the original structure."
+      },
+      {
+        "b": "Train a flow-matching estimator.",
+        "text": "Learn the conditional site likelihood term by fitting a transport field that maps simple noise to the target conditional density over tokens and parameters."
+      },
+      {
+        "b": "Reuse the site factor across sites.",
+        "text": "Apply the same learned site likelihood model to every observed site because exchangeability means the same factor form is valid for each one."
+      },
+      {
+        "b": "Assemble the full hierarchical posterior.",
+        "text": "Combine the site likelihood factors with the hierarchical prior, which is the distribution over parameter values before seeing data, so the multi-site posterior can be recovered without retraining on whole groups."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the training target from a full multi-site posterior estimator to a reusable site-level likelihood estimator that can later be composed into the hierarchical posterior."
+    ],
+    "object": "the unit of amortization in hierarchical SBI"
+  },
+  "hidden": {
+    "h2": "The hidden quantity",
+    "name": "site-wise evidence contribution",
+    "paras": [
+      "The key hidden quantity is how much one site's observation changes belief about the shared global parameter and that site's local parameter. You never observe that contribution directly. You only observe the raw site output from the simulator.",
+      "TFMPE estimates that hidden contribution as a factorized likelihood term. Once each site contributes its own term, the full posterior can be assembled by adding log-likelihood contributions or multiplying likelihood factors across sites, because conditional independence across sites holds once the global and local parameters are fixed."
+    ],
+    "heat": {
+      "cells": [["site 1 weak evidence", 2, false], ["site 2 strong evidence", 5, true], ["site 3 weak evidence", 2, false], ["site 4 moderate evidence", 3, false], ["site 5 strong evidence", 5, true], ["site 6 moderate evidence", 3, false], ["shared global signal", 4, true], ["local-only variation", 2, false], ["token block 1", 4, true], ["token block 2", 3, false], ["token block 3", 2, false], ["token block 4", 4, true]],
+      "caption": "Darker cells mark observation pieces that carry more information about the unknown parameters."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The hidden quantity is the amount of evidence that one site adds about the unknown parameters, because the method learns that one reusable piece before combining many sites."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Likelihood factorization isolates per-site conditional evidence terms whose composition yields the full hierarchical posterior under exchangeable site structure."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why likelihood factorization cuts simulator cost",
+    "paras": [
+      "The saving comes from moving reuse to the right place. If the full hierarchical likelihood equals the product of site likelihoods, then training a full multi-site estimator repeats the same local pattern many times. Training one site factor avoids that repetition because each simulator call teaches the model about a reusable conditional term instead of one large combined example.",
+      "Tokenisation matters because many hierarchical simulators output curves, fields, or long sequences. A plain fixed-width input would either truncate those outputs or flatten them into a long list with weak inductive structure. Tokens keep local neighborhoods together, which lets the flow-matching model see repeated local patterns across positions and across sites.",
+      "Flow matching matters because it learns the transport rule directly. Instead of simulating a long reverse-time chain, it fits the velocity field of a continuous transformation from simple noise to the target conditional density. That gives a flexible conditional estimator for complicated site outputs, while still letting the final multi-site inference step reuse one learned factor over and over."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "one-site simulator output plus associated parameters"
+        },
+        {
+          "t": "step",
+          "s": "split long observation into tokens",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "train site likelihood by flow matching",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "reuse same likelihood factor for every observed site"
+        },
+        {
+          "t": "output",
+          "s": "assemble full hierarchical posterior with fewer simulator calls"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Factorize the hierarchy before inference",
+    "words": "The main identity is that the hierarchical likelihood of all observations can be written as a product of per-site likelihood terms once the shared global parameter and the site-specific local parameters are fixed.",
+    "equation": "p(y_1,...,y_S | g,l_1,...,l_S) = product over s of p(y_s | g,l_s)",
+    "symbols": [
+      ["y_s", "observation from site s"],
+      ["g", "shared global parameter"],
+      ["l_s", "local parameter for site s"],
+      ["p(y_s | g,l_s)", "site-level likelihood term"],
+      ["S", "number of observed sites"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose there are 100 sites and one simulator run for one site costs 1 second.",
+        "A training method that needs 20 sites per example spends about 20 seconds of simulation to make one example.",
+        "If the likelihood really factorizes by site, one-site training spends 1 second for one reusable site factor example.",
+        "At inference time, the learned model evaluates site 1, site 2, and site 3 separately and then combines those three likelihood terms.",
+        "The inference still uses all observed sites, but the expensive simulator was only needed one site at a time during training."
+      ]
+    },
+    "note": "The factorization does not make the posterior trivial. It changes where the heavy simulator work happens and makes that work reusable across any number of sites."
+  },
+  "bars": {
+    "h2": "What the reported gains mean",
+    "charts": [
+      {
+        "title": "Train on multi-site simulations",
+        "rows": [["simulator calls per training example", 90, "bad"], ["reuse of site structure", 28, "bad"], ["calibration of final posterior", 72, "good"]],
+        "note": "This baseline can be accurate, but it pays simulator cost repeatedly because each training item bundles many sites together."
+      },
+      {
+        "title": "Likelihood factorization with TFMPE",
+        "rows": [["simulator calls per training example", 20, "good"], ["reuse of site structure", 92, "good"], ["calibration of final posterior", 81, "good"]],
+        "note": "The reported win is lower training cost while retaining calibrated posteriors, because the learned site factor can be reused across any collection of sites."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The factorization assumption can be wrong.",
+        "html": "If sites interact after conditioning on the global and local parameters, then the product of site factors misses cross-site dependence, because one site's observation contains information about another beyond the assumed hierarchy."
+      },
+      {
+        "warn": true,
+        "b": "Tokenisation can discard long-range structure.",
+        "html": "If important evidence lives in a global pattern spanning many tokens, a token model may underuse it unless the architecture also aggregates information across distant token positions."
+      },
+      {
+        "warn": true,
+        "b": "Single-site training can underrepresent group-level edge cases.",
+        "html": "Rare configurations that only become visible when many sites are observed together may not appear clearly during one-site training, so the assembled posterior can still need careful calibration checks."
+      },
+      {
+        "b": "Done right.",
+        "html": "The method is strongest when the hierarchy truly decomposes by site, because then almost all simulator cost can be shifted into a reusable site-level learner without changing the final inference target."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a hierarchical toy simulator with one global mean, one site-specific offset, and one observed time series per site. Train one model on full 10-site examples and another on one-site likelihood factors. Use the same total simulator budget for both methods, then estimate the posterior for held-out groups with 5, 10, and 20 sites.",
+      "The demo should compare calibration and wall-clock training cost. It should show that one-site factor training reaches similar posterior quality because the same site rule is reused, while needing far fewer simulator evaluations per update."
+    ],
+    "metric_eq": "cost_per_effective_example = simulator_calls / posterior_accuracy_score",
+    "closing": "A convincing demo must show that the factorized method preserves hierarchical inference quality because it changes only the training decomposition, not the target posterior itself."
+  },
+  "note_on_source": "This spec is grounded in the ICML abstract and metadata only. The first-principles explanation of the mechanism follows from the abstract's stated likelihood factorization and tokenised flow matching design."
+}

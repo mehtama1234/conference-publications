@@ -1,0 +1,233 @@
+{
+  "slug": "icml-or-ym8fnvy5z4",
+  "title": "LLM-Guided Loop Bound Generation for Program Termination Verification",
+  "family": "Other",
+  "one_liner": "Use a language model to propose loop bounds, then keep only the ones a formal checker can prove and use violation feedback to refine the next guess.",
+  "lead": "Termination verification asks whether every execution of a program eventually stops. For many programs the hard step is finding a loop bound, meaning a proof that each loop can only repeat a finite number of times from any reachable state. That search is hard because the proof object must match the program's control flow, numeric updates, and branching structure closely. LIFT treats the language model as a candidate generator rather than as a trusted prover. The model reads the program and proposes loop bounds. A sound checker then tries to verify those proposals. If a proposal fails, the tool extracts why it failed and feeds that violation back into the next prompt. The method improves coverage because the language model explores proof templates quickly, while soundness is preserved because only checker-approved bounds count as proofs.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Termination proofs need the right bound, not only raw search power",
+    "paras": [
+      "To prove that a loop terminates, a verifier often needs a numeric measure that keeps moving downward and cannot decrease forever. A loop bound is a closely related object because it states how many iterations remain or gives an upper bound that shrinks as the loop runs.",
+      "The search space is large. Two loops that look similar at the surface may need different symbolic expressions because one branches on one variable while another branches on a pair of coupled variables. Traditional tools rely on fixed templates or exhaustive search, so they can miss bounds that a human would notice from the code structure."
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Let the language model guess candidate bounds from program structure, but trust only the formal validator, and use validator failures as targeted feedback for the next guess."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Program with a loop",
+        "viz": "box",
+        "viz_args": "while condition holds: update variables",
+        "caption": "The verifier needs an argument that the loop cannot run forever."
+      },
+      {
+        "title": "2. Candidate bound is proposed",
+        "viz": "weights",
+        "viz_args": [["guess 1", 42], ["guess 2", 57], ["guess 3", 31], ["guess 4", 49], ["guess 5", 26], ["guess 6", 38]],
+        "caption": "The language model proposes formulas or templates that might bound the remaining iteration count."
+      },
+      {
+        "title": "3. Formal checker tests it",
+        "viz": "box",
+        "viz_args": "entry condition | preservation | decrease | nonnegativity",
+        "caption": "A bound is useful only if all required proof obligations hold."
+      },
+      {
+        "title": "4. Violation explains the failure",
+        "viz": "weights",
+        "viz_args": [["not decreasing", 77], ["negative too early", 55], ["branch missed", 81], ["init wrong", 43], ["overflow issue", 36], ["unreachable case", 18]],
+        "caption": "The failed obligation identifies what the next proposal must repair."
+      },
+      {
+        "title": "5. Accepted proof",
+        "viz": "plain",
+        "caption": "Only verified bounds become termination certificates, so final answers stay sound."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Parse a target loop",
+        "text": "Extract the loop condition, variable updates, and control-flow context because candidate bounds must refer to the actual program state."
+      },
+      {
+        "b": "Ask the language model for a bound",
+        "text": "Generate one or more candidate loop bounds from the code because the model can search symbolic patterns faster than a fixed template library."
+      },
+      {
+        "b": "Run sound validation",
+        "text": "Check that the candidate is initialized correctly, stays valid across iterations, and decreases as the loop executes because those facts turn a guess into a proof."
+      },
+      {
+        "b": "Extract a violation reason",
+        "text": "If validation fails, identify the broken obligation or counterexample pattern so the next prompt targets the real defect."
+      },
+      {
+        "b": "Repeat until proof or exhaustion",
+        "text": "Keep the guess-and-check loop going because each failed bound narrows the search toward a structure the checker can certify."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the source of candidate loop bounds. Instead of relying only on hand-built bound templates, it uses a language model to draft candidates while leaving certification to the formal backend."
+    ],
+    "object": "the generator of candidate termination arguments"
+  },
+  "hidden": {
+    "h2": "Remaining-iterations measure",
+    "name": "remaining-iterations measure (a quantity that should start finite and keep shrinking until the loop exits)",
+    "paras": [
+      "Every successful termination proof hides a measure of progress. That measure may be one variable, a sum of several variables, or a branch-sensitive expression. The verifier never observes it directly in the source code. It has to synthesize it.",
+      "A good candidate bound must fit all paths through the loop. It is not enough for the bound to decrease on the common path. It must also stay nonnegative and decrease or advance properly under every branch that is actually reachable."
+    ],
+    "heat": {
+      "cells": [
+        ["entry finite", 4, true],
+        ["branch A decreases", 5, true],
+        ["branch B decreases", 5, true],
+        ["branch C missed", 1, false],
+        ["nonnegative", 4, true],
+        ["reset bug", 1, false],
+        ["nested update handled", 3, true],
+        ["overflow concern", 2, false],
+        ["path condition needed", 3, true],
+        ["spurious guess", 1, false],
+        ["certified bound", 5, true],
+        ["unknown", 2, false]
+      ],
+      "caption": "Darker cells mark situations where the candidate bound is close to a full proof because it respects all branches and the entry condition."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The verifier needs a number that tracks how much looping room is left and keeps shrinking until no iterations remain."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "LIFT synthesizes candidate loop bounds with an LLM and validates them with sound proof obligations, so the hidden progress measure is discovered by guided search rather than assumed up front."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why guess-and-check with violation feedback works",
+    "paras": [
+      "A language model is useful here because bound synthesis is partly a code-understanding problem. The model can notice that a loop variable is counting down, that two variables move in lockstep, or that a branch resets one term and therefore requires a conditional bound. A fixed template engine often misses that structure because it only searches a narrow symbolic family.",
+      "The formal validator is the safety wall. A candidate bound can look plausible in prose and still fail on one branch, one starting state, or one preservation condition. LIFT keeps soundness because the checker must discharge every obligation before the tool reports termination. This division of labor matters because the language model is good at proposing and the verifier is good at rejecting false proposals.",
+      "Violation analysis makes the loop closed instead of blind. When a candidate fails, the system learns whether the defect was missing decrease, missing nonnegativity, or a branch case the proposal ignored. The next prompt is therefore better focused. Performance improves because the search does not restart from scratch after each failed guess."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "program loop"
+        },
+        {
+          "t": "step",
+          "s": "LLM proposes a candidate bound"
+        },
+        {
+          "t": "step",
+          "s": "formal checker tests proof obligations",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "violation report refines the next prompt",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "certified termination proof or no proof found"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "What the checker must establish",
+    "words": "a candidate loop bound is accepted only if it starts finite on loop entry and decreases along every loop iteration until the guard becomes false",
+    "equation": "valid_bound if entry_ok and preserved_nonnegative and strictly_decreases_on_each_iteration",
+    "symbols": [
+      ["entry_ok", "the candidate gives a finite nonnegative value whenever the loop is entered"],
+      ["preserved_nonnegative", "the value never drops below zero while the loop still continues"],
+      ["strictly_decreases_on_each_iteration", "every taken loop step lowers the candidate enough to rule out infinite execution"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Consider a loop that decrements x by 1 while x is positive.",
+        "A candidate bound is x.",
+        "At entry, x is nonnegative whenever the loop guard is true.",
+        "After one iteration, x becomes x minus 1, so the bound decreases by 1.",
+        "Because the value cannot decrease forever while staying nonnegative, the loop must stop."
+      ]
+    },
+    "note": "Real benchmarks need more involved bounds, but every accepted candidate must satisfy the same proof pattern."
+  },
+  "bars": {
+    "h2": "What the benchmark result means",
+    "charts": [
+      {
+        "title": "Template-only verifiers",
+        "rows": [
+          ["benchmarks solved", 41, "bad"],
+          ["false positive terminations", 0, "good"],
+          ["missed unusual bounds", 72, "bad"]
+        ],
+        "note": "These tools stay sound because they rely on formal proof, but they often fail when the needed bound is outside their template family."
+      },
+      {
+        "title": "LIFT",
+        "rows": [
+          ["benchmarks solved", 67, "good"],
+          ["false positive terminations", 0, "good"],
+          ["useful refinement after failed guess", 74, "good"]
+        ],
+        "note": "The paper reports stronger benchmark performance because the proposal generator explores a wider set of symbolic candidates while the validator preserves soundness."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "The candidate space is still too narrow.",
+        "html": "If the required proof needs a structure the prompt or verifier cannot express, repeated guessing will stall because every proposal lives in the wrong family."
+      },
+      {
+        "warn": true,
+        "b": "Violation feedback is too coarse.",
+        "html": "If the checker only says that the candidate failed without identifying the failing condition, the next prompt gains little direction and the search becomes inefficient."
+      },
+      {
+        "warn": true,
+        "b": "Program semantics are modeled incompletely.",
+        "html": "If integer overflow, unreachable branches, or environment assumptions are handled badly, the checker may reject good candidates or accept bounds for the wrong model."
+      },
+      {
+        "b": "Done right.",
+        "html": "The design is strongest when the formal backend can explain failures clearly, because those explanations give the language model a structured repair target."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a toy verifier for small integer loops. Let a language model or a scripted stand-in propose candidate bounds such as one variable, a sum of two variables, or a conditional expression. Then write a checker that tests entry validity, nonnegativity, and decrease over all reachable small states.",
+      "The demo should show the full loop: failed guesses receive branch-level feedback, repaired guesses improve because the next proposal repairs a named proof defect, and only checker-approved candidates are counted as proofs. That demonstrates the actual point of LIFT, which is guided synthesis under formal control."
+    ],
+    "metric_eq": "solve_rate = proved_loops / total_loops ; refinement_gain = solved_after_feedback - solved_without_feedback",
+    "closing": "A convincing demo shows more proved loops with feedback than without feedback, while keeping the count of unsound proofs at zero."
+  }
+}

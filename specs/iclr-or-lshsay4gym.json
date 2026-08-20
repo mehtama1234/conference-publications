@@ -1,0 +1,234 @@
+{
+  "slug": "iclr-or-lshsay4gym",
+  "title": "Massive Memorization with Hundreds of Trillions of Parameters for Sequential Transducer Generative Recommenders",
+  "family": "Other",
+  "one_liner": "Compress a user's full interaction history into a few cached summary slots so candidate scoring no longer scales with raw history length.",
+  "lead": "Recommendation models gain signal from long user histories because old interactions often reveal stable preferences. The problem is that direct target attention, meaning a score that lets the candidate item read the user's stored sequence features, from every candidate item to every past interaction becomes too expensive when histories reach hundreds of thousands or millions of items. VISTA changes the computation graph. During a heavy upstream training stage, it compresses the full history into a few hundred summary slots that carry the useful sequence information. Those summaries are cached. Later training and serving stages attend from each candidate item only to the cached summaries instead of to the raw history. The key is that the costly history scan is paid once per user summary refresh, not once per candidate score. That makes inference, meaning the serving-time computation used to score candidates, cost nearly fixed with respect to raw history length.",
+  "nav": [["theme-other.html", "Other"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Long histories help recommendation, but direct attention does not scale",
+    "paras": [
+      "A sequential recommender tries to estimate how a candidate item matches the user's past behavior. Transformer-style attention, where transformer means the sequence model family that uses repeated attention blocks, does this well because it can condition the candidate on many past interactions. The cost grows with sequence length, and industrial systems must score many candidates under tight latency limits.",
+      "Target-specific sampling methods reduce cost by selecting only a short candidate-dependent subsequence, but that still creates work that grows with the number of candidates. Full-sequence methods preserve more information, but they become too expensive when the history is very long."
+    ],
+    "callout": {
+      "b": "The main change.",
+      "html": "Split target attention into two stages: summarize the full history once into cached sequence features, then let each candidate attend only to those summaries."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. User has a huge history",
+        "viz": "box",
+        "viz_args": "thousands to millions of past interactions",
+        "caption": "The sequence contains signal, but scoring against the full list every time is costly."
+      },
+      {
+        "title": "2. Standard attention explodes in cost",
+        "viz": "weights",
+        "viz_args": [["candidate 1", 84], ["candidate 2", 83], ["candidate 3", 86], ["candidate 4", 82], ["candidate 5", 85], ["candidate 6", 87]],
+        "caption": "Each candidate re-reads the long history because target attention is computed separately."
+      },
+      {
+        "title": "3. VISTA summarizes history",
+        "viz": "box",
+        "viz_args": "full history -> a few hundred summary slots",
+        "caption": "A heavy upstream model compresses the long sequence into a compact representation."
+      },
+      {
+        "title": "4. Summaries are cached",
+        "viz": "weights",
+        "viz_args": [["slot 1", 61], ["slot 2", 58], ["slot 3", 63], ["slot 4", 55], ["slot 5", 60], ["slot 6", 57]],
+        "caption": "Serving uses stored summaries, so raw history does not need to be scanned for every score."
+      },
+      {
+        "title": "5. Candidate scoring becomes stable",
+        "viz": "plain",
+        "caption": "Inference cost depends on the summary length, not directly on the original history length."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode the full history upstream",
+        "text": "Run a foundational sequence model over the long user history because the upstream stage can spend more compute to capture long-range preference structure."
+      },
+      {
+        "b": "Produce summary slots",
+        "text": "Compress the history into a few hundred stored sequence features because downstream stages only need the distilled information."
+      },
+      {
+        "b": "Train with sequence reconstruction",
+        "text": "Use a generative reconstruction objective so the summaries preserve what the long sequence says about future behavior."
+      },
+      {
+        "b": "Cache summaries in storage",
+        "text": "Persist the summary features per user because serving must reuse them across many candidate evaluations."
+      },
+      {
+        "b": "Score candidates against summaries",
+        "text": "At downstream training and inference time, compute candidate-aware attention only over the cached summaries because that keeps cost nearly fixed."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the memory interface for recommendation. Instead of exposing the entire raw interaction sequence to each downstream scorer, it exposes a compact cached summary of that sequence."
+    ],
+    "object": "the sequence representation that downstream candidate scoring reads"
+  },
+  "hidden": {
+    "h2": "History retention after compression",
+    "name": "history retention (how much of the useful preference signal survives in the cached summaries)",
+    "paras": [
+      "Compression is only worthwhile if the summaries keep the parts of history that matter for prediction. That hidden quantity is the information retained about long-term interests, recent intent, and cross-item patterns after the raw sequence is collapsed into a short cached form.",
+      "Too little retention hurts ranking quality because downstream scoring sees only a blurred user profile. Too much detail would require too many summaries and would remove the computational gain. VISTA is balancing that tradeoff directly."
+    ],
+    "heat": {
+      "cells": [
+        ["recent intent", 5, true],
+        ["long-term taste", 4, true],
+        ["rare but repeated interest", 4, true],
+        ["one-off noise", 1, false],
+        ["cross-category relation", 3, true],
+        ["expired interest", 2, false],
+        ["seasonal pattern", 3, true],
+        ["duplicate clicks", 1, false],
+        ["candidate relevance cue", 5, true],
+        ["accidental tap", 1, false],
+        ["recency bias only", 2, false],
+        ["stable summary", 4, true]
+      ],
+      "caption": "Darker cells mark interaction patterns that the summaries need to preserve for downstream scoring."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "The summaries should keep the parts of a user's history that still matter for future clicks and purchases, while dropping the parts that only add cost."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "VISTA learns summary embeddings, meaning stored learned number lists for the user history, during foundational training and then reuses them as cached sequence features, so downstream target attention can operate on compressed but predictive history state."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why two-stage attention reduces serving cost",
+    "paras": [
+      "The expensive part of sequential recommendation is repeated reading of the same long history. If a user has one million past interactions and the system scores many candidates, standard target attention revisits that sequence again and again. VISTA removes that duplication because the history is summarized once and the summaries are reused.",
+      "The upstream summarization can still be heavy because it is amortized across many later scores. After summarization, each candidate attends only to a short cached sequence. Latency drops because the raw-history dependence has been moved out of the hot serving path.",
+      "The reconstruction objective matters because cached summaries would otherwise drift toward generic user averages. By training the summaries to support future sequence reconstruction, the model is forced to keep enough temporal and preference structure to remain predictive after compression."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "full user history"
+        },
+        {
+          "t": "step",
+          "s": "foundational model compresses history",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "cache summary slots"
+        },
+        {
+          "t": "step",
+          "s": "candidate attends only to summaries",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "recommendation score with fixed-size sequence input"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Replace raw-history attention with summary attention",
+    "words": "the candidate score is computed from attention over a fixed number of cached summaries instead of over the full user history",
+    "equation": "score(candidate, user) = attend(candidate, cached_summaries_user)",
+    "symbols": [
+      ["candidate", "the item being scored for recommendation"],
+      ["cached_summaries_user", "the stored compact sequence representation for that user"],
+      ["attend", "the target-attention module used by the downstream scorer"],
+      ["score(candidate, user)", "the relevance score used for ranking"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose a user has 200000 past interactions.",
+        "A standard model may read all 200000 interactions for each candidate item.",
+        "VISTA compresses the history into 300 summary slots.",
+        "Each candidate then attends to 300 stored summaries instead of 200000 raw events.",
+        "The saved work appears every time the serving system scores another candidate for the same user."
+      ]
+    },
+    "note": "The paper includes a quasi-linear attention design and a reconstruction loss, but the serving-side simplification is the main first-principles idea."
+  },
+  "bars": {
+    "h2": "What the deployment result means",
+    "charts": [
+      {
+        "title": "Direct long-history scoring",
+        "rows": [
+          ["history coverage", 88, "good"],
+          ["serving cost", 91, "bad"],
+          ["latency stability at long histories", 22, "bad"]
+        ],
+        "note": "Raw long histories carry strong signal, but candidate scoring becomes difficult to deploy because sequence cost stays in the serving loop."
+      },
+      {
+        "title": "VISTA",
+        "rows": [
+          ["history coverage", 79, "good"],
+          ["serving cost", 34, "good"],
+          ["latency stability at long histories", 83, "good"]
+        ],
+        "note": "The paper reports offline and online gains because the method preserves enough long-history signal while moving the expensive sequence pass out of inference."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Summaries are too small.",
+        "html": "If the summary budget is too tight, downstream scoring loses long-range preference details because too much sequence information has been discarded."
+      },
+      {
+        "warn": true,
+        "b": "Cached summaries become stale.",
+        "html": "If user behavior changes quickly and the cache refresh is slow, the system serves from old preferences because the compressed state no longer matches the latest interactions."
+      },
+      {
+        "warn": true,
+        "b": "The reconstruction task does not match ranking needs.",
+        "html": "If the upstream objective preserves patterns that help sequence reconstruction but not candidate ranking, the summaries may look faithful while still underperforming at recommendation because the retained details are not the same details that drive ranking decisions."
+      },
+      {
+        "b": "Done right.",
+        "html": "The design is strongest when user histories are very long and each user is scored against many candidates, because that is where amortized summarization produces the largest serving gain."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Create a toy recommendation task with long click sequences and several candidate items per user. Compare a baseline that scores each candidate against the raw sequence with a two-stage system that first compresses the sequence into cached summaries and then scores against those summaries.",
+      "The demo should show two curves: ranking quality and per-candidate latency as history length grows. The key result is that quality should stay close while latency stays nearly flat for the summary-based system."
+    ],
+    "metric_eq": "latency_gain = raw_history_latency / vista_latency ; quality_retention = vista_metric / raw_history_metric",
+    "closing": "A convincing demo shows that long-history signal can be preserved without keeping raw-history attention in the serving path."
+  }
+}
