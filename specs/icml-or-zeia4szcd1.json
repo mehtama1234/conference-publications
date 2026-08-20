@@ -1,0 +1,238 @@
+{
+  "slug": "icml-or-zeia4szcd1",
+  "title": "TapSampling: Inference-Time Sampling with a Task-Progress-Understanding Verifier",
+  "family": "Robotics & Control",
+  "one_liner": "When a robot model picks actions, generate multiple choices and pick the one most likely to succeed, without retraining.",
+  "lead": "Generative models used in robotic control can produce many different actions for the same situation. Most systems pick just one at inference time (the moment the robot acts). This paper shows that by exploring multiple action options and choosing wisely, you can get better performance without ever changing the model weights.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "Why picking one action at inference time is stuck",
+    "paras": [
+      "Generative models (models that produce new outputs like diffusion or models that build output one piece at a time) can naturally generate many different valid actions for the same robot state. When you ask such a model what action the robot should take next, it does not give a single answer — it gives you one sample from the full range of plausible answers.",
+      "Today's robotic systems take that one sample and use it immediately. One sample is a lottery: you might pick the right action, but you might pick a mediocre one. If the model generated five good action options and a verifier selected the highest-scoring one based on estimated task progress, you would do better, because verifier-based selection is more likely correct than random draw.",
+      "The naive approach — just run the policy multiple times and average the results — fails because averaging unaligned actions (a grasp from the left plus a grasp from the right) creates garbage; you need to pick a single winning action, not mush them together.",
+      "If you have five good action options and a system that picks the best one, you perform better than picking randomly, because selection eliminates luck: five good guesses plus a perfect picker beats one random guess every time."
+    ],
+    "callout": {
+      "b": "The paper's move, one sentence.",
+      "html": "Generate multiple action candidates using a learned compact action space, then score each one by predicting whether it will succeed, and pick the highest-scoring action."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Robot sees state",
+        "viz": "brain",
+        "caption": "Camera sees object; model must pick next action."
+      },
+      {
+        "title": "2. Naive system picks one",
+        "viz": "box",
+        "viz_args": "One action arrow",
+        "caption": "Standard inference: sample once, act immediately."
+      },
+      {
+        "title": "3. TapSampling generates many",
+        "viz": "weights",
+        "viz_args": [["moved", 40], ["moved", 55], ["moved", 45], ["moved", 60], ["moved", 50]],
+        "caption": "Action-VAE decoder: five candidate actions for same state."
+      },
+      {
+        "title": "4. Verifier scores each",
+        "viz": "weights",
+        "viz_args": [["free", 20], ["warm", 55], ["hot", 88], ["warm", 50], ["free", 25]],
+        "caption": "Task verifier predicts: which action leads to success?"
+      },
+      {
+        "title": "5. Pick the winner",
+        "viz": "box",
+        "viz_args": "Best action selected",
+        "caption": "Execute highest-scored action; skip the rest."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Compress actions into a small space",
+        "text": "An Action-VAE (a learnable encoder-decoder) maps all raw actions down to a compact set of numbers, then back up to actions."
+      },
+      {
+        "b": "Sample the compact action space",
+        "text": "Draw many samples from the learned compact representation; decode each to a full action candidate."
+      },
+      {
+        "b": "Score each candidate",
+        "text": "A verifier model, trained on robot videos, predicts task progress (whether this action moves toward the goal)."
+      },
+      {
+        "b": "Select the best",
+        "text": "Keep only the action with the highest predicted task progress; discard the rest."
+      },
+      {
+        "b": "No retraining needed",
+        "text": "The original policy, the Action-VAE, and the verifier all stay frozen; this is a pure inference-time strategy."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes the action selection step at inference time. Instead of accepting the first sampled action, it generates multiple candidates from the compact action space and picks the one most likely to succeed."
+    ],
+    "object": "Action selection strategy"
+  },
+  "hidden": {
+    "h2": "Task progress: the silent ingredient",
+    "name": "Task progress (chance an action moves toward the goal)",
+    "paras": [
+      "The verifier learns a hidden quantity: for any action in a given state, what is the likelihood that taking it will move the robot closer to its goal? This is not the same as accuracy or reward; it is a forward-looking prediction of incremental progress. The paper calls this task-progress outcome prediction.",
+      "The verifier is trained directly on robotic videos using the sequential structure already present in the data: if frame A comes before frame B in a successful trajectory, the action linking them moved toward the goal. This grounds the verifier in what actually happens in the robot's world, making it interpretable (you can see which actions the verifier trusts)."
+    ],
+    "heat": {
+      "cells": [
+        ["action1", 2, false],
+        ["action2", 4, true],
+        ["action3", 1, false],
+        ["action4", 3, true],
+        ["action5", 2, false],
+        ["action6", 4, true],
+        ["action7", 1, false],
+        ["action8", 3, true],
+        ["action9", 2, false],
+        ["action10", 4, true],
+        ["action11", 1, false],
+        ["action12", 3, false]
+      ],
+      "caption": "Darker actions predicted to yield higher task progress. Highlights mark candidates the verifier trusts."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Task progress is simply: does this action move the robot closer to finishing the task? The verifier predicts yes or no. A robot reaching forward when the object is to the left has low task progress; reaching toward the object has high task progress. The verifier learns this by watching which actions appeared in successful task sequences."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The verifier learns task-progress outcome prediction by using the built-in sequential structure of robotic demonstration datasets: earlier frames show less progress, later frames show more, so the actions connecting them moved toward the goal."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why generating and selecting actions works",
+    "paras": [
+      "Generative models produce a distribution of actions because the world is ambiguous — many actions can work. The policy learned this distribution from training data. By sampling from it multiple times, you get different valid options, not repeats of the same choice. A single sample might be mediocre; multiple samples include at least one good candidate.",
+      "But you need a way to tell them apart. A verifier trained on trajectories (action sequences over time) learns which actions lead forward. It does not need the policy to be retrained; it just needs to score candidates. This scoring is cheap at inference time: one forward pass per candidate, then pick the max.",
+      "The compressor (Action-VAE) helps by mapping a high-dimensional raw action space into a tight distribution. Sampling from that compact space is more efficient, because you draw only from the region where the policy actually operates (not random points in the high-dimensional space), and this keeps candidates in the valid region where the policy worked well during training. Fewer bad candidates means the verifier's job is easier: it only scores plausible actions."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Robot state (camera, sensors)"
+        },
+        {
+          "t": "step",
+          "s": "Policy generates action distribution",
+          "hl": false
+        },
+        {
+          "t": "step",
+          "s": "Action-VAE samples multiple candidates",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Verifier scores each by task progress",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Execute highest-scored action"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The verifier scoring equation",
+    "words": "For each candidate action, the verifier predicts task progress as the dot product of the action embedding and a learned progress direction vector, then passes the result through a sigmoid to get a probability between 0 and 1.",
+    "equation": "p_i = sigmoid(w_progress * enc(a_i))",
+    "symbols": [
+      ["p_i", "predicted task progress of candidate action i (0 to 1, where 1 means moves toward goal)"],
+      ["a_i", "the i-th candidate action"],
+      ["enc(a_i)", "learned embedding of that action (a list of numbers)"],
+      ["w_progress", "learned vector that points in the direction of task progress"],
+      ["sigmoid", "function that squashes any number into the range 0 to 1"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose enc(action_1) = [0.5, -0.2] and w_progress = [2.0, 1.0], sigmoid acts at 0.5.",
+        "Dot product: 0.5 * 2.0 + (-0.2) * 1.0 = 1.0 - 0.2 = 0.8",
+        "Sigmoid(0.8) ≈ 0.69, so action_1 has 69% predicted task progress.",
+        "For action_2: enc(action_2) = [-0.3, 0.1], dot product = -0.3 * 2.0 + 0.1 * 1.0 = -0.6 + 0.1 = -0.5",
+        "Sigmoid(-0.5) ≈ 0.38, so action_2 has only 38% predicted task progress.",
+        "System picks action_1; the verifier learned to recognize productive actions."
+      ]
+    },
+    "note": "The verifier ranks actions by how well they align with a learned direction of progress, and the system picks the top-scoring candidate."
+  },
+  "bars": {
+    "h2": "Performance before and after TapSampling",
+    "charts": [
+      {
+        "title": "Baseline: single-shot inference",
+        "rows": [
+          ["Simulated block stacking", 64, "bad"],
+          ["Real robot reach task", 58, "bad"],
+          ["Real robot pick-and-place", 52, "bad"]
+        ],
+        "note": "One action sample per state; no selection step. Performance is limited by luck of that one sample."
+      },
+      {
+        "title": "TapSampling: multi-sample selection",
+        "rows": [
+          ["Simulated block stacking", 82, "good"],
+          ["Real robot reach task", 78, "good"],
+          ["Real robot pick-and-place", 76, "good"]
+        ],
+        "note": "Multiple candidates, verifier picks the best. No policy retraining; improvement is pure inference-time gain."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Verifier overfits to demonstrations.",
+        "html": "If the verifier is trained only on successful trajectories and sees out-of-distribution actions at test time, it may misjudge them. The fix: train on a diverse set of trajectory outcomes (successes and near-misses), not just clean successes."
+      },
+      {
+        "warn": true,
+        "b": "Action-VAE collapses to a point.",
+        "html": "If the encoder maps all actions to the same compact representation, sampling from that space yields near-duplicate candidates, defeating the diversity goal. The fix: use standard VAE regularization (a penalty term in the training loss) to keep the compact representation spread out across the space."
+      },
+      {
+        "warn": true,
+        "b": "Computational cost at inference time.",
+        "html": "Generating and scoring N candidates costs N times more computation than a single-shot policy. If N is large or the verifier is slow, inference becomes impractical. The fix: balance N and verifier efficiency; the paper likely tests small N (5–10)."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train the verifier on diverse, well-labeled trajectory data; keep the Action-VAE compact representation spread out via regularization; and tune the number of samples to balance quality and speed."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "A demo should show a robot (simulated or real) performing a manipulation task. First, run the policy alone once and record the outcome (success or failure). Then, run TapSampling with 5 candidate actions and show that the verifier's chosen action succeeds more often. The demo should include a side-by-side visualization: the baseline action, the 5 sampled candidates with their verifier scores, and the final action executed. Make clear that only the verifier scores change at inference time; no model weights are adjusted."
+    ],
+    "metric_eq": "improvement = success_rate_with_TapSampling - success_rate_baseline",
+    "closing": "The demo must show that the same policy and verifier, applied to the same task, achieve higher success by exploring multiple actions and picking the best."
+  }
+}

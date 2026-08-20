@@ -1,0 +1,241 @@
+{
+  "slug": "icml-or-ijnyi8dwr4",
+  "title": "Speedup Patch: Plug-and-Play Acceleration for Robot Manipulation",
+  "family": "Robotics & Control",
+  "one_liner": "A robot can skip redundant action steps using a learned world model to safely trim motions, without retraining the original policy.",
+  "lead": "Robot arms taught from human videos move slowly because they follow the human's pace exactly. Existing speedup methods require retraining the entire robot brain or letting it practice online with real hardware—both expensive. This paper adds a lightweight external scheduler that watches the robot's proposed actions, skips the redundant ones, and keeps the robot safe by checking against a learned world model of how the robot actually moves.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Robots are slow because they copy human video exactly",
+    "paras": [
+      "When a robot learns to manipulate objects by watching humans, it learns to repeat every tiny movement—the hand pauses, adjusts slightly, moves again. Humans do this because we need to check our progress and stay safe. But a robot can skip the pauses and the timid adjustments because it has already learned the path to the target: removing steps that do not actually change the outcome saves execution time without changing the final result, so the robot finishes sooner.",
+      "A naive engineer might try to speed up the robot by simply playing its actions twice as fast, because faster time per action means faster total time. This breaks: when actions run faster, timing gaps between movements shrink, so the robot's fingers collide, or the object bounces before the grip tightens. The right solution is to skip the redundant steps—the small adjustments that don't actually change anything—because removing steps that have no effect also removes their time cost, and the remaining critical steps can run at their original speed without collision. But how do you know which steps are safe to skip?"
+    ],
+    "callout": {
+      "b": "The method in one sentence.",
+      "html": "Add an external decision-maker that watches each action the policy produces, skips steps that do nothing important, and checks its safety guess using a learned simulation of how the robot really behaves."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Robot learns from video",
+        "viz": "weights",
+        "viz_args": [["moved",45],["moved",50],["moved",48],["moved",52],["moved",42],["warm",30],["warm",28],["warm",35],["free",15],["free",12],["free",18],["free",10]],
+        "caption": "Every human action is copied exactly, even tiny pauses and adjustments."
+      },
+      {
+        "title": "2. The problem: redundant steps",
+        "viz": "box",
+        "viz_args": "Grasp, hold, micro-adjust, hold, micro-adjust, release. Four hold-adjust cycles.",
+        "caption": "Many steps do almost nothing. Skipping them saves time without breaking the task."
+      },
+      {
+        "title": "3. Scheduler proposes skips",
+        "viz": "weights",
+        "viz_args": [["moved",45],["free",8],["moved",48],["free",7],["moved",42],["warm",30],["warm",28],["warm",35],["free",15],["free",12],["free",18],["free",10]],
+        "caption": "A new scheduler decides which actions to keep (dark) and which to drop (light)."
+      },
+      {
+        "title": "4. World model checks safety",
+        "viz": "brain",
+        "caption": "Before executing, simulate: 'If I skip that step, do I still reach the target?'"
+      },
+      {
+        "title": "5. Result: same success, less time",
+        "viz": "box",
+        "viz_args": "Grasp, micro-adjust, release. One hold cycle.",
+        "caption": "Task succeeds in 1.8 times less wall-clock time. Same end state, faster path."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Step 1: Policy proposes actions",
+        "text": "The trained robot policy outputs a sequence of movement commands to pick up and place an object."
+      },
+      {
+        "b": "Step 2: Scheduler compresses the sequence",
+        "text": "A second decision system (the scheduler) chooses which commands to keep and which to drop, aiming to remove redundant steps."
+      },
+      {
+        "b": "Step 3: World model simulates the skip",
+        "text": "A learned simulator predicts what will happen if those commands are removed—does the robot still reach the target or collide?"
+      },
+      {
+        "b": "Step 4: Safety constraint checks deviation",
+        "text": "If the predicted result (world state) diverges too far from the normal successful path, the scheduler loses confidence and keeps the action."
+      },
+      {
+        "b": "Step 5: Execute the trimmed sequence",
+        "text": "The robot runs the compressed action list. Fewer commands means faster completion time because each action takes a fixed duration; removing an action removes that duration from the total."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "The paper adds an external scheduler between the policy and execution. This scheduler is a separate decision-maker that sits outside the original robot policy. It can drop or keep each action the policy suggests, in real time, without asking the policy to retrain."
+    ],
+    "object": "Action sequence (compress it)"
+  },
+  "hidden": {
+    "h2": "State deviation: a safety alarm from the world model",
+    "name": "State deviation (predicted divergence from success)",
+    "paras": [
+      "A state is the robot's configuration—where its joints are, what it is holding, positions of objects on the table. When the scheduler skips an action, the world model predicts what the new state will be. State deviation measures how different this new state is from the state the original policy was designed to handle. High deviation means 'you are going off the rails; stopping the skip is safer.' Low deviation means 'skipping this step is fine.'",
+      "The paper treats state deviation as a safety measure: the scheduler must keep state deviation below a threshold (constraint). To estimate it without running real experiments, the paper uses the learned world model as a virtual evaluator—predict the skipped trajectory, compute the deviation, and use that prediction to train the scheduler."
+    ],
+    "heat": {
+      "cells": [
+        ["Action 1",4,true],
+        ["Action 2",1,false],
+        ["Action 3",4,false],
+        ["Action 4",1,false],
+        ["Action 5",4,true],
+        ["Action 6",2,false],
+        ["Action 7",2,false],
+        ["Action 8",3,false],
+        ["Action 9",1,false],
+        ["Action 10",2,false],
+        ["Action 11",4,false],
+        ["Action 12",1,false]
+      ],
+      "caption": "Darker actions are high-deviation skips (unsafe, keep them); lighter actions can be safely dropped."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "State deviation is how far off course the robot ends up if you skip a step. The world model predicts this without trying it in the real world."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "World Model based state deviation enforces safety constraints in the Constrained MDP by predicting counterfactual trajectories."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the method works: offline learning with a virtual test",
+    "paras": [
+      "The core insight is that you do not need to run the robot thousands of times to learn a good scheduler. Instead, you train the scheduler using offline reinforcement learning—a technique where the algorithm learns from recorded data of past actions without trying new things.",
+      "Here is the causal chain: The world model is a learned simulator of the robot. When the scheduler proposes to skip an action, the world model predicts the resulting robot state. If that predicted state deviates too much from normal (high deviation), it means the skip would push the robot toward failure—so the scheduler penalizes that choice. Over many training examples, the scheduler learns which steps are truly redundant (dropping them causes low deviation) and which are critical (high deviation). This training happens entirely offline, on a computer, without any real robot risk.",
+      "Why this is safer than retraining the original policy: The original policy was learned from human data and is already trusted. You are not changing it. You are only learning a lightweight trimmer that sits on top. If the trimmer makes a mistake, you have not broken the underlying policy."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Policy outputs action sequence"
+        },
+        {
+          "t": "step",
+          "s": "Scheduler picks actions to keep and drop",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "World model predicts result of trimmed sequence"
+        },
+        {
+          "t": "step",
+          "s": "Compute state deviation from normal path"
+        },
+        {
+          "t": "step",
+          "s": "Offline RL trains scheduler: reward speed, penalize high deviation",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Run the trimmed action sequence on the robot"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The optimization formula",
+    "words": "Maximize speed (reward per step kept) subject to: state deviation stays below a safety limit.",
+    "equation": "maximize: (T_orig - T_compressed) / T_orig subject to: E[deviation(state_skip)] <= delta_max",
+    "symbols": [
+      ["T_orig","original action sequence length (number of steps)"],
+      ["T_compressed","length after scheduler drops actions"],
+      ["deviation(state_skip)","how far the predicted state strays if action is dropped"],
+      ["delta_max","safety threshold (the tolerance for deviation)"],
+      ["E[...]","expected value (average over many examples)"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the policy proposes 10 actions. Original time: T_orig = 10.",
+        "Scheduler drops 2 redundant actions. Remaining: T_compressed = 8.",
+        "Speedup = (10 - 8) / 10 = 0.2, or 20% faster.",
+        "World model predicts: if we drop those 2, state deviation = 0.8 (low). delta_max = 1.5.",
+        "Constraint satisfied: 0.8 < 1.5. The skip is safe. Scheduler keeps this choice.",
+        "For another action, world model predicts deviation = 2.1. Constraint fails: 2.1 > 1.5.",
+        "Scheduler learns not to drop that action.",
+        "Across 1000 training examples, scheduler learns the pattern and achieves 1.8x speedup overall."
+      ]
+    },
+    "note": "The scheduler trades off speed against safety: keep the deviation low enough to guarantee the robot reaches the target, while removing as many slow steps as possible."
+  },
+  "bars": {
+    "h2": "Typical results",
+    "charts": [
+      {
+        "title": "Naive speedup (2x playback)",
+        "rows": [
+          ["Task success",96,"good"],
+          ["Execution time",50,"bad"],
+          ["Robot collisions",34,"bad"]
+        ],
+        "note": "Doubling playback speed breaks the task; the robot overshoots."
+      },
+      {
+        "title": "SuP (this paper)",
+        "rows": [
+          ["Task success",96,"good"],
+          ["Execution time",56,"good"],
+          ["Robot collisions",4,"good"]
+        ],
+        "note": "Smart action dropping keeps the task safe while cutting time (1.8x speedup)."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "World model prediction error.",
+        "html": "If the learned world model is inaccurate (for example, it miscalculates friction or object weight), the state deviation estimate is wrong. The scheduler might drop an action the model thought was safe but actually is not. This is especially risky if the model was trained on simpler scenarios than the real task."
+      },
+      {
+        "warn": true,
+        "b": "Distribution shift: new objects or table layouts.",
+        "html": "If the test task uses objects or configurations the world model never saw, the model's predictions become unreliable. State deviation estimates drift, and the constraint fails to protect the robot."
+      },
+      {
+        "warn": true,
+        "b": "Too aggressive speedup target.",
+        "html": "If the safety threshold (delta_max) is set too high, the scheduler ignores the constraint and drops too many actions. This trades speed for success rate. The operator must tune the threshold carefully."
+      },
+      {
+        "b": "Done right: world model learns from diverse examples.",
+        "html": "Train the world model on many different robot trajectories and configurations so it works on new cases. Test state deviation predictions against real robot runs you did not train on. Set the safety threshold conservatively and watch task success in practice."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simple simulation: a two-link robot arm reaching toward a block on a table. Train a policy to reach and hold the block still for one second (using recorded demonstrations). The policy will learn to move slowly and carefully. Record 100 policy rollouts. Train a world model on those 100 trajectories. Then train the scheduler on the same 100 trajectories: reward it for dropping actions (shorter sequence) and penalize high state deviation (constraint). Finally, run 10 new test scenarios with the scheduler on top of the policy."
+    ],
+    "metric_eq": "Speedup = (original_sequence_length - compressed_sequence_length) / original_sequence_length; Success = 1 if object stays held for 1 second, 0 otherwise.",
+    "closing": "The demo must show that speedup is achieved without losing success rate—the scheduler finds the sweet spot where redundant steps are dropped but the core task is preserved."
+  }
+}

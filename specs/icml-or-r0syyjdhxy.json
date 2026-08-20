@@ -1,0 +1,229 @@
+{
+  "slug": "icml-or-r0syyjdhxy",
+  "title": "MVP-LAM: Learning Action-Centric Latent Action via Cross-Viewpoint Reconstruction",
+  "family": "Robotics & Control",
+  "one_liner": "Learn action representations from videos by forcing one camera view's action code to predict what happens next in a different camera view.",
+  "lead": "When a robot learns to grasp from human videos, it needs to extract what the action actually is — not just memorize camera-specific details like lighting or angle. This paper shows how to train action representations that focus on the real movement and ignore viewpoint noise by asking one camera view to explain the future in a different camera view.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "The viewpoint trap: actions tangled with camera angles",
+    "paras": [
+      "When robots learn to grasp from human videos, they need to compress each action into a code — a small set of numbers. A naive approach: watch the frames and guess what action happened. But this breaks because the code soaks up camera-specific junk: sunlight from the left, the angle of the table, the person's height. Two videos of the identical grasp from different camera angles produce wildly different codes.",
+      "A beginner might try: collect videos from one camera angle and hope the code stays pure. This fails because real robot deployments see new angles, new lighting, new tables. The code learned from one view does not generalize."
+    ],
+    "callout": {
+      "b": "The core problem.",
+      "html": "Action codes end up encoding camera angles and lighting instead of the real action, making them useless when the camera moves."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Two cameras, one grasp",
+        "viz": "brain",
+        "caption": "Same hand grasp, filmed from left and right angles simultaneously."
+      },
+      {
+        "title": "2. Naive code: camera-specific junk",
+        "viz": "weights",
+        "viz_args": [["hot",65],["warm",40],["free",20],["hot",55],["free",15]],
+        "caption": "Left view code learns bright sunlight, table tilt, arm position."
+      },
+      {
+        "title": "3. Cross-view constraint: must explain both futures",
+        "viz": "box",
+        "viz_args": "Left code → Right future pixels?",
+        "caption": "Force left-view code to predict what the right camera sees next."
+      },
+      {
+        "title": "4. Code must strip camera junk",
+        "viz": "weights",
+        "viz_args": [["moved",70],["moved",68],["moved",72],["free",8],["free",5]],
+        "caption": "Sunlight and angles do not transfer; code must capture pure motion."
+      },
+      {
+        "title": "5. Action code works everywhere",
+        "viz": "plain",
+        "caption": "Same grasp code predicts actions in new cameras, new lighting, new scenes."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Record videos",
+        "text": "Film the same robot action or human task from two or more camera angles at once."
+      },
+      {
+        "b": "Compress one view",
+        "text": "Train an encoder that reads left-camera frames and squashes them into a small action code."
+      },
+      {
+        "b": "Decode to other view",
+        "text": "Build a decoder that takes that action code and reconstructs what the right-camera will see next."
+      },
+      {
+        "b": "Measure cross-view loss",
+        "text": "Measure how wrong the reconstruction is; tune the encoder and decoder to minimize error."
+      },
+      {
+        "b": "Strip viewpoint noise",
+        "text": "Because lighting and camera angle do not transfer between views, the code is forced to retain only real action."
+      }
+    ]
+  },
+  "object": {
+    "h2": "The one thing the paper changes",
+    "paras": [
+      "The paper changes how action codes are learned. Instead of a single-view encoder that predicts actions from one camera, it builds a cross-view encoder: given frames from camera A, produce an action code that must reconstruct the future pixels in camera B."
+    ],
+    "object": "action representation encoder"
+  },
+  "hidden": {
+    "h2": "The hidden quantity: mutual information with ground-truth action",
+    "name": "how much action the code retains",
+    "paras": [
+      "The paper measures a hidden quantity: does the learned action code actually contain the ground-truth action, or just camera artifacts? The paper calls this mutual information — a number (in bits) that counts how much information the code shares with the true action, measured on held-out data.",
+      "The paper estimates this by asking: given the action code, how well can a separate predictor guess the true action label (grasp, pinch, push, etc.)? A higher score means the code absorbed the action; a low score means the code is full of camera noise. MVP-LAM's key claim: cross-viewpoint reconstruction training raises this score higher than single-view training."
+    ],
+    "heat": {
+      "cells": [
+        ["left-view code",1,false],
+        ["right-view code",1,false],
+        ["left-code trained cross-view",4,true],
+        ["right-code trained cross-view",4,true],
+        ["action-specific info",4,true],
+        ["lighting junk",1,false],
+        ["camera angle junk",1,false],
+        ["table-tilt junk",1,false],
+        ["action type score",4,true],
+        ["grasp bit",3,true],
+        ["push bit",3,true],
+        ["pinch bit",3,true]
+      ],
+      "caption": "Darker means more ground-truth action information. Cross-view codes (highlighted) contain more action, less camera junk."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "A good action code should let you guess the real task just by looking at it. Cross-view training makes that guess much easier."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "Mutual information I(Code; Action) measures how many bits of true action live in the code. MVP-LAM achieves higher I than baselines."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why it works: the cross-view bottleneck",
+    "paras": [
+      "The encoder reads left-camera frames and squeezes them into a tiny code. The decoder must then reconstruct what the right camera sees next, using only that code. Camera-specific junk — sunlight from the left, the table tilt in the left frame, the arm's position in the left camera's coordinates — does not transfer to the right camera, because the right camera has different lighting, a different viewing angle, and a different coordinate system. The decoder cannot use sunlight or angle to predict right-camera pixels; only the pure hand motion (gripper opening, reach direction, approach angle) appears in both views.",
+      "So the encoder is forced to discard camera junk and keep only the action. This is a bottleneck: the code is small (many details cannot fit), and the only details that pass through are the ones that appear in both views — the action itself. The decoder learns to take the action code and predict which pixels the right camera will see next, using the known camera angles and positions."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Left-camera frames (pixels + lighting + table angle)"
+        },
+        {
+          "t": "step",
+          "s": "Encoder squashes to small action code",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Decoder reads code, knows right-camera angle and position"
+        },
+        {
+          "t": "step",
+          "s": "Reconstruct right-camera future pixels"
+        },
+        {
+          "t": "output",
+          "s": "Minimize reconstruction error; code captures action only"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The cross-viewpoint reconstruction loss",
+    "words": "Take the action code from camera A and try to reconstruct the pixels in camera B. The penalty is the sum of squared differences between predicted and actual pixels. Sum this over all pixel positions.",
+    "equation": "L = sum_pixels (predicted_right_pixels - actual_right_pixels)^2",
+    "symbols": [
+      ["L","the total error the optimizer tries to shrink"],
+      ["predicted_right_pixels","what the decoder guesses the right camera will show"],
+      ["actual_right_pixels","what the right camera actually showed in the video"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Say the right camera has 100 pixels and the prediction is off by 0.1 per pixel on average.",
+        "Error for one pixel: (predicted - actual)^2 = (0.1)^2 = 0.01.",
+        "Total error: 100 pixels × 0.01 = 1.0.",
+        "If a pixel is off by 0.2, that single pixel contributes 0.04, making the total 1.03.",
+        "The encoder learns to keep only information that reduces this pixel error across all 100 pixels and all frames."
+      ]
+    },
+    "note": "The magic is that pixels only match if the code captures the true action motion, not camera-specific confounds."
+  },
+  "bars": {
+    "h2": "Mutual information: action code quality before and after MVP-LAM",
+    "charts": [
+      {
+        "title": "Naive single-view training",
+        "rows": [
+          ["Grasp action in code",32,"bad"],
+          ["Camera sunlight in code",78,"bad"],
+          ["Actionable for new camera",15,"bad"]
+        ],
+        "note": "Single-view code is mostly camera junk; task-specific action is buried."
+      },
+      {
+        "title": "MVP-LAM cross-view training",
+        "rows": [
+          ["Grasp action in code",74,"good"],
+          ["Camera sunlight in code",12,"good"],
+          ["Actionable for new camera",71,"good"]
+        ],
+        "note": "Cross-view constraint forces code to discard lighting and angles; pure action dominates."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Need multi-view video.",
+        "html": "The method requires recording the same action from multiple camera angles. Single-camera datasets cannot be used; this is a hard constraint."
+      },
+      {
+        "warn": true,
+        "b": "Occlusions break reconstruction.",
+        "html": "If one camera view shows the hand but the other view has the hand hidden behind the table, reconstruction becomes impossible and the code must memorize the occlusion, not the action."
+      },
+      {
+        "warn": true,
+        "b": "Synchronized timing required.",
+        "html": "If the two cameras are not perfectly time-synchronized, frame A from the left camera does not match frame A from the right camera. Timestamp misalignment ruins the loss signal."
+      },
+      {
+        "b": "Scaling to many tasks.",
+        "html": "MVP-LAM works well when the dataset is consistent: similar lighting, similar robot or hand, similar tasks. It is less clear if one dataset of grasps and one dataset of pouring can be mixed; each may need separate training."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Record 10 seconds of a robot grasp from two mounted cameras. Train a simple encoder (e.g. a 3-layer convolutional neural network) using the cross-viewpoint objective: encode left-camera frames into a code of fixed size (e.g. 128 numbers), then train a decoder to reconstruct right-camera frames from that code alone. Log the reconstruction error as training progresses. Then freeze the encoder and test it on a new grasp task (a different object, a different hand position). Measure: on new data, how well does the code from camera A still reconstruct camera B? This should stay high if the code is action-centric and low if it is camera-specific."
+    ],
+    "metric_eq": "action_generalization = (reconstruction_error_known_task - reconstruction_error_new_task) / reconstruction_error_known_task",
+    "closing": "The demo succeeds when the code trained on known grasps still reconstructs new grasps from the alternate camera, proving the code learned the action, not the camera."
+  }
+}

@@ -1,0 +1,234 @@
+{
+  "slug": "icml-or-vzad3e3d6w",
+  "title": "When Replanning Becomes the Bottleneck: Budgeted Replanning for Embodied Agents",
+  "family": "Robotics & Control",
+  "one_liner": "The paper limits how many words a robot's brain can read in each decision, stopping replanning from getting too slow to matter.",
+  "lead": "Embodied agents (robots and simulated agents) frequently replan their next moves when things go wrong or the world changes unexpectedly. But as the agent gathers more and more context—past observations, movement history, previous plans—each replanning decision becomes slower. This paper shows that unbounded context growth causes replanning to miss real-time deadlines, even when the agent is actually succeeding at its task. The fix is BRACE: a method that deliberately budgets how many words the agent can read per decision, paired with E-RECAP, a pruning technique that keeps only the most useful context.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Why growing context breaks real-time deadlines",
+    "paras": [
+      "An embodied agent (a robot or software agent acting in a simulation) replans constantly: it executes one move, checks what actually happened, and decides what to do next. As the agent collects more history—sensor readings, past actions, earlier plans that failed—this history accumulates. Each time the agent needs to make a decision, it sends all this history to a language model to reason about the next move.",
+      "A language model (a machine-learning system trained to predict the next word given previous words) reads its input word by word, and the time to read doubles when the input doubles. So as accumulated context grows, replanning latency (the time to get a new decision) grows too. A beginner might ignore this: they see the agent still completes tasks successfully, and the average latency is acceptable. But what actually happens is that tail latency (the worst-case time for a single replanning call) shoots up. On a real robot with a 100-millisecond deadline, a single replanning call taking 500 milliseconds means the robot misses the deadline and lurches or freezes. This happens silently—the robot still knows what to do, but it cannot answer in time."
+    ],
+    "callout": {
+      "b": "The bottleneck.",
+      "html": "Unbounded accumulated context causes tail latency to explode, breaking real-time deadlines even when task success is high."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Agent starts fresh",
+        "viz": "brain",
+        "caption": "Robot begins a task with empty memory."
+      },
+      {
+        "title": "2. Context grows",
+        "viz": "weights",
+        "viz_args": [["moved",10],["moved",20],["moved",30],["moved",40],["moved",50]],
+        "caption": "Each decision adds more history: past actions, failures, sensor readings stack up."
+      },
+      {
+        "title": "3. Replanning slows down",
+        "viz": "box",
+        "viz_args": "Latency: 10ms -> 50ms -> 200ms -> 600ms",
+        "caption": "Time to get a new plan grows with context size."
+      },
+      {
+        "title": "4. Pruning keeps only what matters",
+        "viz": "weights",
+        "viz_args": [["hot",15],["free",5],["hot",20],["free",8],["hot",12]],
+        "caption": "E-RECAP identifies the most useful tokens and removes the rest."
+      },
+      {
+        "title": "5. Decisions stay fast",
+        "viz": "box",
+        "viz_args": "Latency: 10ms -> 12ms -> 15ms -> 18ms",
+        "caption": "With a pruned context, replanning stays below the real-time deadline."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Agent chooses: replan or not?",
+        "text": "BRACE decides whether to call the language model at all, or reuse the old plan."
+      },
+      {
+        "b": "If replanning: predict token importance",
+        "text": "E-RECAP looks at each word in the context and scores how useful it will be for the decision."
+      },
+      {
+        "b": "Prune low-importance tokens",
+        "text": "Remove words that scored low, keeping only the most informative ones, while always preserving the first and last tokens (head and tail)."
+      },
+      {
+        "b": "Set a time budget",
+        "text": "BRACE allocates a maximum latency (e.g. 50 milliseconds) for this replanning call."
+      },
+      {
+        "b": "Get the new plan within budget",
+        "text": "The language model reads the pruned context and outputs the next move, respecting the time limit."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes",
+    "paras": [
+      "The paper changes which words the language model reads in each replanning decision. Normally, the model reads all accumulated context (every past observation, action, and decision). The paper instead limits the model to a pruned subset: only the most useful words, plus a strict token budget (a maximum number of words allowed per call)."
+    ],
+    "object": "context words per replanning call"
+  },
+  "hidden": {
+    "h2": "Token utility: the hidden quantity",
+    "name": "token utility score",
+    "paras": [
+      "Token utility is a number (between 0 and 1) that measures how much each word in the context will help the language model make a better decision, because the model's attention heads (the parts of the model that determine which earlier words to focus on) reveal which words it actually reads and emphasizes when making decisions. High utility means the word is critical for planning the next move. Low utility means the word is noise or historical detail that will not affect the decision.",
+      "E-RECAP estimates utility by looking at how attention heads (the parts of the language model that read the input) focus on each token. Tokens that many attention heads focus on across many layers have high utility. Tokens that are ignored get low utility. The method is cost-aware: it predicts utility efficiently without running the full model on every possible subset."
+    ],
+    "heat": {
+      "cells": [
+        ["recent_sensor",4,true],
+        ["old_sensor",1,false],
+        ["last_action",4,true],
+        ["failed_plan_detail",1,false],
+        ["current_goal",4,true],
+        ["past_goal",1,false],
+        ["obstacle_ahead",4,true],
+        ["corridor_map",2,false],
+        ["agent_pose",3,true],
+        ["log_entry",1,false],
+        ["next_step_intent",4,true],
+        ["old_step",1,false]
+      ],
+      "caption": "Darker means higher token utility. Recent, directly relevant tokens stay; old details get pruned."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Some words in the context are critical for the next decision (e.g., the current obstacle just detected, the goal, the last action taken). Other words are historical detail (e.g., what the agent saw five steps ago, previous goals that are no longer relevant). Token utility scores tell you which is which."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "E-RECAP predicts token utility by analyzing cross-layer attention patterns. High-attention tokens are preserved; low-attention tokens are removed. The method preserves head and tail (the first and last tokens) because these often carry positional or summary information."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why shrinking context keeps replanning fast",
+    "paras": [
+      "A language model's latency grows with input length. More precisely: reading a longer context takes longer because the model has to process every word through all of its layers. By pruning context down to only high-utility tokens, you reduce input length. Fewer words to read means faster computation, because the model's processing time is proportional to the number of input tokens it must transform.",
+      "But why does removing low-utility words not hurt task success? Because those words do not carry information the model needs for the next decision. The model's attention patterns already reveal which tokens it actually uses. By keeping only those tokens and removing the rest, you eliminate waste without losing signal. The first and last tokens are always preserved because they often encode positional or structural information that subtly influences reasoning, even if they do not grab attention directly."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Full accumulated context (every past observation, action, plan)"
+        },
+        {
+          "t": "step",
+          "s": "Score each token's utility using attention patterns",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Remove tokens below utility threshold; always keep head and tail"
+        },
+        {
+          "t": "step",
+          "s": "Feed pruned context to language model"
+        },
+        {
+          "t": "output",
+          "s": "New plan computed faster because context is smaller, stays within latency budget"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "Token budget and utility pruning",
+    "words": "The latency budget sets a maximum time per replanning call. E-RECAP removes tokens below a utility threshold while respecting the budget. Latency is roughly proportional to the number of tokens kept.",
+    "equation": "tokens_kept = select_top_k(utility_scores, k_threshold) ∪ {first_token, last_token}; latency_SLO = 50ms; tokens_to_remove = tokens with utility < threshold where total_tokens_kept <= budget",
+    "symbols": [
+      ["utility_scores","a score for each word (how much attention it receives across layers)"],
+      ["k_threshold","the cutoff: keep only tokens scoring above this value"],
+      ["latency_SLO","the maximum allowed time per replanning call (e.g., 50 milliseconds)"],
+      ["total_tokens_kept","how many words survive pruning"],
+      ["first_token, last_token","always preserved because they often encode position or structure"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose the context has 200 tokens with these utility scores: [0.9, 0.1, 0.85, 0.05, 0.92, 0.02, 0.88, ...]",
+        "Set threshold = 0.5 to keep high-utility tokens and remove low-utility ones.",
+        "Tokens above 0.5: [0.9, 0.85, 0.92, 0.88, ...] = 80 tokens kept.",
+        "Always preserve token 1 (index 0) and token 200 (index 199): now 82 tokens kept.",
+        "Original latency was 200 tokens × 0.5ms/token = 100ms. New latency = 82 × 0.5ms = 41ms, below the 50ms deadline."
+      ]
+    },
+    "note": "The equation states that replanning latency depends on context size. By keeping only high-utility tokens and removing low-utility ones, the model reads fewer words and answers faster."
+  },
+  "bars": {
+    "h2": "Task success and real-time performance",
+    "charts": [
+      {
+        "title": "Unbounded replanning (baseline)",
+        "rows": [
+          ["Task success",92,"good"],
+          ["Average latency",45,"good"],
+          ["Tail latency (worst-case)",650,"bad"],
+          ["SLO violations (deadline misses)",94,"bad"]
+        ],
+        "note": "The agent completes tasks but misses real-time deadlines on the worst replanning calls."
+      },
+      {
+        "title": "BRACE + E-RECAP (this paper)",
+        "rows": [
+          ["Task success",90,"good"],
+          ["Average latency",48,"good"],
+          ["Tail latency (worst-case)",120,"good"],
+          ["SLO violations (deadline misses)",8,"good"]
+        ],
+        "note": "By pruning context and setting a budget, the paper reduces tail latency and SLO violations while keeping task success nearly as high."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Over-aggressive pruning removes critical context.",
+        "html": "If the utility threshold is too high, important tokens get removed. The model then lacks information for sound reasoning, and task success drops. The fix is to tune the threshold carefully and validate on a held-out task set."
+      },
+      {
+        "warn": true,
+        "b": "Utility estimates are stale or inaccurate.",
+        "html": "E-RECAP predicts utility using attention patterns from earlier in training. If the model's priorities shift (e.g., in a new task domain), the utility scores no longer reflect what the model actually needs. The method requires retraining utility estimates when switching domains."
+      },
+      {
+        "warn": true,
+        "b": "Latency budget is too tight.",
+        "html": "If the allowed latency is lower than the minimum time the model needs to process any input, the replanning call will time out or return an invalid plan. The budget must be set with some safety margin."
+      },
+      {
+        "b": "Done right.",
+        "html": "Tune the pruning threshold on a validation task set to keep high-utility tokens and remove low-utility ones. Periodically retrain utility estimators on new task types. Set the latency budget conservatively with headroom for variability."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a simulated robotic agent that repeatedly replan using a language model. In the first experiment, accumulate all context unbounded and measure average latency and tail latency (the 99th-percentile latency—the time for the slowest replanning calls). In the second experiment, run the same agent but with E-RECAP pruning: apply a fixed utility threshold to the context before each replanning call. Measure the same latencies. In the third experiment, wrap BRACE around E-RECAP: add a latency budget and a decision rule for when to replan. Again measure both tail latency and task success (the fraction of episodes where the agent completes the goal within the time limit)."
+    ],
+    "metric_eq": "tail_latency = 99th_percentile(replanning_call_times); task_success = (goals_reached / total_episodes) * 100; SLO_violation_rate = (calls_exceeding_deadline / total_calls) * 100",
+    "closing": "The demo should show that E-RECAP + BRACE reduces tail latency and SLO violations dramatically while keeping task success nearly unchanged."
+  }
+}

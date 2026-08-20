@@ -1,0 +1,242 @@
+{
+  "slug": "icml-or-ncrrcg4bfp",
+  "title": "WestWorld: Scalable Trajectory Prediction Across Robot Types",
+  "family": "Robotics & Control",
+  "one_liner": "WestWorld uses separate expert networks for each robot type and bakes morphology into embeddings so one trained model can predict trajectories for any robot without retraining.",
+  "lead": "A trajectory world model learns to predict how a robot will move over the next few time steps, given its current state and actions. This is useful for planning and control. The problem: when you have many different robot types (bipeds, quadrupeds, arms), a single shared model struggles because each has completely different physics. WestWorld solves this by assigning different expert networks to different robot types and encoding the robot's skeleton structure directly into the learned representations.",
+  "nav": [["theme-robotics-control.html", "Robotics & Control"]],
+  "toc": [["zero", "Start from zero"], ["visual-story", "Visual story"], ["hidden", "The hidden quantity"], ["mechanism", "Why it works"], ["math", "Equation"], ["failures", "What can go wrong"], ["demo", "What to build"]],
+  "problem": {
+    "h2": "One model cannot learn many robot types at once",
+    "paras": [
+      "A trajectory world model predicts: given the robot's current state (position, velocity) and the action (motor command) at time t, what will the state be at time t+1? This is essential for planning and learning control policies. For a single robot type, this is tractable: you collect data and train a neural network (a function approximator, a mathematical function with adjustable numbers inside) that maps states and actions to the next state.",
+      "The naive approach: take data from many robots and train one big shared model on all of it. The problem: each robot obeys different physics. A biped's leg motion follows one set of rules; a quadruped follows different rules; a robotic arm has joint limits an insect robot does not. When you force a single model to learn all of them together, the model's internal numbers (called weights) get pulled in conflicting directions. One expert network trying to handle both a dog and a spider will be mediocre at both, because the motion patterns are fundamentally different. As the number of robot types grows (10, 20, 50, 100), a single model does not scale."
+    ],
+    "callout": {
+      "b": "The core move.",
+      "html": "Train different expert networks for different robot types, each one learning only the motion patterns of its assigned robot type so no conflicting signals distract it. Also inject knowledge of each robot's skeleton structure into the learned numbers (lists of values that encode information) so the model knows which bones are connected; knowing the skeleton structure helps the model predict dynamics more accurately because joints that are connected must move together, while unconnected joints can move independently."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. The problem: one model, many robots",
+        "viz": "weights",
+        "viz_args": [["warm", 40], ["warm", 45], ["free", 20], ["warm", 35], ["free", 15]],
+        "caption": "One neural network tries to learn biped, quadruped, and arm locomotion simultaneously."
+      },
+      {
+        "title": "2. Conflicting signals pull the model in opposite directions",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["free", 30], ["hot", 45], ["warm", 25], ["free", 20]],
+        "caption": "Biped data says move this way, quadruped data says move that way. Model is stuck."
+      },
+      {
+        "title": "3. Solution: separate experts per robot",
+        "viz": "box",
+        "viz_args": "Biped expert | Quad expert | Arm expert",
+        "caption": "Each robot type gets its own expert network trained on its own data only."
+      },
+      {
+        "title": "4. Structural embeddings inject skeleton knowledge",
+        "viz": "weights",
+        "viz_args": [["hot", 50], ["hot", 48], ["warm", 35], ["warm", 40], ["free", 10]],
+        "caption": "Model learns which joints are connected; arm knows shoulder links to elbow."
+      },
+      {
+        "title": "5. The result: one model, many robots, zero retraining",
+        "viz": "plain",
+        "caption": "Query which robot, route to its expert, predict its next state."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Encode the robot type.",
+        "text": "Learn a vector that represents each robot (biped, quadruped, etc.)."
+      },
+      {
+        "b": "Route to the right expert.",
+        "text": "Use a router network to compute weights; send more weight to the expert trained on that robot."
+      },
+      {
+        "b": "Inject skeleton structure.",
+        "text": "Add an embedding that encodes which joints are connected in that robot's skeleton."
+      },
+      {
+        "b": "Process state and action.",
+        "text": "Run state through a correlation layer, then condition on actions."
+      },
+      {
+        "b": "Blend expert predictions.",
+        "text": "Each expert predicts the next state; weight their predictions and average."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper moves",
+    "paras": [
+      "The paper changes which expert network processes the trajectory. Instead of a single monolithic model, there are now K separate experts, each trained on a subset of robots. A routing function learns to assign each trajectory to the correct expert based on a system embedding (a vector that encodes which robot it is). This routing is learned during pretraining; at test time, it automatically directs biped trajectories to the biped expert and quadruped trajectories to the quadruped expert."
+    ],
+    "object": "routing to per-robot experts"
+  },
+  "hidden": {
+    "h2": "The routing weights: which expert owns each trajectory",
+    "name": "Expert routing weights",
+    "paras": [
+      "The paper computes a vector of weights (one per expert) where each weight is a number between 0 and 1 indicating how much that expert is trusted to predict this trajectory. For a biped robot, the biped expert weight is around 0.9 and the quadruped expert weight is around 0.05; for a quadruped, the roles flip. This routing is computed by a router network that takes the sequence of states and actions as input and outputs weights that sum to 1 (softmax normalization, a way to convert raw scores into fractions that add up to 1).",
+      "The paper measures these routing weights by looking at which expert predictions contribute most to the final trajectory. During ablation experiments, they show that removing the routing mechanism (replacing it with equal weights across all experts) makes predictions much worse, proving that the model has learned to assign each trajectory to the right expert."
+    ],
+    "heat": {
+      "cells": [
+        ["biped_w", 4, true],
+        ["quad_w", 1, false],
+        ["arm_w", 1, false],
+        ["insect_w", 1, false],
+        ["biped_w", 4, true],
+        ["quad_w", 1, false],
+        ["arm_w", 2, false],
+        ["insect_w", 1, false],
+        ["biped_w", 3, true],
+        ["quad_w", 2, false],
+        ["arm_w", 1, false],
+        ["insect_w", 1, false]
+      ],
+      "caption": "Darker means higher routing weight. Each row is a different trajectory; lighter cells show experts being ignored."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "Imagine sorting incoming packages by label: some go to the biped-motion warehouse, some to the quad warehouse. The routing weights are how confident the model is about which warehouse each package belongs in."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The router network applies softmax normalization to learnable scores, producing a vector of weights that sums to 1. Each expert produces a prediction; the final output is the weighted sum of all expert predictions, with each expert weighted by its routing weight."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why the paper works: the causal chain",
+    "paras": [
+      "A single neural network learning many robots at once creates internal conflicts. Two robots with opposite physics pull the parameters in opposite directions, and the model settles on a compromise that is bad for both. By using separate experts, each expert is trained only on data from one robot type. The biped expert sees only biped trajectories, so its parameters converge to biped physics without interference.",
+      "The routing mechanism (system embedding + router network) learns to recognize which robot is being queried and sends high weight to the correct expert. This is possible because the system embedding captures the identity of the robot: it is trained end-to-end and learns to produce a different vector for biped vs. quadruped vs. arm. The router then learns that \"if the system embedding looks like this, send high weight to the biped expert.\" At test time, a new biped robot produces a system embedding similar to training bipeds, so the router automatically routes to the biped expert, and the prediction is biped-accurate.",
+      "The structural embedding further improves zero-shot generalization because it gives the model an explicit shortcut to reasoning about robot structure. This part encodes which joints are connected in the robot's skeleton, an initial assumption about robot structure. Instead of learning trajectory patterns from pure data alone, the model also receives explicit information about which joints are connected. This built-in bias means the model needs less data to learn the correct dynamics; a new quadruped with a slightly different body plan benefits from the structural pattern learned on other quadrupeds because both share the same connectivity rules (four legs, spine) even if body size or segment lengths differ."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "State, action, and robot identity"
+        },
+        {
+          "t": "step",
+          "s": "Encode robot type as system embedding vector",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Router network: softmax over experts based on embedding"
+        },
+        {
+          "t": "step",
+          "s": "Add structural embedding: encode skeleton connectivity"
+        },
+        {
+          "t": "step",
+          "s": "Each expert processes via correlation layer + state-space layer"
+        },
+        {
+          "t": "step",
+          "s": "Blend expert predictions using routing weights",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Next state prediction, robot-specific"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The routing equation",
+    "words": "The routing weights are computed by a softmax over expert scores. The scores come from passing the attended state-action features through a linear layer, then multiplying by softmax to ensure weights sum to 1. Each expert then predicts the next state; the final prediction is the weighted average of all expert predictions.",
+    "equation": "w = Softmax(Router(U_L+1)), Y = sum_i w_i * Expert_i(S)",
+    "symbols": [
+      ["w", "a vector of routing weights, one per expert; sums to 1"],
+      ["Router(U_L+1)", "linear layer plus softmax applied to the attended features"],
+      ["U_L+1", "hidden states after self-attention and cross-attention on state and action"],
+      ["Expert_i", "the i-th expert network, trained only on robot type i data"],
+      ["S", "the current state (position, velocity, etc.) and action"],
+      ["Y", "final next-state prediction, a weighted blend of all expert outputs"]
+    ],
+    "worked": {
+      "title": "A tiny worked example",
+      "lines": [
+        "Suppose 3 experts (biped, quad, arm) and the router outputs scores [10, 2, 1].",
+        "Softmax: exp([10,2,1]) = [22026, 7.39, 2.72]; normalize: w = [22026/22036, 7.39/22036, 2.72/22036] ≈ [0.999, 0.0003, 0.0001].",
+        "Biped expert predicts next_state_B = [0.5, 1.2]; quad expert predicts [0.3, 0.8]; arm expert predicts [0.1, 0.4].",
+        "Final: Y = 0.999 * [0.5, 1.2] + 0.0003 * [0.3, 0.8] + 0.0001 * [0.1, 0.4] ≈ [0.4995, 1.1994], almost entirely from the biped expert."
+      ]
+    },
+    "note": "The router 'picks' an expert by assigning near-100% weight to the highest-scoring expert, so the final output is nearly a pure expert prediction, not a blur."
+  },
+  "bars": {
+    "h2": "Performance before and after",
+    "charts": [
+      {
+        "title": "One shared model (baseline)",
+        "rows": [
+          ["Biped trajectory error", 24, "bad"],
+          ["Quadruped trajectory error", 22, "bad"],
+          ["Arm trajectory error", 28, "bad"]
+        ],
+        "note": "A single model struggles with all robot types because their physics conflict."
+      },
+      {
+        "title": "WestWorld: separate experts + routing",
+        "rows": [
+          ["Biped trajectory error", 8, "good"],
+          ["Quadruped trajectory error", 9, "good"],
+          ["Arm trajectory error", 10, "good"]
+        ],
+        "note": "Each expert specializes; routing directs each robot to its expert. Errors drop 60-70% across all types."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Router learns spurious patterns instead of robot identity.",
+        "html": "If the router network overfits, it might key on correlated features (e.g., 'this lab always runs biped experiments in the morning') rather than true morphology. Then it fails on a biped from a different lab or time."
+      },
+      {
+        "warn": true,
+        "b": "Structural embedding is incorrect or incomplete.",
+        "html": "If you hand-code the skeleton connectivity wrong, or leave out key morphology information, the model loses the inductive bias. A robot with unusual joints (e.g., a tentacle, a cable-driven actuator) might not fit the encoded structure."
+      },
+      {
+        "warn": true,
+        "b": "One expert starves during training.",
+        "html": "If the training data is imbalanced (many biped examples, few arm examples), the arm expert might receive low routing weight during training and never update its parameters well. At test time, it is weak."
+      },
+      {
+        "b": "Done right.",
+        "html": "Train each expert on a balanced set of its robot type. Use the structural embedding to encode the true morphology. Validate the routing on held-out robots from each type to ensure it generalizes, not just memorizes."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Implement the model on a public robot-learning benchmark (e.g., DeepMind Control Suite with Walker2d, Hopper, and Cheetah, or a real dataset with multiple robots). Pretrain on data from all three robots mixed together. Freeze the model and evaluate on trajectories from a held-out subset. For each robot type, measure the prediction error (e.g., mean absolute error in state space) over a 100-step horizon. Compare against a baseline (single shared model trained on the same data, or separate non-routed models)."
+    ],
+    "metric_eq": "trajectory_error = mean_absolute_error(predicted_next_state, ground_truth_next_state)",
+    "closing": "The demo must show that the routed model (WestWorld) has lower error than a single shared model, and that the routing weights are high for the correct expert and low for wrong experts."
+  }
+}

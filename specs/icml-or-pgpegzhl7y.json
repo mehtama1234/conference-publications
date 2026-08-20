@@ -1,0 +1,236 @@
+{
+  "slug": "icml-or-pgpegzhl7y",
+  "title": "STABLE: Simulation-Ready Tabletop Layout Generation",
+  "family": "Robotics & Control",
+  "one_liner": "Split the task of scene layout into two specialists: one that understands instructions and one that fixes physics violations.",
+  "lead": "Robots need realistic training environments, so researchers want to generate tabletop scenes from task instructions automatically. But large language models (LLMs — programs trained to predict text) are bad at 3D spatial reasoning: they predict scenes with objects stacked inside each other or floating in mid-air. STABLE solves this by using two separate experts: one that reads the instruction and produces a rough layout, and another that nudges every object into a physically valid position.",
+  "nav": [["theme-robotics-control.html","Robotics & Control"]],
+  "toc": [["zero","Start from zero"],["visual-story","Visual story"],["hidden","The hidden quantity"],["mechanism","Why it works"],["math","Equation"],["failures","What can go wrong"],["demo","What to build"]],
+  "problem": {
+    "h2": "Language models are great at text, bad at physics",
+    "paras": [
+      "Building a robot simulator is expensive. Researchers want to generate synthetic training scenes from task descriptions (\"a pick-and-place task with a mug and plate\"). A straightforward idea: feed the description to an LLM and ask it to predict object positions. The LLM reads the instruction and outputs a layout. But LLMs live in text space, not 3D space. They make systematic mistakes: objects overlap (interpenetrate), sink into the table, or float in mid-air.",
+      "A naive fix is to run the scene through a physics simulator afterward and let gravity sort it out. But that loses the original task structure—objects drift away, or the simulator crashes. You need both semantic fidelity (respect the instruction) and physical realism (no collisions)."
+    ],
+    "callout": {
+      "b": "The core problem:",
+      "html": "An LLM produces semantically correct but physically broken scenes; fixing physics breaks semantics."
+    }
+  },
+  "comic": {
+    "h2": "Five-panel picture",
+    "panels": [
+      {
+        "title": "1. Task instruction arrives",
+        "viz": "box",
+        "viz_args": "Place mug right of plate",
+        "caption": "Robot receives a task description with objects and relationships to arrange."
+      },
+      {
+        "title": "2. LLM guesses positions (broken physics)",
+        "viz": "weights",
+        "viz_args": [["overlap",60],["float",45],["sink",50],["good",30],["overlap",55],["float",40]],
+        "caption": "LLM outputs coordinates, but objects interpenetrate, float, or clip into table."
+      },
+      {
+        "title": "3. Semantic Reasoner: coarse layout aligned to task",
+        "viz": "weights",
+        "viz_args": [["task",70],["coarse",50],["aligned",65],["task",72],["coarse",48]],
+        "caption": "Semantic module refines the layout, preserving which objects and relationships matter."
+      },
+      {
+        "title": "4. Physics Corrector nudges poses using geometry math",
+        "viz": "weights",
+        "viz_args": [["fixed",75],["valid",80],["contact",72],["fixed",78],["valid",82]],
+        "caption": "A learned denoising model adjusts position and rotation to eliminate collisions."
+      },
+      {
+        "title": "5. Simulation-ready scene: semantics plus physics",
+        "viz": "box",
+        "viz_args": "Mug valid, plate valid, touching table, no penetration",
+        "caption": "Final layout respects the task and passes physics checks before simulation runs."
+      }
+    ]
+  },
+  "flow": {
+    "h2": "What it actually does",
+    "steps": [
+      {
+        "b": "Task instruction enters the Semantic Reasoner",
+        "text": "Fine-tuned LLM reads the instruction and predicts rough positions for relevant objects."
+      },
+      {
+        "b": "Physics Corrector receives the coarse layout",
+        "text": "A learned denoising model trained on collision-free examples refines poses using shape constraints and collision penalties."
+      },
+      {
+        "b": "Loop back and add more objects",
+        "text": "Alternate: add task-critical objects, refine them; then add background objects, refine again."
+      },
+      {
+        "b": "Compute shape-based collision metrics",
+        "text": "For each object, check distance to other objects and to the table using signed distance functions (SDF; a fast way to measure overlap)."
+      },
+      {
+        "b": "Iteratively push objects apart",
+        "text": "The corrector learns to reduce collision penalties while keeping objects close to their semantic positions."
+      }
+    ]
+  },
+  "object": {
+    "h2": "What the paper changes: object poses and the trajectory between semantics and physics",
+    "paras": [
+      "The paper does not change what objects to place or their semantic roles. Instead, it tunes where and how each object sits — the position (x, y, z coordinates) and rotation in 3D space. The real innovation is the loop: alternate between a semantic reasoner (which respects the task) and a physics corrector (which respects reality)."
+    ],
+    "object": "object poses and refinement loop"
+  },
+  "hidden": {
+    "h2": "The signed distance function: measuring collision severity",
+    "name": "collision distance (SDF)",
+    "paras": [
+      "A signed distance function (SDF) computes how far a point is from a 3D shape. If the point is outside the shape, the distance is positive. If inside (interpenetrating), the distance is negative. The magnitude tells you how bad the overlap is.",
+      "The Physics Corrector learns by watching SDF values and adjusting poses to make them non-negative (no interpenetration). The corrector is trained to minimize a loss that penalizes interpenetration, so negative SDF values trigger large corrections."
+    ],
+    "heat": {
+      "cells": [
+        ["Object A near Table",4,true],
+        ["Object B near A",2,false],
+        ["Object C far",1,false],
+        ["Object D interpenetrates",4,true],
+        ["Object E touches plate",3,true],
+        ["Object F above table",2,false],
+        ["Object G floats high",1,false],
+        ["Object H inside A",4,true],
+        ["Object I resting",2,false],
+        ["Object J on top",3,true],
+        ["Object K below table",4,true],
+        ["Object L centered",2,false]
+      ],
+      "caption": "Darker cells show high collision severity; marked cells are critical interpenetrations the corrector must fix."
+    },
+    "reads": [
+      {
+        "b": "Plain reading.",
+        "html": "To prevent objects from overlapping, you need a fast way to measure how much they overlap. The signed distance function gives a negative number whenever two objects penetrate, and the magnitude of that number is proportional to how badly they overlap."
+      },
+      {
+        "b": "Paper reading.",
+        "html": "The paper uses differentiable mesh-level SDF constraints to enforce simulation readiness. For each mesh, they precompute its SDF and add a loss term that penalizes negative distances (interpenetration) during training of the Physics Corrector."
+      }
+    ]
+  },
+  "mechanism": {
+    "h2": "Why splitting into two modules works: specialization and constraints",
+    "paras": [
+      "An LLM is trained to predict tokens (words), not to minimize collision losses. When you ask an LLM to generate 3D layouts, it has no signal from failed collisions to improve—during training, no one penalizes the LLM for predicting overlaps. STABLE inverts this: the Semantic Reasoner does what LLMs do well (interpret instructions and assign objects), and then hands off to a Physics Corrector that is trained explicitly on collision-reduction by receiving a loss signal whenever objects overlap.",
+      "The Physics Corrector is a flow-based denoising model trained on pairs of (slightly-messed-up layout, collision-free layout). It learns to predict corrections by minimizing three losses: (1) overlap penalties (object-object SDF), (2) table-penetration penalties (object-table SDF), and (3) support-contact penalties (ensuring objects rest on valid surfaces). Because these losses are differentiable, the corrector learns adjustment directions (how to nudge each pose) that point directly toward physically plausible configurations.",
+      "The progressive loop (add task objects, refine, add background objects, refine) further helps: early refinements stabilize the core task structure, so later refinements only have to avoid clutter, not rearrange the entire scene. This is easier because the corrector has fewer degrees of freedom left—it is nudging background objects into gaps rather than solving a global rearrangement puzzle."
+    ],
+    "visual": {
+      "kind": "pipeline",
+      "stages": [
+        {
+          "t": "input",
+          "s": "Task instruction plus 3D asset library"
+        },
+        {
+          "t": "step",
+          "s": "Semantic Reasoner reads instruction, picks objects, guesses positions",
+          "hl": true
+        },
+        {
+          "t": "step",
+          "s": "Physics Corrector refines poses, minimizes collisions"
+        },
+        {
+          "t": "step",
+          "s": "Add next batch of objects, repeat refinement loop",
+          "hl": true
+        },
+        {
+          "t": "output",
+          "s": "Simulation-ready layout: task-aligned and collision-free"
+        }
+      ]
+    }
+  },
+  "math": {
+    "h2": "The loss function: balancing semantics and physics",
+    "words": "The Physics Corrector minimizes a weighted sum of three losses: flow matching loss plus a scaled collision penalty plus a scaled support-contact penalty.",
+    "equation": "L_PC = L_flow + lambda_sdf * (L_obj-obj + L_obj-table) + lambda_sup * L_sup",
+    "symbols": [
+      ["L_flow","Flow matching loss: how far the corrector's prediction is from the target collision-free pose"],
+      ["L_obj-obj","Object-object collision loss: sum of negative SDF values (penetration depths) between all pairs"],
+      ["L_obj-table","Object-table collision loss: sum of negative SDF values for the table and floor"],
+      ["L_sup","Support-contact loss: how far each object's bottom is from a valid support surface"],
+      ["lambda_sdf","Weight controlling how strongly collisions are penalized relative to flow matching"],
+      ["lambda_sup","Weight controlling how strongly objects are pushed to rest on valid surfaces"]
+    ],
+    "worked": {
+      "title": "A tiny worked example with three objects",
+      "lines": [
+        "Object A (mug): interpenetrates table by 2cm, SDF = -0.02. Penalty from object-table loss = 0.02 squared (penalizes penetration).",
+        "Object B (plate): interpenetrates mug by 1cm, SDF = -0.01. Penalty from object-object loss = 0.01 squared.",
+        "Object C (block): rests cleanly on table, SDF = +0.05 (above surface). No penalty from object-table.",
+        "Total L_obj-obj + L_obj-table = 0.0004 + 0.0001 = 0.0005. With lambda_sdf = 100, this contributes 0.05 to the total loss.",
+        "During training, the corrector learns that reducing interpenetration shrinks the loss faster than any other adjustment."
+      ]
+    },
+    "note": "The sum of squared negative distances teaches the corrector to identify and eliminate overlaps; the support loss teaches it to place objects on real surfaces, not floating in air."
+  },
+  "bars": {
+    "h2": "Before and after: collision rate and semantic quality",
+    "charts": [
+      {
+        "title": "Naive LLM-only baseline",
+        "rows": [
+          ["Collision rate 0–10 cm",72,"bad"],
+          ["Collision rate 10–20 cm",48,"bad"],
+          ["Task semantic adherence",85,"good"]
+        ],
+        "note": "LLM captures the task but leaves many collisions unresolved. High collision rate means simulation fails or looks unrealistic."
+      },
+      {
+        "title": "STABLE with dual system",
+        "rows": [
+          ["Collision rate 0–10 cm",8,"good"],
+          ["Collision rate 10–20 cm",3,"good"],
+          ["Task semantic adherence",92,"good"]
+        ],
+        "note": "Physics Corrector dramatically reduces collisions while Semantic Reasoner keeps task alignment high. Scene is both realistic and task-faithful."
+      }
+    ]
+  },
+  "failures": {
+    "h2": "What can go wrong",
+    "items": [
+      {
+        "warn": true,
+        "b": "Training data does not cover rare object types.",
+        "html": "If the Physics Corrector sees only scenes with mugs and plates but is asked to fix a scene with tall vases, it may produce suboptimal corrections because it has never learned how to handle shapes it has not seen."
+      },
+      {
+        "warn": true,
+        "b": "Semantic Reasoner commits to a bad layout early.",
+        "html": "If the initial coarse layout has objects in fundamentally wrong positions, the Physics Corrector can only nudge them slightly. A major rearrangement is beyond its training."
+      },
+      {
+        "warn": true,
+        "b": "Hyperparameters lambda_sdf and lambda_sup are not tuned.",
+        "html": "If lambda_sdf is too low, the corrector tolerates lingering collisions. If too high, it pushes objects so far that they violate semantic constraints (e.g., the mug ends up across the table instead of beside the plate)."
+      },
+      {
+        "b": "Done right: progressive refinement works.",
+        "html": "By alternating Semantic Reasoner and Physics Corrector across multiple stages (task-critical objects first, then background), the system maintains both fidelity and realism for diverse scene layouts."
+      }
+    ]
+  },
+  "demo": {
+    "h2": "What a runnable demo should prove",
+    "paras": [
+      "Build a small tabletop scene generator: give it a task description (e.g., 'arrange three blocks in a pyramid') and a library of 5–10 3D object meshes. Run the Semantic Reasoner to predict initial positions, then run the Physics Corrector for 2–3 refinement passes. At each pass, compute the collision rate (fraction of object pairs with negative SDF distance). Measure the final collision rate and compare to a baseline that runs only the Semantic Reasoner or only a post-hoc physics simulator."
+    ],
+    "metric_eq": "collision_rate = number of colliding object pairs / total object pairs",
+    "closing": "The demo must show that STABLE's collision rate is lower than the LLM baseline and that task-critical objects (those named in the instruction) are still in semantically sensible positions, not scattered across the table."
+  }
+}
