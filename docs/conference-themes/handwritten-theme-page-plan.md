@@ -4,16 +4,15 @@
 
 Turn the conference theme site from generated evidence pages into a readable field map of ICML/ICLR research directions. The finished site should help someone understand what problem each theme is trying to solve, why the problem matters, what technical approaches the papers use, and how the papers relate to one another.
 
-This is not a template cleanup. The target is hand-written synthesis at paragraph depth across all 64 theme pages and all named paper entries.
+This is not a template cleanup. The target is hand-written synthesis at paragraph depth across all 76 theme pages and all named paper entries.
 
 ## Current State
 
-- The site has 64 theme pages in `docs/conference-themes/site/themes/`.
-- The pages are live locally at `http://127.0.0.1:8765/`.
-- `main` contains the source site.
-- `gh-pages` contains a static-only copy intended for GitHub Pages.
-- The first fully rewritten page is `evaluation-benchmarks-and-measurement.html`.
-- The public GitHub Pages URL is still returning 404 until repository Pages settings are enabled for the `gh-pages` branch.
+- The site has 76 theme pages in `docs/conference-themes/site/themes/`.
+- `main` contains the source site and publishes the static `docs` directory through the GitHub Pages workflow.
+- Four standalone lane maps are complete: safety/evaluation, agents/reasoning, data/systems, and physical/generative.
+- The theory/optimization lane remains in progress and is a major source for the concept layer.
+- The active product layer is now the mathematical concept page plus the paper atlas, connected back to the conceptual spine pages.
 
 ## What A Finished Theme Page Must Do
 
