@@ -16,10 +16,10 @@
     <h1>Robotics and control</h1>
     <p class="lede"><strong>The central problem is making model-predictive control fast and differentiable enough for modern learning systems.</strong> The local evidence focuses on GPU-parallel MPC rather than high-level robot policy learning.</p>
   </div>
-  <div class="stats"><div class="stat"><div class="k">evidence rows</div><div class="v">1</div></div>
-<div class="stat"><div class="k">papers</div><div class="v">1</div></div>
-<div class="stat"><div class="k">subthemes</div><div class="v">1</div></div>
-<div class="stat"><div class="k">source</div><div class="v">theme-index</div></div></div>
+  <div class="stats"><div class="stat"><div class="k">papers</div><div class="v">1</div></div>
+<div class="stat"><div class="k">concepts</div><div class="v">8</div></div>
+<div class="stat"><div class="k">object</div><div class="v">solver</div></div>
+<div class="stat"><div class="k">source</div><div class="v">atlas</div></div></div>
   <div class="note"><span class="dot">*</span> Curated from local ICLR 2026 evidence rows; paper rows are evidence-backed local mappings, not a claim of full conference coverage.</div>
 </header>
 
@@ -38,11 +38,105 @@
 </div></section>
 
 <section><div class="wrap">
+  <div class="kicker"><span class="idx">CORE</span><h2>Control is choosing an action path that the world will allow</h2></div>
+  <p class="lead measure">A robot action is not just a label or a token. It is a sequence of physical moves that must obey dynamics, constraints, timing, and contact with the world.</p>
+  <p class="body">Model-predictive control is powerful because it keeps that fact visible. At each step, the controller imagines nearby future trajectories, scores them against a goal, rejects paths that violate constraints, executes the first part of the best path, then plans again after the world has changed. This repeated re-planning is why MPC is attractive in robotics: it can react to new state instead of committing to a long open-loop plan.</p>
+  <p class="body">The cost is computation. The robot may need to solve a structured optimization problem every control cycle. If that solve is too slow, the action is late. If it cannot be differentiated, it sits awkwardly beside learned perception, learned dynamics, learned rewards, or policy training. The paper's importance is that it treats the solver itself as the object to redesign.</p>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">LENS</span><h2>The concrete object</h2></div>
+  <div class="matrix-scroll"><table><thead><tr><th>Question</th><th>First-principles answer</th></tr></thead><tbody>
+    <tr><td>Concrete object</td><td>A differentiable model-predictive-control solver that repeatedly solves constrained trajectory optimization problems on GPU.</td></tr>
+    <tr><td>What must stay fixed</td><td>The control problem's meaning: dynamics, constraints, costs, feasible trajectories, and the requirement that the chosen action path remain physically valid.</td></tr>
+    <tr><td>What may change</td><td>The numerical route used to solve the problem: SQP approximations, linear-system solves, preconditioning, batching, memory layout, and GPU parallel execution.</td></tr>
+    <tr><td>Why the method works</td><td>SQP turns the nonlinear control problem into a sequence of structured local quadratic problems; preconditioned conjugate gradients make the hard linear algebra cheaper; tridiagonal structure matches the time-chain shape of trajectory optimization; GPU batching makes many solves practical.</td></tr>
+    <tr><td>What evidence would prove it</td><td>Fast, stable MPC solves on GPU, useful gradients through the solver, preserved constraint-aware control behavior, and better scaling than treating MPC as a slow external planner.</td></tr>
+    <tr><td>Failure boundary</td><td>If the accelerated solver loses feasibility, gives unstable gradients, breaks under stiff dynamics, or saves time only on toy horizons, then the numerical speedup has not preserved the control object.</td></tr>
+    <tr><td>Concept supported</td><td>Robotics control as differentiable constrained optimization under hardware and latency limits.</td></tr>
+  </tbody></table></div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">TOPIC 01</span><h2>MPC is a feedback loop, not a one-time plan</h2></div>
+  <p class="lead measure">The controller plans because the future matters, but it replans because the first plan is never the whole truth.</p>
+  <p class="body">A simple way to understand MPC is: observe the current state, solve a short-horizon trajectory problem, execute the first action, observe again, and solve again. The plan is useful because it looks ahead; the feedback loop is useful because the world can differ from the plan. A robot may slip, a contact may happen earlier than expected, a learned dynamics model may be slightly wrong, or a goal may change. Replanning turns those surprises into the next optimization problem instead of treating them as fatal.</p>
+  <p class="body">This is why acceleration has to preserve closed-loop behavior. Solving one trajectory faster is not enough if the solver cannot run inside the repeated observe-plan-act cycle. The control object is the loop plus the constrained trajectory solve, not an isolated numerical benchmark.</p>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">TOPIC 02</span><h2>Feasibility is the non-negotiable invariant</h2></div>
+  <p class="lead measure">A controller is allowed to optimize cost, but it is not allowed to forget what actions the system can physically take.</p>
+  <p class="body">In language generation, an invalid token can be corrected later. In robotics, an invalid action path may be impossible, unsafe, or too late to repair. Feasibility means the proposed trajectory respects the dynamics, actuator limits, contact assumptions, timing, and task constraints. MPC is attractive because those constraints remain explicit while the controller searches for a good action path.</p>
+  <p class="body">That gives the paper its main invariant. The numerical method may change radically: SQP approximations, conjugate-gradient solves, preconditioners, GPU memory layout, batching, and differentiation strategy can all move. But the meaning of the control problem cannot move. If speed comes from weakening feasibility, the method has optimized away the thing that made MPC valuable.</p>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">TOPIC 03</span><h2>Differentiability turns control failure into training signal</h2></div>
+  <p class="lead measure">A differentiable solver lets the learning system ask how perception, dynamics, or costs should change so the chosen action improves.</p>
+  <p class="body">Without gradients, MPC can still choose actions, but it sits like a hard boundary in the system. The learned components before it produce state estimates, dynamics predictions, or cost parameters; the solver consumes those objects; the final action succeeds or fails. Differentiability makes the boundary more informative. If the selected trajectory is bad, training can push upstream components toward representations that make better constrained plans possible.</p>
+  <p class="body">This only matters if the gradients are meaningful. A solver can be formally differentiable while producing unstable, noisy, or misleading gradients through approximation choices. The evidence should therefore show not only that gradients exist, but that they improve the learned system when the solver is actually inside the loop.</p>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">TOPIC 04</span><h2>Latency changes what intelligence is available</h2></div>
+  <p class="lead measure">A slow correct controller can still fail because the world does not wait for the optimization to finish.</p>
+  <p class="body">Robotics makes time part of correctness. If a controller returns a feasible trajectory after the robot state has already changed, the action is stale. This is why GPU-parallel MPC is not just a systems convenience. Faster solves can change which control strategies are usable at all: longer horizons, larger batches, richer learned costs, repeated planning during training, or many candidate environments in simulation.</p>
+  <p class="body">The hardware lesson is first-principles, not decorative. A method that preserves the mathematical control problem but ignores accelerator structure may be too slow to deploy. A method that matches the accelerator but breaks the control problem is not a controller. The paper matters because it tries to keep both sides fixed: physical control meaning and modern learning-system throughput.</p>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">METHOD</span><h2>Why SQP and preconditioning matter</h2></div>
+  <p class="lead measure">The paper is not just "MPC on a GPU." The deeper idea is to keep the structure that makes MPC trustworthy while changing the computation so it can scale.</p>
+  <p class="body">Sequential quadratic programming is useful because a hard nonlinear control problem can often be solved by repeatedly asking a simpler local question: near the current trajectory, what quadratic approximation gives a better feasible direction? That keeps the solver tied to dynamics and constraints instead of asking a neural network to invent a valid action path from scratch.</p>
+  <p class="body">Preconditioned conjugate gradients matter because the local quadratic subproblem still contains large linear algebra. A poor numerical form wastes iterations. A good preconditioner changes the geometry of the solve so the answer is reached faster. The tridiagonal structure is not incidental: trajectory problems are chained through time, so nearby time steps are coupled in a regular way. Exploiting that structure is the difference between generic acceleration and control-aware acceleration.</p>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">INSIGHT</span><h2>The solver becomes part of the model</h2></div>
+  <p class="lead measure">Modern robot learning often combines learned components with structured control. The boundary between "model" and "optimizer" is becoming less clean.</p>
+  <p class="body">A learned perception model may estimate state. A learned dynamics model may predict what actions do. A learned cost may encode preferences. MPC then turns those ingredients into action. If the MPC layer is differentiable, training can ask how upstream representations should change so the downstream action improves. If the MPC layer is GPU-parallel, the system can run many solves during training or deployment instead of treating planning as a bottleneck.</p>
+  <p class="body">That is the first-principles contribution: make the control layer compatible with the learning layer without erasing the physical constraints that made control useful in the first place.</p>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">EVIDENCE</span><h2>What would prove the MPC solver really worked</h2></div>
+  <p class="lead measure">The evidence has to show that acceleration preserved the control problem, not just that one numerical kernel ran faster.</p>
+  <div class="grid" style="margin-top:24px">
+    <div class="box"><h3>Closed-loop behavior</h3><p>The controller should repeatedly choose feasible action paths as state changes, not only solve isolated optimization instances.</p></div>
+    <div class="box"><h3>Constraint preservation</h3><p>Dynamics, costs, actuator limits, and feasibility constraints must remain meaningful after SQP approximation and GPU-parallel linear solves.</p></div>
+    <div class="box"><h3>Useful gradients</h3><p>Differentiability matters only if gradients through the MPC layer help train upstream state, dynamics, or cost models without becoming unstable.</p></div>
+    <div class="box"><h3>Scaling with horizon and batch</h3><p>GPU gains should survive longer horizons, larger batches, and realistic trajectory dimensions, not only small toy problems.</p></div>
+    <div class="box"><h3>Preconditioner value</h3><p>The tridiagonal preconditioner should reduce solve difficulty because it matches trajectory time structure, with ablations against generic or weaker solvers.</p></div>
+    <div class="box"><h3>Latency budget</h3><p>The final proof is control-cycle timing: the solver must return a valid action before the robot or simulator state has moved on.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">FAILURE MODES</span><h2>How differentiable control can overclaim</h2></div>
+  <p class="lead measure">A control solver fails when it becomes easier to train or faster to run by silently weakening the physical problem.</p>
+  <div class="matrix-scroll" style="margin-top:24px"><table><thead><tr><th>Failure</th><th>Plain meaning</th><th>Why it matters</th></tr></thead><tbody>
+    <tr><td>Fast but infeasible</td><td>The GPU solver returns quickly but violates dynamics, constraints, or actuator limits.</td><td>In robotics, an invalid action path is not a small prediction error; it can be impossible or unsafe.</td></tr>
+    <tr><td>Gradient theater</td><td>The layer is technically differentiable, but gradients are too noisy, biased, or unstable to improve learned components.</td><td>The method only helps learning if differentiability carries useful credit assignment.</td></tr>
+    <tr><td>Open-loop benchmark</td><td>The paper reports one-shot solve speed while the real task requires repeated closed-loop replanning.</td><td>MPC is valuable because it replans after observing the world, so the loop must be tested.</td></tr>
+    <tr><td>Toy-horizon scaling</td><td>Speedups hold only for short horizons, small batches, or simplified dynamics.</td><td>Hardware acceleration matters only if it survives the problem sizes that made control expensive.</td></tr>
+    <tr><td>Approximation drift</td><td>SQP local approximations move away from the nonlinear control problem they were supposed to solve.</td><td>The solver can look efficient while optimizing the wrong local model.</td></tr>
+    <tr><td>Hardware-specific fragility</td><td>The numerical path depends on a narrow GPU, precision, or memory setting.</td><td>A robotics primitive is less useful if it cannot be composed with the broader learning stack.</td></tr>
+  </tbody></table></div>
+</div></section>
+
+<section><div class="wrap">
   <div class="kicker"><span class="idx">CLUSTER</span><h2>The Main Research Move</h2></div>
   <div class="subtheme">
     <h3>Make the optimizer part of the differentiable system</h3>
     <p class="lead">The paper's core contribution is not a new robot task, but a better computational form for a classic control tool. SQP gives the planning problem local quadratic structure; preconditioned conjugate gradients make the linear algebra tractable; GPU parallelism makes many solves feasible. The result is a control primitive that can live closer to neural-network training and inference instead of sitting outside as a slow external planner.</p>
   </div>
+</div></section>
+<section><div class="wrap">
+  <div class="kicker"><span class="idx">PAPER LENS</span><h2>What the paper teaches</h2></div>
+  <div class="matrix-scroll"><table><thead><tr><th>Paper</th><th>Surface problem</th><th>Deeper principle</th><th>What to watch for</th></tr></thead><tbody>
+    <tr><td>Differentiable MPC on GPU</td><td>Make model-predictive control fast, differentiable, and parallel on GPUs.</td><td>Structured control can be made compatible with neural learning systems if the solver preserves constraints while changing its numerical and hardware form.</td><td>Speed is not enough. The important evidence is whether feasibility, useful gradients, stability, and repeated closed-loop planning survive the acceleration.</td></tr>
+  </tbody></table></div>
 </div></section>
 <section><div class="wrap">
   <div class="kicker"><span class="idx">PAPERS</span><h2>Evidence Rows, Preserved</h2></div>
